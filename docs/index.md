@@ -27,6 +27,12 @@
    - Автоматизация процессов
    - Обработка ошибок
 
+5. **[training_metadata.md](training_metadata.md)** - Метаданные обучения
+   - Формат файла training_metadata.json
+   - Структура метаданных
+   - Отслеживание статуса и ошибок
+   - Именование директорий с результатами
+
 ## Быстрая навигация по темам
 
 ### Начало работы
@@ -96,6 +102,7 @@
 - [data.yaml](data_formats.md#формат-datayaml)
 - [datasets_info.json](data_formats.md#формат-datasets_infojson)
 - [class_names.json](data_formats.md#формат-class_namesjson)
+- [training_metadata.json](training_metadata.md#формат-файла)
 
 ### По проблемам
 
