@@ -19,7 +19,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 
 DEFAULT_MAP_COL = "metrics/mAP50-95(B)"
@@ -395,7 +396,7 @@ def cmd_interactive(args: argparse.Namespace) -> None:
     cmd_compare(ns)
 
 
-def main() -> None:
+def build_analyze_arg_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--workspace",
@@ -416,7 +417,7 @@ def main() -> None:
         help="Подкаталог workspace/analytics/: артефакты и session.json (export-table, compare, interactive)",
     )
 
-    parser = argparse.ArgumentParser(description="Анализ результатов обучения YOLO (Ultralytics)")
+    parser = CliArgumentParser(description="Анализ результатов обучения YOLO (Ultralytics)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_scan = sub.add_parser("scan", parents=[common], help="Список прогонов")
@@ -463,7 +464,14 @@ def main() -> None:
     p_int.add_argument("--metric-column", type=str, default=DEFAULT_MAP_COL)
     p_int.set_defaults(func=cmd_interactive)
 
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv=None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
+    parser = build_analyze_arg_parser()
+    args = parser.parse_args(argv)
     args.models_root = resolve_models_scan_root(args.workspace, args.models_root)
     args.func(args)
 

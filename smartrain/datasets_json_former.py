@@ -5,7 +5,8 @@ import sys
 import argparse
 from typing import Any, Dict, Optional
 
-from workspace_paths import (
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,
@@ -306,8 +307,8 @@ def process_dataset(folder_path, folder_name):
     }
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
+def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(
         description="Обработка датасетов и создание JSON файлов с информацией о классах и структуре"
     )
 
@@ -341,7 +342,11 @@ def parse_args():
         "refresh: пересканировать только data_path из существующего datasets_info.json",
     )
 
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv=None):
+    return build_datasets_json_arg_parser().parse_args(argv)
 
 
 # Поля записи датасета, сохраняемые при пересканировании (вручную в JSON)
@@ -376,8 +381,10 @@ def _run_scan_folder_roots(folder_roots: list[tuple[str, str]]) -> tuple[dict, d
     return datasets_info, class_names
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    args = parse_args(argv)
 
     if args.datasets_path:
         use_workspace = False

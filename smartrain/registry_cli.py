@@ -12,8 +12,9 @@ import shutil
 import sys
 from datetime import datetime, timezone
 
-from workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
-from results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
 
 
 MANIFEST_NAME = "model_manifest.json"
@@ -205,8 +206,8 @@ def _cmd_models_remove(ctx: RegistryCliContext, name: str) -> None:
     print(f"[OK] Удалено: {d}")
 
 
-def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Реестр прогонов (runs) и промотированных моделей (models)")
+def build_registry_arg_parser() -> argparse.ArgumentParser:
+    p = CliArgumentParser(description="Реестр прогонов (runs) и промотированных моделей (models)")
     p.add_argument(
         "--workspace",
         type=str,
@@ -253,11 +254,17 @@ def _parse_args() -> argparse.Namespace:
     p_mr.add_argument("name", type=str)
     p_mr.set_defaults(handler="models_remove")
 
-    return p.parse_args()
+    return p
 
 
-def main() -> None:
-    args = _parse_args()
+def _parse_args(argv=None) -> argparse.Namespace:
+    return build_registry_arg_parser().parse_args(argv)
+
+
+def main(argv=None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
+    args = _parse_args(argv)
     try:
         root = resolve_workspace_root(args.workspace)
     except ValueError as e:

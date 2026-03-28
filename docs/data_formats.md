@@ -240,7 +240,7 @@ names:
 
 ## Формат datasets_info.json
 
-JSON файл с метаданными о всех доступных датасетах. Создается скриптом `datasets_json_former.py`.
+JSON файл с метаданными о всех доступных датасетах. Создаётся командой **`smartrain datasets-json`** (модуль `datasets_json_former`).
 
 ### Структура
 
@@ -328,7 +328,7 @@ JSON файл с метаданными о всех доступных дата�
 Путь к `datasets_info.json`: каталог **рядом с папкой датасета** (тот же родитель, что и `{dataset_name}`). Запуск:
 
 ```bash
-python3 dataset_roi_yolo.py \
+smartrain roi \
   --dataset-name MyDataset \
   --source-path /data/datasets_parent \
   --output-path /data/MyDataset_cropped \
@@ -401,46 +401,46 @@ JSON файл для нормализации имен классов между
 
 ### Использование
 
-Файл используется скриптом `dataset_former.py` при объединении датасетов для приведения имен классов к единому виду перед фильтрацией.
+Файл используется модулем `dataset_former` / командой **`smartrain dataset-former`** при объединении датасетов для приведения имён классов к единому виду перед фильтрацией.
 
 ---
 
-## Формат training_queue.txt
+## Формат queue.txt (файл очереди)
 
-Текстовый файл со списком задач для выполнения системой очереди.
+Текстовый файл со списком задач для **`smartrain queue-run`** (или `smartrain queue run`). По умолчанию путь: **`queue.txt`** в корне workspace (см. `workspace_queue_path` в [`smartrain/workspace_paths.py`](../smartrain/workspace_paths.py)); иначе см. `--queue-file` у исполнителя.
 
 ### Формат строки
 
+Рекомендуемый вид — полная shell-команда:
+
 ```
-[python3] script_name.py [аргументы]
+smartrain <подкоманда> [аргументы...]
 ```
 
-### Правила
+### Правила (как в [`process_line()`](../smartrain/training_queue.py))
 
-1. Одна задача на строку
-2. Команда может начинаться с `python3` или без него (добавляется автоматически)
-3. Расширение `.py` добавляется автоматически, если отсутствует
-4. Строки, начинающиеся с `#`, игнорируются (комментарии)
-5. Пустые строки игнорируются
+1. Одна задача на строку.
+2. Если строка начинается с **`smartrain`** (или пути к бинарнику `smartrain`) — выполняется как есть.
+3. Если начинается с **`python3`** / **`python`** — выполняется как есть.
+4. Иначе для обратной совместимости строка нормализуется к виду `python3 script.py ...` (к первому токену дописывается `.py`, если нужно). Предпочтительно писать явно **`smartrain ...`**.
+5. Строки с `#` в начале и пустые строки игнорируются.
 
 ### Пример
 
 ```
-# Создание объединенного датасета
-dataset_former.py --target-path /path/to/output --classes "helmet,vest"
+# Создание объединённого датасета
+smartrain dataset-former --target-path /path/to/output --classes "helmet,vest"
 
-# Обучение модели yolov8n
-model_training_module.py --data /path/to/dataset --model yolov8n --epochs 50
-
-# Обучение модели yolov8s
-python3 model_training_module.py --data /path/to/dataset --model yolov8s --epochs 100
+# Обучение
+smartrain train --data /path/to/dataset --model yolov8n --epochs 50 -y
+smartrain train --data /path/to/dataset --model yolov8s --epochs 100 -y
 ```
 
 ---
 
 ## Формат tmp/status.txt
 
-Текстовый файл с текущим статусом выполнения задач. Создается и обновляется автоматически скриптом `training_queue.py`.
+Текстовый файл с текущим статусом выполнения задач. Создаётся и обновляется исполнителем очереди ([`smartrain/training_queue.py`](../smartrain/training_queue.py)); путь по умолчанию — **`tmp/status.txt`** внутри workspace.
 
 ### Формат строки
 
@@ -458,9 +458,9 @@ python3 model_training_module.py --data /path/to/dataset --model yolov8s --epoch
 ### Пример
 
 ```
-dataset_former.py --target-path /path/to/output --classes "helmet,vest" | Выполнено
-model_training_module.py --data /path/to/dataset --model yolov8n --epochs 50 | Выполняется
-model_training_module.py --data /path/to/dataset --model yolov8s --epochs 100 | Ждет выполнения
+smartrain dataset-former --target-path /path/to/output --classes "helmet,vest" | Выполнено
+smartrain train --data /path/to/dataset --model yolov8n --epochs 50 | Выполняется
+smartrain train --data /path/to/dataset --model yolov8s --epochs 100 | Ждет выполнения
 ```
 
 ---

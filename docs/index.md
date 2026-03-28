@@ -16,9 +16,8 @@
    - Кодировка и стандарты
 
 3. **[api_reference.md](api_reference.md)** - Справочник API
-   - Описание всех функций
-   - Параметры функций
-   - Возвращаемые значения
+   - В начале файла: разделы про [`cli.py` и `cli_argparse`](api_reference.md) (точка входа `smartrain` и форматтер справки)
+   - Описание функций модулей, параметры, возвращаемые значения
    - Константы и настройки
 
 4. **[examples.md](examples.md)** - Примеры использования
@@ -38,10 +37,15 @@
 ## Быстрая навигация по темам
 
 ### Начало работы
-- [Быстрый старт](../README.md#быстрый-старт) - в корневом README.md
-- [Основные команды](../README.md#основные-команды) - в корневом README.md
+- [Быстрый старт](../README.md#быстрый-старт) — корневой README
+- [Команды CLI](../README.md#команды-cli) — таблица подкоманд `smartrain`
+- [Workspace и переменные](../README.md#workspace) — `SMART_TRAIN_WORKSPACE`, `deploy`
 
-### Скрипты
+### Точка входа
+- Единая команда **`smartrain`** ([`smartrain/cli.py`](../smartrain/cli.py)): Typer + делегирование в модули `datasets_json_former`, `dataset_former`, `model_training_module`, и т.д.
+- Справка: `smartrain --help`, `smartrain <команда> --help` (полный текст argparse, в т.ч. для `queue list --help`).
+
+### Модули (вызываются через CLI)
 - [datasets_json_former.py](api_reference.md#datasets_json_formerpy) - Анализ датасетов
 - [dataset_former.py](api_reference.md#dataset_formerpy) - Объединение датасетов
 - [model_training_module.py](api_reference.md#model_training_modulepy) - Обучение моделей
@@ -112,7 +116,7 @@
 ### По проблемам
 
 **Ошибки при работе:**
-- [Устранение неполадок](../README.md#устранение-неполадок) - в корневом README.md
+- [Устранение неполадок](../README.md#устранение-неполадок) — корневой README
 - [Примеры обработки ошибок](examples.md#пример-11-обработка-ошибок)
 
 **Вопросы по форматам:**

@@ -3,7 +3,8 @@ import subprocess
 import time
 import argparse
 
-from workspace_paths import (
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.workspace_paths import (
     resolve_workspace_root,
     workspace_queue_path,
     workspace_queue_status_path,
@@ -11,10 +12,7 @@ from workspace_paths import (
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 QUEUE_TXT = os.path.join(BASE_DIR, "training_queue.txt")
-TMP_DIR = os.path.join(BASE_DIR, "tmp")
 STATUS_FILE = os.path.join(BASE_DIR, "tmp/status.txt")
-
-os.makedirs(TMP_DIR, exist_ok=True)
 
 
 def resolve_queue_status_paths(queue_file_cli, workspace_cli, status_file_cli):
@@ -61,11 +59,11 @@ def get_queue_tasks(queue_path=None):
     return out
 
 
-def main_window():
+def main_window(status_file: str) -> None:
     subprocess.Popen([
         "gnome-terminal", "--",
         "bash", "-c",
-        f"watch -n 1 cat {STATUS_FILE}; exec bash"
+        f"watch -n 1 cat {status_file}; exec bash"
     ])
 
 
@@ -79,7 +77,7 @@ def update_status(index, status, tasks):
 
 
 def start_new_process(cmd, cwd=None):
-    work_dir = cwd if cwd is not None else BASE_DIR
+    work_dir = cwd if cwd is not None else os.getcwd()
     process = subprocess.Popen(
         cmd,
         shell=True,
@@ -100,17 +98,19 @@ def read_txt(txt_file):
 
 def process_line(line):
     try:
-        arguments = line.strip().split()
-
-        if not arguments or arguments[0].startswith("#"):
+        s = line.strip()
+        if not s or s.startswith("#"):
             return None
-
-        if not arguments[0].startswith("python3"):
+        arguments = s.split()
+        first = arguments[0]
+        if first == "smartrain" or first.endswith("/smartrain"):
+            return s
+        if first in ("python3", "python"):
+            return s
+        if not first.startswith("python3"):
             arguments.insert(0, "python3")
-
-        if not arguments[1].endswith(".py"):
+        if len(arguments) > 1 and not arguments[1].endswith(".py"):
             arguments[1] += ".py"
-
         return " ".join(arguments)
     except Exception as e:
         print(f"[ERROR] Ошибка при обработке команды: {e}")
@@ -146,18 +146,18 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
     """
     Последовательно выполняет задачи из очереди.
     no_terminal: не открывать gnome-terminal.
-    cwd: рабочая директория для subprocess (по умолчанию BASE_DIR).
+    cwd: рабочая директория для subprocess (по умолчанию текущий каталог).
     """
     qpath = queue_path or QUEUE_TXT
     st_file = status_file or STATUS_FILE
-    work_cwd = cwd if cwd is not None else BASE_DIR
+    work_cwd = cwd if cwd is not None else os.getcwd()
 
     st_dir = os.path.dirname(st_file)
     if st_dir:
         os.makedirs(st_dir, exist_ok=True)
 
     if not no_terminal:
-        main_window()
+        main_window(st_file)
 
     def _load():
         if not os.path.exists(st_file):
@@ -207,8 +207,10 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
             os.remove(st_file)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Очередь обучения: последовательный запуск команд из training_queue.txt")
+def build_queue_run_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(
+        description="Очередь обучения: последовательный запуск команд из training_queue.txt"
+    )
     parser.add_argument(
         "--no-gui",
         action="store_true",
@@ -218,7 +220,7 @@ def main():
         "--cwd",
         type=str,
         default=None,
-        help="Рабочая директория для запуска команд (по умолчанию каталог скрипта)",
+        help="Рабочая директория для запуска команд (по умолчанию текущий каталог)",
     )
     parser.add_argument(
         "--workspace",
@@ -238,7 +240,14 @@ def main():
         default=None,
         help="Явный путь к status.txt исполнителя",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv=None):
+    if argv is None:
+        import sys
+        argv = sys.argv[1:]
+    args = build_queue_run_arg_parser().parse_args(argv)
     qpath, stpath = resolve_queue_status_paths(
         args.queue_file, args.workspace, args.status_file
     )

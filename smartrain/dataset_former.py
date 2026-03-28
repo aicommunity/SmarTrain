@@ -5,8 +5,9 @@ import random
 import argparse
 from tqdm import tqdm
 
-from datasets_json_former import yolo_flat_image_label_buckets
-from workspace_paths import (
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.datasets_json_former import yolo_flat_image_label_buckets
+from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,
@@ -77,8 +78,8 @@ def find_dataset_paths(dataset_path, structure, arg=False):
     return paths
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
+def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(
         description="Объединение и фильтрация датасетов по выбранным классам"
     )
 
@@ -114,7 +115,7 @@ def parse_args():
         "--classes",
         type=str,
         default=None,
-        help="Имена классов через запятую; если не задано — объединение всех классов из всех датасетов в datasets_info.json (кроме выходного)"
+        help="Имена классов через запятую; если не задано — объединение всех классов из всех датасетов в datasets_info.json (кроме выходного)",
     )
 
     parser.add_argument(
@@ -123,11 +124,11 @@ def parse_args():
         default=None,
         help="Legacy: каталог с datasets_info.json; в workspace не нужен (всегда source_datasets/)",
     )
-    
+
     parser.add_argument(
         "--exclude-test",
         action="store_true",
-        help="Исключить тестовые данные из выбранных датасетов"
+        help="Исключить тестовые данные из выбранных датасетов",
     )
 
     parser.add_argument(
@@ -136,7 +137,7 @@ def parse_args():
         metavar=("SOURCES", "TARGET"),
         action="append",
         default=None,
-        help='Слияние классов: строка имён через запятую и целевое имя в --classes. Повторяйте флаг для нескольких групп.',
+        help="Слияние классов: строка имён через запятую и целевое имя в --classes. Повторяйте флаг для нескольких групп.",
     )
 
     parser.add_argument(
@@ -145,7 +146,11 @@ def parse_args():
         help="Оставить только классы из набора (--classes или авто-объединение), присутствующие в каждом датасете группы пересечения; остальные отбрасываются с предупреждением",
     )
 
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv=None):
+    return build_dataset_former_arg_parser().parse_args(argv)
 
 
 def _normalize_name(name, class_names_map):
@@ -404,8 +409,11 @@ def _update_work_datasets_sidecar(
         json.dump(class_names_out, f, ensure_ascii=False, indent=4)
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    if argv is None:
+        import sys
+        argv = sys.argv[1:]
+    args = parse_args(argv)
 
     legacy = (
         args.source_path is not None

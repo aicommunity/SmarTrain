@@ -18,8 +18,9 @@ from PIL import Image
 from tqdm import tqdm
 from ultralytics import YOLO
 
-from dataset_former import find_dataset_paths
-from datasets_json_former import (
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.dataset_former import find_dataset_paths
+from smartrain.datasets_json_former import (
     IMAGE_EXTS_FLAT,
     find_yaml_file,
     load_yaml,
@@ -264,8 +265,8 @@ def _copy_and_patch_yaml(dataset_root: str, output_root: str) -> None:
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
 
 
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
+def build_roi_arg_parser() -> argparse.ArgumentParser:
+    p = CliArgumentParser(
         description="Кроп датасета YOLO по ROI (Ultralytics YOLO detect/segment)"
     )
     p.add_argument("--dataset-name", required=True, help="Имя папки датасета (ключ в datasets_info.json)")
@@ -301,7 +302,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Требовать блок roi_auto в datasets_info (иначе достаточно --weights и т.д.)",
     )
-    return p.parse_args()
+    return p
+
+
+def parse_args(argv=None) -> argparse.Namespace:
+    return build_roi_arg_parser().parse_args(argv)
 
 
 def _validate_layout(
@@ -357,8 +362,10 @@ def _load_roi_config(args: argparse.Namespace, entry: Dict[str, Any]) -> Dict[st
     }
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv=None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
+    args = parse_args(argv)
     info_dir = args.datasets_info_path or args.source_path
     dataset_root = _validate_layout(
         args.source_path, args.dataset_name, args.datasets_info_path

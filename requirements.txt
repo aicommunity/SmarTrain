@@ -1,7 +1,2 @@
-ultralytics
-pyyaml
-tqdm
-pandas
-matplotlib
-pillow
-numpy
+# Установка пакета: pip install -e .
+# Зависимости перечислены в pyproject.toml.

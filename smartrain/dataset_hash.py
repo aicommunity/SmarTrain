@@ -4,7 +4,8 @@ import json
 import os
 import sys
 
-from workspace_paths import (
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.workspace_paths import (
     DATASETS_INFO_FILE,
     WorkspaceLayout,
     resolve_dataset_root,
@@ -139,11 +140,11 @@ def resolve_hash_dataset_root(
     return os.path.abspath(os.path.expanduser(str(dataset_path_pos).strip()))
 
 
-def main():
-    parser = argparse.ArgumentParser(
+def build_hash_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(
         description="Вычисление хеша датасета на основе структуры, имен файлов и их размеров"
     )
-    
+
     parser.add_argument(
         "dataset_path",
         type=str,
@@ -169,10 +170,16 @@ def main():
         "--validate",
         type=str,
         default=None,
-        help="Ожидаемое значение хеша для валидации"
+        help="Ожидаемое значение хеша для валидации",
     )
-    
-    args = parser.parse_args()
+
+    return parser
+
+
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    args = build_hash_arg_parser().parse_args(argv)
     if args.work_dataset and args.dataset_path:
         print(
             "[ERROR] Укажите либо путь к датасету, либо --work-dataset, не оба сразу.",

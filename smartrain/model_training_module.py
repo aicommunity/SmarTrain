@@ -6,8 +6,9 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from ultralytics import YOLO
-from dataset_hash import calculate_dataset_hash
-from workspace_paths import (
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.dataset_hash import calculate_dataset_hash
+from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,
@@ -22,8 +23,8 @@ BATCH = 16
 IMG_SIZE = 640
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Обучение моделей")
+def build_train_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(description="Обучение моделей")
 
     parser.add_argument(
         "--workspace",
@@ -42,49 +43,49 @@ def parse_args():
     parser.add_argument(
         "--model",
         type=str,
-        default=None,
-        help="Модель (например: yolov8n.pt, yolov8s.pt, yolov11n.pt)"
+        default=MODEL_VERSION,
+        help="Модель (например: yolov8n.pt, yolov8s.pt, yolov11n.pt)",
     )
 
     parser.add_argument(
         "--epochs",
         type=int,
-        default=None,
-        help="Количество эпох обучения"
+        default=EPOCHS,
+        help="Количество эпох обучения",
     )
 
     parser.add_argument(
         "--batch",
         type=int,
-        default=None,
-        help="Размер batch"
+        default=BATCH,
+        help="Размер batch",
     )
 
     parser.add_argument(
         "--img-size",
         type=int,
-        default=None,
-        help="Размер изображения"
+        default=IMG_SIZE,
+        help="Размер изображения",
     )
 
     parser.add_argument(
         "--target-path",
         type=str,
         default=None,
-        help="Базовый каталог для прогонов (по умолчанию workspace/runs при использовании workspace)"
+        help="Базовый каталог для прогонов (по умолчанию workspace/runs при использовании workspace)",
     )
 
     parser.add_argument(
         "--model-dir",
         type=str,
         default=None,
-        help="Путь к папке с моделью"
+        help="Путь к папке с моделью",
     )
 
     parser.add_argument(
         "--test-only",
         action="store_true",
-        help="Выполнить только тестирование без обучения"
+        help="Выполнить только тестирование без обучения",
     )
 
     parser.add_argument(
@@ -92,7 +93,7 @@ def parse_args():
         "--yes",
         action="store_true",
         dest="non_interactive",
-        help="Не спрашивать подтверждение при существующей папке результатов (для очереди и CI)"
+        help="Не спрашивать подтверждение при существующей папке результатов (для очереди и CI)",
     )
 
     parser.add_argument(
@@ -114,7 +115,11 @@ def parse_args():
         help="Порог IoU для val() (Ultralytics)",
     )
 
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(argv=None):
+    return build_train_arg_parser().parse_args(argv)
 
 
 def resolve_training_data_path(layout: WorkspaceLayout, data_arg: str) -> str:
@@ -132,12 +137,14 @@ def resolve_training_data_path(layout: WorkspaceLayout, data_arg: str) -> str:
     if not isinstance(catalog, dict):
         raise ValueError(f"{info_path}: ожидается объект JSON.")
     if data_arg not in catalog:
-        raise KeyError(
-            f"Имя {data_arg!r} отсутствует в work_datasets/{DATASETS_INFO_FILE}."
+        names = ", ".join(sorted(catalog.keys()))
+        hint = f" Известные имена: {names}." if names else ""
+        raise ValueError(
+            f"Имя датасета {data_arg!r} отсутствует в work_datasets/{DATASETS_INFO_FILE}.{hint}"
         )
     entry = catalog[data_arg]
     if not isinstance(entry, dict):
-        raise TypeError(f"Запись {data_arg!r} должна быть объектом JSON.")
+        raise ValueError(f"Запись {data_arg!r} должна быть объектом JSON.")
     return resolve_dataset_root(layout.root, data_arg, entry, layout.work_datasets)
 
 
@@ -498,8 +505,11 @@ def _resolve_cli_paths(args):
     return None, dataset_path, target_base
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    if argv is None:
+        import sys
+        argv = sys.argv[1:]
+    args = parse_args(argv)
 
     try:
         workspace_root, data, target_dir = _resolve_cli_paths(args)
@@ -507,10 +517,10 @@ def main():
         print(f"[ERROR] {e}")
         return
 
-    model_version = args.model if args.model else MODEL_VERSION
-    epochs = args.epochs if args.epochs else EPOCHS
-    batch = args.batch if args.batch else BATCH
-    img_size = args.img_size if args.img_size else IMG_SIZE
+    model_version = args.model
+    epochs = args.epochs
+    batch = args.batch
+    img_size = args.img_size
 
     # Переменные для отслеживания статуса
     training_success = True

@@ -6,5 +6,6 @@ __pycache__
 *.csv
 *.pt
 *.onnx
+*.egg-info/
 
 

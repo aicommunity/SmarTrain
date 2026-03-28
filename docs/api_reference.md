@@ -1,5 +1,19 @@
 # Справочник API
 
+## cli.py (команда `smartrain`)
+
+Единая точка входа: **Typer**-приложение `app`, callback синхронизирует `SMART_TRAIN_WORKSPACE` с текущим каталогом, если переменная пуста.
+
+Подкоманды с префиксом `context_settings` (`allow_extra_args`, `ignore_unknown_options`) и **`add_help_option=False`**: при наличии `--help` / `-h` в хвосте аргументов вызывается **`_dispatch_argparse_help`** с фабрикой `build_*_arg_parser` целевого модуля; иначе **`_call(module, "main", ctx)`** → `main(list(ctx.args))`.
+
+Соответствие имён подкоманд и модулей см. исходный файл [`smartrain/cli.py`](../smartrain/cli.py).
+
+## cli_argparse.py
+
+**`CliArgumentParser`** — подкласс `argparse.ArgumentParser` с `formatter_class=ArgumentDefaultsHelpFormatter`, чтобы в справке отображались значения по умолчанию опций.
+
+---
+
 ## workspace_paths.py
 
 Модуль единого корня workspace.
@@ -21,7 +35,7 @@
 
 ## registry_cli.py
 
-CLI: `--workspace` (или env), подкоманды `runs-list`, `runs-info`, `runs-metrics`, `models-add`, `models-list`, `models-info`, `models-remove`. Веса копируются в `models/<friendly_name>/<friendly_name>.pt` с `model_manifest.json`.
+Через **`smartrain registry`**: `--workspace` (или env), подкоманды `runs-list`, `runs-info`, `runs-metrics`, `models-add`, `models-list`, `models-info`, `models-remove`. Парсер: **`build_registry_arg_parser()`**. Веса копируются в `models/<friendly_name>/<friendly_name>.pt` с `model_manifest.json`.
 
 ---
 
@@ -238,6 +252,8 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 ## training_queue.py
 
+Исполнитель очереди: **`smartrain queue-run`**. Резолв путей: **`resolve_queue_status_paths()`** — при успешном `resolve_workspace_root` очередь = `queue.txt` в корне workspace, статусы = `workspace/tmp/status.txt`; иначе fallback на `training_queue.txt` и `tmp/status.txt` рядом с пакетом (см. константы в коде).
+
 ### Функции
 
 #### `main_window() -> None`
@@ -282,10 +298,11 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 **Возвращает**: Обработанную команду или `None` если строка пустая/комментарий
 
-**Обработка**:
-- Добавляет `python3` если отсутствует
-- Добавляет расширение `.py` если отсутствует
-- Игнорирует строки, начинающиеся с `#`
+**Обработка** (актуальная логика):
+- Строки, начинающиеся с `smartrain` или с пути, оканчивающегося на `/smartrain`, возвращаются без изменений
+- Строки с префиксом `python3` / `python` — без изменений
+- Иначе: вставка `python3` в начало и дополнение `.py` ко второму токену при необходимости (legacy)
+- Комментарии `#` и пустые строки → `None`
 
 ---
 
@@ -329,7 +346,7 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 ## training_queue_cli.py
 
-Подкоманды: `list`, `add`, `remove`, `clear`, `run`. Общий флаг `--queue-file`.
+Команда **`smartrain queue`**. Парсер: **`build_queue_cli_arg_parser()`**. Подкоманды: `list`, `add`, `remove`, `clear`, `run`. Общие опции: `--workspace`, `--queue-file`, `--status-file`.
 
 ---
 
@@ -365,8 +382,8 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 - `IMG_SIZE` - размер изображения по умолчанию (640)
 
 ### training_queue.py
-- `BASE_DIR` - директория скрипта
-- `QUEUE_TXT` - путь к файлу очереди (`"training_queue.txt"`)
-- `TMP_DIR` - временная директория (`"tmp"`)
-- `STATUS_FILE` - путь к файлу статуса (`"tmp/status.txt"`)
+- `BASE_DIR` — каталог пакета (рядом с модулем)
+- `QUEUE_TXT` — запасной файл очереди, если workspace не задан (`training_queue.txt` в `BASE_DIR`)
+- `STATUS_FILE` — запасной путь к статусам (`tmp/status.txt` в `BASE_DIR`)
+- В режиме workspace пути задают `workspace_queue_path` / `workspace_queue_status_path` (`queue.txt`, `tmp/status.txt` в корне workspace)
 

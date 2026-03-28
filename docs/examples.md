@@ -1,5 +1,7 @@
 # Примеры использования
 
+Во всех примерах предполагается установленная команда **`smartrain`** (`pip install -e .` из корня репозитория). Это соответствует коду в [`smartrain/cli.py`](../smartrain/cli.py). Прямой запуск `python smartrain/datasets_json_former.py` устарел; при необходимости вызывайте функции `main` модулей из Python или `python -m smartrain` с нужной подкомандой.
+
 ## Пример 1: Полный цикл работы с датасетами
 
 ### Шаг 1: Анализ существующих датасетов
@@ -11,7 +13,7 @@
 
 Запустите анализ:
 ```bash
-python3 datasets_json_former.py --datasets-path /data/datasets --output-path .
+smartrain datasets-json --datasets-path /data/datasets --output-path .
 ```
 
 Результат: созданы файлы `datasets_info.json` и `class_names.json` в текущей директории.
@@ -38,7 +40,7 @@ python3 datasets_json_former.py --datasets-path /data/datasets --output-path .
 
 Создайте датасет только с классами `helmet` и `gloves`:
 ```bash
-python3 dataset_former.py \
+smartrain dataset-former \
     --source-path /data/datasets \
     --target-path /data/merged_helmet_gloves \
     --classes "helmet,gloves" \
@@ -55,7 +57,7 @@ python3 dataset_former.py \
 
 Обучите модель YOLOv8n на созданном датасете:
 ```bash
-python3 model_training_module.py \
+smartrain train \
     --data /data/merged_helmet_gloves \
     --model yolov8n \
     --epochs 50 \
@@ -72,7 +74,7 @@ python3 model_training_module.py \
 ### Создание датасета с полным набором СИЗ
 
 ```bash
-python3 dataset_former.py \
+smartrain dataset-former \
     --classes "helmet,gloves,vest,boots,goggles,mask" \
     --target-path /data/full_ppe_dataset \
     --exclude-test
@@ -84,21 +86,21 @@ python3 dataset_former.py \
 
 ```bash
 # Маленькая модель для быстрого прототипирования
-python3 model_training_module.py \
+smartrain train \
     --data /data/full_ppe_dataset \
     --model yolov8n \
     --epochs 30 \
     --batch 32
 
 # Средняя модель для баланса скорости и точности
-python3 model_training_module.py \
+smartrain train \
     --data /data/full_ppe_dataset \
     --model yolov8s \
     --epochs 50 \
     --batch 16
 
 # Большая модель для максимальной точности
-python3 model_training_module.py \
+smartrain train \
     --data /data/full_ppe_dataset \
     --model yolov8l \
     --epochs 100 \
@@ -111,26 +113,26 @@ python3 model_training_module.py \
 
 ### Подготовка файла очереди
 
-Создайте файл `training_queue.txt`:
+По умолчанию исполнитель читает **`queue.txt`** в корне workspace (см. [`workspace_paths.workspace_queue_path`](../smartrain/workspace_paths.py)). Создайте или отредактируйте этот файл:
 
 ```
 # Шаг 1: Создание датасета
-dataset_former.py --classes "helmet,vest" --target-path /data/helmet_vest_dataset
+smartrain dataset-former --classes "helmet,vest" --target-path /data/helmet_vest_dataset
 
 # Шаг 2: Обучение yolov8n
-model_training_module.py --data /data/helmet_vest_dataset --model yolov8n --epochs 50
+smartrain train --data /data/helmet_vest_dataset --model yolov8n --epochs 50
 
 # Шаг 3: Обучение yolov8s
-model_training_module.py --data /data/helmet_vest_dataset --model yolov8s --epochs 50
+smartrain train --data /data/helmet_vest_dataset --model yolov8s --epochs 50
 
 # Шаг 4: Обучение yolov8m
-model_training_module.py --data /data/helmet_vest_dataset --model yolov8m --epochs 50
+smartrain train --data /data/helmet_vest_dataset --model yolov8m --epochs 50
 ```
 
 ### Запуск очереди
 
 ```bash
-python3 training_queue.py
+smartrain queue-run
 ```
 
 Система автоматически:
@@ -154,10 +156,10 @@ darknet_dataset/
 └── obj.data
 ```
 
-Скрипт `datasets_json_former.py` автоматически определит структуру:
+Команда **`smartrain datasets-json`** (модуль `datasets_json_former`) автоматически определит структуру:
 
 ```bash
-python3 datasets_json_former.py --datasets-path /path/to/darknet_dataset
+smartrain datasets-json --datasets-path /path/to/darknet_dataset
 ```
 
 Результат в `datasets_info.json`:
@@ -181,7 +183,7 @@ python3 datasets_json_former.py --datasets-path /path/to/darknet_dataset
 После обучения модели можно протестировать ее на тестовом наборе:
 
 ```bash
-python3 model_training_module.py \
+smartrain train \
     --test-only \
     --model-dir /data/models/merged_helmet_gloves/yolov8n_50epochs \
     --data /data/merged_helmet_gloves
@@ -209,7 +211,7 @@ dataset/
 Скрипты автоматически определяют структуру и обрабатывают ее корректно:
 
 ```bash
-python3 datasets_json_former.py --datasets-path /path/to/dataset
+smartrain datasets-json --datasets-path /path/to/dataset
 ```
 
 Результат:
@@ -244,7 +246,7 @@ python3 datasets_json_former.py --datasets-path /path/to/dataset
 При создании объединенного датасета все варианты будут нормализованы:
 
 ```bash
-python3 dataset_former.py --classes "helmet" --target-path /data/helmet_only
+smartrain dataset-former --classes "helmet" --target-path /data/helmet_only
 ```
 
 Все три варианта будут объединены в один класс `helmet`.
@@ -253,7 +255,7 @@ python3 dataset_former.py --classes "helmet" --target-path /data/helmet_only
 
 ## Пример 8: Настройка пропорций разделения
 
-Для изменения пропорций train/val/test отредактируйте константы в `dataset_former.py`:
+Для изменения пропорций train/val/test отредактируйте константы в модуле `smartrain/dataset_former.py`:
 
 ```python
 TRAIN_PART = 0.7  # 70%
@@ -267,23 +269,23 @@ TEST_PART = 0.1   # 10%
 
 ## Пример 9: Пакетное обучение с разными конфигурациями
 
-Создайте `training_queue.txt` для экспериментов:
+Создайте `queue.txt` в корне workspace для экспериментов:
 
 ```
 # Эксперимент 1: Маленькая модель, мало эпох
-model_training_module.py --data /data/dataset --model yolov8n --epochs 10 --batch 32
+smartrain train --data /data/dataset --model yolov8n --epochs 10 --batch 32
 
 # Эксперимент 2: Маленькая модель, много эпох
-model_training_module.py --data /data/dataset --model yolov8n --epochs 100 --batch 16
+smartrain train --data /data/dataset --model yolov8n --epochs 100 --batch 16
 
 # Эксперимент 3: Средняя модель
-model_training_module.py --data /data/dataset --model yolov8s --epochs 50 --batch 16
+smartrain train --data /data/dataset --model yolov8s --epochs 50 --batch 16
 
 # Эксперимент 4: Большая модель
-model_training_module.py --data /data/dataset --model yolov8l --epochs 50 --batch 8
+smartrain train --data /data/dataset --model yolov8l --epochs 50 --batch 8
 
 # Эксперимент 5: YOLOv11
-model_training_module.py --data /data/dataset --model yolov11n --epochs 50 --batch 16
+smartrain train --data /data/dataset --model yolov11n --epochs 50 --batch 16
 ```
 
 Запустите очередь и оставьте работать на ночь.
@@ -296,7 +298,7 @@ model_training_module.py --data /data/dataset --model yolov11n --epochs 50 --bat
 
 ```bash
 # Если вы находитесь в /home/user/project
-python3 dataset_former.py \
+smartrain dataset-former \
     --source-path ./datasets \
     --target-path ./output/merged \
     --classes "helmet,gloves"
@@ -305,7 +307,7 @@ python3 dataset_former.py \
 Или использовать абсолютные пути для большей надежности:
 
 ```bash
-python3 dataset_former.py \
+smartrain dataset-former \
     --source-path /home/user/project/datasets \
     --target-path /home/user/project/output/merged \
     --classes "helmet,gloves"
@@ -318,7 +320,7 @@ python3 dataset_former.py \
 ### Ошибка: Датасет не найден
 
 ```bash
-$ python3 datasets_json_former.py --datasets-path /wrong/path
+$ smartrain datasets-json --datasets-path /wrong/path
 [ERROR] Папка '/wrong/path' не найдена.
 ```
 
@@ -327,7 +329,7 @@ $ python3 datasets_json_former.py --datasets-path /wrong/path
 ### Ошибка: Классы не найдены
 
 ```bash
-$ python3 dataset_former.py --classes "nonexistent_class"
+$ smartrain dataset-former --classes "nonexistent_class"
 [ERROR] Ни один датасет не содержит все выбранные классы.
 ```
 
@@ -339,7 +341,7 @@ $ python3 dataset_former.py --classes "nonexistent_class"
 ### Ошибка: YAML файл не найден
 
 ```bash
-$ python3 model_training_module.py --data /path/to/dataset
+$ smartrain train --data /path/to/dataset
 [ERROR] Не найден yaml файл: /path/to/dataset/data.yaml
 ```
 
@@ -383,7 +385,7 @@ results[0].show()
 Итоговые имена классов в `--classes`; `--merge-classes` задаёт соответствие «несколько исходных → одно имя из --classes»:
 
 ```bash
-python3 dataset_former.py \
+smartrain dataset-former \
     --source-path /data/datasets \
     --target-path /data/merged_head \
     --classes "head_ppe,vest" \
@@ -394,10 +396,10 @@ python3 dataset_former.py \
 ## Пример 15: Очередь через CLI и анализ прогонов
 
 ```bash
-python3 training_queue_cli.py add -- python3 model_training_module.py --data /data/m --model yolov8n -y --epochs 2
-python3 training_queue_cli.py list
-python3 results_analyzer.py scan --models-root /path/to/Models
-python3 results_analyzer.py compare --baseline /path/to/run1 --others /path/to/run2 -o cmp.csv --out-png cmp.png
+smartrain queue add -- smartrain train --data /data/m --model yolov8n -y --epochs 2
+smartrain queue list
+smartrain analyze scan --models-root /path/to/Models
+smartrain analyze compare --baseline /path/to/run1 --others /path/to/run2 -o cmp.csv --out-png cmp.png
 ```
 
 ## Пример 13: Автоматизация с помощью скриптов
@@ -414,18 +416,18 @@ CLASSES="helmet,gloves,vest"
 
 # Шаг 1: Анализ датасетов
 echo "Анализ датасетов..."
-python3 datasets_json_former.py --datasets-path $DATASETS_PATH
+smartrain datasets-json --datasets-path $DATASETS_PATH
 
 # Шаг 2: Создание объединенного датасета
 echo "Создание объединенного датасета..."
-python3 dataset_former.py \
+smartrain dataset-former \
     --source-path $DATASETS_PATH \
     --target-path $OUTPUT_PATH/merged \
     --classes $CLASSES
 
 # Шаг 3: Обучение модели
 echo "Обучение модели..."
-python3 model_training_module.py \
+smartrain train \
     --data $OUTPUT_PATH/merged \
     --model yolov8n \
     --epochs 50

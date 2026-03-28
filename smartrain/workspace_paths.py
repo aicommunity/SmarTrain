@@ -1,7 +1,11 @@
 """
 Единый корень workspace: подкаталоги и резолв путей к датасетам (data_path / каталог по ключу).
 """
+from __future__ import annotations
+
+import json
 import os
+from typing import Any
 
 WORKSPACE_ENV_VAR = "SMART_TRAIN_WORKSPACE"
 
@@ -92,3 +96,49 @@ def workspace_queue_status_path(workspace_root: str) -> str:
     """Статусы исполнителя очереди: `workspace/tmp/status.txt`."""
     root = os.path.abspath(os.path.expanduser(workspace_root))
     return os.path.join(root, "tmp", "status.txt")
+
+
+def deploy_workspace(target_root: str | None = None) -> dict[str, Any]:
+    """
+    Создаёт каталоги workspace и пустые datasets_info.json при отсутствии.
+    target_root по умолчанию — текущий каталог (как у пользовательского workspace).
+    """
+    root = os.path.abspath(os.path.expanduser(target_root or os.getcwd()))
+    layout = WorkspaceLayout(root)
+    created_dirs: list[str] = []
+    created_files: list[str] = []
+    skipped: list[str] = []
+
+    dir_specs = [
+        ("source_datasets", layout.source_datasets),
+        ("work_datasets", layout.work_datasets),
+        ("runs", layout.runs),
+        ("analytics", layout.analytics),
+        ("models", layout.models),
+        ("tmp", os.path.join(root, "tmp")),
+    ]
+    for name, dpath in dir_specs:
+        if os.path.isdir(dpath):
+            skipped.append(f"dir:{name}")
+        else:
+            os.makedirs(dpath, exist_ok=True)
+            created_dirs.append(name)
+
+    file_specs = [
+        ("source_datasets_info", layout.source_datasets_info_path()),
+        ("work_datasets_info", layout.work_datasets_info_path()),
+    ]
+    for label, fpath in file_specs:
+        if os.path.isfile(fpath):
+            skipped.append(f"file:{label}")
+        else:
+            with open(fpath, "w", encoding="utf-8") as f:
+                json.dump({}, f, ensure_ascii=False, indent=2)
+            created_files.append(label)
+
+    return {
+        "root": root,
+        "created_dirs": created_dirs,
+        "created_files": created_files,
+        "skipped": skipped,
+    }

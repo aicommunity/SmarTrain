@@ -15,9 +15,13 @@
 
 ## Архитектура системы
 
+### Точка входа для пользователя
+
+Пакет **`smartrain`** ([`smartrain/cli.py`](../smartrain/cli.py)): приложение **Typer** с глобальной опцией `--workspace` / `SMART_TRAIN_WORKSPACE`, подкоманда **`deploy`** и командами, которые передают остаток argv в **`main(argv)`** соответствующих модулей (`datasets_json_former`, `dataset_former`, `model_training_module`, …). Для справки по опциям argparse у подкоманд отключён стандартный `--help` Typer и вызывается парсер модуля (`build_*_arg_parser`, см. [`cli_argparse.py`](../smartrain/cli_argparse.py)).
+
 ### Общая структура
 
-Система состоит из четырех независимых модулей, работающих последовательно:
+Система состоит из модулей, вызываемых по цепочке (часто через CLI):
 
 ```
 ┌─────────────────────────┐
@@ -463,10 +467,10 @@ calculate_dataset_hash(dataset_path)
 - **Использование**:
   ```bash
   # Вычисление хеша
-  python3 dataset_hash.py /path/to/dataset
-  
+  smartrain hash /path/to/dataset
+
   # Валидация хеша
-  python3 dataset_hash.py /path/to/dataset --validate a1b2c3d4
+  smartrain hash /path/to/dataset --validate a1b2c3d4
   ```
 
 #### Структура данных
@@ -499,7 +503,7 @@ main()
 ├── Открытие окна мониторинга статуса
 ├── Загрузка существующих статусов
 └── Бесконечный цикл:
-    ├── Чтение training_queue.txt
+    ├── Чтение файла очереди (по умолчанию queue.txt в workspace или fallback training_queue.txt)
     ├── Добавление новых задач в статусы
     ├── Поиск следующей задачи со статусом "Ждет выполнения"
     ├── Если найдена:
@@ -521,11 +525,10 @@ main()
 
 **`process_line(line)`**
 - **Алгоритм обработки**:
-  1. Разделение строки на аргументы
-  2. Пропуск комментариев (строки начинающиеся с `#`)
-  3. Пропуск пустых строк
-  4. Добавление `python3` если отсутствует
-  5. Добавление `.py` если отсутствует расширение
+  1. Пропуск комментариев и пустых строк
+  2. Если команда начинается с `smartrain` (или пути к `smartrain`) — возврат строки как есть
+  3. Если начинается с `python3` / `python` — как есть
+  4. Иначе — префикс `python3` и при необходимости суффикс `.py` у второго токена (legacy)
 - **Возвращает**: Обработанную команду или `None`
 
 **`start_new_process(cmd)`**
@@ -543,16 +546,16 @@ main()
 **Статусы задач**:
 ```python
 statuses = {
-    "dataset_former.py --classes helmet": "Ждет выполнения",
-    "model_training_module.py --model yolov8n": "Выполняется",
+    "smartrain dataset-former --classes helmet": "Ждет выполнения",
+    "smartrain train --model yolov8n": "Выполняется",
     ...
 }
 ```
 
 **Формат файла статуса**:
 ```
-dataset_former.py --classes helmet | Ждет выполнения
-model_training_module.py --model yolov8n | Выполняется
+smartrain dataset-former --classes helmet | Ждет выполнения
+smartrain train --model yolov8n | Выполняется
 ```
 
 #### Особенности реализации

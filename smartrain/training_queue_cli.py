@@ -8,7 +8,8 @@ import sys
 import tempfile
 import shutil
 
-import training_queue as tq
+import smartrain.training_queue as tq
+from smartrain.cli_argparse import CliArgumentParser
 
 
 def _queue_and_status(args):
@@ -191,7 +192,7 @@ def cmd_run(args):
     )
 
 
-def main():
+def build_queue_cli_arg_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--workspace",
@@ -212,7 +213,7 @@ def main():
         help="Явный путь к status.txt исполнителя",
     )
 
-    parser = argparse.ArgumentParser(description="Управление очередью обучения")
+    parser = CliArgumentParser(description="Управление очередью обучения")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_list = sub.add_parser("list", parents=[common], help="Показать задачи и статусы")
@@ -237,7 +238,14 @@ def main():
     p_run.add_argument("--cwd", type=str, default=None, help="Рабочая каталог для subprocess")
     p_run.set_defaults(func=cmd_run)
 
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    parser = build_queue_cli_arg_parser()
+    args = parser.parse_args(argv)
     if args.cmd == "add" and not args.command:
         parser.error("add: укажите команду после add")
     args.func(args)
