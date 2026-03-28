@@ -10,7 +10,8 @@ from dataset_hash import calculate_dataset_hash
 
 
 DATASET_PATH = "/media/user/Data/IndustrialSafety/Datasets/HardHatSkz"
-MODELS_BASE_DIR = "/media/user/Data/IndustrialSafety/Models"
+# По умолчанию — домашний каталог (нет жёсткой привязки к /media/user).
+MODELS_BASE_DIR = os.path.join(os.path.expanduser("~"), "IndustrialSafety", "Models")
 MODEL_VERSION = "yolov8n"
 EPOCHS = 50
 BATCH = 16

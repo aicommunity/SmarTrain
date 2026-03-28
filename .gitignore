@@ -1,3 +1,10 @@
 .idea
 __pycache__
+*.png
+*.jpg
+*.bmp
+*.csv
+*.pt
+*.onnx
+
 

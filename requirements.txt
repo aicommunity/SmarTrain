@@ -3,3 +3,5 @@ pyyaml
 tqdm
 pandas
 matplotlib
+pillow
+numpy

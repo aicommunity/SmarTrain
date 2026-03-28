@@ -3,6 +3,7 @@ import yaml
 import json
 import sys
 import argparse
+from typing import Any, Dict, Optional
 
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -319,6 +320,21 @@ def parse_args():
     return parser.parse_args()
 
 
+# Поля записи датасета, сохраняемые при пересканировании (вручную в JSON)
+_PRESERVED_DATASET_INFO_KEYS = ("roi_auto", "tags")
+
+
+def _merge_preserved_dataset_fields(fresh: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Дополняет свежую запись из скана полями roi_auto/tags из старого datasets_info.json."""
+    if not previous:
+        return fresh
+    out = dict(fresh)
+    for key in _PRESERVED_DATASET_INFO_KEYS:
+        if key in previous:
+            out[key] = previous[key]
+    return out
+
+
 def main():
     args = parse_args()
     
@@ -348,6 +364,20 @@ def main():
                 datasets_info[folder_name] = info
                 for class_name in info["classes"]:
                     class_names[class_name] = class_name
+
+    previous_info = {}
+    if os.path.isfile(output_file):
+        try:
+            with open(output_file, "r", encoding="utf-8") as f:
+                previous_info = json.load(f)
+        except Exception as e:
+            print(f"[WARNING] Не удалось прочитать существующий {output_file} для мержа roi_auto/tags: {e}")
+
+    for name in list(datasets_info.keys()):
+        if name in previous_info and isinstance(previous_info[name], dict):
+            datasets_info[name] = _merge_preserved_dataset_fields(
+                datasets_info[name], previous_info[name]
+            )
 
     try:
         with open(output_file, "w", encoding="utf-8") as f:

@@ -32,6 +32,12 @@
             │ Создает: объединенный датасет + data.yaml
             ↓
 ┌─────────────────────────┐
+│   dataset_roi_yolo.py    │  → Кроп по ROI (YOLO/YOLO-Seg), опционально
+└───────────┬─────────────┘
+            │ Использует: datasets_info.json (roi_auto), find_dataset_paths
+            │ Создает: новый датасет с тем же layout
+            ↓
+┌─────────────────────────┐
 │ model_training_module.py│  → Обучение моделей YOLO
 └───────────┬─────────────┘
             │ Использует: data.yaml
@@ -71,6 +77,7 @@ main()
 │   │   ├── load_yaml() или load_obj_names()
 │   │   └── count_elements()
 │   └── Добавление в datasets_info
+├── Мерж из старого datasets_info.json: перенос roi_auto и tags по имени датасета
 └── Сохранение JSON файлов
 ```
 
@@ -237,6 +244,21 @@ pair = (image_path: str, label_path: str)
 5. **Создание data.yaml**: Простое текстовое создание файла
    - Относительные пути для портативности
    - Формат совместим с Ultralytics YOLO
+
+---
+
+### 2a. dataset_roi_yolo.py
+
+#### Назначение
+Построение **нового** датасета с тем же layout (`split`, `flat`, `subset_flat`, `nested_split`, `darknet`), где каждый кадр обрезан по ROI из инференса Ultralytics (детекция или сегментация). Метки в формате YOLO (bbox и полигоны) пересчитываются в нормализованные координаты относительно **кропа**.
+
+#### Зависимости
+- `find_dataset_paths()` из `dataset_former.py`
+- Поля `structure` и опционально `roi_auto` из `datasets_info.json` (файл рядом с папкой датасета)
+- `find_yaml_file` / `load_yaml` для копии `data.yaml` с обновлённым `path`
+
+#### Политики ROI
+См. [data_formats.md](data_formats.md#опциональные-поля-не-перезаписываются-сканером): `union`, `largest`, `best_conf`, `per_box` (суффиксы `_split_N` в имени файла).
 
 ---
 

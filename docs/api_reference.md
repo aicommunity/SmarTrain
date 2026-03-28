@@ -113,6 +113,20 @@
 
 ---
 
+#### Сохранение `datasets_info.json` и поля `roi_auto` / `tags`
+
+Если выходной `datasets_info.json` уже существует, перед записью он читается; для каждого имени датасета, снова присутствующего в новом скане, в запись переносятся из старого файла необязательные ключи **`roi_auto`** и **`tags`** (остальное берётся из свежего `process_dataset`). Так вручную добавленная конфигурация кропа ROI не стирается при повторном анализе папок.
+
+---
+
+## dataset_roi_yolo.py
+
+CLI: кроп датасета по ROI модели Ultralytics (detect/segment), пересчёт нормализованных меток. Подробности и формат `roi_auto` — в [data_formats.md](data_formats.md#опциональные-поля-не-перезаписываются-сканером).
+
+**Основные аргументы**: `--dataset-name`, `--source-path` (родитель каталога `{dataset_name}`), `--output-path`, опционально `--datasets-info-path` (тот же родитель, что и у папки датасета), переопределения `--weights`, `--conf`, `--pad-px`, `--roi-policy`, `--mode`, `--on-empty`, `--require-roi-auto`.
+
+---
+
 ## dataset_former.py
 
 ### Параметры CLI (дополнительно)
@@ -327,7 +341,7 @@
 
 ### model_training_module.py
 - `DATASET_PATH` - путь к датасету по умолчанию (`"/media/user/Data/IndustrialSafety/Datasets/HardHatSkz"`)
-- `MODELS_BASE_DIR` - базовая директория для сохранения моделей (`"/media/user/Data/IndustrialSafety/Models"`)
+- `MODELS_BASE_DIR` - базовая директория для сохранения моделей (по умолчанию: `~/IndustrialSafety/Models`)
 - `MODEL_VERSION` - версия модели по умолчанию (`"yolov8n"`)
 - `EPOCHS` - количество эпох по умолчанию (50)
 - `BATCH` - размер batch по умолчанию (16)
