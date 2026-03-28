@@ -62,7 +62,8 @@
 
 **Возвращает**: Один из типов структуры:
 - `"split"` - разделение на train/val/test
-- `"flat"` - плоская структура images/labels
+- `"flat"` - плоская структура images/labels (файлы в корне этих папок)
+- `"subset_flat"` - плоская структура с подпапками одинакового имени в `images/` и `labels/` (экспорт CVAT Ultralytics YOLO Detection 1.0)
 - `"nested_split"` - вложенное разделение
 - `"darknet"` - формат Darknet YOLO
 - `"unknown"` - неизвестная структура
@@ -104,7 +105,7 @@
 ```python
 {
     "classes": {class_name: index},
-    "structure": "split|flat|nested_split|darknet",
+    "structure": "split|flat|subset_flat|nested_split|darknet",
     "elements_count": int_or_list
 }
 ```
@@ -113,6 +114,11 @@
 ---
 
 ## dataset_former.py
+
+### Параметры CLI (дополнительно)
+
+- **`--classes`** — если не задан, список классов строится как **объединение** всех классов из всех записей `datasets_info.json` (кроме датасета с именем выходной папки), с нормализацией имён через `class_names.json`; порядок в итоговом списке — по возрастанию нормализованного имени.
+- **`--common-classes-only`** — среди датасетов, у которых есть пересечение с запрошенным набором классов (`--classes` или авто-объединение) и источниками `--merge-classes`, оставить в итоге только те классы, которые есть **в каждом** таком датасете; остальные отбрасываются с предупреждением в лог.
 
 ### Функции
 
@@ -255,11 +261,50 @@
 
 ---
 
-#### `save_statuses(statuses: dict[str, str]) -> None`
-Сохраняет статусы задач в файл.
+#### `save_statuses(tasks: list[str], statuses: dict[str, str], status_file: str | None) -> None`
+Сохраняет статусы в порядке строк очереди.
 
 **Параметры**:
+- `tasks` - список строк задач (без `\\n`)
 - `statuses` - словарь `{задача: статус}`
+- `status_file` - путь к `status.txt` (по умолчанию `tmp/status.txt`)
+
+---
+
+#### `get_queue_tasks(queue_path: str | None) -> list[str]`
+Возвращает непустые строки очереди без комментариев.
+
+---
+
+#### `run_queue(no_terminal: bool, cwd: str | None, queue_path: str | None, status_file: str | None) -> None`
+Цикл исполнения очереди. При `no_terminal=True` не вызывается `gnome-terminal`.
+
+---
+
+## dataset_hash.py
+
+### CLI
+- Позиционный аргумент: путь к датасету
+- `--validate <hash>` — код выхода `0` при совпадении, `1` при расхождении, `2` при ошибке
+
+### `calculate_dataset_hash(dataset_path: str) -> str`
+Первые 8 символов MD5 по структуре, именам и размерам файлов.
+
+---
+
+## training_queue_cli.py
+
+Подкоманды: `list`, `add`, `remove`, `clear`, `run`. Общий флаг `--queue-file`.
+
+---
+
+## results_analyzer.py
+
+Подкоманды:
+- `scan --models-root` — список прогонов
+- `export-table -o` — сводный CSV
+- `compare --baseline --others … -o --out-png` — дельты и графики
+- `interactive` — выбор прогонов в терминале
 
 ---
 
@@ -275,7 +320,6 @@
 - `JSON_FILE` - имя файла с информацией о датасетах (`"datasets_info.json"`)
 - `CLASS_NAMES_FILE` - имя файла с именами классов (`"class_names.json"`)
 - `OUTPUT_DATASET_NAME` - имя выходного датасета (`"merged_dataset"`)
-- `SELECTED_CLASSES` - список классов по умолчанию (`["hardhat", "no_hardhat"]`)
 - `TRAIN_PART` - доля обучающей выборки (0.8)
 - `VAL_PART` - доля валидационной выборки (0.1)
 - `TEST_PART` - доля тестовой выборки (0.1)

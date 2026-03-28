@@ -112,29 +112,27 @@ def main():
         computed_hash = calculate_dataset_hash(args.dataset_path)
         
         if args.validate:
-            # Режим валидации
             if computed_hash.lower() == args.validate.lower():
                 print(f"Валидация успешна. Хеш совпадает: {computed_hash}")
-                sys.exit(1)  # Успех
+                sys.exit(0)
             else:
                 print(f"Валидация не пройдена.")
                 print(f"Ожидалось: {args.validate}")
                 print(f"Получено: {computed_hash}")
-                sys.exit(0)  # Ошибка
+                sys.exit(1)
         else:
-            # Режим вычисления хеша
             print(computed_hash)
             sys.exit(0)
-            
+
     except FileNotFoundError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
-        sys.exit(0)
+        sys.exit(2)
     except ValueError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
-        sys.exit(0)
+        sys.exit(2)
     except Exception as e:
         print(f"[ERROR] Неожиданная ошибка: {e}", file=sys.stderr)
-        sys.exit(0)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

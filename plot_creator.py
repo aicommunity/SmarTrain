@@ -1,52 +1,31 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import os
+#!/usr/bin/env python3
+"""
+Устаревший скрипт. Используйте results_analyzer для сравнения прогонов и графиков.
 
-base_dir = '/media/user/Data/IndustrialSafety/Models/Hard Hats.v6-resized6'
+Пример:
+  python3 results_analyzer.py compare --baseline /path/to/run1 --others /path/to/run2 \\
+      -o delta.csv --out-png curves.png
+"""
+import argparse
+import subprocess
+import sys
+from pathlib import Path
 
-models = ['yolov8n', 'yolov8m', 'yolov8l', 'yolo11n']
 
-map_column = 'metrics/mAP50-95(B)' 
+def main():
+    parser = argparse.ArgumentParser(
+        description="Обёртка: перенаправление на results_analyzer (старый plot_creator устарел)."
+    )
+    parser.add_argument(
+        "remainder",
+        nargs=argparse.REMAINDER,
+        help="Аргументы передаются в results_analyzer.py",
+    )
+    args = parser.parse_args()
+    script = Path(__file__).resolve().parent / "results_analyzer.py"
+    cmd = [sys.executable, str(script)] + (args.remainder or ["--help"])
+    raise SystemExit(subprocess.call(cmd))
 
-plt.figure(figsize=(12, 7))
 
-data_plotted = False
-
-for model in models:
-    csv_path = os.path.join(base_dir, model, 'train', 'results.csv')
-    
-    if os.path.exists(csv_path):
-        try:
-            df = pd.read_csv(csv_path)
-            
-            df.columns = df.columns.str.strip()
-            
-            if 'epoch' in df.columns and map_column in df.columns:
-                plt.plot(df['epoch'], df[map_column], label=model, linewidth=2)
-                data_plotted = True
-            else:
-                print(f"[Внимание] В файле {csv_path} нет колонки '{map_column}'.")
-                print(f"Доступные колонки: {df.columns.tolist()}")
-                
-        except Exception as e:
-            print(f"[Ошибка] Не удалось прочитать {csv_path}: {e}")
-    else:
-        print(f"[Внимание] Файл не найден: {csv_path}")
-
-if data_plotted:
-    plt.title('Зависимость mAP от эпохи обучения для разных моделей YOLO', fontsize=16, pad=15)
-    plt.xlabel('Эпоха (Epoch)', fontsize=14)
-    plt.ylabel(f'Точность ({map_column})', fontsize=14)
-    
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.legend(title='Модели', fontsize=12, title_fontsize=13)
-    
-    plt.tight_layout()
-    
-    save_path = os.path.join(base_dir, 'map_comparison_plot.png')
-    plt.savefig(save_path, dpi=300)
-    print(f"\n✅ График успешно сохранен: {save_path}")
-    
-    plt.show()
-else:
-    print("\n❌ Не удалось найти данные для построения графика. Проверьте пути и содержимое CSV-файлов.")
+if __name__ == "__main__":
+    main()

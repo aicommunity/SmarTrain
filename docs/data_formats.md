@@ -45,7 +45,30 @@ dataset_name/
     └── ...
 ```
 
-**Определение**: Наличие папок `images` и `labels` на верхнем уровне, отсутствие папок train/val/test.
+**Определение**: Наличие папок `images` и `labels` на верхнем уровне; файлы лежат непосредственно в них; внутри `images/` нет подкаталогов `train` / `val` / `test` и нет общих пар подпапок с `labels/` (см. ниже).
+
+---
+
+### 2а. Subset flat (CVAT Ultralytics YOLO Detection 1.0)
+
+Экспорт из [CVAT](https://docs.cvat.ai/docs/dataset_management/formats/) в формате **Ultralytics YOLO Detection 1.0** часто даёт одну или несколько **произвольно именованных** подпапок внутри `images/` и с теми же именами в `labels/` (например, имя задачи или набора: `Pads`, `Batch1` и т.д.).
+
+```
+dataset_name/
+├── data.yaml
+├── images/
+│   └── Pads/                    # имя может быть любым
+│       ├── shot001.jpg
+│       └── ...
+└── labels/
+    └── Pads/
+        ├── shot001.txt
+        └── ...
+```
+
+**Определение**: есть `images/` и `labels/` на верхнем уровне; внутри `images/` **нет** подкаталогов с именами `train` / `val` / `test`; при этом существует хотя бы одна пара вложенных каталогов с **одинаковым именем** в `images/<name>/` и `labels/<name>/`. Допускается сочетание с файлами в корне `images/` и `labels/` (тогда учитываются и корень, и все такие пары).
+
+В `datasets_info.json` поле `structure` для такого датасета: **`subset_flat`**.
 
 ---
 

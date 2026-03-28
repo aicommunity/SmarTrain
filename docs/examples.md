@@ -378,6 +378,28 @@ results[0].show()
 
 ---
 
+## Пример 14: Слияние классов при сборке датасета
+
+Итоговые имена классов в `--classes`; `--merge-classes` задаёт соответствие «несколько исходных → одно имя из --classes»:
+
+```bash
+python3 dataset_former.py \
+    --source-path /data/datasets \
+    --target-path /data/merged_head \
+    --classes "head_ppe,vest" \
+    --merge-classes "helmet, hard_hat" head_ppe \
+    --datasets-info-path /data/datasets
+```
+
+## Пример 15: Очередь через CLI и анализ прогонов
+
+```bash
+python3 training_queue_cli.py add -- python3 model_training_module.py --data /data/m --model yolov8n -y --epochs 2
+python3 training_queue_cli.py list
+python3 results_analyzer.py scan --models-root /path/to/Models
+python3 results_analyzer.py compare --baseline /path/to/run1 --others /path/to/run2 -o cmp.csv --out-png cmp.png
+```
+
 ## Пример 13: Автоматизация с помощью скриптов
 
 Создайте bash скрипт для автоматизации:

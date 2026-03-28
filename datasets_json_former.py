@@ -65,6 +65,61 @@ def load_obj_data(file_path):
         return None
 
 
+IMAGE_EXTS_FLAT = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+
+
+def _is_split_name(dir_name):
+    return dir_name.lower() in ("train", "val", "test")
+
+
+def yolo_flat_image_label_buckets(folder_path):
+    """
+    Пары каталогов (images…, labels…) для плоских датасетов YOLO:
+    — классический flat: одна пара (images, labels), если есть файлы в корне;
+    — экспорт CVAT «Ultralytics YOLO Detection 1.0»: images/<подпапка>/ и labels/<та же подпапка>/
+      (имя подпапки произвольное, не только train/val/test).
+    Если встречаются и корневые файлы, и общие подпапки — возвращаются оба варианта.
+    Для вложенного split (images/train/…) возвращает пустой список — используйте nested_split.
+    """
+    images_path = os.path.join(folder_path, "images")
+    labels_path = os.path.join(folder_path, "labels")
+    if not os.path.isdir(images_path) or not os.path.isdir(labels_path):
+        return []
+
+    subdirs_img = [
+        d for d in os.listdir(images_path)
+        if os.path.isdir(os.path.join(images_path, d))
+    ]
+    if any(_is_split_name(d) for d in subdirs_img):
+        return []
+
+    lbl_dirnames = {
+        d for d in os.listdir(labels_path)
+        if os.path.isdir(os.path.join(labels_path, d))
+    }
+    paired = sorted(set(subdirs_img) & lbl_dirnames)
+
+    has_root_imgs = any(
+        os.path.isfile(os.path.join(images_path, f))
+        and f.lower().endswith(IMAGE_EXTS_FLAT)
+        for f in os.listdir(images_path)
+    )
+    has_root_lbls = any(
+        os.path.isfile(os.path.join(labels_path, f)) and f.lower().endswith(".txt")
+        for f in os.listdir(labels_path)
+    )
+
+    buckets = []
+    if has_root_imgs or has_root_lbls:
+        buckets.append((images_path, labels_path))
+    for d in paired:
+        buckets.append((
+            os.path.join(images_path, d),
+            os.path.join(labels_path, d),
+        ))
+    return buckets
+
+
 def detect_structure(folder_path):
     subfolders = [d.lower() for d in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, d))]
 
@@ -80,9 +135,20 @@ def detect_structure(folder_path):
         return "split"
 
     elif all(os.path.exists(os.path.join(folder_path, subdir)) for subdir in ["images", "labels"]):
-        images_sub = os.listdir(os.path.join(folder_path, "images"))
-        if any(x in images_sub for x in ["train", "val", "test"]):
+        images_path = os.path.join(folder_path, "images")
+        images_entries = os.listdir(images_path)
+        if any(
+            os.path.isdir(os.path.join(images_path, d)) and _is_split_name(d)
+            for d in images_entries
+        ):
             return "nested_split"
+        buckets = yolo_flat_image_label_buckets(folder_path)
+        if not buckets:
+            return "unknown"
+        images_root = os.path.join(folder_path, "images")
+        has_subset = any(img != images_root for img, _ in buckets)
+        if has_subset:
+            return "subset_flat"
         return "flat"
 
     else:
@@ -101,7 +167,7 @@ def load_yaml(file_path):
 def count_elements(folder_path, structure):
     labels_count = 0
     images_count = 0
-    IMAGE_EXTS = [".jpg", ".jpeg", ".png"]
+    IMAGE_EXTS = list(IMAGE_EXTS_FLAT)
 
     if structure == "split":
         for dir_name in os.listdir(folder_path):
@@ -124,19 +190,23 @@ def count_elements(folder_path, structure):
                     if f.lower().endswith(".txt")
                 ])
 
-    elif structure == "flat":
-        img_dir = os.path.join(folder_path, "images")
-        lbl_dir = os.path.join(folder_path, "labels")
-
-        images_count = len([
-            f for f in os.listdir(img_dir)
-            if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
-        ]) if os.path.exists(img_dir) else 0
-
-        labels_count = len([
-            f for f in os.listdir(lbl_dir)
-            if f.lower().endswith(".txt")
-        ]) if os.path.exists(lbl_dir) else 0
+    elif structure in ("flat", "subset_flat"):
+        buckets = yolo_flat_image_label_buckets(folder_path)
+        if not buckets:
+            img_dir = os.path.join(folder_path, "images")
+            lbl_dir = os.path.join(folder_path, "labels")
+            buckets = [(img_dir, lbl_dir)]
+        for img_dir, lbl_dir in buckets:
+            if os.path.exists(img_dir):
+                images_count += len([
+                    f for f in os.listdir(img_dir)
+                    if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
+                ])
+            if os.path.exists(lbl_dir):
+                labels_count += len([
+                    f for f in os.listdir(lbl_dir)
+                    if f.lower().endswith(".txt")
+                ])
 
     elif structure == "nested_split":
         for split in ["train", "val", "test"]:

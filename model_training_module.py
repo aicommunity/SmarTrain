@@ -75,10 +75,37 @@ def parse_args():
         help="Выполнить только тестирование без обучения"
     )
 
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        dest="non_interactive",
+        help="Не спрашивать подтверждение при существующей папке результатов (для очереди и CI)"
+    )
+
+    parser.add_argument(
+        "--val-imgsz",
+        type=int,
+        default=None,
+        help="Размер изображения для val/test (по умолчанию как --img-size при обучении)",
+    )
+    parser.add_argument(
+        "--val-conf",
+        type=float,
+        default=None,
+        help="Порог conf для val() (Ultralytics)",
+    )
+    parser.add_argument(
+        "--val-iou",
+        type=float,
+        default=None,
+        help="Порог IoU для val() (Ultralytics)",
+    )
+
     return parser.parse_args()
 
 
-def train_yolo(dataset_path, model_version, epochs, batch, img_size, target_dir):
+def train_yolo(dataset_path, model_version, epochs, batch, img_size, target_dir, non_interactive=False):
     training_start_time = datetime.now()
     
     if not os.path.exists(dataset_path):
@@ -114,14 +141,19 @@ def train_yolo(dataset_path, model_version, epochs, batch, img_size, target_dir)
         )
     
     if os.path.exists(model_dir):
-        while True:
-            answer = input(f"[WARNING] Папка с таким названием уже существует: {model_dir}. Продолжить обучение? (y/n): \n").strip().lower()
-            if answer == 'y':
-                break
-            elif answer == 'n':
-                sys.exit(1)
-            else:
-                print("Пожалуйста, введите только 'y' или 'n'.\n")
+        if non_interactive:
+            print(f"[INFO] Папка уже существует, продолжаем без запроса: {model_dir}")
+        else:
+            while True:
+                answer = input(
+                    f"[WARNING] Папка с таким названием уже существует: {model_dir}. Продолжить обучение? (y/n): \n"
+                ).strip().lower()
+                if answer == 'y':
+                    break
+                elif answer == 'n':
+                    sys.exit(1)
+                else:
+                    print("Пожалуйста, введите только 'y' или 'n'.\n")
     else:
         os.makedirs(model_dir, exist_ok=True)
 
@@ -164,30 +196,56 @@ def train_yolo(dataset_path, model_version, epochs, batch, img_size, target_dir)
     return model_dir, training_start_time, training_end_time, dataset_hash
 
 
-def test_yolo(model_dir, dataset_path, training_start_time=None, training_end_time=None):
+def test_yolo(
+    model_dir,
+    dataset_path,
+    training_start_time=None,
+    training_end_time=None,
+    train_img_size=None,
+    val_imgsz=None,
+    val_conf=None,
+    val_iou=None,
+):
     test_start_time = datetime.now()
-    
+
+    data_yaml = os.path.join(dataset_path, "data.yaml")
+    imgsz = val_imgsz if val_imgsz is not None else train_img_size
+
+    inference_record = {
+        "imgsz": imgsz,
+        "conf": val_conf,
+        "iou": val_iou,
+    }
+
     model_path = os.path.join(model_dir, "train", "weights", "best.pt")
     trained_model = YOLO(model_path)
 
-    data_yaml = os.path.join(dataset_path, "data.yaml")
+    val_kwargs = {
+        "data": data_yaml,
+        "split": "test",
+        "project": model_dir,
+        "name": "test",
+        "exist_ok": False,
+    }
+    if imgsz is not None:
+        val_kwargs["imgsz"] = imgsz
+    if val_conf is not None:
+        val_kwargs["conf"] = val_conf
+    if val_iou is not None:
+        val_kwargs["iou"] = val_iou
 
     print("\n" + "=" * 60)
     print(f"[INFO] Тестирование модели: {model_dir}")
     print(f"[INFO] Датасет: {dataset_path}")
     print(f"[INFO] Конфигурация: {data_yaml}")
     print(f"[INFO] Сохранение результатов в {model_dir}")
+    if imgsz is not None:
+        print(f"[INFO] val imgsz={imgsz}, conf={val_conf}, iou={val_iou}")
     print("=" * 60 + "\n")
-    
+
     test_end_time = None
     try:
-        result = trained_model.val(
-            data=data_yaml, 
-            split='test', 
-            project=model_dir, 
-            name="test",
-            exist_ok = False
-            )
+        result = trained_model.val(**val_kwargs)
 
         test_end_time = datetime.now()
         csv_file = save_metrics_csv(result, model_dir)
@@ -202,8 +260,8 @@ def test_yolo(model_dir, dataset_path, training_start_time=None, training_end_ti
     except Exception as e:
         test_end_time = datetime.now()
         print(f"[ERROR] Не удалось протестировать {model_dir} на датасете {dataset_path}: {e}")
-    
-    return test_start_time, test_end_time
+
+    return test_start_time, test_end_time, inference_record
 
 
 def save_metrics_csv(test_result, model_dir):
@@ -223,10 +281,11 @@ def save_metrics_csv(test_result, model_dir):
     return csv_file
 
 
-def save_training_metadata(model_dir, dataset_path, model_version=None, training_start_time=None, 
+def save_training_metadata(model_dir, dataset_path, model_version=None, training_start_time=None,
                           training_end_time=None, test_start_time=None, test_end_time=None,
-                          epochs=None, batch=None, img_size=None, training_success=True, 
-                          training_error=None, test_success=True, test_error=None, dataset_hash=None):
+                          epochs=None, batch=None, img_size=None, training_success=True,
+                          training_error=None, test_success=True, test_error=None, dataset_hash=None,
+                          inference=None):
     """
     Сохраняет метаданные обучения в JSON файл рядом с test_metrics.csv
     
@@ -294,7 +353,10 @@ def save_training_metadata(model_dir, dataset_path, model_version=None, training
                 os.path.join(model_dir, "train", "weights", "best.pt")) else None
         }
     }
-    
+
+    if inference:
+        metadata["inference"] = {k: v for k, v in inference.items() if v is not None}
+
     metadata_file = os.path.join(model_dir, "training_metadata.json")
     
     try:
@@ -349,6 +411,7 @@ def main():
     test_start_time = None
     test_end_time = None
     model_dir = None
+    inference_info = None
 
     # Переменная для хранения хеша датасета
     dataset_hash = None
@@ -362,7 +425,8 @@ def main():
                 epochs=epochs,
                 batch=batch,
                 img_size=img_size,
-                target_dir=target_dir
+                target_dir=target_dir,
+                non_interactive=args.non_interactive,
             )
         except Exception as e:
             training_success = False
@@ -392,11 +456,15 @@ def main():
         # Тестирование с обработкой ошибок (только если обучение прошло успешно)
         if training_success and model_dir:
             try:
-                test_start_time, test_end_time = test_yolo(
+                test_start_time, test_end_time, inference_info = test_yolo(
                     model_dir=model_dir,
                     dataset_path=data,
                     training_start_time=training_start_time,
-                    training_end_time=training_end_time
+                    training_end_time=training_end_time,
+                    train_img_size=img_size,
+                    val_imgsz=args.val_imgsz,
+                    val_conf=args.val_conf,
+                    val_iou=args.val_iou,
                 )
             except Exception as e:
                 test_success = False
@@ -422,13 +490,21 @@ def main():
                 training_error=training_error,
                 test_success=test_success,
                 test_error=test_error,
-                dataset_hash=dataset_hash
+                dataset_hash=dataset_hash,
+                inference=inference_info,
             )
     else:
         model_dir = args.model_dir
         if model_dir:
             try:
-                test_start_time, test_end_time = test_yolo(model_dir, data)
+                test_start_time, test_end_time, inference_info = test_yolo(
+                    model_dir,
+                    data,
+                    train_img_size=img_size,
+                    val_imgsz=args.val_imgsz,
+                    val_conf=args.val_conf,
+                    val_iou=args.val_iou,
+                )
             except Exception as e:
                 test_success = False
                 test_error = str(e)
@@ -443,7 +519,8 @@ def main():
                 test_start_time=test_start_time,
                 test_end_time=test_end_time,
                 test_success=test_success,
-                test_error=test_error
+                test_error=test_error,
+                inference=inference_info,
             )
         else:
             print(f"[ERROR] Не указан путь к модели")

@@ -43,7 +43,10 @@
 - [datasets_json_former.py](api_reference.md#datasets_json_formerpy) - Анализ датасетов
 - [dataset_former.py](api_reference.md#dataset_formerpy) - Объединение датасетов
 - [model_training_module.py](api_reference.md#model_training_modulepy) - Обучение моделей
+- [dataset_hash.py](api_reference.md#dataset_hashpy) - Хеш датасета
 - [training_queue.py](api_reference.md#training_queuepy) - Система очереди
+- [training_queue_cli.py](api_reference.md#training_queue_clipy) - CLI очереди (`list`, `add`, `remove`, `run`, …)
+- [results_analyzer.py](api_reference.md#results_analyzerpy) - Сводки и сравнение прогонов
 
 ### Форматы данных
 - [Структура датасетов](data_formats.md#структура-датасетов-yolo)
