@@ -33,7 +33,8 @@ def update_status(index, status):
 def start_new_process(cmd):
     process = subprocess.Popen(
         cmd,
-        shell=True
+        shell=True,
+        cwd=BASE_DIR
     )
 
     result = process.wait()
