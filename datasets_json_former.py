@@ -5,12 +5,20 @@ import sys
 import argparse
 from typing import Any, Dict, Optional
 
+from workspace_paths import (
+    WORKSPACE_ENV_VAR,
+    WorkspaceLayout,
+    resolve_workspace_root,
+    resolve_dataset_root,
+    DATASETS_INFO_FILE,
+    CLASS_NAMES_FILE,
+)
+
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-BASE_DIR = "/media/user/Data/IndustrialSafety/Datasets"
-OUTPUT_FILE = "datasets_info.json"
-OUTPUT_CLASS_NAMES_FILE = "class_names.json"
+OUTPUT_FILE = DATASETS_INFO_FILE
+OUTPUT_CLASS_NAMES_FILE = CLASS_NAMES_FILE
 
 
 def find_yaml_file(folder_path):
@@ -304,24 +312,40 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); JSON пишутся в source_datasets/",
+    )
+
+    parser.add_argument(
         "--datasets-path",
         type=str,
         default=None,
-        help="Путь к папке с датасетами (если не указан, используется значение BASE_DIR)"
+        help="Режим без workspace: корень каталогов датасетов для сканирования",
     )
 
     parser.add_argument(
         "--output-path",
         type=str,
         default=None,
-        help="Путь для сохранения выходных JSON файлов (если не указан, используется директория с датасетами)"
+        help="Режим без workspace: каталог для datasets_info.json и class_names.json",
+    )
+
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=("scan", "refresh"),
+        default="scan",
+        help="scan: обход подкаталогов source_datasets (или --datasets-path); "
+        "refresh: пересканировать только data_path из существующего datasets_info.json",
     )
 
     return parser.parse_args()
 
 
 # Поля записи датасета, сохраняемые при пересканировании (вручную в JSON)
-_PRESERVED_DATASET_INFO_KEYS = ("roi_auto", "tags")
+_PRESERVED_DATASET_INFO_KEYS = ("roi_auto", "tags", "data_path")
 
 
 def _merge_preserved_dataset_fields(fresh: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -335,43 +359,102 @@ def _merge_preserved_dataset_fields(fresh: Dict[str, Any], previous: Optional[Di
     return out
 
 
+def _run_scan_folder_roots(folder_roots: list[tuple[str, str]]) -> tuple[dict, dict]:
+    """folder_roots: список (logical_name, folder_path на диске)."""
+    datasets_info: dict = {}
+    class_names: dict = {}
+
+    for logical_name, folder_path in folder_roots:
+        if not os.path.isdir(folder_path):
+            print(f"[WARNING] Пропуск {logical_name!r}: нет каталога {folder_path}")
+            continue
+        info = process_dataset(folder_path, logical_name)
+        if info:
+            datasets_info[logical_name] = info
+            for class_name in info["classes"]:
+                class_names[class_name] = class_name
+    return datasets_info, class_names
+
+
 def main():
     args = parse_args()
-    
-    datasets_dir = args.datasets_path if args.datasets_path else BASE_DIR
-    
-    if args.output_path:
-        output_dir = args.output_path
-        os.makedirs(output_dir, exist_ok=True)
+
+    if args.datasets_path:
+        use_workspace = False
+        layout = None
+    else:
+        try:
+            root = resolve_workspace_root(args.workspace)
+        except ValueError as e:
+            print(f"[ERROR] {e}")
+            return
+        use_workspace = True
+        layout = WorkspaceLayout(root)
+        os.makedirs(layout.source_datasets, exist_ok=True)
+
+    if use_workspace:
+        output_dir = layout.source_datasets
         output_file = os.path.join(output_dir, OUTPUT_FILE)
         output_class_names_file = os.path.join(output_dir, OUTPUT_CLASS_NAMES_FILE)
+        datasets_dir = layout.source_datasets
     else:
-        output_file = os.path.join(datasets_dir, OUTPUT_FILE)
-        output_class_names_file = os.path.join(datasets_dir, OUTPUT_CLASS_NAMES_FILE)
+        datasets_dir = os.path.abspath(os.path.expanduser(args.datasets_path))
+        if args.output_path:
+            output_dir = os.path.abspath(os.path.expanduser(args.output_path))
+            os.makedirs(output_dir, exist_ok=True)
+        else:
+            output_dir = datasets_dir
+        output_file = os.path.join(output_dir, OUTPUT_FILE)
+        output_class_names_file = os.path.join(output_dir, OUTPUT_CLASS_NAMES_FILE)
 
-    datasets_info = {}
-    class_names = {}
+    datasets_info: dict = {}
+    class_names: dict = {}
 
-    if not os.path.exists(datasets_dir):
-        print(f"[ERROR] Папка '{datasets_dir}' не найдена.")
+    if args.mode == "refresh" and not use_workspace:
+        print("[ERROR] Режим --mode refresh поддерживается только без --datasets-path (через workspace).")
         return
 
-    for folder_name in os.listdir(datasets_dir):
-        folder_path = os.path.join(datasets_dir, folder_name)
-        if os.path.isdir(folder_path):
-            info = process_dataset(folder_path, folder_name)
-            if info:
-                datasets_info[folder_name] = info
-                for class_name in info["classes"]:
-                    class_names[class_name] = class_name
-
-    previous_info = {}
-    if os.path.isfile(output_file):
-        try:
-            with open(output_file, "r", encoding="utf-8") as f:
-                previous_info = json.load(f)
-        except Exception as e:
-            print(f"[WARNING] Не удалось прочитать существующий {output_file} для мержа roi_auto/tags: {e}")
+    if use_workspace and args.mode == "refresh":
+        if not os.path.isfile(output_file):
+            print(f"[ERROR] Режим refresh: не найден {output_file}")
+            return
+        with open(output_file, "r", encoding="utf-8") as f:
+            previous_full = json.load(f)
+        if not isinstance(previous_full, dict):
+            print(f"[ERROR] {output_file}: ожидается объект JSON с датасетами.")
+            return
+        folder_roots = []
+        for name, prev_entry in previous_full.items():
+            if not isinstance(prev_entry, dict):
+                continue
+            if "data_path" not in prev_entry:
+                folder_roots.append((name, os.path.join(datasets_dir, name)))
+            else:
+                dp = prev_entry["data_path"]
+                if not isinstance(dp, str):
+                    print(f"[WARNING] Пропуск {name!r}: data_path не строка")
+                    continue
+                root_path = resolve_dataset_root(layout.root, name, prev_entry, datasets_dir)
+                folder_roots.append((name, root_path))
+        datasets_info, class_names = _run_scan_folder_roots(folder_roots)
+        previous_info = previous_full
+    else:
+        if not os.path.exists(datasets_dir):
+            print(f"[ERROR] Папка '{datasets_dir}' не найдена.")
+            return
+        folder_roots = []
+        for folder_name in os.listdir(datasets_dir):
+            folder_path = os.path.join(datasets_dir, folder_name)
+            if os.path.isdir(folder_path):
+                folder_roots.append((folder_name, folder_path))
+        datasets_info, class_names = _run_scan_folder_roots(folder_roots)
+        previous_info = {}
+        if os.path.isfile(output_file):
+            try:
+                with open(output_file, "r", encoding="utf-8") as f:
+                    previous_info = json.load(f)
+            except Exception as e:
+                print(f"[WARNING] Не удалось прочитать существующий {output_file}: {e}")
 
     for name in list(datasets_info.keys()):
         if name in previous_info and isinstance(previous_info[name], dict):

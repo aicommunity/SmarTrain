@@ -1,7 +1,15 @@
-import os
-import hashlib
 import argparse
+import hashlib
+import json
+import os
 import sys
+
+from workspace_paths import (
+    DATASETS_INFO_FILE,
+    WorkspaceLayout,
+    resolve_dataset_root,
+    resolve_workspace_root,
+)
 
 
 def calculate_dataset_hash(dataset_path):
@@ -88,6 +96,49 @@ def calculate_dataset_hash(dataset_path):
     return hasher.hexdigest()[:8]
 
 
+def resolve_hash_dataset_root(
+    workspace_cli: str | None,
+    dataset_path_pos: str | None,
+    work_dataset: str | None,
+) -> str:
+    """
+    Корень датасета для хеша: явный путь или резолв по имени записи work_datasets
+    (как resolve_training_data_path в model_training_module, без импорта Ultralytics).
+    """
+    if work_dataset is not None and str(work_dataset).strip():
+        name = str(work_dataset).strip()
+        root = resolve_workspace_root(workspace_cli)
+        layout = WorkspaceLayout(root)
+        expanded = os.path.abspath(os.path.expanduser(name))
+        yaml_here = os.path.join(expanded, "data.yaml")
+        if os.path.isdir(expanded) and os.path.isfile(yaml_here):
+            return expanded
+        info_path = layout.work_datasets_info_path()
+        if not os.path.isfile(info_path):
+            raise FileNotFoundError(
+                f"Каталог с data.yaml для {name!r} не найден и отсутствует {info_path}."
+            )
+        with open(info_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+        if not isinstance(catalog, dict):
+            raise ValueError(f"{info_path}: ожидается объект JSON.")
+        if name not in catalog:
+            raise KeyError(
+                f"Имя {name!r} отсутствует в work_datasets/{DATASETS_INFO_FILE}."
+            )
+        entry = catalog[name]
+        if not isinstance(entry, dict):
+            raise TypeError(f"Запись {name!r} должна быть объектом JSON.")
+        return resolve_dataset_root(layout.root, name, entry, layout.work_datasets)
+
+    if dataset_path_pos is None or not str(dataset_path_pos).strip():
+        raise ValueError(
+            "Укажите путь к папке датасета или --work-dataset <имя> с --workspace "
+            "(или SMART_TRAIN_WORKSPACE)."
+        )
+    return os.path.abspath(os.path.expanduser(str(dataset_path_pos).strip()))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Вычисление хеша датасета на основе структуры, имен файлов и их размеров"
@@ -96,9 +147,24 @@ def main():
     parser.add_argument(
         "dataset_path",
         type=str,
-        help="Путь к папке с датасетом"
+        nargs="?",
+        default=None,
+        help="Путь к папке с датасетом (не нужен при --work-dataset)",
     )
-    
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help="Корень workspace для --work-dataset (иначе SMART_TRAIN_WORKSPACE)",
+    )
+    parser.add_argument(
+        "--work-dataset",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Имя записи из work_datasets/datasets_info.json (или каталог с data.yaml)",
+    )
+
     parser.add_argument(
         "--validate",
         type=str,
@@ -107,9 +173,18 @@ def main():
     )
     
     args = parser.parse_args()
-    
+    if args.work_dataset and args.dataset_path:
+        print(
+            "[ERROR] Укажите либо путь к датасету, либо --work-dataset, не оба сразу.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     try:
-        computed_hash = calculate_dataset_hash(args.dataset_path)
+        root = resolve_hash_dataset_root(
+            args.workspace, args.dataset_path, args.work_dataset
+        )
+        computed_hash = calculate_dataset_hash(root)
         
         if args.validate:
             if computed_hash.lower() == args.validate.lower():
@@ -128,6 +203,9 @@ def main():
         print(f"[ERROR] {e}", file=sys.stderr)
         sys.exit(2)
     except ValueError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(2)
+    except KeyError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         sys.exit(2)
     except Exception as e:

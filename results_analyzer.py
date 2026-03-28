@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from glob import glob
 from typing import Any
@@ -18,8 +19,21 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+
 
 DEFAULT_MAP_COL = "metrics/mAP50-95(B)"
+
+
+def resolve_models_scan_root(workspace_cli: str | None, models_root_cli: str | None) -> str:
+    """Явный --models-root, иначе workspace/runs, иначе текущий каталог."""
+    if models_root_cli is not None:
+        return os.path.abspath(os.path.expanduser(models_root_cli))
+    try:
+        ws = resolve_workspace_root(workspace_cli)
+        return WorkspaceLayout(ws).runs
+    except ValueError:
+        return os.path.abspath(os.getcwd())
 
 
 def find_run_directories(models_root: str) -> list[str]:
@@ -102,6 +116,26 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
 def cmd_export_table(args: argparse.Namespace) -> None:
     runs = find_run_directories(args.models_root)
+    out_path = args.output
+    analytics_dir: str | None = None
+    if args.analytics_session is not None:
+        session_name = args.analytics_session.strip()
+        if not session_name:
+            print("[ERROR] --analytics-session не может быть пустым.", file=sys.stderr)
+            sys.exit(1)
+        try:
+            ws = resolve_workspace_root(args.workspace)
+        except ValueError:
+            print(
+                f"[ERROR] --analytics-session требует --workspace или {WORKSPACE_ENV_VAR}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        layout = WorkspaceLayout(ws)
+        os.makedirs(layout.analytics, exist_ok=True)
+        analytics_dir = os.path.join(layout.analytics, session_name)
+        os.makedirs(analytics_dir, exist_ok=True)
+        out_path = os.path.join(analytics_dir, os.path.basename(args.output))
     rows: list[dict[str, Any]] = []
     for rd in runs:
         try:
@@ -137,9 +171,68 @@ def cmd_export_table(args: argparse.Namespace) -> None:
         print("[ERROR] Нет данных для экспорта.", file=sys.stderr)
         sys.exit(1)
     df = pd.DataFrame(rows)
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
-    df.to_csv(args.output, index=False, encoding="utf-8")
-    print(f"[OK] Сводная таблица: {args.output} ({len(df)} строк)")
+    out_dir = os.path.dirname(os.path.abspath(out_path))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    df.to_csv(out_path, index=False, encoding="utf-8")
+    print(f"[OK] Сводная таблица: {out_path} ({len(df)} строк)")
+    if analytics_dir is not None:
+        manifest = {
+            "scan_root": args.models_root,
+            "run_directories": runs,
+            "summary_csv": out_path,
+        }
+        with open(os.path.join(analytics_dir, "session.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+        print(f"[OK] Манифест сессии: {os.path.join(analytics_dir, 'session.json')}")
+
+
+def _finalize_compare_analytics_session(
+    args: argparse.Namespace,
+    baseline: str,
+    others: list[str],
+    out_csv: str,
+    out_png: str,
+    bar_path: str | None,
+) -> None:
+    session_name = (getattr(args, "analytics_session", None) or "").strip()
+    if not session_name:
+        return
+    try:
+        ws = resolve_workspace_root(args.workspace)
+    except ValueError:
+        print(
+            f"[ERROR] --analytics-session требует --workspace или {WORKSPACE_ENV_VAR}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    layout = WorkspaceLayout(ws)
+    dest_root = os.path.join(layout.analytics, session_name)
+    os.makedirs(dest_root, exist_ok=True)
+    artifacts: list[dict[str, str]] = []
+    for role, p in (
+        ("delta_csv", out_csv),
+        ("curves_png", out_png),
+        ("bars_png", bar_path),
+    ):
+        if not p:
+            continue
+        ap = os.path.abspath(p)
+        if os.path.isfile(ap):
+            bn = os.path.basename(ap)
+            shutil.copy2(ap, os.path.join(dest_root, bn))
+            artifacts.append({"role": role, "file": bn})
+    manifest: dict[str, Any] = {
+        "kind": "compare",
+        "baseline": baseline,
+        "others": others,
+        "scan_root_at_generation": getattr(args, "models_root", None),
+        "artifacts": artifacts,
+    }
+    sj = os.path.join(dest_root, "session.json")
+    with open(sj, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    print(f"[OK] Манифест сессии compare: {sj}")
 
 
 def _read_test_metrics_row(run_dir: str) -> dict[str, Any]:
@@ -156,6 +249,7 @@ def _read_test_metrics_row(run_dir: str) -> dict[str, Any]:
 def cmd_compare(args: argparse.Namespace) -> None:
     baseline = os.path.abspath(args.baseline)
     others = [os.path.abspath(p) for p in args.others]
+    bar_path: str | None = None
     all_runs = [baseline] + others
     for p in all_runs:
         if not os.path.isdir(p) or not os.path.exists(os.path.join(p, "training_metadata.json")):
@@ -254,6 +348,10 @@ def cmd_compare(args: argparse.Namespace) -> None:
         plt.close()
         print(f"[OK] Столбчатый график: {bar_path}")
 
+    _finalize_compare_analytics_session(
+        args, baseline, others, args.out_csv, args.out_png, bar_path
+    )
+
 
 def cmd_interactive(args: argparse.Namespace) -> None:
     runs = find_run_directories(args.models_root)
@@ -290,6 +388,9 @@ def cmd_interactive(args: argparse.Namespace) -> None:
         out_csv=out_csv,
         out_png=out_png,
         metric_column=args.metric_column,
+        workspace=args.workspace,
+        analytics_session=args.analytics_session,
+        models_root=args.models_root,
     )
     cmd_compare(ns)
 
@@ -297,10 +398,22 @@ def cmd_interactive(args: argparse.Namespace) -> None:
 def main() -> None:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}) для корня прогонов по умолчанию",
+    )
+    common.add_argument(
         "--models-root",
         type=str,
-        default=".",
-        help="Корень поиска каталогов с training_metadata.json",
+        default=None,
+        help="Явный корень поиска каталогов с training_metadata.json",
+    )
+    common.add_argument(
+        "--analytics-session",
+        type=str,
+        default=None,
+        help="Подкаталог workspace/analytics/: артефакты и session.json (export-table, compare, interactive)",
     )
 
     parser = argparse.ArgumentParser(description="Анализ результатов обучения YOLO (Ultralytics)")
@@ -351,6 +464,7 @@ def main() -> None:
     p_int.set_defaults(func=cmd_interactive)
 
     args = parser.parse_args()
+    args.models_root = resolve_models_scan_root(args.workspace, args.models_root)
     args.func(args)
 
 

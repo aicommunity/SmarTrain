@@ -1,3 +1,10 @@
-dataset_former.py --target-path /media/user/Data/IndustrialSafety/Datasets/test --classes "glasses, vest"
-model_training_module --data /media/user/Data/IndustrialSafety/Datasets/merged_dataset --model yolov8l --epochs 2
-python3 model_training_module.py --data /media/user/Data/IndustrialSafety/Datasets/merged_dataset --model yolov8n --epochs 1
+# Пример с workspace (задайте свой путь):
+# export SMART_TRAIN_WORKSPACE=/path/to/workspace
+# python3 datasets_json_former.py --workspace "$SMART_TRAIN_WORKSPACE"
+# python3 dataset_former.py --workspace "$SMART_TRAIN_WORKSPACE" --classes "glasses, vest"
+# python3 model_training_module.py --workspace "$SMART_TRAIN_WORKSPACE" --data merged --model yolov8l --epochs 2 -y
+# python3 model_training_module.py --workspace "$SMART_TRAIN_WORKSPACE" --data merged --model yolov8n --epochs 1 -y
+
+# Legacy (три пути для former, data + target-path для обучения):
+# dataset_former.py --source-path ... --datasets-info-path ... --target-path ... --classes "glasses, vest"
+# python3 model_training_module.py --data /path/to/dataset --target-path /path/to/runs --model yolov8n --epochs 1 -y

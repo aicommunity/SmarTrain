@@ -1,5 +1,30 @@
 # Справочник API
 
+## workspace_paths.py
+
+Модуль единого корня workspace.
+
+### `WORKSPACE_ENV_VAR`
+Строка `"SMART_TRAIN_WORKSPACE"`.
+
+### `resolve_workspace_root(cli_workspace: str | None) -> str`
+Корень: непустой `--workspace` перекрывает переменную окружения; иначе `ValueError`.
+
+### `class WorkspaceLayout`
+В `__init__(root)` задаются поля: `root`, `source_datasets`, `work_datasets`, `runs`, `analytics`, `models` и методы путей к `datasets_info.json` / `class_names.json` в source и work.
+
+### `resolve_path_under_workspace(workspace_root, relative_or_absolute) -> str`
+### `resolve_dataset_root(workspace_root, entry_key, entry_dict, catalog_dir) -> str`
+Если в `entry_dict` есть `data_path` — резолв от workspace или абсолют; иначе `os.path.join(catalog_dir, entry_key)`.
+
+---
+
+## registry_cli.py
+
+CLI: `--workspace` (или env), подкоманды `runs-list`, `runs-info`, `runs-metrics`, `models-add`, `models-list`, `models-info`, `models-remove`. Веса копируются в `models/<friendly_name>/<friendly_name>.pt` с `model_manifest.json`.
+
+---
+
 ## datasets_json_former.py
 
 ### Функции
@@ -113,9 +138,11 @@
 
 ---
 
-#### Сохранение `datasets_info.json` и поля `roi_auto` / `tags`
+#### Сохранение `datasets_info.json` и поля `roi_auto` / `tags` / `data_path`
 
-Если выходной `datasets_info.json` уже существует, перед записью он читается; для каждого имени датасета, снова присутствующего в новом скане, в запись переносятся из старого файла необязательные ключи **`roi_auto`** и **`tags`** (остальное берётся из свежего `process_dataset`). Так вручную добавленная конфигурация кропа ROI не стирается при повторном анализе папок.
+Если выходной `datasets_info.json` уже существует, перед записью он читается; для каждого имени датасета, снова присутствующего в новом скане, в запись переносятся из старого файла необязательные ключи **`roi_auto`**, **`tags`** и **`data_path`** (остальное берётся из свежего `process_dataset`).
+
+**CLI**: `--workspace` (результат в `source_datasets/`) или пара `--datasets-path` + опционально `--output-path`; `--mode scan|refresh` (refresh только с workspace).
 
 ---
 
@@ -174,18 +201,12 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 ### Функции
 
-#### `train_yolo(dataset_path: str, model_version: str, epochs: int, batch: int, img_size: int, target_dir: str) -> str`
-Обучает модель YOLO на указанном датасете.
+#### `train_yolo(..., workspace_root=None) -> tuple`
+Обучает модель YOLO. Возвращает `(model_dir, training_start_time, training_end_time, dataset_hash, workspace_root)`.
 
-**Параметры**:
-- `dataset_path` - путь к датасету (должен содержать `data.yaml`)
-- `model_version` - версия модели (например, `"yolov8n"` или `"yolov8n.pt"`)
-- `epochs` - количество эпох обучения
-- `batch` - размер batch
-- `img_size` - размер изображения
-- `target_dir` - директория для сохранения результатов
+**Параметры**: `dataset_path`, `model_version`, `epochs`, `batch`, `img_size`, `target_dir`, `non_interactive`, опционально `workspace_root` для метаданных.
 
-**Возвращает**: Путь к директории с обученной моделью
+**CLI**: `--workspace` и `--data` (каталог с `data.yaml` или имя из `work_datasets/datasets_info.json`), либо без workspace — обязательны `--data` и `--target-path`. Прогоны по умолчанию в `workspace/runs`.
 
 **Исключения**:
 - `FileNotFoundError` - если датасет или `data.yaml` не найдены
@@ -314,8 +335,10 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 ## results_analyzer.py
 
+Общие флаги: `--workspace` (или `SMART_TRAIN_WORKSPACE`), `--models-root` (явный корень поиска прогонов), `--analytics-session` (только `export-table`: `workspace/analytics/<имя>/` + `session.json`).
+
 Подкоманды:
-- `scan --models-root` — список прогонов
+- `scan` — список прогонов
 - `export-table -o` — сводный CSV
 - `compare --baseline --others … -o --out-png` — дельты и графики
 - `interactive` — выбор прогонов в терминале
@@ -325,23 +348,17 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 ## Константы
 
 ### datasets_json_former.py
-- `BASE_DIR` - базовая директория с датасетами (по умолчанию: `/media/user/Data/IndustrialSafety/Datasets`)
-- `OUTPUT_FILE` - имя выходного файла с информацией о датасетах (`"datasets_info.json"`)
-- `OUTPUT_CLASS_NAMES_FILE` - имя выходного файла с именами классов (`"class_names.json"`)
+- `OUTPUT_FILE` / `OUTPUT_CLASS_NAMES_FILE` — алиасы имён из `workspace_paths` (`datasets_info.json`, `class_names.json`)
 
 ### dataset_former.py
-- `BASE_DIR` - базовая директория с датасетами
-- `JSON_FILE` - имя файла с информацией о датасетах (`"datasets_info.json"`)
-- `CLASS_NAMES_FILE` - имя файла с именами классов (`"class_names.json"`)
-- `OUTPUT_DATASET_NAME` - имя выходного датасета (`"merged_dataset"`)
+- `DEFAULT_OUTPUT_NAME` — имя подкаталога в `work_datasets/` по умолчанию (`"merged"`)
+- `DATASETS_INFO_FILE`, `CLASS_NAMES_FILE` — из `workspace_paths`
 - `TRAIN_PART` - доля обучающей выборки (0.8)
 - `VAL_PART` - доля валидационной выборки (0.1)
 - `TEST_PART` - доля тестовой выборки (0.1)
 - `RANDOM_SEED` - seed для генератора случайных чисел (12345)
 
 ### model_training_module.py
-- `DATASET_PATH` - путь к датасету по умолчанию (`"/media/user/Data/IndustrialSafety/Datasets/HardHatSkz"`)
-- `MODELS_BASE_DIR` - базовая директория для сохранения моделей (по умолчанию: `~/IndustrialSafety/Models`)
 - `MODEL_VERSION` - версия модели по умолчанию (`"yolov8n"`)
 - `EPOCHS` - количество эпох по умолчанию (50)
 - `BATCH` - размер batch по умолчанию (16)

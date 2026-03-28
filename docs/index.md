@@ -33,6 +33,8 @@
    - Отслеживание статуса и ошибок
    - Именование директорий с результатами
 
+6. **[workspace.md](workspace.md)** - Единый корень `SMART_TRAIN_WORKSPACE`, каталоги `source_datasets` / `work_datasets` / `runs` / `analytics` / `models`, поле `data_path`
+
 ## Быстрая навигация по темам
 
 ### Начало работы

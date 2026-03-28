@@ -3,12 +3,50 @@ import subprocess
 import time
 import argparse
 
+from workspace_paths import (
+    resolve_workspace_root,
+    workspace_queue_path,
+    workspace_queue_status_path,
+)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 QUEUE_TXT = os.path.join(BASE_DIR, "training_queue.txt")
 TMP_DIR = os.path.join(BASE_DIR, "tmp")
 STATUS_FILE = os.path.join(BASE_DIR, "tmp/status.txt")
 
 os.makedirs(TMP_DIR, exist_ok=True)
+
+
+def resolve_queue_status_paths(queue_file_cli, workspace_cli, status_file_cli):
+    """
+    Очередь и файл статусов.
+    Приоритет: явный --queue-file; иначе при успешном resolve workspace — queue.txt в корне workspace;
+    иначе QUEUE_TXT рядом со скриптом.
+    Статус: явный --status-file; иначе tmp/status.txt рядом с файлом очереди (для workspace — workspace/tmp/status.txt).
+    """
+    if status_file_cli is not None and status_file_cli.strip():
+        status_path = os.path.abspath(os.path.expanduser(status_file_cli.strip()))
+    else:
+        status_path = None
+
+    if queue_file_cli is not None and queue_file_cli.strip():
+        queue_path = os.path.abspath(os.path.expanduser(queue_file_cli.strip()))
+        if status_path is None:
+            status_path = os.path.join(os.path.dirname(queue_path), "tmp", "status.txt")
+        return queue_path, status_path
+
+    try:
+        root = resolve_workspace_root(workspace_cli)
+    except ValueError:
+        queue_path = QUEUE_TXT
+        if status_path is None:
+            status_path = STATUS_FILE
+        return queue_path, status_path
+
+    queue_path = workspace_queue_path(root)
+    if status_path is None:
+        status_path = workspace_queue_status_path(root)
+    return queue_path, status_path
 
 
 def get_queue_tasks(queue_path=None):
@@ -114,6 +152,10 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
     st_file = status_file or STATUS_FILE
     work_cwd = cwd if cwd is not None else BASE_DIR
 
+    st_dir = os.path.dirname(st_file)
+    if st_dir:
+        os.makedirs(st_dir, exist_ok=True)
+
     if not no_terminal:
         main_window()
 
@@ -179,13 +221,33 @@ def main():
         help="Рабочая директория для запуска команд (по умолчанию каталог скрипта)",
     )
     parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help="Корень workspace: очередь workspace/queue.txt (иначе SMART_TRAIN_WORKSPACE)",
+    )
+    parser.add_argument(
         "--queue-file",
         type=str,
         default=None,
-        help="Путь к файлу очереди (по умолчанию training_queue.txt рядом со скриптом)",
+        help="Явный путь к файлу очереди (перекрывает --workspace)",
+    )
+    parser.add_argument(
+        "--status-file",
+        type=str,
+        default=None,
+        help="Явный путь к status.txt исполнителя",
     )
     args = parser.parse_args()
-    run_queue(no_terminal=args.no_gui, cwd=args.cwd, queue_path=args.queue_file)
+    qpath, stpath = resolve_queue_status_paths(
+        args.queue_file, args.workspace, args.status_file
+    )
+    run_queue(
+        no_terminal=args.no_gui,
+        cwd=args.cwd,
+        queue_path=qpath,
+        status_file=stpath,
+    )
 
 
 if __name__ == "__main__":

@@ -11,8 +11,17 @@ import shutil
 import training_queue as tq
 
 
+def _queue_and_status(args):
+    return tq.resolve_queue_status_paths(
+        getattr(args, "queue_file", None),
+        getattr(args, "workspace", None),
+        getattr(args, "status_file", None),
+    )
+
+
 def _queue_path(args):
-    return args.queue_file if getattr(args, "queue_file", None) else tq.QUEUE_TXT
+    q, _ = _queue_and_status(args)
+    return q
 
 
 def _lock_path(queue_path):
@@ -59,12 +68,11 @@ def _rebuild_queue_file(queue_path, new_tasks):
 
 
 def cmd_list(args):
-    path = _queue_path(args)
+    path, st_file = _queue_and_status(args)
     if not os.path.exists(path):
         print("(файл очереди отсутствует)")
         return
     tasks = tq.get_queue_tasks(path)
-    st_file = os.path.join(tq.BASE_DIR, "tmp", "status.txt")
     statuses = {}
     if os.path.exists(st_file):
         with open(st_file, "r", encoding="utf-8") as f:
@@ -174,20 +182,34 @@ def cmd_clear(args):
 
 
 def cmd_run(args):
+    qpath, stpath = _queue_and_status(args)
     tq.run_queue(
         no_terminal=args.no_gui,
         cwd=args.cwd,
-        queue_path=_queue_path(args),
+        queue_path=qpath,
+        status_file=stpath,
     )
 
 
 def main():
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help="Корень workspace: очередь queue.txt, статусы tmp/status.txt (иначе SMART_TRAIN_WORKSPACE)",
+    )
+    common.add_argument(
         "--queue-file",
         type=str,
         default=None,
-        help="Путь к training_queue.txt (по умолчанию рядом с training_queue.py)",
+        help="Явный путь к файлу очереди (перекрывает --workspace)",
+    )
+    common.add_argument(
+        "--status-file",
+        type=str,
+        default=None,
+        help="Явный путь к status.txt исполнителя",
     )
 
     parser = argparse.ArgumentParser(description="Управление очередью обучения")

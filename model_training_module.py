@@ -7,11 +7,15 @@ from datetime import datetime
 from pathlib import Path
 from ultralytics import YOLO
 from dataset_hash import calculate_dataset_hash
+from workspace_paths import (
+    WORKSPACE_ENV_VAR,
+    WorkspaceLayout,
+    resolve_workspace_root,
+    resolve_dataset_root,
+    DATASETS_INFO_FILE,
+)
 
 
-DATASET_PATH = "/media/user/Data/IndustrialSafety/Datasets/HardHatSkz"
-# По умолчанию — домашний каталог (нет жёсткой привязки к /media/user).
-MODELS_BASE_DIR = os.path.join(os.path.expanduser("~"), "IndustrialSafety", "Models")
 MODEL_VERSION = "yolov8n"
 EPOCHS = 50
 BATCH = 16
@@ -22,10 +26,17 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Обучение моделей")
 
     parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); прогоны в runs/, разрешение --data по work_datasets",
+    )
+
+    parser.add_argument(
         "--data",
         type=str,
         default=None,
-        help="Путь к папке с датасетом (должен содержать файл data.yaml)"
+        help="Каталог с data.yaml (абсолютный/относительный) или имя записи из work_datasets/datasets_info.json",
     )
 
     parser.add_argument(
@@ -60,7 +71,7 @@ def parse_args():
         "--target-path",
         type=str,
         default=None,
-        help="Путь к папке с результатами обучения"
+        help="Базовый каталог для прогонов (по умолчанию workspace/runs при использовании workspace)"
     )
 
     parser.add_argument(
@@ -106,7 +117,40 @@ def parse_args():
     return parser.parse_args()
 
 
-def train_yolo(dataset_path, model_version, epochs, batch, img_size, target_dir, non_interactive=False):
+def resolve_training_data_path(layout: WorkspaceLayout, data_arg: str) -> str:
+    expanded = os.path.abspath(os.path.expanduser(data_arg))
+    yaml_here = os.path.join(expanded, "data.yaml")
+    if os.path.isdir(expanded) and os.path.isfile(yaml_here):
+        return expanded
+    info_path = layout.work_datasets_info_path()
+    if not os.path.isfile(info_path):
+        raise FileNotFoundError(
+            f"Каталог с data.yaml для {data_arg!r} не найден и отсутствует {info_path}."
+        )
+    with open(info_path, "r", encoding="utf-8") as f:
+        catalog = json.load(f)
+    if not isinstance(catalog, dict):
+        raise ValueError(f"{info_path}: ожидается объект JSON.")
+    if data_arg not in catalog:
+        raise KeyError(
+            f"Имя {data_arg!r} отсутствует в work_datasets/{DATASETS_INFO_FILE}."
+        )
+    entry = catalog[data_arg]
+    if not isinstance(entry, dict):
+        raise TypeError(f"Запись {data_arg!r} должна быть объектом JSON.")
+    return resolve_dataset_root(layout.root, data_arg, entry, layout.work_datasets)
+
+
+def train_yolo(
+    dataset_path,
+    model_version,
+    epochs,
+    batch,
+    img_size,
+    target_dir,
+    non_interactive=False,
+    workspace_root=None,
+):
     training_start_time = datetime.now()
     
     if not os.path.exists(dataset_path):
@@ -194,7 +238,7 @@ def train_yolo(dataset_path, model_version, epochs, batch, img_size, target_dir,
         training_end_time = datetime.now()
         print(f"[ERROR] Не удалось запустить обучение {model_version} на датасете {dataset_name} на {epochs} эпох: {e}")
     
-    return model_dir, training_start_time, training_end_time, dataset_hash
+    return model_dir, training_start_time, training_end_time, dataset_hash, workspace_root
 
 
 def test_yolo(
@@ -282,11 +326,34 @@ def save_metrics_csv(test_result, model_dir):
     return csv_file
 
 
-def save_training_metadata(model_dir, dataset_path, model_version=None, training_start_time=None,
-                          training_end_time=None, test_start_time=None, test_end_time=None,
-                          epochs=None, batch=None, img_size=None, training_success=True,
-                          training_error=None, test_success=True, test_error=None, dataset_hash=None,
-                          inference=None):
+def _relative_to_workspace(path: str, workspace_root: str) -> str:
+    ap = os.path.abspath(path)
+    wr = os.path.abspath(workspace_root)
+    try:
+        return os.path.relpath(ap, wr)
+    except ValueError:
+        return ap
+
+
+def save_training_metadata(
+    model_dir,
+    dataset_path,
+    model_version=None,
+    training_start_time=None,
+    training_end_time=None,
+    test_start_time=None,
+    test_end_time=None,
+    epochs=None,
+    batch=None,
+    img_size=None,
+    training_success=True,
+    training_error=None,
+    test_success=True,
+    test_error=None,
+    dataset_hash=None,
+    inference=None,
+    workspace_root=None,
+):
     """
     Сохраняет метаданные обучения в JSON файл рядом с test_metrics.csv
     
@@ -355,6 +422,13 @@ def save_training_metadata(model_dir, dataset_path, model_version=None, training
         }
     }
 
+    if workspace_root is not None:
+        metadata["workspace"] = {
+            "root": os.path.abspath(workspace_root),
+            "dataset_path_relative": _relative_to_workspace(dataset_path, workspace_root),
+            "run_directory_relative": _relative_to_workspace(model_dir, workspace_root),
+        }
+
     if inference:
         metadata["inference"] = {k: v for k, v in inference.items() if v is not None}
 
@@ -392,15 +466,51 @@ def _get_relative_path(target_path, base_path):
         return os.path.abspath(target_path)
     
 
+def _resolve_cli_paths(args):
+    """
+    Возвращает (workspace_root|None, dataset_path, target_base_dir).
+    workspace_root задан — разрешение --data через work_datasets или каталог с yaml.
+    Иначе нужны оба: --data и --target-path (абсолютные каталоги прогонов).
+    """
+    try:
+        ws = resolve_workspace_root(args.workspace)
+    except ValueError:
+        ws = None
+    if ws is not None:
+        layout = WorkspaceLayout(ws)
+        os.makedirs(layout.runs, exist_ok=True)
+        if args.data is None:
+            raise ValueError(
+                "При использовании workspace укажите --data (каталог с data.yaml или имя из work_datasets)."
+            )
+        dataset_path = resolve_training_data_path(layout, args.data)
+        if args.target_path is not None:
+            target_base = os.path.abspath(os.path.expanduser(args.target_path))
+        else:
+            target_base = layout.runs
+        return ws, dataset_path, target_base
+    if args.data is None or args.target_path is None:
+        raise ValueError(
+            f"Задайте --workspace (или {WORKSPACE_ENV_VAR}) либо оба параметра: --data и --target-path."
+        )
+    dataset_path = os.path.abspath(os.path.expanduser(args.data))
+    target_base = os.path.abspath(os.path.expanduser(args.target_path))
+    return None, dataset_path, target_base
+
+
 def main():
     args = parse_args()
-    
-    data = args.data if args.data else DATASET_PATH
+
+    try:
+        workspace_root, data, target_dir = _resolve_cli_paths(args)
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return
+
     model_version = args.model if args.model else MODEL_VERSION
     epochs = args.epochs if args.epochs else EPOCHS
     batch = args.batch if args.batch else BATCH
     img_size = args.img_size if args.img_size else IMG_SIZE
-    target_dir = args.target_path if args.target_path else MODELS_BASE_DIR
 
     # Переменные для отслеживания статуса
     training_success = True
@@ -420,7 +530,7 @@ def main():
     if not args.test_only:
         # Обучение с обработкой ошибок
         try:
-            model_dir, training_start_time, training_end_time, dataset_hash = train_yolo(
+            model_dir, training_start_time, training_end_time, dataset_hash, _ = train_yolo(
                 dataset_path=data,
                 model_version=model_version,
                 epochs=epochs,
@@ -428,6 +538,7 @@ def main():
                 img_size=img_size,
                 target_dir=target_dir,
                 non_interactive=args.non_interactive,
+                workspace_root=workspace_root,
             )
         except Exception as e:
             training_success = False
@@ -458,8 +569,8 @@ def main():
         if training_success and model_dir:
             try:
                 test_start_time, test_end_time, inference_info = test_yolo(
-                    model_dir=model_dir,
-                    dataset_path=data,
+                    model_dir,
+                    data,
                     training_start_time=training_start_time,
                     training_end_time=training_end_time,
                     train_img_size=img_size,
@@ -493,6 +604,7 @@ def main():
                 test_error=test_error,
                 dataset_hash=dataset_hash,
                 inference=inference_info,
+                workspace_root=workspace_root,
             )
     else:
         model_dir = args.model_dir
@@ -522,6 +634,7 @@ def main():
                 test_success=test_success,
                 test_error=test_error,
                 inference=inference_info,
+                workspace_root=workspace_root,
             )
         else:
             print(f"[ERROR] Не указан путь к модели")

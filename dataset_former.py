@@ -6,13 +6,16 @@ import argparse
 from tqdm import tqdm
 
 from datasets_json_former import yolo_flat_image_label_buckets
+from workspace_paths import (
+    WORKSPACE_ENV_VAR,
+    WorkspaceLayout,
+    resolve_workspace_root,
+    resolve_dataset_root,
+    DATASETS_INFO_FILE,
+    CLASS_NAMES_FILE,
+)
 
-
-BASE_DIR = "/media/user/Data/IndustrialSafety/Datasets"
-JSON_FILE = "datasets_info.json"
-CLASS_NAMES_FILE = "class_names.json"
-OUTPUT_DATASET_NAME = "merged_dataset"
-OUTPUT_DIR = os.path.join("/media/user/Data/IndustrialSafety/Datasets", OUTPUT_DATASET_NAME)
+DEFAULT_OUTPUT_NAME = "merged"
 TRAIN_PART = 0.8  # 80%
 VAL_PART = 0.1    # 10%
 TEST_PART = 0.1   # 10%
@@ -80,17 +83,31 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); JSON в source_datasets/, вывод в work_datasets/",
+    )
+
+    parser.add_argument(
+        "--output-name",
+        type=str,
+        default=DEFAULT_OUTPUT_NAME,
+        help="Имя выходного work-датасета (подкаталог work_datasets/) при использовании workspace",
+    )
+
+    parser.add_argument(
         "--source-path",
         type=str,
         default=None,
-        help="Путь к исходным датасетам (если не указан, используется значение BASE_DIR)"
+        help="Legacy: родительский каталог датасетов (вместе с --target-path и --datasets-info-path)",
     )
 
     parser.add_argument(
         "--target-path",
         type=str,
         default=None,
-        help="Путь к новому создаваемому датасету (если не указан, используется значение OUTPUT_DIR)"
+        help="Legacy: полный путь к выходному датасету; в workspace — переопределяет work_datasets/<output-name>",
     )
 
     parser.add_argument(
@@ -104,7 +121,7 @@ def parse_args():
         "--datasets-info-path",
         type=str,
         default=None,
-        help="Путь к JSON файлам с информацией о датасетах (если не указан, используется source-path)"
+        help="Legacy: каталог с datasets_info.json; в workspace не нужен (всегда source_datasets/)",
     )
     
     parser.add_argument(
@@ -136,6 +153,8 @@ def _normalize_name(name, class_names_map):
 
 
 def dataset_normalized_keys(info, class_names_map):
+    if "classes" not in info:
+        return set()
     return {_normalize_name(k, class_names_map) for k in info["classes"].keys()}
 
 
@@ -148,7 +167,9 @@ def all_classes_union_from_datasets(datasets_info, output_dataset_name, class_na
     for name, info in datasets_info.items():
         if name == output_dataset_name:
             continue
-        for k in info.get("classes", {}).keys():
+        if "classes" not in info:
+            continue
+        for k in info["classes"].keys():
             normalized.add(_normalize_name(k, class_names_map))
     return sorted(normalized)
 
@@ -255,6 +276,8 @@ def build_merge_config(merge_args, class_names_map, selected_classes):
 def dataset_matches_selection(
     info, class_names_map, selected_classes, merge_targets_to_sources
 ):
+    if "classes" not in info:
+        return False
     normalized_in_ds = {_normalize_name(k, class_names_map) for k in info["classes"].keys()}
 
     for out in selected_classes:
@@ -324,20 +347,99 @@ def filter_label_file(
     return False
 
 
+def _dataset_root_for_merge(
+    dataset_name: str,
+    info: dict,
+    workspace_root: str | None,
+    source_catalog_dir: str,
+    legacy_source_parent: str,
+) -> str:
+    if workspace_root is not None:
+        return resolve_dataset_root(workspace_root, dataset_name, info, source_catalog_dir)
+    if "data_path" in info:
+        raw = info["data_path"]
+        if not isinstance(raw, str):
+            raise TypeError(f"data_path для {dataset_name!r} должен быть строкой.")
+        if os.path.isabs(raw):
+            return os.path.abspath(raw)
+        return os.path.abspath(os.path.join(legacy_source_parent, os.path.normpath(raw)))
+    return os.path.join(legacy_source_parent, dataset_name)
+
+
+def _update_work_datasets_sidecar(
+    layout: WorkspaceLayout,
+    output_key: str,
+    selected_classes: list,
+    target_dir: str,
+) -> None:
+    os.makedirs(layout.work_datasets, exist_ok=True)
+    rel = os.path.relpath(os.path.abspath(target_dir), layout.root)
+    entry = {
+        "classes": {name: idx for idx, name in enumerate(selected_classes)},
+        "structure": "split",
+        "elements_count": None,
+        "data_path": rel,
+    }
+    info_path = layout.work_datasets_info_path()
+    previous: dict = {}
+    if os.path.isfile(info_path):
+        with open(info_path, "r", encoding="utf-8") as f:
+            previous = json.load(f)
+        if not isinstance(previous, dict):
+            previous = {}
+    previous[output_key] = entry
+    with open(info_path, "w", encoding="utf-8") as f:
+        json.dump(previous, f, ensure_ascii=False, indent=4)
+
+    cn_path = layout.work_class_names_path()
+    class_names_out: dict = {}
+    if os.path.isfile(cn_path):
+        with open(cn_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            class_names_out = dict(loaded)
+    for c in selected_classes:
+        class_names_out[c] = c
+    with open(cn_path, "w", encoding="utf-8") as f:
+        json.dump(class_names_out, f, ensure_ascii=False, indent=4)
+
+
 def main():
     args = parse_args()
-    
-    # Определяем пути
-    source_dir = args.source_path if args.source_path else BASE_DIR
-    target_dir = args.target_path if args.target_path else OUTPUT_DIR
 
-    # Определяем путь к JSON файлам
-    if args.datasets_info_path:
-        info_dir = args.datasets_info_path
+    legacy = (
+        args.source_path is not None
+        and args.target_path is not None
+        and args.datasets_info_path is not None
+    )
+    layout: WorkspaceLayout | None = None
+    workspace_root: str | None = None
+
+    if legacy:
+        source_dir = os.path.abspath(os.path.expanduser(args.source_path))
+        target_dir = os.path.abspath(os.path.expanduser(args.target_path))
+        info_dir = os.path.abspath(os.path.expanduser(args.datasets_info_path))
     else:
-        info_dir = source_dir
+        try:
+            workspace_root = resolve_workspace_root(args.workspace)
+        except ValueError as e:
+            print(f"[ERROR] {e}")
+            print(
+                "[ERROR] Либо задайте workspace, либо все три флага: "
+                "--source-path, --target-path, --datasets-info-path."
+            )
+            return
+        layout = WorkspaceLayout(workspace_root)
+        os.makedirs(layout.source_datasets, exist_ok=True)
+        os.makedirs(layout.work_datasets, exist_ok=True)
+        info_dir = layout.source_datasets
+        source_dir = layout.source_datasets
+        if args.target_path:
+            target_dir = os.path.abspath(os.path.expanduser(args.target_path))
+        else:
+            target_dir = os.path.join(layout.work_datasets, args.output_name)
 
-    json_file = os.path.join(info_dir, JSON_FILE)
+    json_file = os.path.join(info_dir, DATASETS_INFO_FILE)
     class_names_file = os.path.join(info_dir, CLASS_NAMES_FILE)
 
     with open(json_file, "r", encoding="utf-8") as f:
@@ -456,7 +558,16 @@ def main():
 
     total_labels = 0
     for dataset_name, info in matching_datasets:
-        dataset_path = os.path.join(source_dir, dataset_name)
+        if "structure" not in info:
+            print(f"[ERROR] В записи {dataset_name!r} нет поля structure.")
+            return
+        dataset_path = _dataset_root_for_merge(
+            dataset_name,
+            info,
+            workspace_root,
+            layout.source_datasets if layout else source_dir,
+            source_dir,
+        )
         for _, labels_path in find_dataset_paths(dataset_path, info["structure"], args.exclude_test):
             total_labels += len([f for f in os.listdir(labels_path) if f.endswith(".txt")])
 
@@ -465,7 +576,13 @@ def main():
 
     with tqdm(total=total_labels, desc="Обработка датасетов", unit="файл") as pbar:
         for dataset_name, info in matching_datasets:
-            dataset_path = os.path.join(source_dir, dataset_name)
+            dataset_path = _dataset_root_for_merge(
+                dataset_name,
+                info,
+                workspace_root,
+                layout.source_datasets if layout else source_dir,
+                source_dir,
+            )
             for images_path, labels_path in find_dataset_paths(dataset_path, info["structure"], args.exclude_test):
 
                 pairs = []
@@ -531,6 +648,11 @@ def main():
         f.write(f"names: {selected_classes}\n")
 
     print(f"[OK] Итоговый YAML создан: {yaml_path}")
+
+    if layout is not None:
+        out_key = os.path.basename(os.path.normpath(target_dir))
+        _update_work_datasets_sidecar(layout, out_key, selected_classes, target_dir)
+        print(f"[OK] Обновлены {layout.work_datasets_info_path()} и class_names.json в work_datasets/")
 
 
 if __name__ == "__main__":
