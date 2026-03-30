@@ -17,6 +17,8 @@ CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
 - `smartrain cvat export --dataset-dir <dir> [--zip-path <out.zip>] [--task-name <name>] [--names a,b,c] [--force]`
   - экспортирует плоский YOLO-датасет (`images/` + `labels/`) обратно в CVAT 1.1 zip.
 
+Примечание: `smartrain dataset-former` умеет работать с `structure="cvat11"` **нативно** (временные `.txt` метки генерируются на лету из `annotations.xml`), поэтому отдельный `smartrain cvat import` не обязателен для merge.
+
 ## cli_argparse.py
 
 **`CliArgumentParser`** — подкласс `argparse.ArgumentParser` с `formatter_class=ArgumentDefaultsHelpFormatter`, чтобы в справке отображались значения по умолчанию опций.

@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
+import shutil
+import zipfile
 from typing import Any
 
 WORKSPACE_ENV_VAR = "SMART_TRAIN_WORKSPACE"
@@ -24,6 +27,7 @@ class WorkspaceLayout:
         self.runs = os.path.join(self.root, "runs")
         self.analytics = os.path.join(self.root, "analytics")
         self.models = os.path.join(self.root, "models")
+        self.extracted_datasets = os.path.join(self.root, "tmp", "extracted_datasets")
 
     def source_datasets_info_path(self) -> str:
         return os.path.join(self.source_datasets, DATASETS_INFO_FILE)
@@ -86,6 +90,108 @@ def resolve_dataset_root(
     return os.path.join(catalog_dir, entry_key)
 
 
+def _safe_extract_zip(zip_path: str, target_dir: str) -> None:
+    """
+    Безопасная распаковка zip в target_dir с защитой от path traversal.
+    """
+    abs_target = os.path.abspath(target_dir)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.infolist():
+            member_name = member.filename
+            out_path = os.path.abspath(os.path.join(abs_target, member_name))
+            if not out_path.startswith(abs_target + os.sep) and out_path != abs_target:
+                raise ValueError(f"Архив содержит небезопасный путь: {member_name!r}")
+        zf.extractall(abs_target)
+
+
+def _choose_extracted_dataset_root(extract_dir: str) -> str:
+    """
+    Если в архиве один верхнеуровневый каталог — используем его как корень датасета.
+    Иначе используем сам каталог распаковки.
+    """
+    try:
+        entries = [name for name in os.listdir(extract_dir) if name != "__meta__.json"]
+    except FileNotFoundError:
+        return extract_dir
+    dirs = [name for name in entries if os.path.isdir(os.path.join(extract_dir, name))]
+    files = [name for name in entries if os.path.isfile(os.path.join(extract_dir, name))]
+    if len(dirs) == 1 and not files:
+        return os.path.join(extract_dir, dirs[0])
+    return extract_dir
+
+
+def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
+    """
+    Распаковывает zip датасет в кэш workspace/tmp/extracted_datasets с инвалидацией
+    по размеру и mtime архива. Возвращает путь к корню распакованного датасета.
+    """
+    abs_zip = os.path.abspath(os.path.expanduser(zip_path))
+    if not os.path.isfile(abs_zip):
+        raise FileNotFoundError(f"Zip-архив не найден: {abs_zip}")
+    stat = os.stat(abs_zip)
+    key_src = f"{abs_zip}|{stat.st_size}|{stat.st_mtime_ns}"
+    cache_key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:16]
+
+    layout = WorkspaceLayout(workspace_root)
+    cache_root = layout.extracted_datasets
+    cache_dir = os.path.join(cache_root, cache_key)
+    meta_path = os.path.join(cache_dir, "__meta__.json")
+    os.makedirs(cache_root, exist_ok=True)
+
+    if os.path.isdir(cache_dir) and os.path.isfile(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            if (
+                meta.get("zip_path") == abs_zip
+                and meta.get("size") == stat.st_size
+                and meta.get("mtime_ns") == stat.st_mtime_ns
+            ):
+                root_rel = meta.get("dataset_root_rel", "")
+                root = os.path.join(cache_dir, root_rel) if root_rel else cache_dir
+                if os.path.isdir(root):
+                    return root
+        except Exception:
+            pass
+
+    if os.path.isdir(cache_dir):
+        shutil.rmtree(cache_dir, ignore_errors=True)
+    os.makedirs(cache_dir, exist_ok=True)
+    _safe_extract_zip(abs_zip, cache_dir)
+    dataset_root = _choose_extracted_dataset_root(cache_dir)
+    rel_root = os.path.relpath(dataset_root, cache_dir)
+
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "zip_path": abs_zip,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "dataset_root_rel": "" if rel_root == "." else rel_root,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    return dataset_root
+
+
+def resolve_or_extract_dataset_root(
+    workspace_root: str,
+    entry_key: str,
+    entry_dict: dict,
+    catalog_dir: str,
+) -> str:
+    """
+    Как resolve_dataset_root, но если путь указывает на zip-архив, возвращает
+    корень распакованного датасета из workspace-кэша.
+    """
+    root = resolve_dataset_root(workspace_root, entry_key, entry_dict, catalog_dir)
+    if root.lower().endswith(".zip"):
+        return extract_dataset_zip_to_cache(workspace_root, root)
+    return root
+
+
 def workspace_queue_path(workspace_root: str) -> str:
     """Файл очереди обучения в корне workspace (`queue.txt`)."""
     root = os.path.abspath(os.path.expanduser(workspace_root))
@@ -116,6 +222,7 @@ def deploy_workspace(target_root: str | None = None) -> dict[str, Any]:
         ("analytics", layout.analytics),
         ("models", layout.models),
         ("tmp", os.path.join(root, "tmp")),
+        ("extracted_datasets", layout.extracted_datasets),
     ]
     for name, dpath in dir_specs:
         if os.path.isdir(dpath):

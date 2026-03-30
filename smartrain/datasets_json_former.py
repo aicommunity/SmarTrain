@@ -11,7 +11,7 @@ from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,
-    resolve_dataset_root,
+    resolve_or_extract_dataset_root,
     DATASETS_INFO_FILE,
     CLASS_NAMES_FILE,
 )
@@ -90,6 +90,45 @@ def _cvat_has_images_dir_near_xml(xml_path: str) -> bool:
         return os.path.isdir(os.path.join(p, "images"))
     except Exception:
         return False
+
+
+def _is_cvat11_images_xml(xml_path: str) -> bool:
+    """
+    Минимальная валидация, что annotations.xml похож на CVAT for images 1.1:
+    - root == <annotations>
+    - есть хотя бы один <image>
+    - для images-task обычно есть <box> внутри <image> (но допускаем пустую разметку)
+    - если есть <version>, то она должна быть 1.1 (иначе считаем неподходящим)
+    """
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+    except Exception:
+        return False
+
+    if (root.tag or "").strip().lower() != "annotations":
+        return False
+
+    ver_el = root.find("./version")
+    if ver_el is not None and ver_el.text and ver_el.text.strip():
+        if ver_el.text.strip() != "1.1":
+            return False
+
+    images = root.findall("./image")
+    if not images:
+        return False
+
+    # Если совсем нет box, это может быть пустая разметка; считаем валидной.
+    # Но если есть box, проверим наличие обязательных атрибутов.
+    boxes = root.findall("./image/box")
+    if boxes:
+        for b in boxes[:5]:
+            if not b.attrib.get("label"):
+                return False
+            for k in ("xtl", "ytl", "xbr", "ybr"):
+                if k not in b.attrib:
+                    return False
+    return True
 
 
 def _load_cvat11_label_names(xml_path: str) -> list[str]:
@@ -199,7 +238,7 @@ def detect_structure(folder_path):
 
     # CVAT 1.1 extracted folder: annotations.xml + images/
     cvat_xml = _find_cvat_annotations_xml(folder_path)
-    if cvat_xml and _cvat_has_images_dir_near_xml(cvat_xml):
+    if cvat_xml and _cvat_has_images_dir_near_xml(cvat_xml) and _is_cvat11_images_xml(cvat_xml):
         return "cvat11"
 
     if any(x in subfolders for x in ["train", "val", "test"]):
@@ -460,17 +499,19 @@ def _merge_preserved_dataset_fields(fresh: Dict[str, Any], previous: Optional[Di
     return out
 
 
-def _run_scan_folder_roots(folder_roots: list[tuple[str, str]]) -> tuple[dict, dict]:
-    """folder_roots: список (logical_name, folder_path на диске)."""
+def _run_scan_folder_roots(folder_roots: list[tuple[str, str, dict]]) -> tuple[dict, dict]:
+    """folder_roots: список (logical_name, folder_path на диске, overrides для datasets_info)."""
     datasets_info: dict = {}
     class_names: dict = {}
 
-    for logical_name, folder_path in folder_roots:
+    for logical_name, folder_path, overrides in folder_roots:
         if not os.path.isdir(folder_path):
             print(f"[WARNING] Пропуск {logical_name!r}: нет каталога {folder_path}")
             continue
         info = process_dataset(folder_path, logical_name)
         if info:
+            if overrides:
+                info.update(overrides)
             datasets_info[logical_name] = info
             for class_name in info["classes"]:
                 class_names[class_name] = class_name
@@ -531,14 +572,14 @@ def main(argv=None):
             if not isinstance(prev_entry, dict):
                 continue
             if "data_path" not in prev_entry:
-                folder_roots.append((name, os.path.join(datasets_dir, name)))
+                folder_roots.append((name, os.path.join(datasets_dir, name), {}))
             else:
                 dp = prev_entry["data_path"]
                 if not isinstance(dp, str):
                     print(f"[WARNING] Пропуск {name!r}: data_path не строка")
                     continue
-                root_path = resolve_dataset_root(layout.root, name, prev_entry, datasets_dir)
-                folder_roots.append((name, root_path))
+                root_path = resolve_or_extract_dataset_root(layout.root, name, prev_entry, datasets_dir)
+                folder_roots.append((name, root_path, {"data_path": dp}))
         datasets_info, class_names = _run_scan_folder_roots(folder_roots)
         previous_info = previous_full
     else:
@@ -549,7 +590,27 @@ def main(argv=None):
         for folder_name in os.listdir(datasets_dir):
             folder_path = os.path.join(datasets_dir, folder_name)
             if os.path.isdir(folder_path):
-                folder_roots.append((folder_name, folder_path))
+                folder_roots.append((folder_name, folder_path, {}))
+            elif use_workspace and folder_name.lower().endswith(".zip"):
+                zip_path = folder_path
+                logical_name = os.path.splitext(folder_name)[0]
+                try:
+                    extracted = resolve_or_extract_dataset_root(
+                        layout.root,
+                        logical_name,
+                        {"data_path": os.path.relpath(zip_path, layout.root)},
+                        datasets_dir,
+                    )
+                except Exception as e:
+                    print(f"[WARNING] Пропуск {folder_name!r}: не удалось распаковать zip ({e})")
+                    continue
+                folder_roots.append(
+                    (
+                        logical_name,
+                        extracted,
+                        {"data_path": os.path.relpath(zip_path, layout.root)},
+                    )
+                )
         datasets_info, class_names = _run_scan_folder_roots(folder_roots)
         previous_info = {}
         if os.path.isfile(output_file):

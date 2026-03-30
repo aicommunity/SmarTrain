@@ -812,7 +812,7 @@ names: ['class1', 'class2', 'class3']
 Поддержка CVAT 1.1 в `smart-train` разделена на два уровня:
 
 1. **Обнаружение распакованного датасета**: `datasets_json_former.detect_structure()` распознаёт `structure="cvat11"` при наличии `annotations.xml` и папки `images/` рядом с ним. Классы берутся из `meta/task/labels` (если есть), иначе из `box/@label`.
-2. **Конвертация для обучения**: пайплайн `dataset_former.py` ожидает YOLO `.txt`, поэтому CVAT 1.1 нужно предварительно конвертировать в YOLO через CLI `smartrain cvat import` (см. модуль `smartrain/cvat11_converter.py`).
+2. **Нативная работа в dataset-former**: `dataset_former.py` умеет включать `cvat11` в merge напрямую, генерируя **временные** YOLO `.txt` из `annotations.xml` (без ручной предварительной конвертации пользователем). Конвертер `smartrain cvat import` остаётся полезен, когда нужен отдельный YOLO-датасет как артефакт.
 
 **Добавление новых метрик**:
 1. Расширить `save_metrics_csv()` для сохранения дополнительных метрик

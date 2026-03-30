@@ -280,7 +280,7 @@ JSON файл с метаданными о всех доступных дата�
 - `"subset_flat"` - `images/<подпапка>/` и `labels/<подпапка>/` (см. выше)
 - `"nested_split"` - вложенное разделение
 - `"darknet"` - формат Darknet
-- `"cvat11"` - распакованный экспорт CVAT 1.1: `annotations.xml` рядом с папкой `images/` (формат Images + bbox). Для обучения требуется предварительная конвертация в YOLO (см. `smartrain cvat import`).
+- `"cvat11"` - распакованный экспорт CVAT 1.1: `annotations.xml` рядом с папкой `images/` (формат Images + bbox). Поддерживается нативно в `datasets-json` и `dataset-former` (в merge используются временные YOLO `.txt`, генерируемые из XML).
 
 #### `elements_count`
 Количество элементов (изображений/аннотаций) в датасете:

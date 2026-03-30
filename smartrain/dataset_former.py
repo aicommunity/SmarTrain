@@ -3,15 +3,18 @@ import json
 import shutil
 import random
 import argparse
+import tempfile
+from pathlib import Path
 from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.datasets_json_former import yolo_flat_image_label_buckets
+from smartrain.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted, YOLO_IMAGE_EXTS
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,
-    resolve_dataset_root,
+    resolve_or_extract_dataset_root,
     DATASETS_INFO_FILE,
     CLASS_NAMES_FILE,
 )
@@ -76,6 +79,26 @@ def find_dataset_paths(dataset_path, structure, arg=False):
             # Для Darknet формата изображения и аннотации в одной папке
             paths.append((obj_train_data_path, obj_train_data_path))
     return paths
+
+
+def _cvat11_temp_bucket(dataset_root: str, dataset_name: str, info: dict, temp_root: str) -> tuple[str, str]:
+    """
+    Создает временные YOLO-labels из CVAT 1.1 extracted dataset и возвращает (images_dir, labels_dir).
+    dataset_root: корень датасета (как в datasets_info data_path resolve)
+    temp_root: каталог для временных меток (обычно внутри workspace/tmp)
+    """
+    if "classes" not in info or not isinstance(info["classes"], dict):
+        raise ValueError(f"{dataset_name!r}: нет classes для cvat11 в datasets_info.json")
+    class_map: dict = info["classes"]
+    labels_out = Path(temp_root) / "cvat11_labels" / dataset_name
+    if labels_out.exists():
+        shutil.rmtree(labels_out)
+    images_dir, _images_found, _labels_written = generate_temp_yolo_labels_from_cvat11_extracted(
+        dataset_root=Path(dataset_root),
+        labels_out_dir=labels_out,
+        class_name_to_id={str(k): int(v) for k, v in class_map.items()},
+    )
+    return str(images_dir), str(labels_out)
 
 
 def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
@@ -360,7 +383,7 @@ def _dataset_root_for_merge(
     legacy_source_parent: str,
 ) -> str:
     if workspace_root is not None:
-        return resolve_dataset_root(workspace_root, dataset_name, info, source_catalog_dir)
+        return resolve_or_extract_dataset_root(workspace_root, dataset_name, info, source_catalog_dir)
     if "data_path" in info:
         raw = info["data_path"]
         if not isinstance(raw, str):
@@ -564,26 +587,21 @@ def main(argv=None):
     for name, _ in matching_datasets:
         print(f"   - {name}")
 
+    cvat11_buckets: dict[str, tuple[str, str]] = {}
+    temp_ctx = None
+    if layout is not None:
+        temp_root = os.path.join(layout.root, "tmp")
+        os.makedirs(temp_root, exist_ok=True)
+    else:
+        temp_ctx = tempfile.TemporaryDirectory(prefix="smartrain_cvat11_")
+        temp_root = temp_ctx.name
+
     total_labels = 0
-    for dataset_name, info in matching_datasets:
-        if "structure" not in info:
-            print(f"[ERROR] В записи {dataset_name!r} нет поля structure.")
-            return
-        dataset_path = _dataset_root_for_merge(
-            dataset_name,
-            info,
-            workspace_root,
-            layout.source_datasets if layout else source_dir,
-            source_dir,
-        )
-        for _, labels_path in find_dataset_paths(dataset_path, info["structure"], args.exclude_test):
-            total_labels += len([f for f in os.listdir(labels_path) if f.endswith(".txt")])
-
-    used_stems = {split: set() for split in ("train", "valid", "test")}
-    copied_count = 0
-
-    with tqdm(total=total_labels, desc="Обработка датасетов", unit="файл") as pbar:
+    try:
         for dataset_name, info in matching_datasets:
+            if "structure" not in info:
+                print(f"[ERROR] В записи {dataset_name!r} нет поля structure.")
+                return
             dataset_path = _dataset_root_for_merge(
                 dataset_name,
                 info,
@@ -591,55 +609,86 @@ def main(argv=None):
                 layout.source_datasets if layout else source_dir,
                 source_dir,
             )
-            for images_path, labels_path in find_dataset_paths(dataset_path, info["structure"], args.exclude_test):
+            if info["structure"] == "cvat11":
+                img_p, lbl_p = _cvat11_temp_bucket(dataset_path, dataset_name, info, temp_root)
+                cvat11_buckets[dataset_name] = (img_p, lbl_p)
+                total_labels += len([f for f in os.listdir(lbl_p) if f.endswith(".txt")])
+                continue
+            for _, labels_path in find_dataset_paths(dataset_path, info["structure"], args.exclude_test):
+                total_labels += len([f for f in os.listdir(labels_path) if f.endswith(".txt")])
 
-                pairs = []
-                for label_file in os.listdir(labels_path):
-                    if not label_file.endswith(".txt"):
+        used_stems = {split: set() for split in ("train", "valid", "test")}
+        copied_count = 0
+
+        with tqdm(total=total_labels, desc="Обработка датасетов", unit="файл") as pbar:
+            for dataset_name, info in matching_datasets:
+                dataset_path = _dataset_root_for_merge(
+                    dataset_name,
+                    info,
+                    workspace_root,
+                    layout.source_datasets if layout else source_dir,
+                    source_dir,
+                )
+
+                if info["structure"] == "cvat11":
+                    buckets = [cvat11_buckets.get(dataset_name)] if dataset_name in cvat11_buckets else [
+                        _cvat11_temp_bucket(dataset_path, dataset_name, info, temp_root)
+                    ]
+                else:
+                    buckets = list(find_dataset_paths(dataset_path, info["structure"], args.exclude_test))
+
+                for images_path, labels_path in buckets:
+
+                    pairs = []
+                    for label_file in os.listdir(labels_path):
+                        if not label_file.endswith(".txt"):
+                            continue
+                        image_name = os.path.splitext(label_file)[0]
+                        for ext in list(YOLO_IMAGE_EXTS):
+                            candidate = os.path.join(images_path, image_name + ext)
+                            if os.path.exists(candidate):
+                                pairs.append((candidate, os.path.join(labels_path, label_file)))
+                                break
+
+                    if not pairs:
                         continue
-                    image_name = os.path.splitext(label_file)[0]
-                    for ext in [".jpg", ".jpeg", ".png"]:
-                        candidate = os.path.join(images_path, image_name + ext)
-                        if os.path.exists(candidate):
-                            pairs.append((candidate, os.path.join(labels_path, label_file)))
-                            break
 
-                if not pairs:
-                    continue
+                    random.shuffle(pairs)
+                    n = len(pairs)
+                    train_split = pairs[:int(n * TRAIN_PART)]
+                    val_split = pairs[int(n * TRAIN_PART):int(n * (TRAIN_PART + VAL_PART))]
+                    test_split = pairs[int(n * (VAL_PART + TRAIN_PART)):]
 
-                random.shuffle(pairs)
-                n = len(pairs)
-                train_split = pairs[:int(n * TRAIN_PART)]
-                val_split = pairs[int(n * TRAIN_PART):int(n * (TRAIN_PART + VAL_PART))]
-                test_split = pairs[int(n * (VAL_PART + TRAIN_PART)):]
+                    splits_data = {"train": train_split, "valid": val_split, "test": test_split}
 
-                splits_data = {"train": train_split, "valid": val_split, "test": test_split}
+                    for split_name, split_pairs in splits_data.items():
+                        for image_src, label_src in split_pairs:
+                            image_ext = os.path.splitext(image_src)[1]
+                            stem = _unique_merge_stem(
+                                dataset_name, image_src, used_stems[split_name]
+                            )
+                            image_dst = os.path.join(
+                                target_dir, split_name, "images", f"{stem}{image_ext}"
+                            )
+                            label_dst = os.path.join(
+                                target_dir, split_name, "labels", f"{stem}.txt"
+                            )
 
-                for split_name, split_pairs in splits_data.items():
-                    for image_src, label_src in split_pairs:
-                        image_ext = os.path.splitext(image_src)[1]
-                        stem = _unique_merge_stem(
-                            dataset_name, image_src, used_stems[split_name]
-                        )
-                        image_dst = os.path.join(
-                            target_dir, split_name, "images", f"{stem}{image_ext}"
-                        )
-                        label_dst = os.path.join(
-                            target_dir, split_name, "labels", f"{stem}.txt"
-                        )
-
-                        ok = filter_label_file(
-                            label_src,
-                            label_dst,
-                            info["classes"],
-                            class_names_map,
-                            selected_classes,
-                            normalized_to_output_name,
-                        )
-                        if ok:
-                            shutil.copy2(image_src, image_dst)
-                            copied_count += 1
-                        pbar.update(1)
+                            ok = filter_label_file(
+                                label_src,
+                                label_dst,
+                                info["classes"],
+                                class_names_map,
+                                selected_classes,
+                                normalized_to_output_name,
+                            )
+                            if ok:
+                                shutil.copy2(image_src, image_dst)
+                                copied_count += 1
+                            pbar.update(1)
+    finally:
+        if temp_ctx is not None:
+            temp_ctx.cleanup()
 
     print(f"\n[DEBUG] Всего label-файлов: {total_labels}")
     print(f"[DEBUG] Отфильтровано и скопировано: {copied_count}")

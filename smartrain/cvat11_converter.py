@@ -41,6 +41,97 @@ def find_cvat_annotations_and_images_dir(extracted_root: Path) -> Tuple[Path, Pa
     return annotations[0], images_dirs[0]
 
 
+def is_cvat11_images_xml(xml_path: Path) -> bool:
+    """
+    Lightweight validation for CVAT for images 1.1 annotations.xml.
+    We intentionally keep this permissive to support real-world exports.
+    """
+    try:
+        tree = ET.parse(str(xml_path))
+        root = tree.getroot()
+    except Exception:
+        return False
+
+    if (root.tag or "").strip().lower() != "annotations":
+        return False
+
+    ver_el = root.find("./version")
+    if ver_el is not None and ver_el.text and ver_el.text.strip():
+        if ver_el.text.strip() != "1.1":
+            return False
+
+    images = root.findall("./image")
+    if not images:
+        return False
+    return True
+
+
+def generate_temp_yolo_labels_from_cvat11_extracted(
+    *,
+    dataset_root: Path,
+    labels_out_dir: Path,
+    class_name_to_id: Dict[str, int],
+) -> Tuple[Path, int, int]:
+    """
+    Native bridge: read extracted CVAT 1.1 dataset (annotations.xml + images/)
+    and generate YOLO txt labels into labels_out_dir WITHOUT copying images.
+
+    Returns:
+      images_dir, images_found_count, labels_written_count
+    """
+    dataset_root = Path(dataset_root)
+    labels_out_dir = Path(labels_out_dir)
+    _ensure_dir(labels_out_dir)
+
+    xml_path, images_dir = find_cvat_annotations_and_images_dir(dataset_root)
+    if not is_cvat11_images_xml(xml_path):
+        raise ValueError(f"Not a CVAT 1.1 images annotations.xml: {xml_path}")
+
+    _task_name, _labels_in_meta, images = load_cvat11_images_and_labels(xml_path)
+
+    images_found = 0
+    labels_written = 0
+
+    for img in images:
+        cvat_image_name = img.get("name", "")
+        if not isinstance(cvat_image_name, str) or not cvat_image_name:
+            continue
+
+        src = images_dir / cvat_image_name
+        if not src.exists():
+            src = images_dir / Path(cvat_image_name).name
+        if not src.exists():
+            continue
+
+        dst_name = Path(cvat_image_name).name
+        images_found += 1
+
+        img_w = int(img.get("width", -1))
+        img_h = int(img.get("height", -1))
+        if img_w <= 0 or img_h <= 0:
+            with Image.open(src) as im:
+                img_w, img_h = im.size
+                img_w = int(img_w)
+                img_h = int(img_h)
+
+        lines: List[str] = []
+        for b in img.get("boxes", []):
+            if not isinstance(b, CvatBox):
+                continue
+            class_id = class_name_to_id.get(b.label)
+            if class_id is None:
+                continue
+            yolo = _cvat_box_to_yolo_line(b, class_id=class_id, img_w=img_w, img_h=img_h)
+            if yolo:
+                lines.append(yolo)
+
+        label_path = labels_out_dir / f"{Path(dst_name).stem}.txt"
+        label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        labels_written += 1
+
+    return images_dir, images_found, labels_written
+
+
 def _safe_int_from_xml_attr(v: str) -> int:
     try:
         return int(float(v))
