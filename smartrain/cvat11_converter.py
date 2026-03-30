@@ -190,6 +190,16 @@ def _ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+def _default_tmp_dir(base_dir: Optional[Path] = None) -> Path:
+    """
+    Единое место для временных файлов: <base>/tmp (или ./tmp), а не системный /tmp.
+    """
+    root = Path(base_dir) if base_dir is not None else Path.cwd()
+    p = (root / "tmp").resolve()
+    _ensure_dir(p)
+    return p
+
+
 def _clamp(v: float, lo: float, hi: float) -> float:
     if v < lo:
         return lo
@@ -226,6 +236,7 @@ def import_cvat11_zip_to_yolo(
     output_dir: Path,
     task_name: Optional[str] = None,
     force: bool = False,
+    tmp_base_dir: Optional[Path] = None,
 ) -> Dict:
     """
     Convert CVAT 1.1 ZIP (Images + bbox) to YOLO dataset folder:
@@ -262,7 +273,8 @@ def import_cvat11_zip_to_yolo(
     _ensure_dir(images_out)
     _ensure_dir(labels_out)
 
-    with tempfile.TemporaryDirectory(prefix="cvat11_import_") as td:
+    tmp_dir = _default_tmp_dir(tmp_base_dir)
+    with tempfile.TemporaryDirectory(prefix="cvat11_import_", dir=str(tmp_dir)) as td:
         td_path = Path(td)
         with zipfile.ZipFile(cvat_zip_path, "r") as zf:
             zf.extractall(td_path)
@@ -501,6 +513,7 @@ def export_yolo_to_cvat11_zip(
     images_dir: Optional[Path] = None,
     labels_dir: Optional[Path] = None,
     force: bool = False,
+    tmp_base_dir: Optional[Path] = None,
 ) -> Dict:
     """
     Export flat YOLO dataset (images/ + labels/) to CVAT 1.1 zip.
@@ -548,7 +561,8 @@ def export_yolo_to_cvat11_zip(
     if output_zip_path.exists():
         output_zip_path.unlink()
 
-    with tempfile.TemporaryDirectory(prefix="cvat11_export_") as td:
+    tmp_dir = _default_tmp_dir(tmp_base_dir)
+    with tempfile.TemporaryDirectory(prefix="cvat11_export_", dir=str(tmp_dir)) as td:
         td_path = Path(td)
         task_root = td_path / effective_task_name
         img_out = task_root / "images"

@@ -19,6 +19,12 @@ def build_cvat_arg_parser() -> argparse.ArgumentParser:
 
     # Common-ish
     p.add_argument("--force", action="store_true", help="Перезаписать выход при наличии.")
+    p.add_argument(
+        "--tmp-dir",
+        type=str,
+        default=None,
+        help="Каталог для временных файлов (по умолчанию: ./tmp относительно текущего каталога)",
+    )
 
     # import
     p.add_argument("--cvat-zip", type=str, default=None, help="Путь к CVAT 1.1 zip export.")
@@ -69,6 +75,7 @@ def _load_names_from_data_yaml(dataset_dir: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> None:
     args = build_cvat_arg_parser().parse_args(argv)
     cmd = args.command
+    tmp_base_dir = Path(args.tmp_dir).expanduser().resolve() if args.tmp_dir else Path.cwd()
 
     if cmd == "import":
         if not args.cvat_zip or not args.output_dir:
@@ -78,6 +85,7 @@ def main(argv: list[str] | None = None) -> None:
             output_dir=Path(args.output_dir),
             task_name=args.task_name,
             force=bool(args.force),
+            tmp_base_dir=tmp_base_dir,
         )
         print(f"[OK] CVAT import -> YOLO: {info['output_dir']}")
         print(f"[OK] classes={info['nc']} images={info['images_count']} labels={info['labels_count']}")
@@ -101,6 +109,7 @@ def main(argv: list[str] | None = None) -> None:
             output_zip_path=zip_path,
             names=names,
             force=bool(args.force),
+            tmp_base_dir=tmp_base_dir,
         )
         print(f"[OK] YOLO export -> CVAT zip: {info['zip_path']}")
         print(f"[OK] task_name={info['task_name']} images={info['images_count']}")

@@ -168,6 +168,12 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Оставить только классы из набора (--classes или авто-объединение), присутствующие в каждом датасете группы пересечения; остальные отбрасываются с предупреждением",
     )
+    parser.add_argument(
+        "--tmp-dir",
+        type=str,
+        default=None,
+        help="Каталог для временных файлов (по умолчанию: <workspace>/tmp или <source-path>/tmp в legacy-режиме)",
+    )
 
     return parser
 
@@ -589,11 +595,17 @@ def main(argv=None):
 
     cvat11_buckets: dict[str, tuple[str, str]] = {}
     temp_ctx = None
-    if layout is not None:
+    if args.tmp_dir:
+        temp_root = os.path.abspath(os.path.expanduser(args.tmp_dir))
+        os.makedirs(temp_root, exist_ok=True)
+    elif layout is not None:
         temp_root = os.path.join(layout.root, "tmp")
         os.makedirs(temp_root, exist_ok=True)
     else:
-        temp_ctx = tempfile.TemporaryDirectory(prefix="smartrain_cvat11_")
+        # Legacy mode: временные файлы только рядом с рабочими данными, не в системном /tmp.
+        legacy_tmp_parent = os.path.join(source_dir, "tmp")
+        os.makedirs(legacy_tmp_parent, exist_ok=True)
+        temp_ctx = tempfile.TemporaryDirectory(prefix="smartrain_cvat11_", dir=legacy_tmp_parent)
         temp_root = temp_ctx.name
 
     total_labels = 0
