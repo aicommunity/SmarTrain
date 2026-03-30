@@ -17,6 +17,7 @@ CLI_HELP_CASES: list[tuple[str, list[str]]] = [
     ("train", ["--", "--help"]),
     ("hash", ["--", "--help"]),
     ("roi", ["--", "--help"]),
+    ("cvat", ["--", "--help"]),
     ("queue", ["list"]),
     ("queue-run", ["--", "--help"]),
     ("registry", ["runs-list"]),

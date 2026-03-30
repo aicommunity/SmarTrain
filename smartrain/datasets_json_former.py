@@ -4,6 +4,7 @@ import json
 import sys
 import argparse
 from typing import Any, Dict, Optional
+import xml.etree.ElementTree as ET
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.workspace_paths import (
@@ -75,6 +76,61 @@ def load_obj_data(file_path):
         return None
 
 
+def _find_cvat_annotations_xml(folder_path: str) -> Optional[str]:
+    for root, _, files in os.walk(folder_path):
+        for f in files:
+            if f.lower() == "annotations.xml":
+                return os.path.join(root, f)
+    return None
+
+
+def _cvat_has_images_dir_near_xml(xml_path: str) -> bool:
+    try:
+        p = os.path.dirname(xml_path)
+        return os.path.isdir(os.path.join(p, "images"))
+    except Exception:
+        return False
+
+
+def _load_cvat11_label_names(xml_path: str) -> list[str]:
+    """
+    CVAT 1.1 (Images task) labels.
+    Prefer meta/task/labels/label/name; fallback to unique box/@label values.
+    """
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+    except Exception:
+        return []
+
+    meta_names: list[str] = []
+    try:
+        for lb in root.findall("./meta/task/labels/label/name"):
+            if lb is not None and lb.text and lb.text.strip():
+                meta_names.append(lb.text.strip())
+    except Exception:
+        meta_names = []
+
+    if meta_names:
+        # unique preserve order
+        out: list[str] = []
+        seen = set()
+        for n in meta_names:
+            if n not in seen:
+                seen.add(n)
+                out.append(n)
+        return out
+
+    seen = set()
+    out = []
+    for box in root.findall("./image/box"):
+        label = box.attrib.get("label", "")
+        if label and label not in seen:
+            seen.add(label)
+            out.append(label)
+    return sorted(out)
+
+
 IMAGE_EXTS_FLAT = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 
@@ -141,6 +197,11 @@ def detect_structure(folder_path):
     if os.path.exists(obj_train_data_path) and (obj_names_path or obj_data_path):
         return "darknet"
 
+    # CVAT 1.1 extracted folder: annotations.xml + images/
+    cvat_xml = _find_cvat_annotations_xml(folder_path)
+    if cvat_xml and _cvat_has_images_dir_near_xml(cvat_xml):
+        return "cvat11"
+
     if any(x in subfolders for x in ["train", "val", "test"]):
         return "split"
 
@@ -178,6 +239,29 @@ def count_elements(folder_path, structure):
     labels_count = 0
     images_count = 0
     IMAGE_EXTS = list(IMAGE_EXTS_FLAT)
+
+    if structure == "cvat11":
+        xml_path = _find_cvat_annotations_xml(folder_path)
+        if not xml_path:
+            return None
+        try:
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            xml_images = root.findall("./image")
+            labels_count = len(xml_images)
+        except Exception:
+            return None
+        img_dir = os.path.join(os.path.dirname(xml_path), "images")
+        if os.path.isdir(img_dir):
+            images_count = len(
+                [
+                    f
+                    for f in os.listdir(img_dir)
+                    if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
+                ]
+            )
+        else:
+            images_count = 0
 
     if structure == "split":
         for dir_name in os.listdir(folder_path):
@@ -291,6 +375,18 @@ def process_dataset(folder_path, folder_name):
                 return None
         else:
             print(f"[WARNING] В папке {folder_name} не найден obj.names — пропуск")
+            return None
+
+    # Если CVAT 1.1 extracted dataset
+    if not names and structure == "cvat11":
+        xml_path = _find_cvat_annotations_xml(folder_path)
+        if xml_path:
+            names = _load_cvat11_label_names(xml_path)
+            if not names:
+                print(f"[WARNING] CVAT 1.1: не удалось извлечь labels из {xml_path} — пропуск")
+                return None
+        else:
+            print(f"[WARNING] CVAT 1.1: не найден annotations.xml — пропуск")
             return None
 
     # Если ничего не нашли

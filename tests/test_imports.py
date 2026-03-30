@@ -23,6 +23,8 @@ def test_import_cli_modules() -> None:
         "smartrain.results_analyzer",
         "smartrain.plot_creator",
         "smartrain.cli_argparse",
+        "smartrain.cvat11_converter",
+        "smartrain.cvat_cli",
         "smartrain.cli",
     ):
         __import__(mod)

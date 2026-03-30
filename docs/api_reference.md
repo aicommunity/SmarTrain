@@ -8,6 +8,15 @@
 
 Соответствие имён подкоманд и модулей см. исходный файл [`smartrain/cli.py`](../smartrain/cli.py).
 
+## cvat_cli.py (команда `smartrain cvat`)
+
+CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
+
+- `smartrain cvat import --cvat-zip <file.zip> --output-dir <dir> [--task-name <name>] [--force]`
+  - распаковывает zip, читает `annotations.xml`, копирует `images/*`, пишет YOLO `labels/*.txt` и `data.yaml`.
+- `smartrain cvat export --dataset-dir <dir> [--zip-path <out.zip>] [--task-name <name>] [--names a,b,c] [--force]`
+  - экспортирует плоский YOLO-датасет (`images/` + `labels/`) обратно в CVAT 1.1 zip.
+
 ## cli_argparse.py
 
 **`CliArgumentParser`** — подкласс `argparse.ArgumentParser` с `formatter_class=ArgumentDefaultsHelpFormatter`, чтобы в справке отображались значения по умолчанию опций.
@@ -144,7 +153,7 @@
 ```python
 {
     "classes": {class_name: index},
-    "structure": "split|flat|subset_flat|nested_split|darknet",
+    "structure": "split|flat|subset_flat|nested_split|darknet|cvat11",
     "elements_count": int_or_list
 }
 ```

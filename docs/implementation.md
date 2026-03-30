@@ -807,6 +807,13 @@ names: ['class1', 'class2', 'class3']
 3. Добавить подсчет в `count_elements()`
 4. Обновить документацию
 
+### CVAT 1.1 (Images + bbox)
+
+Поддержка CVAT 1.1 в `smart-train` разделена на два уровня:
+
+1. **Обнаружение распакованного датасета**: `datasets_json_former.detect_structure()` распознаёт `structure="cvat11"` при наличии `annotations.xml` и папки `images/` рядом с ним. Классы берутся из `meta/task/labels` (если есть), иначе из `box/@label`.
+2. **Конвертация для обучения**: пайплайн `dataset_former.py` ожидает YOLO `.txt`, поэтому CVAT 1.1 нужно предварительно конвертировать в YOLO через CLI `smartrain cvat import` (см. модуль `smartrain/cvat11_converter.py`).
+
 **Добавление новых метрик**:
 1. Расширить `save_metrics_csv()` для сохранения дополнительных метрик
 2. Использовать API Ultralytics для получения расширенных метрик

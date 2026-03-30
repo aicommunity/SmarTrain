@@ -236,6 +236,20 @@ def cmd_plot(ctx: typer.Context) -> None:
     _call("smartrain.plot_creator", "main", ctx)
 
 
+@app.command(
+    "cvat",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_cvat(ctx: typer.Context) -> None:
+    """Конвертация CVAT 1.1 (Images+bbox): import/export."""
+    if _ctx_has_help_flag(ctx):
+        from smartrain.cvat_cli import build_cvat_arg_parser
+
+        _dispatch_argparse_help(ctx, build_cvat_arg_parser, "smartrain cvat")
+    _call("smartrain.cvat_cli", "main", ctx)
+
+
 def main() -> None:
     app()
 
