@@ -518,6 +518,15 @@ def _run_scan_folder_roots(folder_roots: list[tuple[str, str, dict]]) -> tuple[d
     return datasets_info, class_names
 
 
+def _dir_has_content(path: str) -> bool:
+    if not os.path.isdir(path):
+        return False
+    with os.scandir(path) as it:
+        for _ in it:
+            return True
+    return False
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -594,6 +603,13 @@ def main(argv=None):
             elif use_workspace and folder_name.lower().endswith(".zip"):
                 zip_path = folder_path
                 logical_name = os.path.splitext(folder_name)[0]
+                existing_dir = os.path.join(datasets_dir, logical_name)
+                if _dir_has_content(existing_dir):
+                    print(
+                        f"[INFO] Пропуск архива {folder_name!r}: найден непустой каталог "
+                        f"{existing_dir!r}"
+                    )
+                    continue
                 try:
                     extracted = resolve_or_extract_dataset_root(
                         layout.root,
