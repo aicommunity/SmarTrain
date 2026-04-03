@@ -59,6 +59,16 @@ smartrain dataset-former --output-name merged --classes "class_a,class_b"
 smartrain train --data merged
 ```
 
+Сканирование датасетов из файла со списком путей:
+
+```bash
+smartrain datasets-json --datasets-list /data/MarsSmarTrain/source_datasets/datasets_list.txt
+```
+
+Формат `datasets_list.txt`: один путь на строку (поддерживаются директории и `.zip`), строки с `#` и пустые игнорируются. Относительные пути интерпретируются относительно директории самого list-файла.
+
+В workspace-режиме файл `source_datasets/datasets_list.txt` подхватывается автоматически (если существует), даже без явного `--datasets-list`.
+
 ## Команды CLI
 
 | Команда | Назначение |

@@ -3,6 +3,8 @@ import yaml
 import json
 import sys
 import argparse
+import hashlib
+import zipfile
 from typing import Any, Dict, Optional
 import xml.etree.ElementTree as ET
 
@@ -21,6 +23,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 OUTPUT_FILE = DATASETS_INFO_FILE
 OUTPUT_CLASS_NAMES_FILE = CLASS_NAMES_FILE
+DEFAULT_DATASETS_LIST_FILE = "datasets_list.txt"
 
 
 def find_yaml_file(folder_path):
@@ -476,6 +479,12 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
         help="scan: обход подкаталогов source_datasets (или --datasets-path); "
         "refresh: пересканировать только data_path из существующего datasets_info.json",
     )
+    parser.add_argument(
+        "--datasets-list",
+        type=str,
+        default=None,
+        help="TXT-файл со списком путей к датасетам (по одному на строку): директории или .zip",
+    )
 
     return parser
 
@@ -525,6 +534,128 @@ def _dir_has_content(path: str) -> bool:
         for _ in it:
             return True
     return False
+
+
+def _normalize_path_for_data_path(path: str, workspace_root: Optional[str]) -> str:
+    """Возвращает path для data_path: относительный к workspace, если возможно."""
+    abs_path = os.path.abspath(os.path.expanduser(path))
+    if workspace_root:
+        try:
+            rel = os.path.relpath(abs_path, workspace_root)
+            if not rel.startswith(".."):
+                return rel
+        except Exception:
+            pass
+    return abs_path
+
+
+def _load_datasets_list_file(list_path: str) -> list[str]:
+    entries: list[str] = []
+    list_dir = os.path.dirname(list_path)
+    with open(list_path, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            expanded = os.path.expanduser(line)
+            if not os.path.isabs(expanded):
+                expanded = os.path.join(list_dir, expanded)
+            entries.append(os.path.abspath(expanded))
+    return entries
+
+
+def _unique_dataset_key(base_name: str, used_names: set[str]) -> str:
+    key = base_name or "dataset"
+    if key not in used_names:
+        used_names.add(key)
+        return key
+    idx = 2
+    while f"{key}_{idx}" in used_names:
+        idx += 1
+    unique = f"{key}_{idx}"
+    used_names.add(unique)
+    return unique
+
+
+def _zip_extract_path(temp_root: str, zip_path: str) -> str:
+    abs_zip = os.path.abspath(zip_path)
+    sig = hashlib.sha1(abs_zip.encode("utf-8")).hexdigest()[:12]
+    stem = os.path.splitext(os.path.basename(abs_zip))[0]
+    return os.path.join(temp_root, f"{stem}_{sig}")
+
+
+def _extract_zip_for_scan(zip_path: str, temp_root: str) -> str:
+    os.makedirs(temp_root, exist_ok=True)
+    out_dir = _zip_extract_path(temp_root, zip_path)
+    marker = os.path.join(out_dir, ".extract_done")
+    if os.path.isfile(marker):
+        return out_dir
+    if os.path.isdir(out_dir):
+        for root, dirs, files in os.walk(out_dir, topdown=False):
+            for f in files:
+                os.remove(os.path.join(root, f))
+            for d in dirs:
+                os.rmdir(os.path.join(root, d))
+    os.makedirs(out_dir, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(out_dir)
+    with open(marker, "w", encoding="utf-8") as f:
+        f.write("ok")
+    return out_dir
+
+
+def _append_roots_from_datasets_list(
+    *,
+    list_path: str,
+    folder_roots: list[tuple[str, str, dict]],
+    used_names: set[str],
+    use_workspace: bool,
+    layout: Optional[WorkspaceLayout],
+    output_dir: str,
+) -> None:
+    entries = _load_datasets_list_file(list_path)
+    workspace_root = layout.root if layout else None
+    for src_path in entries:
+        if not os.path.exists(src_path):
+            print(f"[WARNING] Пропуск из datasets-list: путь не найден: {src_path}")
+            continue
+
+        base_name = (
+            os.path.splitext(os.path.basename(src_path))[0]
+            if src_path.lower().endswith(".zip")
+            else os.path.basename(src_path)
+        )
+        logical_name = _unique_dataset_key(base_name, used_names)
+        data_path_value = _normalize_path_for_data_path(src_path, workspace_root)
+
+        if os.path.isdir(src_path):
+            folder_roots.append((logical_name, src_path, {"data_path": data_path_value}))
+            continue
+
+        if src_path.lower().endswith(".zip"):
+            try:
+                if use_workspace and layout:
+                    extracted = resolve_or_extract_dataset_root(
+                        layout.root,
+                        logical_name,
+                        {"data_path": data_path_value},
+                        layout.source_datasets,
+                    )
+                else:
+                    extracted = _extract_zip_for_scan(
+                        src_path,
+                        os.path.join(output_dir, "tmp", "datasets_list_extract"),
+                    )
+            except Exception as e:
+                print(f"[WARNING] Пропуск архива из datasets-list {src_path!r}: {e}")
+                continue
+            folder_roots.append((logical_name, extracted, {"data_path": data_path_value}))
+            continue
+
+        print(
+            f"[WARNING] Пропуск из datasets-list: поддерживаются только директории и .zip, "
+            f"получено: {src_path}"
+        )
 
 
 def main(argv=None):
@@ -596,10 +727,12 @@ def main(argv=None):
             print(f"[ERROR] Папка '{datasets_dir}' не найдена.")
             return
         folder_roots = []
+        used_names: set[str] = set()
         for folder_name in os.listdir(datasets_dir):
             folder_path = os.path.join(datasets_dir, folder_name)
             if os.path.isdir(folder_path):
                 folder_roots.append((folder_name, folder_path, {}))
+                used_names.add(folder_name)
             elif use_workspace and folder_name.lower().endswith(".zip"):
                 zip_path = folder_path
                 logical_name = os.path.splitext(folder_name)[0]
@@ -627,6 +760,26 @@ def main(argv=None):
                         {"data_path": os.path.relpath(zip_path, layout.root)},
                     )
                 )
+                used_names.add(logical_name)
+        if args.datasets_list:
+            list_path = os.path.abspath(os.path.expanduser(args.datasets_list))
+            if not os.path.isfile(list_path):
+                print(f"[ERROR] Не найден файл --datasets-list: {list_path}")
+                return
+        elif use_workspace:
+            auto_list = os.path.join(datasets_dir, DEFAULT_DATASETS_LIST_FILE)
+            list_path = auto_list if os.path.isfile(auto_list) else None
+        else:
+            list_path = None
+        if list_path:
+            _append_roots_from_datasets_list(
+                list_path=list_path,
+                folder_roots=folder_roots,
+                used_names=used_names,
+                use_workspace=use_workspace,
+                layout=layout,
+                output_dir=output_dir,
+            )
         datasets_info, class_names = _run_scan_folder_roots(folder_roots)
         previous_info = {}
         if os.path.isfile(output_file):

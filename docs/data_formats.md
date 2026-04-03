@@ -242,6 +242,24 @@ names:
 
 JSON файл с метаданными о всех доступных датасетах. Создаётся командой **`smartrain datasets-json`** (модуль `datasets_json_former`).
 
+### Источники датасетов для `datasets-json`
+
+По умолчанию команда сканирует подкаталоги `source_datasets/` (или путь из `--datasets-path`).
+
+Дополнительно можно передать файл списка:
+
+```bash
+smartrain datasets-json --datasets-list /abs/path/to/datasets_list.txt
+```
+
+Правила для `datasets_list.txt`:
+- одна строка = один путь к датасету;
+- поддерживаются пути к директории датасета и к архиву `.zip`;
+- пустые строки и строки-комментарии (`# ...`) игнорируются;
+- относительные пути интерпретируются относительно каталога, где лежит `datasets_list.txt`.
+
+В workspace-режиме (`smartrain datasets-json` без `--datasets-path`) файл `source_datasets/datasets_list.txt` используется автоматически, если он есть.
+
 ### Структура
 
 ```json
