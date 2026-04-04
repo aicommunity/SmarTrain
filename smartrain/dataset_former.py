@@ -4,6 +4,7 @@ import shutil
 import random
 import argparse
 import tempfile
+from datetime import datetime
 from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
@@ -21,7 +22,8 @@ from smartrain.workspace_paths import (
     CLASS_NAMES_FILE,
 )
 
-DEFAULT_OUTPUT_NAME = "merged"
+# Суффикс имени каталога по умолчанию в workspace (префикс — дата-время см. main).
+FUSION_DEFAULT_DIR_SUFFIX = "merged"
 TRAIN_PART = 0.8  # 80%
 VAL_PART = 0.1    # 10%
 TEST_PART = 0.1   # 10%
@@ -68,8 +70,9 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-name",
         type=str,
-        default=DEFAULT_OUTPUT_NAME,
-        help="Имя выходного work-датасета (подкаталог work_datasets/) при использовании workspace",
+        default=None,
+        help="Имя выходного work-датасета (подкаталог work_datasets/) в workspace; "
+        "если не задано — YYYY-MM-DD_HH-MM-SS-merged",
     )
 
     parser.add_argument(
@@ -119,6 +122,17 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         "--common-classes-only",
         action="store_true",
         help="Оставить только классы из набора (--classes или авто-объединение), присутствующие в каждом датасете группы пересечения; остальные отбрасываются с предупреждением",
+    )
+    parser.add_argument(
+        "--include-partial-datasets",
+        action="store_true",
+        help="Брать в слияние датасеты, в которых есть хотя бы один из выбранных классов "
+        "(по умолчанию требуется наличие всех выбранных классов в каждом датасете)",
+    )
+    parser.add_argument(
+        "--drop-empty-images",
+        action="store_true",
+        help="После слияния удалить в выходном каталоге пары image+label без ни одной валидной строки YOLO в .txt",
     )
     parser.add_argument(
         "--tmp-dir",
@@ -260,22 +274,96 @@ def build_merge_config(merge_args, class_names_map, selected_classes):
 
 
 def dataset_matches_selection(
-    info, class_names_map, selected_classes, merge_targets_to_sources
+    info,
+    class_names_map,
+    selected_classes,
+    merge_targets_to_sources,
+    *,
+    require_all_classes: bool = True,
 ):
+    """
+    require_all_classes=True (по умолчанию): в датасете должны быть все выбранные классы
+    (для группы --merge-classes — хотя бы один источник из каждой группы).
+    require_all_classes=False: достаточно пересечения с любым из выбранных классов.
+    """
     if "classes" not in info:
         return False
     normalized_in_ds = {_normalize_name(k, class_names_map) for k in info["classes"].keys()}
+
+    if require_all_classes:
+        for out in selected_classes:
+            out_n = _normalize_name(out, class_names_map)
+            sources = merge_targets_to_sources.get(out)
+            if sources:
+                if not (normalized_in_ds & sources):
+                    return False
+            else:
+                if out_n not in normalized_in_ds:
+                    return False
+        return True
 
     for out in selected_classes:
         out_n = _normalize_name(out, class_names_map)
         sources = merge_targets_to_sources.get(out)
         if sources:
-            if not (normalized_in_ds & sources):
-                return False
+            if normalized_in_ds & sources:
+                return True
         else:
-            if out_n not in normalized_in_ds:
-                return False
-    return True
+            if out_n in normalized_in_ds:
+                return True
+    return False
+
+
+def _label_file_has_valid_yolo_annotation(path: str) -> bool:
+    """Есть ли в файле хотя бы одна строка с целочисленным class_id (как в filter_label_file)."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                try:
+                    int(parts[0])
+                except ValueError:
+                    continue
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def prune_output_empty_label_pairs(target_dir: str) -> int:
+    """
+    Удаляет в train/valid/test пары label+image, где .txt пустой или без валидных аннотаций.
+    Возвращает число удалённых label-файлов.
+    """
+    removed = 0
+    for split in ("train", "valid", "test"):
+        labels_dir = os.path.join(target_dir, split, "labels")
+        images_dir = os.path.join(target_dir, split, "images")
+        if not os.path.isdir(labels_dir):
+            continue
+        for name in os.listdir(labels_dir):
+            if not name.endswith(".txt"):
+                continue
+            lp = os.path.join(labels_dir, name)
+            if _label_file_has_valid_yolo_annotation(lp):
+                continue
+            stem = os.path.splitext(name)[0]
+            try:
+                os.remove(lp)
+            except OSError:
+                pass
+            if os.path.isdir(images_dir):
+                for fn in os.listdir(images_dir):
+                    if os.path.splitext(fn)[0] == stem:
+                        ip = os.path.join(images_dir, fn)
+                        try:
+                            os.remove(ip)
+                        except OSError:
+                            pass
+            removed += 1
+    return removed
 
 
 def filter_label_file(
@@ -407,7 +495,15 @@ def main(argv=None):
         if args.target_path:
             target_dir = os.path.abspath(os.path.expanduser(args.target_path))
         else:
-            target_dir = os.path.join(layout.work_datasets, args.output_name)
+            raw_out = (args.output_name or "").strip()
+            if raw_out:
+                workspace_out = raw_out
+            else:
+                workspace_out = (
+                    f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}-{FUSION_DEFAULT_DIR_SUFFIX}"
+                )
+                print(f"[INFO] --output-name не задан: выходной каталог {workspace_out!r}")
+            target_dir = os.path.join(layout.work_datasets, workspace_out)
 
     json_file = os.path.join(info_dir, DATASETS_INFO_FILE)
     class_names_file = os.path.join(info_dir, CLASS_NAMES_FILE)
@@ -509,17 +605,35 @@ def main(argv=None):
         safe_mkdir(os.path.join(target_dir, split, "images"))
         safe_mkdir(os.path.join(target_dir, split, "labels"))
 
+    require_all_classes = not args.include_partial_datasets
+    if args.include_partial_datasets:
+        print(
+            "[INFO] --include-partial-datasets: в слияние входят датасеты, "
+            "у которых есть хотя бы один из выбранных классов."
+        )
+
     matching_datasets = []
     for dataset_name, info in datasets_info.items():
         if dataset_name == output_dataset_name:
             continue
         if dataset_matches_selection(
-            info, class_names_map, selected_classes, merge_targets_to_sources
+            info,
+            class_names_map,
+            selected_classes,
+            merge_targets_to_sources,
+            require_all_classes=require_all_classes,
         ):
             matching_datasets.append((dataset_name, info))
 
     if not matching_datasets:
-        print("[ERROR] Ни один датасет не содержит все выбранные классы.")
+        if require_all_classes:
+            print("[ERROR] Ни один датасет не содержит все выбранные классы.")
+            print(
+                "[INFO] Подсказка: --include-partial-datasets — брать датасеты с любым "
+                "подмножеством выбранных классов и объединять кадры со всех таких источников."
+            )
+        else:
+            print("[ERROR] Ни один датасет не пересекается с выбранными классами.")
         return
 
     print(f"[INFO] Найдено {len(matching_datasets)} подходящих датасета:")
@@ -625,9 +739,16 @@ def main(argv=None):
         if temp_ctx is not None:
             temp_ctx.cleanup()
 
+    if args.drop_empty_images:
+        pruned = prune_output_empty_label_pairs(target_dir)
+        if pruned:
+            print(f"[INFO] --drop-empty-images: удалено пар без объектов: {pruned}")
+            copied_count = max(0, copied_count - pruned)
+
     print(f"\n[DEBUG] Всего label-файлов: {total_labels}")
     print(f"[DEBUG] Отфильтровано и скопировано: {copied_count}")
-    print(f"[DEBUG] Процент используемых файлов: {copied_count / total_labels * 100:.2f}%")
+    pct = (copied_count / total_labels * 100) if total_labels else 0.0
+    print(f"[DEBUG] Процент используемых файлов: {pct:.2f}%")
 
     print(f"\n[OK] Скопировано {copied_count} изображений с фильтрованными аннотациями.")
 

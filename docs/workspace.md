@@ -10,7 +10,7 @@
 |------|------------|
 | `source_datasets/datasets_info.json` | Описание исходных датасетов |
 | `source_datasets/class_names.json` | Нормализация имён классов |
-| `work_datasets/` | Рабочие датасеты; `fusion` пишет данные в `work_datasets/<имя>/` и обновляет `work_datasets/datasets_info.json` |
+| `work_datasets/` | Рабочие датасеты; `fusion` пишет данные в `work_datasets/<имя>/` (по умолчанию `<YYYY-MM-DD_HH-MM-SS>-merged`, иначе `--output-name`) и обновляет `work_datasets/datasets_info.json` |
 | `runs/` | Прогоны обучения (`train` / `model_training_module`) |
 | `analytics/` | Сессии анализа (`analyze export-table` и др. с `--analytics-session`) |
 | `models/` | Промотированные веса (`registry models-add`, …) |

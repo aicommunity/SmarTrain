@@ -55,8 +55,10 @@ smartrain train --help
 
 ```bash
 smartrain scan
-smartrain fusion --output-name merged --classes "class_a,class_b"
-smartrain train --data merged
+smartrain fusion --classes "class_a,class_b"
+# создаётся work_datasets/YYYY-MM-DD_HH-MM-SS-merged (см. вывод [INFO])
+smartrain train --data <имя_этого_каталога>
+# фиксированное имя: smartrain fusion --output-name my_merge --classes ...
 ```
 
 Сканирование датасетов из файла со списком путей:
