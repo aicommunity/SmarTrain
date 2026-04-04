@@ -12,8 +12,8 @@ from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 CLI_HELP_CASES: list[tuple[str, list[str]]] = [
     ("deploy", ["--help"]),
-    ("datasets-json", ["--", "--help"]),
-    ("dataset-former", ["--", "--help"]),
+    ("scan", ["--", "--help"]),
+    ("fusion", ["--", "--help"]),
     ("train", ["--", "--help"]),
     ("hash", ["--", "--help"]),
     ("roi", ["--", "--help"]),

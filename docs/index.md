@@ -3,7 +3,7 @@
 ## Основные документы
 
 1. **[datasets.md](datasets.md)** — **Описание датасетов и каталога**
-   - Где находится описание конкретных наборов (`datasets_info.json` после `datasets-json`)
+   - Где находится описание конкретных наборов (`datasets_info.json` после `scan`)
    - Ссылки на структуру YOLO, аннотации, `data.yaml`, workspace
    - Как обновить метаданные датасетов
 
@@ -93,13 +93,14 @@
 
 **Хочу прочитать описание датасетов (что за наборы, классы, пути):**
 - [datasets.md](datasets.md) — навигация; итоговый каталог после сканирования: **`datasets_info.json`** (см. [формат](data_formats.md#формат-datasets_infojson))
-- Команда: `smartrain datasets-json`
+- Команда: `smartrain scan`
 
 **Хочу проанализировать датасеты:**
 - [datasets_json_former.py](api_reference.md#datasets_json_formerpy)
 - [Пример анализа](examples.md#пример-1-полный-цикл-работы-с-датасетами)
 
 **Хочу объединить датасеты:**
+- Команда: `smartrain fusion`
 - [dataset_former.py](api_reference.md#dataset_formerpy)
 - [Пример объединения](examples.md#пример-1-полный-цикл-работы-с-датасетами)
 

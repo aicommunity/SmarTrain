@@ -268,7 +268,7 @@ def _copy_and_patch_yaml(dataset_root: str, output_root: str) -> None:
 
 def _ensure_data_yaml_after_roi(output_root: str, entry: Dict[str, Any]) -> None:
     """
-    Если в источнике не было data.yaml (часто cvat11 / zip), datasets-json пропускает выход ROI.
+    Если в источнике не было data.yaml (часто cvat11 / zip), scan пропускает выход ROI.
     Пишем минимальный flat-YOLO yaml из поля classes записи datasets_info.
     """
     if find_yaml_file(output_root):
@@ -354,7 +354,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 def _resolve_catalog_dataset_key(catalog: Dict[str, Any], requested: str) -> str:
     """
     Ключ в datasets_info для zip в source_datasets задаётся без суффикса .zip
-    (как в datasets-json). Принимаем и полное имя файла архива.
+    (как в scan). Принимаем и полное имя файла архива.
     """
     if requested in catalog:
         return requested

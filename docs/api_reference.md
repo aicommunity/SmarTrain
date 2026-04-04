@@ -17,7 +17,7 @@ CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
 - `smartrain cvat export --dataset-dir <dir> [--zip-path <out.zip>] [--task-name <name>] [--names a,b,c] [--force]`
   - экспортирует плоский YOLO-датасет (`images/` + `labels/`) обратно в CVAT 1.1 zip.
 
-Примечание: `smartrain dataset-former` умеет работать с `structure="cvat11"` **нативно** (временные `.txt` метки генерируются на лету из `annotations.xml`), поэтому отдельный `smartrain cvat import` не обязателен для merge.
+Примечание: `smartrain fusion` умеет работать с `structure="cvat11"` **нативно** (временные `.txt` метки генерируются на лету из `annotations.xml`), поэтому отдельный `smartrain cvat import` не обязателен для merge.
 
 ## cli_argparse.py
 
@@ -51,6 +51,8 @@ CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
 ---
 
 ## datasets_json_former.py
+
+**CLI**: `smartrain scan`.
 
 ### Функции
 
@@ -182,6 +184,8 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 ---
 
 ## dataset_former.py
+
+**CLI**: `smartrain fusion`.
 
 ### Параметры CLI (дополнительно)
 

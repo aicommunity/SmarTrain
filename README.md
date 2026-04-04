@@ -47,22 +47,22 @@ smartrain deploy
 ```bash
 cd /path/to/my_workspace
 smartrain deploy
-smartrain datasets-json --help
+smartrain scan --help
 smartrain train --help
 ```
 
 Типовой сценарий из корня workspace (после `deploy` и заполнения `source_datasets/`):
 
 ```bash
-smartrain datasets-json
-smartrain dataset-former --output-name merged --classes "class_a,class_b"
+smartrain scan
+smartrain fusion --output-name merged --classes "class_a,class_b"
 smartrain train --data merged
 ```
 
 Сканирование датасетов из файла со списком путей:
 
 ```bash
-smartrain datasets-json --datasets-list /data/MarsSmarTrain/source_datasets/datasets_list.txt
+smartrain scan --datasets-list /data/MarsSmarTrain/source_datasets/datasets_list.txt
 ```
 
 Формат `datasets_list.txt`: один путь на строку (поддерживаются директории и `.zip`), строки с `#` и пустые игнорируются. Относительные пути интерпретируются относительно директории самого list-файла.
@@ -74,8 +74,8 @@ smartrain datasets-json --datasets-list /data/MarsSmarTrain/source_datasets/data
 | Команда | Назначение |
 |---------|------------|
 | `deploy` | Создать структуру workspace (Typer; свой `--help`) |
-| `datasets-json` | Сканирование `source_datasets` → `datasets_info.json` / `class_names.json` |
-| `dataset-former` | Сборка объединённого work-датасета в `work_datasets/` |
+| `scan` | Сканирование `source_datasets` → `datasets_info.json` / `class_names.json` / `datasets_scan_summary.json` |
+| `fusion` | Сборка объединённого work-датасета в `work_datasets/` |
 | `train` | Обучение YOLO (`model_training_module`) |
 | `hash` | Хеш датасета по файлам и размерам |
 | `roi` | Кроп датасета по ROI (Ultralytics) |

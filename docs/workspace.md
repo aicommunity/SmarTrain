@@ -1,6 +1,6 @@
 # Единый workspace
 
-Корень задаётся **`--workspace`** (глобальная опция Typer у `smartrain`) или переменной **`SMART_TRAIN_WORKSPACE`**. В коде модулей при вызове `resolve_workspace_root()` **непустой** аргумент CLI перекрывает env; если оба пусты — **ValueError** (кроме сценариев без workspace, например legacy-пути у `dataset-former`).
+Корень задаётся **`--workspace`** (глобальная опция Typer у `smartrain`) или переменной **`SMART_TRAIN_WORKSPACE`**. В коде модулей при вызове `resolve_workspace_root()` **непустой** аргумент CLI перекрывает env; если оба пусты — **ValueError** (кроме сценариев без workspace, например legacy-пути у `fusion`).
 
 При запуске CLI, если переменная окружения не задана, Typer может выставить **`SMART_TRAIN_WORKSPACE`** в текущий каталог — см. [`smartrain/cli.py`](../smartrain/cli.py).
 
@@ -10,7 +10,7 @@
 |------|------------|
 | `source_datasets/datasets_info.json` | Описание исходных датасетов |
 | `source_datasets/class_names.json` | Нормализация имён классов |
-| `work_datasets/` | Рабочие датасеты; `dataset-former` пишет данные в `work_datasets/<имя>/` и обновляет `work_datasets/datasets_info.json` |
+| `work_datasets/` | Рабочие датасеты; `fusion` пишет данные в `work_datasets/<имя>/` и обновляет `work_datasets/datasets_info.json` |
 | `runs/` | Прогоны обучения (`train` / `model_training_module`) |
 | `analytics/` | Сессии анализа (`analyze export-table` и др. с `--analytics-session`) |
 | `models/` | Промотированные веса (`registry models-add`, …) |

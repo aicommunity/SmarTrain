@@ -97,30 +97,30 @@ def _dispatch_argparse_help(
 
 
 @app.command(
-    "datasets-json",
+    "scan",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
 )
-def cmd_datasets_json(ctx: typer.Context) -> None:
-    """Сканирование source_datasets → datasets_info.json (бывш. datasets_json_former)."""
+def cmd_scan(ctx: typer.Context) -> None:
+    """Сканирование source_datasets → datasets_info.json / class_names.json / datasets_scan_summary.json."""
     if _ctx_has_help_flag(ctx):
         from smartrain.datasets_json_former import build_datasets_json_arg_parser
 
-        _dispatch_argparse_help(ctx, build_datasets_json_arg_parser, "smartrain datasets-json")
+        _dispatch_argparse_help(ctx, build_datasets_json_arg_parser, "smartrain scan")
     _call("smartrain.datasets_json_former", "main", ctx)
 
 
 @app.command(
-    "dataset-former",
+    "fusion",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
 )
-def cmd_dataset_former(ctx: typer.Context) -> None:
-    """Сборка work-датасета (бывш. dataset_former)."""
+def cmd_fusion(ctx: typer.Context) -> None:
+    """Сборка объединённого work-датасета (модуль dataset_former)."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_former import build_dataset_former_arg_parser
 
-        _dispatch_argparse_help(ctx, build_dataset_former_arg_parser, "smartrain dataset-former")
+        _dispatch_argparse_help(ctx, build_dataset_former_arg_parser, "smartrain fusion")
     _call("smartrain.dataset_former", "main", ctx)
 
 

@@ -1,7 +1,7 @@
 # Пример с workspace (задайте свой путь):
 # export SMART_TRAIN_WORKSPACE=/path/to/workspace
 # python3 datasets_json_former.py --workspace "$SMART_TRAIN_WORKSPACE"
-# python3 dataset_former.py --workspace "$SMART_TRAIN_WORKSPACE" --classes "glasses, vest"
+# smartrain fusion --workspace "$SMART_TRAIN_WORKSPACE" --classes "glasses, vest"
 # python3 model_training_module.py --workspace "$SMART_TRAIN_WORKSPACE" --data merged --model yolov8l --epochs 2 -y
 # python3 model_training_module.py --workspace "$SMART_TRAIN_WORKSPACE" --data merged --model yolov8n --epochs 1 -y
 

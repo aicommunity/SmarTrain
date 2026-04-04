@@ -240,16 +240,16 @@ names:
 
 ## Формат datasets_info.json
 
-JSON файл с метаданными о всех доступных датасетах. Создаётся командой **`smartrain datasets-json`** (модуль `datasets_json_former`).
+JSON файл с метаданными о всех доступных датасетах. Создаётся командой **`smartrain scan`** (модуль `datasets_json_former`).
 
-### Источники датасетов для `datasets-json`
+### Источники датасетов для `scan`
 
 По умолчанию команда сканирует подкаталоги `source_datasets/` (или путь из `--datasets-path`).
 
 Дополнительно можно передать файл списка:
 
 ```bash
-smartrain datasets-json --datasets-list /abs/path/to/datasets_list.txt
+smartrain scan --datasets-list /abs/path/to/datasets_list.txt
 ```
 
 Правила для `datasets_list.txt`:
@@ -258,7 +258,7 @@ smartrain datasets-json --datasets-list /abs/path/to/datasets_list.txt
 - пустые строки и строки-комментарии (`# ...`) игнорируются;
 - относительные пути интерпретируются относительно каталога, где лежит `datasets_list.txt`.
 
-В workspace-режиме (`smartrain datasets-json` без `--datasets-path`) файл `source_datasets/datasets_list.txt` используется автоматически, если он есть.
+В workspace-режиме (`smartrain scan` без `--datasets-path`) файл `source_datasets/datasets_list.txt` используется автоматически, если он есть.
 
 Каждый успешный прогон перезаписывает `datasets_info.json` и `class_names.json` **только** по фактически найденным датасетам (каталоги в родительской папке + записи из списка). Рядом создаётся/обновляется **`datasets_scan_summary.json`**:
 
@@ -320,7 +320,7 @@ smartrain datasets-json --datasets-list /abs/path/to/datasets_list.txt
 - `"subset_flat"` - `images/<подпапка>/` и `labels/<подпапка>/` (см. выше)
 - `"nested_split"` - вложенное разделение
 - `"darknet"` - формат Darknet
-- `"cvat11"` - распакованный экспорт CVAT 1.1: `annotations.xml` рядом с папкой `images/` (формат Images + bbox). Поддерживается нативно в `datasets-json` и `dataset-former` (в merge используются временные YOLO `.txt`, генерируемые из XML).
+- `"cvat11"` - распакованный экспорт CVAT 1.1: `annotations.xml` рядом с папкой `images/` (формат Images + bbox). Поддерживается нативно в `scan` и `fusion` (в merge используются временные YOLO `.txt`, генерируемые из XML).
 
 #### `elements_count`
 Количество элементов (изображений/аннотаций) в датасете:
@@ -454,7 +454,7 @@ JSON файл для нормализации имен классов между
 
 ### Использование
 
-Файл используется модулем `dataset_former` / командой **`smartrain dataset-former`** при объединении датасетов для приведения имён классов к единому виду перед фильтрацией.
+Файл используется модулем `dataset_former` / командой **`smartrain fusion`** при объединении датасетов для приведения имён классов к единому виду перед фильтрацией.
 
 ---
 
@@ -482,7 +482,7 @@ smartrain <подкоманда> [аргументы...]
 
 ```
 # Создание объединённого датасета
-smartrain dataset-former --target-path /path/to/output --classes "helmet,vest"
+smartrain fusion --target-path /path/to/output --classes "helmet,vest"
 
 # Обучение
 smartrain train --data /path/to/dataset --model yolov8n --epochs 50 -y
@@ -511,7 +511,7 @@ smartrain train --data /path/to/dataset --model yolov8s --epochs 100 -y
 ### Пример
 
 ```
-smartrain dataset-former --target-path /path/to/output --classes "helmet,vest" | Выполнено
+smartrain fusion --target-path /path/to/output --classes "helmet,vest" | Выполнено
 smartrain train --data /path/to/dataset --model yolov8n --epochs 50 | Выполняется
 smartrain train --data /path/to/dataset --model yolov8s --epochs 100 | Ждет выполнения
 ```

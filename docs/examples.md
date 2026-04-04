@@ -13,7 +13,7 @@
 
 Запустите анализ:
 ```bash
-smartrain datasets-json --datasets-path /data/datasets --output-path .
+smartrain scan --datasets-path /data/datasets --output-path .
 ```
 
 Результат: созданы файлы `datasets_info.json` и `class_names.json` в текущей директории.
@@ -40,7 +40,7 @@ smartrain datasets-json --datasets-path /data/datasets --output-path .
 
 Создайте датасет только с классами `helmet` и `gloves`:
 ```bash
-smartrain dataset-former \
+smartrain fusion \
     --source-path /data/datasets \
     --target-path /data/merged_helmet_gloves \
     --classes "helmet,gloves" \
@@ -74,7 +74,7 @@ smartrain train \
 ### Создание датасета с полным набором СИЗ
 
 ```bash
-smartrain dataset-former \
+smartrain fusion \
     --classes "helmet,gloves,vest,boots,goggles,mask" \
     --target-path /data/full_ppe_dataset \
     --exclude-test
@@ -117,7 +117,7 @@ smartrain train \
 
 ```
 # Шаг 1: Создание датасета
-smartrain dataset-former --classes "helmet,vest" --target-path /data/helmet_vest_dataset
+smartrain fusion --classes "helmet,vest" --target-path /data/helmet_vest_dataset
 
 # Шаг 2: Обучение yolov8n
 smartrain train --data /data/helmet_vest_dataset --model yolov8n --epochs 50
@@ -156,10 +156,10 @@ darknet_dataset/
 └── obj.data
 ```
 
-Команда **`smartrain datasets-json`** (модуль `datasets_json_former`) автоматически определит структуру:
+Команда **`smartrain scan`** (модуль `datasets_json_former`) автоматически определит структуру:
 
 ```bash
-smartrain datasets-json --datasets-path /path/to/darknet_dataset
+smartrain scan --datasets-path /path/to/darknet_dataset
 ```
 
 Результат в `datasets_info.json`:
@@ -211,7 +211,7 @@ dataset/
 Скрипты автоматически определяют структуру и обрабатывают ее корректно:
 
 ```bash
-smartrain datasets-json --datasets-path /path/to/dataset
+smartrain scan --datasets-path /path/to/dataset
 ```
 
 Результат:
@@ -246,7 +246,7 @@ smartrain datasets-json --datasets-path /path/to/dataset
 При создании объединенного датасета все варианты будут нормализованы:
 
 ```bash
-smartrain dataset-former --classes "helmet" --target-path /data/helmet_only
+smartrain fusion --classes "helmet" --target-path /data/helmet_only
 ```
 
 Все три варианта будут объединены в один класс `helmet`.
@@ -298,7 +298,7 @@ smartrain train --data /data/dataset --model yolov11n --epochs 50 --batch 16
 
 ```bash
 # Если вы находитесь в /home/user/project
-smartrain dataset-former \
+smartrain fusion \
     --source-path ./datasets \
     --target-path ./output/merged \
     --classes "helmet,gloves"
@@ -307,7 +307,7 @@ smartrain dataset-former \
 Или использовать абсолютные пути для большей надежности:
 
 ```bash
-smartrain dataset-former \
+smartrain fusion \
     --source-path /home/user/project/datasets \
     --target-path /home/user/project/output/merged \
     --classes "helmet,gloves"
@@ -320,7 +320,7 @@ smartrain dataset-former \
 ### Ошибка: Датасет не найден
 
 ```bash
-$ smartrain datasets-json --datasets-path /wrong/path
+$ smartrain scan --datasets-path /wrong/path
 [ERROR] Папка '/wrong/path' не найдена.
 ```
 
@@ -329,7 +329,7 @@ $ smartrain datasets-json --datasets-path /wrong/path
 ### Ошибка: Классы не найдены
 
 ```bash
-$ smartrain dataset-former --classes "nonexistent_class"
+$ smartrain fusion --classes "nonexistent_class"
 [ERROR] Ни один датасет не содержит все выбранные классы.
 ```
 
@@ -385,7 +385,7 @@ results[0].show()
 Итоговые имена классов в `--classes`; `--merge-classes` задаёт соответствие «несколько исходных → одно имя из --classes»:
 
 ```bash
-smartrain dataset-former \
+smartrain fusion \
     --source-path /data/datasets \
     --target-path /data/merged_head \
     --classes "head_ppe,vest" \
@@ -416,11 +416,11 @@ CLASSES="helmet,gloves,vest"
 
 # Шаг 1: Анализ датасетов
 echo "Анализ датасетов..."
-smartrain datasets-json --datasets-path $DATASETS_PATH
+smartrain scan --datasets-path $DATASETS_PATH
 
 # Шаг 2: Создание объединенного датасета
 echo "Создание объединенного датасета..."
-smartrain dataset-former \
+smartrain fusion \
     --source-path $DATASETS_PATH \
     --target-path $OUTPUT_PATH/merged \
     --classes $CLASSES
