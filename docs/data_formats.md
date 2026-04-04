@@ -260,6 +260,28 @@ smartrain datasets-json --datasets-list /abs/path/to/datasets_list.txt
 
 В workspace-режиме (`smartrain datasets-json` без `--datasets-path`) файл `source_datasets/datasets_list.txt` используется автоматически, если он есть.
 
+Каждый успешный прогон перезаписывает `datasets_info.json` и `class_names.json` **только** по фактически найденным датасетам (каталоги в родительской папке + записи из списка). Рядом создаётся/обновляется **`datasets_scan_summary.json`**:
+
+```json
+{
+  "generated_at": "2026-04-04T12:00:00+00:00",
+  "datasets": {
+    "final": ["имя1", "имя2"],
+    "count": 2,
+    "added": ["имя2"],
+    "removed": []
+  },
+  "class_names": {
+    "final": ["cat", "dog"],
+    "count": 2,
+    "added": ["dog"],
+    "removed": []
+  }
+}
+```
+
+Поля `added` / `removed` сравнивают результат с содержимым **предыдущих** `datasets_info.json` и `class_names.json` на диске до записи.
+
 ### Структура
 
 ```json
@@ -329,7 +351,7 @@ smartrain datasets-json --datasets-list /abs/path/to/datasets_list.txt
     "conf": 0.25,
     "pad_px": 32,
     "class_ids": null,
-    "roi_policy": "union"
+    "roi_policy": "largest"
 }
 ```
 
@@ -338,13 +360,25 @@ smartrain datasets-json --datasets-list /abs/path/to/datasets_list.txt
 - `conf`: порог уверенности инференса.
 - `pad_px`: расширение прямоугольника ROI на столько пикселей с каждой стороны (перед зажатием в границы кадра).
 - `class_ids`: `null` — учитываются все классы модели; иначе массив целых id классов модели, по которым строится ROI.
-- `roi_policy`:
-  - `union` — один кроп по объединённому AABB всех отфильтрованных боксов;
+- `roi_policy` (если не задан ни в JSON, ни в CLI — по умолчанию **`largest`**):
   - `largest` — кроп по боксу максимальной площади;
+  - `union` — один кроп по объединённому AABB всех отфильтрованных боксов;
   - `best_conf` — кроп по боксу с максимальным `conf`;
   - `per_box` — отдельное изображение и файл меток на каждый бокс; имена: `{stem}_split_1`, `{stem}_split_2`, …
 
-Путь к `datasets_info.json`: каталог **рядом с папкой датасета** (тот же родитель, что и `{dataset_name}`). Запуск:
+**Основной режим (workspace):** корень данных берётся из записи в `source_datasets/datasets_info.json` через `data_path` (включая `.zip` и пути из `datasets_list.txt`); физическая папка `source_datasets/<ключ>` не обязательна.
+
+```bash
+export SMART_TRAIN_WORKSPACE=/path/to/workspace
+smartrain roi \
+  --dataset-name MyDataset \
+  --weights /path/to/model.onnx
+# --output-path по умолчанию: source_datasets/MyDataset_roi
+```
+
+Имя датасета — **ключ** из `datasets_info.json` (для архива в `source_datasets` это имя файла **без** `.zip`). Допустимо передать и имя с `.zip`: команда сопоставит его с ключом без расширения.
+
+**Legacy:** каталог датасета лежит в `{source-path}/{dataset-name}/`, JSON рядом:
 
 ```bash
 smartrain roi \
@@ -354,7 +388,7 @@ smartrain roi \
   [--datasets-info-path /data/datasets_parent]
 ```
 
-Если задан `--datasets-info-path`, он должен быть тем же родителем, что и `--source-path`, в котором лежит `{dataset_name}` (проверяется совпадение каталогов). Файл метаданных: `{parent}/datasets_info.json`.
+Если задан `--datasets-info-path` в legacy-режиме, он должен быть тем же родителем, что и `--source-path`, в котором лежит `{dataset_name}`. Файл метаданных: `{parent}/datasets_info.json` или явный путь к файлу.
 
 Поведение при отсутствии детекций: `--on-empty full_image` (по умолчанию — копия всего кадра и пересчёт меток), `skip` — не писать эту пару в выход, `fail` — завершение с ошибкой.
 

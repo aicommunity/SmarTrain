@@ -4,17 +4,19 @@ import shutil
 import random
 import argparse
 import tempfile
-from pathlib import Path
 from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
-from smartrain.datasets_json_former import yolo_flat_image_label_buckets
-from smartrain.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted, YOLO_IMAGE_EXTS
+from smartrain.cvat11_converter import YOLO_IMAGE_EXTS
+from smartrain.dataset_access import (
+    find_dataset_paths,
+    iter_image_label_buckets,
+    resolve_dataset_root_for_entry,
+)
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,
-    resolve_or_extract_dataset_root,
     DATASETS_INFO_FILE,
     CLASS_NAMES_FILE,
 )
@@ -49,56 +51,6 @@ def _unique_merge_stem(dataset_name, src_image_path, used_stems):
             used_stems.add(cand)
             return cand
         n += 1
-
-
-def find_dataset_paths(dataset_path, structure, arg=False):
-    paths = []
-    dataset_splitting = ["train", "val"] if arg else ["train", "val", "test"]
-    if structure == "split":
-        for subset in dataset_splitting:
-            subdir = os.path.join(dataset_path, subset)
-            if os.path.exists(os.path.join(subdir, "images")) and os.path.exists(os.path.join(subdir, "labels")):
-                paths.append((os.path.join(subdir, "images"), os.path.join(subdir, "labels")))
-    elif structure in ("flat", "subset_flat"):
-        buckets = yolo_flat_image_label_buckets(dataset_path)
-        if buckets:
-            paths.extend(buckets)
-        elif os.path.exists(os.path.join(dataset_path, "images")) and os.path.exists(
-            os.path.join(dataset_path, "labels")
-        ):
-            paths.append((os.path.join(dataset_path, "images"), os.path.join(dataset_path, "labels")))
-    elif structure == "nested_split":
-        for subset in dataset_splitting:
-            img_dir = os.path.join(dataset_path, "images", subset)
-            lbl_dir = os.path.join(dataset_path, "labels", subset)
-            if os.path.exists(img_dir) and os.path.exists(lbl_dir):
-                paths.append((img_dir, lbl_dir))
-    elif structure == "darknet":
-        obj_train_data_path = os.path.join(dataset_path, "obj_train_data")
-        if os.path.exists(obj_train_data_path):
-            # Для Darknet формата изображения и аннотации в одной папке
-            paths.append((obj_train_data_path, obj_train_data_path))
-    return paths
-
-
-def _cvat11_temp_bucket(dataset_root: str, dataset_name: str, info: dict, temp_root: str) -> tuple[str, str]:
-    """
-    Создает временные YOLO-labels из CVAT 1.1 extracted dataset и возвращает (images_dir, labels_dir).
-    dataset_root: корень датасета (как в datasets_info data_path resolve)
-    temp_root: каталог для временных меток (обычно внутри workspace/tmp)
-    """
-    if "classes" not in info or not isinstance(info["classes"], dict):
-        raise ValueError(f"{dataset_name!r}: нет classes для cvat11 в datasets_info.json")
-    class_map: dict = info["classes"]
-    labels_out = Path(temp_root) / "cvat11_labels" / dataset_name
-    if labels_out.exists():
-        shutil.rmtree(labels_out)
-    images_dir, _images_found, _labels_written = generate_temp_yolo_labels_from_cvat11_extracted(
-        dataset_root=Path(dataset_root),
-        labels_out_dir=labels_out,
-        class_name_to_id={str(k): int(v) for k, v in class_map.items()},
-    )
-    return str(images_dir), str(labels_out)
 
 
 def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
@@ -381,25 +333,6 @@ def filter_label_file(
     return False
 
 
-def _dataset_root_for_merge(
-    dataset_name: str,
-    info: dict,
-    workspace_root: str | None,
-    source_catalog_dir: str,
-    legacy_source_parent: str,
-) -> str:
-    if workspace_root is not None:
-        return resolve_or_extract_dataset_root(workspace_root, dataset_name, info, source_catalog_dir)
-    if "data_path" in info:
-        raw = info["data_path"]
-        if not isinstance(raw, str):
-            raise TypeError(f"data_path для {dataset_name!r} должен быть строкой.")
-        if os.path.isabs(raw):
-            return os.path.abspath(raw)
-        return os.path.abspath(os.path.join(legacy_source_parent, os.path.normpath(raw)))
-    return os.path.join(legacy_source_parent, dataset_name)
-
-
 def _update_work_datasets_sidecar(
     layout: WorkspaceLayout,
     output_key: str,
@@ -593,8 +526,8 @@ def main(argv=None):
     for name, _ in matching_datasets:
         print(f"   - {name}")
 
-    cvat11_buckets: dict[str, tuple[str, str]] = {}
     temp_ctx = None
+    buckets_by_dataset: dict[str, list[tuple[str, str]]] = {}
     if args.tmp_dir:
         temp_root = os.path.abspath(os.path.expanduser(args.tmp_dir))
         os.makedirs(temp_root, exist_ok=True)
@@ -614,19 +547,23 @@ def main(argv=None):
             if "structure" not in info:
                 print(f"[ERROR] В записи {dataset_name!r} нет поля structure.")
                 return
-            dataset_path = _dataset_root_for_merge(
+            dataset_path = resolve_dataset_root_for_entry(
                 dataset_name,
                 info,
-                workspace_root,
-                layout.source_datasets if layout else source_dir,
-                source_dir,
+                workspace_root=workspace_root,
+                source_catalog_dir=layout.source_datasets if layout else source_dir,
+                legacy_source_parent=source_dir,
             )
-            if info["structure"] == "cvat11":
-                img_p, lbl_p = _cvat11_temp_bucket(dataset_path, dataset_name, info, temp_root)
-                cvat11_buckets[dataset_name] = (img_p, lbl_p)
-                total_labels += len([f for f in os.listdir(lbl_p) if f.endswith(".txt")])
-                continue
-            for _, labels_path in find_dataset_paths(dataset_path, info["structure"], args.exclude_test):
+            buckets = iter_image_label_buckets(
+                dataset_path,
+                info["structure"],
+                info,
+                dataset_name=dataset_name,
+                temp_root=temp_root,
+                exclude_test=args.exclude_test,
+            )
+            buckets_by_dataset[dataset_name] = buckets
+            for _, labels_path in buckets:
                 total_labels += len([f for f in os.listdir(labels_path) if f.endswith(".txt")])
 
         used_stems = {split: set() for split in ("train", "valid", "test")}
@@ -634,21 +571,7 @@ def main(argv=None):
 
         with tqdm(total=total_labels, desc="Обработка датасетов", unit="файл") as pbar:
             for dataset_name, info in matching_datasets:
-                dataset_path = _dataset_root_for_merge(
-                    dataset_name,
-                    info,
-                    workspace_root,
-                    layout.source_datasets if layout else source_dir,
-                    source_dir,
-                )
-
-                if info["structure"] == "cvat11":
-                    buckets = [cvat11_buckets.get(dataset_name)] if dataset_name in cvat11_buckets else [
-                        _cvat11_temp_bucket(dataset_path, dataset_name, info, temp_root)
-                    ]
-                else:
-                    buckets = list(find_dataset_paths(dataset_path, info["structure"], args.exclude_test))
-
+                buckets = buckets_by_dataset[dataset_name]
                 for images_path, labels_path in buckets:
 
                     pairs = []

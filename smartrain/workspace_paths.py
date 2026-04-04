@@ -14,6 +14,7 @@ WORKSPACE_ENV_VAR = "SMART_TRAIN_WORKSPACE"
 
 DATASETS_INFO_FILE = "datasets_info.json"
 CLASS_NAMES_FILE = "class_names.json"
+DATASETS_SCAN_SUMMARY_FILE = "datasets_scan_summary.json"
 WORKSPACE_QUEUE_BASENAME = "queue.txt"
 
 

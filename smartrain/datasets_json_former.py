@@ -5,7 +5,8 @@ import sys
 import argparse
 import hashlib
 import zipfile
-from typing import Any, Dict, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set, Tuple
 import xml.etree.ElementTree as ET
 
 from smartrain.cli_argparse import CliArgumentParser
@@ -16,6 +17,7 @@ from smartrain.workspace_paths import (
     resolve_or_extract_dataset_root,
     DATASETS_INFO_FILE,
     CLASS_NAMES_FILE,
+    DATASETS_SCAN_SUMMARY_FILE,
 )
 
 
@@ -497,6 +499,73 @@ def parse_args(argv=None):
 _PRESERVED_DATASET_INFO_KEYS = ("roi_auto", "tags", "data_path")
 
 
+def _sorted_diff(old: Set[str], new: Set[str]) -> Tuple[List[str], List[str]]:
+    added = sorted(new - old)
+    removed = sorted(old - new)
+    return added, removed
+
+
+def _write_scan_summary(
+    *,
+    output_dir: str,
+    datasets_final: Dict[str, Any],
+    class_names_final: Dict[str, Any],
+    datasets_added: List[str],
+    datasets_removed: List[str],
+    class_names_added: List[str],
+    class_names_removed: List[str],
+) -> str:
+    """Пишет datasets_scan_summary.json; возвращает путь к файлу."""
+    path = os.path.join(output_dir, DATASETS_SCAN_SUMMARY_FILE)
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "datasets": {
+            "final": sorted(datasets_final.keys()),
+            "count": len(datasets_final),
+            "added": datasets_added,
+            "removed": datasets_removed,
+        },
+        "class_names": {
+            "final": sorted(class_names_final.keys()),
+            "count": len(class_names_final),
+            "added": class_names_added,
+            "removed": class_names_removed,
+        },
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return path
+
+
+def _print_scan_report(
+    *,
+    summary_path: str,
+    datasets_added: List[str],
+    datasets_removed: List[str],
+    class_names_added: List[str],
+    class_names_removed: List[str],
+    datasets_final_count: int,
+    class_names_final_count: int,
+    had_previous_datasets: bool,
+    had_previous_class_names: bool,
+) -> None:
+    print(f"[INFO] Итоговых датасетов в {OUTPUT_FILE}: {datasets_final_count}")
+    if datasets_added:
+        print(f"[INFO] Добавлены датасеты ({len(datasets_added)}): {', '.join(datasets_added)}")
+    if datasets_removed:
+        print(f"[INFO] Исключены из каталога ({len(datasets_removed)}): {', '.join(datasets_removed)}")
+    if not datasets_added and not datasets_removed and had_previous_datasets:
+        print("[INFO] Состав датасетов относительно прошлого файла не изменился.")
+    print(f"[INFO] Итоговых имён классов в {OUTPUT_CLASS_NAMES_FILE}: {class_names_final_count}")
+    if class_names_added:
+        print(f"[INFO] Новые имена классов ({len(class_names_added)}): {', '.join(class_names_added)}")
+    if class_names_removed:
+        print(f"[INFO] Удалённые имена классов ({len(class_names_removed)}): {', '.join(class_names_removed)}")
+    if not class_names_added and not class_names_removed and had_previous_class_names:
+        print("[INFO] Состав class_names относительно прошлого файла не изменился.")
+    print(f"[OK] Сводка сохранена: {summary_path}")
+
+
 def _merge_preserved_dataset_fields(fresh: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Дополняет свежую запись из скана полями roi_auto/tags из старого datasets_info.json."""
     if not previous:
@@ -795,12 +864,32 @@ def main(argv=None):
                 datasets_info[name], previous_info[name]
             )
 
+    old_ds_keys: Set[str] = set()
+    if isinstance(previous_info, dict):
+        old_ds_keys = {str(k) for k in previous_info.keys()}
+    new_ds_keys = set(datasets_info.keys())
+    ds_added, ds_removed = _sorted_diff(old_ds_keys, new_ds_keys)
+
+    previous_cn_keys: Set[str] = set()
+    if os.path.isfile(output_class_names_file):
+        try:
+            with open(output_class_names_file, "r", encoding="utf-8") as f:
+                prev_cn = json.load(f)
+            if isinstance(prev_cn, dict):
+                previous_cn_keys = set(prev_cn.keys())
+        except Exception as e:
+            print(f"[WARNING] Не удалось прочитать прежний {OUTPUT_CLASS_NAMES_FILE} для сводки: {e}")
+
+    new_cn_keys = set(class_names.keys())
+    cn_added, cn_removed = _sorted_diff(previous_cn_keys, new_cn_keys)
+
     try:
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(datasets_info, f, ensure_ascii=False, indent=4)
         print(f"[OK] Информация успешно сохранена в {output_file}")
     except Exception as e:
         print(f"[ERROR] Не удалось записать JSON: {e}")
+        return
 
     try:
         with open(output_class_names_file, "w", encoding="utf-8") as f:
@@ -808,6 +897,28 @@ def main(argv=None):
         print(f"[OK] Информация успешно сохранена в {output_class_names_file}")
     except Exception as e:
         print(f"[ERROR] Не удалось записать JSON: {e}")
+        return
+
+    summary_path = _write_scan_summary(
+        output_dir=output_dir,
+        datasets_final=datasets_info,
+        class_names_final=class_names,
+        datasets_added=ds_added,
+        datasets_removed=ds_removed,
+        class_names_added=cn_added,
+        class_names_removed=cn_removed,
+    )
+    _print_scan_report(
+        summary_path=summary_path,
+        datasets_added=ds_added,
+        datasets_removed=ds_removed,
+        class_names_added=cn_added,
+        class_names_removed=cn_removed,
+        datasets_final_count=len(datasets_info),
+        class_names_final_count=len(class_names),
+        had_previous_datasets=bool(old_ds_keys),
+        had_previous_class_names=bool(previous_cn_keys),
+    )
 
 
 if __name__ == "__main__":

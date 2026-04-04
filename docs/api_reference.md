@@ -175,7 +175,9 @@ CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
 
 CLI: кроп датасета по ROI модели Ultralytics (detect/segment), пересчёт нормализованных меток. Подробности и формат `roi_auto` — в [data_formats.md](data_formats.md#опциональные-поля-не-перезаписываются-сканером).
 
-**Основные аргументы**: `--dataset-name`, `--source-path` (родитель каталога `{dataset_name}`), `--output-path`, опционально `--datasets-info-path` (тот же родитель, что и у папки датасета), переопределения `--weights`, `--conf`, `--pad-px`, `--roi-policy`, `--mode`, `--on-empty`, `--require-roi-auto`.
+**Основные аргументы (workspace, предпочтительно)**: `--dataset-name` (ключ в `source_datasets/datasets_info.json`), `--workspace` / `SMART_TRAIN_WORKSPACE`, опционально `--output-path` (по умолчанию `source_datasets/<dataset-name>_roi`), `--tmp-dir`, `--datasets-info-path` (файл или каталог с JSON), переопределения `--weights`, `--conf`, `--pad-px`, `--roi-policy`, `--mode`, `--on-empty`, `--require-roi-auto`.
+
+**Legacy**: `--source-path`, обязательный `--output-path`, прежняя проверка `{source-path}/{dataset-name}/`.
 
 ---
 
@@ -196,15 +198,13 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 ---
 
-#### `find_dataset_paths(dataset_path: str, structure: str, arg: bool = False) -> list[tuple[str, str]]`
-Находит пути к изображениям и аннотациям в зависимости от структуры датасета.
+#### `find_dataset_paths` / `iter_image_label_buckets` — модуль `dataset_access.py`
 
-**Параметры**:
-- `dataset_path` - путь к датасету
-- `structure` - тип структуры датасета
-- `arg` - если `True`, исключает test из поиска
+`find_dataset_paths(dataset_path, structure, arg=False)` — пары `(images, labels)` для YOLO-раскладок (без `cvat11`).
 
-**Возвращает**: Список кортежей `(путь_к_изображениям, путь_к_аннотациям)`
+`iter_image_label_buckets(..., dataset_name, temp_root, exclude_test)` — то же для всех `structure`, включая `cvat11` (временные `.txt` в `temp_root`).
+
+Реэкспорт `find_dataset_paths` из `dataset_former` сохранён для обратной совместимости.
 
 ---
 
@@ -347,11 +347,16 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 ## dataset_hash.py
 
 ### CLI
-- Позиционный аргумент: путь к датасету
+- Ровно один из: позиционный путь к каталогу датасета, `--work-dataset`, `--source-dataset`
+- `--workspace` / `SMART_TRAIN_WORKSPACE` для `--work-dataset` и `--source-dataset`
+- `--hash-zip-metadata` — для `.zip` в `data_path`: хеш по пути/размеру/mtime без распаковки
 - `--validate <hash>` — код выхода `0` при совпадении, `1` при расхождении, `2` при ошибке
 
 ### `calculate_dataset_hash(dataset_path: str) -> str`
 Первые 8 символов MD5 по структуре, именам и размерам файлов.
+
+### `calculate_zip_metadata_hash(zip_path: str) -> str`
+Хеш метаданных архива (без обхода содержимого).
 
 ---
 

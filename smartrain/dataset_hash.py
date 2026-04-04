@@ -9,6 +9,8 @@ from smartrain.workspace_paths import (
     DATASETS_INFO_FILE,
     WorkspaceLayout,
     resolve_dataset_root,
+    resolve_or_extract_dataset_root,
+    resolve_path_under_workspace,
     resolve_workspace_root,
 )
 
@@ -97,15 +99,57 @@ def calculate_dataset_hash(dataset_path):
     return hasher.hexdigest()[:8]
 
 
+def calculate_zip_metadata_hash(zip_path: str) -> str:
+    """Хеш по абсолютному пути, размеру и mtime_ns архива (без распаковки)."""
+    ap = os.path.abspath(zip_path)
+    st = os.stat(ap)
+    hasher = hashlib.md5()
+    hasher.update(ap.encode("utf-8"))
+    hasher.update(b":")
+    hasher.update(str(st.st_size).encode("utf-8"))
+    hasher.update(b":")
+    hasher.update(str(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))).encode("utf-8"))
+    return hasher.hexdigest()[:8]
+
+
 def resolve_hash_dataset_root(
     workspace_cli: str | None,
     dataset_path_pos: str | None,
     work_dataset: str | None,
-) -> str:
+    source_dataset: str | None,
+    *,
+    hash_zip_metadata: bool,
+) -> tuple[str, bool]:
     """
-    Корень датасета для хеша: явный путь или резолв по имени записи work_datasets
-    (как resolve_training_data_path в model_training_module, без импорта Ultralytics).
+    Возвращает (путь_к_корню_или_zip, metadata_only).
+    Если metadata_only, путь — к .zip, хеш считать через calculate_zip_metadata_hash.
     """
+    if source_dataset is not None and str(source_dataset).strip():
+        name = str(source_dataset).strip()
+        root_ws = resolve_workspace_root(workspace_cli)
+        layout = WorkspaceLayout(root_ws)
+        info_path = layout.source_datasets_info_path()
+        if not os.path.isfile(info_path):
+            raise FileNotFoundError(f"Не найден {info_path}.")
+        with open(info_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+        if not isinstance(catalog, dict):
+            raise ValueError(f"{info_path}: ожидается объект JSON.")
+        if name not in catalog:
+            raise KeyError(f"Имя {name!r} отсутствует в source_datasets/{DATASETS_INFO_FILE}.")
+        entry = catalog[name]
+        if not isinstance(entry, dict):
+            raise TypeError(f"Запись {name!r} должна быть объектом JSON.")
+        raw_dp = entry.get("data_path")
+        if isinstance(raw_dp, str) and raw_dp.strip():
+            resolved = resolve_path_under_workspace(root_ws, raw_dp)
+        else:
+            resolved = os.path.join(layout.source_datasets, name)
+        if hash_zip_metadata and resolved.lower().endswith(".zip") and os.path.isfile(resolved):
+            return resolved, True
+        extracted = resolve_or_extract_dataset_root(root_ws, name, entry, layout.source_datasets)
+        return extracted, False
+
     if work_dataset is not None and str(work_dataset).strip():
         name = str(work_dataset).strip()
         root = resolve_workspace_root(workspace_cli)
@@ -130,14 +174,28 @@ def resolve_hash_dataset_root(
         entry = catalog[name]
         if not isinstance(entry, dict):
             raise TypeError(f"Запись {name!r} должна быть объектом JSON.")
-        return resolve_dataset_root(layout.root, name, entry, layout.work_datasets)
+        root = resolve_dataset_root(layout.root, name, entry, layout.work_datasets)
+        if hash_zip_metadata and root.lower().endswith(".zip") and os.path.isfile(root):
+            return root, True
+        if root.lower().endswith(".zip") and os.path.isfile(root):
+            extracted = resolve_or_extract_dataset_root(layout.root, name, entry, layout.work_datasets)
+            return extracted, False
+        return root, False
 
     if dataset_path_pos is None or not str(dataset_path_pos).strip():
         raise ValueError(
-            "Укажите путь к папке датасета или --work-dataset <имя> с --workspace "
-            "(или SMART_TRAIN_WORKSPACE)."
+            "Укажите путь к папке датасета, или --work-dataset, или --source-dataset "
+            "с --workspace (или SMART_TRAIN_WORKSPACE)."
         )
-    return os.path.abspath(os.path.expanduser(str(dataset_path_pos).strip()))
+    p = os.path.abspath(os.path.expanduser(str(dataset_path_pos).strip()))
+    if p.lower().endswith(".zip") and os.path.isfile(p):
+        if hash_zip_metadata:
+            return p, True
+        raise ValueError(
+            "Для .zip по позиционному пути укажите --hash-zip-metadata или используйте "
+            "--source-dataset с workspace (распаковка в кэш)."
+        )
+    return p, False
 
 
 def build_hash_arg_parser() -> argparse.ArgumentParser:
@@ -165,6 +223,18 @@ def build_hash_arg_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="Имя записи из work_datasets/datasets_info.json (или каталог с data.yaml)",
     )
+    parser.add_argument(
+        "--source-dataset",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Имя записи из source_datasets/datasets_info.json (zip распаковывается в кэш при обходе дерева)",
+    )
+    parser.add_argument(
+        "--hash-zip-metadata",
+        action="store_true",
+        help="Для .zip: хеш только от пути/размера/mtime архива (без распаковки и обхода файлов)",
+    )
 
     parser.add_argument(
         "--validate",
@@ -180,18 +250,29 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
     args = build_hash_arg_parser().parse_args(argv)
-    if args.work_dataset and args.dataset_path:
+    sel = [
+        bool(args.dataset_path and str(args.dataset_path).strip()),
+        bool(args.work_dataset and str(args.work_dataset).strip()),
+        bool(args.source_dataset and str(args.source_dataset).strip()),
+    ]
+    if sum(sel) > 1:
         print(
-            "[ERROR] Укажите либо путь к датасету, либо --work-dataset, не оба сразу.",
+            "[ERROR] Укажите ровно один из: путь к датасету, --work-dataset, --source-dataset.",
             file=sys.stderr,
         )
         sys.exit(2)
 
     try:
-        root = resolve_hash_dataset_root(
-            args.workspace, args.dataset_path, args.work_dataset
+        root, zip_meta = resolve_hash_dataset_root(
+            args.workspace,
+            args.dataset_path,
+            args.work_dataset,
+            args.source_dataset,
+            hash_zip_metadata=bool(args.hash_zip_metadata),
         )
-        computed_hash = calculate_dataset_hash(root)
+        computed_hash = (
+            calculate_zip_metadata_hash(root) if zip_meta else calculate_dataset_hash(root)
+        )
         
         if args.validate:
             if computed_hash.lower() == args.validate.lower():

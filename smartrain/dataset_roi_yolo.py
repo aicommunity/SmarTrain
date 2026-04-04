@@ -19,12 +19,13 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 from smartrain.cli_argparse import CliArgumentParser
-from smartrain.dataset_former import find_dataset_paths
+from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.datasets_json_former import (
     IMAGE_EXTS_FLAT,
     find_yaml_file,
     load_yaml,
 )
+from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -265,21 +266,62 @@ def _copy_and_patch_yaml(dataset_root: str, output_root: str) -> None:
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
 
 
+def _ensure_data_yaml_after_roi(output_root: str, entry: Dict[str, Any]) -> None:
+    """
+    Если в источнике не было data.yaml (часто cvat11 / zip), datasets-json пропускает выход ROI.
+    Пишем минимальный flat-YOLO yaml из поля classes записи datasets_info.
+    """
+    if find_yaml_file(output_root):
+        return
+    classes = entry.get("classes")
+    names_list: List[str] = []
+    if isinstance(classes, dict) and classes:
+        pairs = sorted(classes.items(), key=lambda kv: int(kv[1]))
+        names_list = [str(k) for k, _ in pairs]
+    nc = len(names_list)
+    root_abs = os.path.abspath(output_root)
+    blob: Dict[str, Any] = {
+        "path": root_abs,
+        "train": "images",
+        "val": "images",
+        "nc": nc,
+        "names": names_list,
+    }
+    dest = os.path.join(output_root, "data.yaml")
+    os.makedirs(output_root, exist_ok=True)
+    with open(dest, "w", encoding="utf-8") as f:
+        yaml.safe_dump(blob, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
 def build_roi_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(
         description="Кроп датасета YOLO по ROI (Ultralytics YOLO detect/segment)"
     )
-    p.add_argument("--dataset-name", required=True, help="Имя папки датасета (ключ в datasets_info.json)")
+    p.add_argument("--dataset-name", required=True, help="Ключ датасета в datasets_info.json")
+    p.add_argument(
+        "--workspace",
+        default=None,
+        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); основной режим без --source-path",
+    )
     p.add_argument(
         "--source-path",
-        required=True,
-        help="Родительский каталог: датасет в {source-path}/{dataset-name}/",
+        default=None,
+        help="Legacy: родительский каталог, датасет в {source-path}/{dataset-name}/",
     )
-    p.add_argument("--output-path", required=True, help="Корень нового датасета (создаётся)")
+    p.add_argument(
+        "--output-path",
+        default=None,
+        help="Корень нового датасета (по умолчанию в workspace: source_datasets/<dataset-name>_roi)",
+    )
     p.add_argument(
         "--datasets-info-path",
         default=None,
-        help="Каталог, где лежит datasets_info.json рядом с папкой датасета (по умолчанию = --source-path)",
+        help="Файл datasets_info.json или каталог с ним (по умолчанию: source_datasets/ в workspace или --source-path)",
+    )
+    p.add_argument(
+        "--tmp-dir",
+        default=None,
+        help="Каталог для временных cvat11-меток (по умолчанию: <workspace>/tmp)",
     )
     p.add_argument("--weights", default=None, help="Переопределить weights из roi_auto")
     p.add_argument("--conf", type=float, default=None, help="Порог confidence")
@@ -288,7 +330,7 @@ def build_roi_arg_parser() -> argparse.ArgumentParser:
         "--roi-policy",
         choices=ROI_POLICIES,
         default=None,
-        help="union | largest | best_conf | per_box",
+        help="Политика ROI (по умолчанию largest, если не задано в roi_auto): union | largest | best_conf | per_box",
     )
     p.add_argument("--mode", choices=MODES, default=None, help="yolo_detect | yolo_segment")
     p.add_argument(
@@ -309,7 +351,47 @@ def parse_args(argv=None) -> argparse.Namespace:
     return build_roi_arg_parser().parse_args(argv)
 
 
-def _validate_layout(
+def _resolve_catalog_dataset_key(catalog: Dict[str, Any], requested: str) -> str:
+    """
+    Ключ в datasets_info для zip в source_datasets задаётся без суффикса .zip
+    (как в datasets-json). Принимаем и полное имя файла архива.
+    """
+    if requested in catalog:
+        return requested
+    if requested.lower().endswith(".zip"):
+        stem = requested[:-4]
+        if stem in catalog:
+            return stem
+    sys.exit(
+        f"[ERROR] Ключ {requested!r} отсутствует в каталоге. "
+        "Обычно в datasets_info имя совпадает с именем архива без «.zip», "
+        "например «job_2512_dataset_2026_03_27_15_31_43_cvat for images 1.1»."
+    )
+
+
+def _resolve_datasets_info_file(datasets_info_path_arg: Optional[str], default_json_path: str) -> str:
+    if not datasets_info_path_arg or not str(datasets_info_path_arg).strip():
+        return default_json_path
+    p = os.path.abspath(os.path.expanduser(str(datasets_info_path_arg).strip()))
+    if os.path.isfile(p):
+        return p
+    return os.path.join(p, DATASETS_INFO_FILE)
+
+
+def _relpath_under_dataset(path: str, dataset_root: str, fallback: str) -> str:
+    """Относительный путь для зеркалирования структуры в output; если вне dataset_root — fallback."""
+    ap = os.path.abspath(path)
+    ar = os.path.abspath(dataset_root)
+    try:
+        rel = os.path.relpath(ap, ar)
+    except ValueError:
+        return fallback
+    if rel == ".." or rel.startswith(".." + os.sep):
+        return fallback
+    return rel
+
+
+def _validate_layout_legacy(
     source_path: str, dataset_name: str, datasets_info_path_override: Optional[str]
 ) -> str:
     dr = os.path.join(source_path, dataset_name)
@@ -339,7 +421,7 @@ def _load_roi_config(args: argparse.Namespace, entry: Dict[str, Any]) -> Dict[st
 
     conf = args.conf if args.conf is not None else float(ra.get("conf", 0.25))
     pad_px = args.pad_px if args.pad_px is not None else int(ra.get("pad_px", 0))
-    roi_policy = args.roi_policy or ra.get("roi_policy", "union")
+    roi_policy = args.roi_policy or ra.get("roi_policy", "largest")
     mode = args.mode or ra.get("mode", "yolo_detect")
 
     if roi_policy not in ROI_POLICIES:
@@ -366,28 +448,75 @@ def main(argv=None) -> None:
     if argv is None:
         argv = sys.argv[1:]
     args = parse_args(argv)
-    info_dir = args.datasets_info_path or args.source_path
-    dataset_root = _validate_layout(
-        args.source_path, args.dataset_name, args.datasets_info_path
-    )
+    legacy_source = (args.source_path or "").strip()
+    workspace_root: Optional[str] = None
+    layout: Optional[WorkspaceLayout] = None
 
-    info_path = os.path.join(info_dir, DATASETS_INFO_FILE)
+    need_default_roi_output = False
+    if legacy_source:
+        if not args.output_path or not str(args.output_path).strip():
+            sys.exit("[ERROR] В legacy-режиме (--source-path) укажите --output-path")
+        source_path_abs = os.path.abspath(os.path.expanduser(legacy_source))
+        info_path = _resolve_datasets_info_file(
+            args.datasets_info_path, os.path.join(source_path_abs, DATASETS_INFO_FILE)
+        )
+        temp_root = os.path.join(source_path_abs, "tmp")
+        os.makedirs(temp_root, exist_ok=True)
+    else:
+        ws = (args.workspace or "").strip() or (os.environ.get(WORKSPACE_ENV_VAR) or "").strip()
+        if not ws:
+            sys.exit(
+                f"[ERROR] Укажите --source-path (legacy) или --workspace / переменную {WORKSPACE_ENV_VAR}"
+            )
+        workspace_root = os.path.abspath(os.path.expanduser(ws))
+        layout = WorkspaceLayout(workspace_root)
+        info_path = _resolve_datasets_info_file(
+            args.datasets_info_path, layout.source_datasets_info_path()
+        )
+        if args.tmp_dir and str(args.tmp_dir).strip():
+            temp_root = os.path.abspath(os.path.expanduser(str(args.tmp_dir).strip()))
+        else:
+            temp_root = os.path.join(workspace_root, "tmp")
+        os.makedirs(temp_root, exist_ok=True)
+        if not (args.output_path or "").strip():
+            need_default_roi_output = True
+
     if not os.path.isfile(info_path):
         sys.exit(f"[ERROR] Не найден {info_path}")
 
     with open(info_path, "r", encoding="utf-8") as f:
         datasets_info = json.load(f)
 
-    if args.dataset_name not in datasets_info:
-        sys.exit(f"[ERROR] Ключ {args.dataset_name!r} отсутствует в {info_path}")
+    dataset_key = _resolve_catalog_dataset_key(datasets_info, args.dataset_name)
+    if dataset_key != args.dataset_name:
+        print(f"[INFO] Используется ключ датасета в каталоге: {dataset_key!r}")
 
-    entry = datasets_info[args.dataset_name]
+    entry = datasets_info[dataset_key]
+
+    if need_default_roi_output:
+        assert layout is not None
+        args.output_path = os.path.join(layout.source_datasets, f"{dataset_key}_roi")
     structure = entry.get("structure")
     if not structure:
         sys.exit("[ERROR] В записи датасета нет поля structure")
 
+    if legacy_source:
+        source_path_abs = os.path.abspath(os.path.expanduser(legacy_source))
+        dataset_root = _validate_layout_legacy(
+            source_path_abs, dataset_key, args.datasets_info_path
+        )
+    else:
+        assert workspace_root is not None and layout is not None
+        dataset_root = resolve_dataset_root_for_entry(
+            dataset_key,
+            entry,
+            workspace_root=workspace_root,
+            source_catalog_dir=layout.source_datasets,
+            legacy_source_parent=layout.source_datasets,
+        )
+
     cfg = _load_roi_config(args, entry)
-    output_root = os.path.abspath(args.output_path)
+    output_root = os.path.abspath(os.path.expanduser(str(args.output_path).strip()))
     os.makedirs(output_root, exist_ok=True)
 
     model = YOLO(cfg["weights"])
@@ -397,16 +526,23 @@ def main(argv=None) -> None:
             "используются ограничивающие прямоугольники детекций/масок."
         )
 
-    buckets = find_dataset_paths(dataset_root, structure, arg=False)
+    buckets = iter_image_label_buckets(
+        dataset_root,
+        structure,
+        entry,
+        dataset_name=dataset_key,
+        temp_root=temp_root,
+        exclude_test=False,
+    )
     if not buckets:
         sys.exit(f"[ERROR] Нет пар images/labels для structure={structure}")
 
     stats = {"images": 0, "skipped": 0}
 
     for img_dir, lbl_dir in buckets:
-        rel_base = os.path.relpath(img_dir, dataset_root)
+        rel_base = _relpath_under_dataset(img_dir, dataset_root, "images")
         out_img_dir = os.path.join(output_root, rel_base)
-        rel_lbl = os.path.relpath(lbl_dir, dataset_root)
+        rel_lbl = _relpath_under_dataset(lbl_dir, dataset_root, "labels")
         out_lbl_dir = os.path.join(output_root, rel_lbl)
 
         files = [f for f in sorted(os.listdir(img_dir)) if _is_image_file(f)]
@@ -476,6 +612,7 @@ def main(argv=None) -> None:
                 stats["images"] += 1
 
     _copy_and_patch_yaml(dataset_root, output_root)
+    _ensure_data_yaml_after_roi(output_root, entry)
     print(
         f"[OK] Готово: {stats['images']} выходных кадров, пропущено {stats['skipped']}, "
         f"каталог: {output_root}"

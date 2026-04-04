@@ -32,13 +32,13 @@
 ┌─────────────────────────┐
 │   dataset_former.py      │  → Объединение и фильтрация
 └───────────┬─────────────┘
-            │ Использует: datasets_info.json, class_names.json
+            │ Использует: datasets_info.json, class_names.json, dataset_access
             │ Создает: объединенный датасет + data.yaml
             ↓
 ┌─────────────────────────┐
 │   dataset_roi_yolo.py    │  → Кроп по ROI (YOLO/YOLO-Seg), опционально
 └───────────┬─────────────┘
-            │ Использует: datasets_info.json (roi_auto), find_dataset_paths
+            │ Использует: datasets_info.json (roi_auto), dataset_access (резолв zip/cvat11)
             │ Создает: новый датасет с тем же layout
             ↓
 ┌─────────────────────────┐
@@ -59,6 +59,21 @@
 2. **Конфигурация через JSON**: Метаданные хранятся в JSON для гибкости
 3. **Обратная совместимость**: Поддержка различных форматов датасетов YOLO
 4. **Обработка ошибок**: Graceful degradation с информативными сообщениями
+
+### Матрица: `structure` × команды
+
+Единый резолв корня (включая `.zip` в `data_path`) и пары `images`/`labels` для нативных форматов реализованы в [`dataset_access.py`](../smartrain/dataset_access.py) (`resolve_dataset_root_for_entry`, `iter_image_label_buckets`). Команды ниже используют его там, где нужен обход кадров и меток.
+
+| `structure` | `datasets-json` | `dataset-former` | `roi` (workspace) | `hash` (`--source-dataset`) | `cvat import` / `export` |
+|-------------|-----------------|------------------|-------------------|----------------------------|---------------------------|
+| `split` | да | да | да | да (дерево / zip→кэш) | export из YOLO |
+| `flat` | да | да | да | да | export |
+| `subset_flat` | да | да | да | да | export |
+| `nested_split` | да | да | да | да | export |
+| `darknet` | да | да | да | да | — |
+| `cvat11` | да | да (временные `.txt`) | да (те же временные метки) | да | import в YOLO |
+
+Обучение (`train`) по контракту принимает уже готовый YOLO-каталог с `data.yaml` (обычно из `work_datasets` после `dataset-former`).
 
 ---
 
@@ -81,8 +96,9 @@ main()
 │   │   ├── load_yaml() или load_obj_names()
 │   │   └── count_elements()
 │   └── Добавление в datasets_info
-├── Мерж из старого datasets_info.json: перенос roi_auto и tags по имени датасета
-└── Сохранение JSON файлов
+├── Мерж из старого datasets_info.json: перенос roi_auto/tags/data_path по имени датасета
+├── Сравнение с предыдущими файлами: added/removed для датасетов и class_names
+└── Сохранение datasets_info.json, class_names.json и datasets_scan_summary.json (+ отчёт в stdout)
 ```
 
 #### Ключевые функции
@@ -159,7 +175,7 @@ main()
 ├── Поиск подходящих датасетов (содержат все выбранные классы)
 ├── Подсчет общего количества файлов для прогресс-бара
 ├── Для каждого датасета:
-│   ├── find_dataset_paths() → получение путей к изображениям/аннотациям
+│   ├── iter_image_label_buckets() (dataset_access) → пары images/labels, включая cvat11
 │   ├── Создание пар (изображение, аннотация)
 │   ├── Перемешивание пар
 │   ├── Разделение на train/val/test (80/10/10)
@@ -171,14 +187,10 @@ main()
 
 #### Ключевые функции
 
-**`find_dataset_paths(dataset_path, structure, arg=False)`**
-- **Параметр `arg`**: Если `True`, исключает `test` из поиска (для `--exclude-test`)
-- **Логика для каждого типа структуры**:
-  - **Split**: `{split}/images`, `{split}/labels` для каждого split
-  - **Flat**: `images`, `labels` на верхнем уровне
-  - **Nested Split**: `images/{split}`, `labels/{split}`
-  - **Darknet**: `obj_train_data` (изображения и аннотации в одной папке)
-- **Возвращает**: Список кортежей `(images_path, labels_path)`
+**`dataset_access.iter_image_label_buckets` / `find_dataset_paths`**
+- Реализация в [`dataset_access.py`](../smartrain/dataset_access.py); `dataset_former` реэкспортирует `find_dataset_paths` для совместимости.
+- **Параметр `exclude_test` / `arg`**: Если `True`, исключает `test` из поиска (для `--exclude-test`).
+- **Структуры**: `split`, `flat`, `subset_flat`, `nested_split`, `darknet`; для **`cvat11`** — временные YOLO-метки из XML.
 
 **`filter_label_file(src_label_path, dst_label_path, class_map, class_names_map, selected_classes)`**
 - **Алгоритм фильтрации**:
@@ -257,12 +269,13 @@ pair = (image_path: str, label_path: str)
 Построение **нового** датасета с тем же layout (`split`, `flat`, `subset_flat`, `nested_split`, `darknet`), где каждый кадр обрезан по ROI из инференса Ultralytics (детекция или сегментация). Метки в формате YOLO (bbox и полигоны) пересчитываются в нормализованные координаты относительно **кропа**.
 
 #### Зависимости
-- `find_dataset_paths()` из `dataset_former.py`
-- Поля `structure` и опционально `roi_auto` из `datasets_info.json` (файл рядом с папкой датасета)
+- `dataset_access`: `resolve_dataset_root_for_entry`, `iter_image_label_buckets` (включая zip и `cvat11`)
+- Режим **workspace**: `source_datasets/datasets_info.json`, ключ `--dataset-name`; **legacy**: `--source-path` / `--output-path`
+- Поля `structure` и опционально `roi_auto` в записи датасета
 - `find_yaml_file` / `load_yaml` для копии `data.yaml` с обновлённым `path`
 
 #### Политики ROI
-См. [data_formats.md](data_formats.md#опциональные-поля-не-перезаписываются-сканером): `union`, `largest`, `best_conf`, `per_box` (суффиксы `_split_N` в имени файла).
+См. [data_formats.md](data_formats.md#опциональные-поля-не-перезаписываются-сканером): по умолчанию `largest`; также `union`, `best_conf`, `per_box` (суффиксы `_split_N` в имени файла).
 
 ---
 
@@ -756,6 +769,8 @@ training_queue.py
     "original": "normalized"
 }
 ```
+
+**datasets_scan_summary.json** (выход datasets_json_former, рядом с двумя JSON выше): итоговые списки ключей, `added`/`removed` относительно предыдущего запуска, поле `generated_at` (UTC ISO).
 
 **data.yaml** (выход dataset_former, вход model_training_module):
 ```yaml
