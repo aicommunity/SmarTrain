@@ -2,37 +2,42 @@
 
 ## Основные документы
 
-1. **[implementation.md](implementation.md)** - Детали реализации для разработчиков
+1. **[datasets.md](datasets.md)** — **Описание датасетов и каталога**
+   - Где находится описание конкретных наборов (`datasets_info.json` после `datasets-json`)
+   - Ссылки на структуру YOLO, аннотации, `data.yaml`, workspace
+   - Как обновить метаданные датасетов
+
+2. **[implementation.md](implementation.md)** - Детали реализации для разработчиков
    - Архитектура системы
    - Алгоритмы и структуры данных
    - Обработка ошибок
    - Рекомендации по расширению
 
-2. **[data_formats.md](data_formats.md)** - Подробное описание форматов данных
+3. **[data_formats.md](data_formats.md)** - Подробное описание форматов данных
    - Структура датасетов YOLO
    - Формат аннотаций
    - Формат конфигурационных файлов
    - Формат JSON файлов
    - Кодировка и стандарты
 
-3. **[api_reference.md](api_reference.md)** - Справочник API
+4. **[api_reference.md](api_reference.md)** - Справочник API
    - В начале файла: разделы про [`cli.py` и `cli_argparse`](api_reference.md) (точка входа `smartrain` и форматтер справки)
    - Описание функций модулей, параметры, возвращаемые значения
    - Константы и настройки
 
-4. **[examples.md](examples.md)** - Примеры использования
+5. **[examples.md](examples.md)** - Примеры использования
    - Полный цикл работы
    - Работа с разными форматами
    - Автоматизация процессов
    - Обработка ошибок
 
-5. **[training_metadata.md](training_metadata.md)** - Метаданные обучения
+6. **[training_metadata.md](training_metadata.md)** - Метаданные обучения
    - Формат файла training_metadata.json
    - Структура метаданных
    - Отслеживание статуса и ошибок
    - Именование директорий с результатами
 
-6. **[workspace.md](workspace.md)** - Единый корень `SMART_TRAIN_WORKSPACE`, каталоги `source_datasets` / `work_datasets` / `runs` / `analytics` / `models`, поле `data_path`
+7. **[workspace.md](workspace.md)** - Единый корень `SMART_TRAIN_WORKSPACE`, каталоги `source_datasets` / `work_datasets` / `runs` / `analytics` / `models`, поле `data_path`
 
 ## Быстрая навигация по темам
 
@@ -54,11 +59,13 @@
 - [training_queue_cli.py](api_reference.md#training_queue_clipy) - CLI очереди (`list`, `add`, `remove`, `run`, …)
 - [results_analyzer.py](api_reference.md#results_analyzerpy) - Сводки и сравнение прогонов
 
-### Форматы данных
-- [Структура датасетов](data_formats.md#структура-датасетов-yolo)
+### Датасеты и форматы
+- **[О датасетах: каталог и навигация](datasets.md)** — с чего начать: `datasets_info.json`, ссылки на детали
+- [Каталог в JSON (`datasets_info.json`)](data_formats.md#формат-datasets_infojson) — поля по каждому набору
+- [Структура датасетов YOLO](data_formats.md#структура-датасетов-yolo)
 - [Формат аннотаций](data_formats.md#формат-аннотаций-yolo)
 - [Формат data.yaml](data_formats.md#формат-datayaml)
-- [Формат JSON файлов](data_formats.md#формат-datasets_infojson)
+- [Другие JSON (`class_names.json` и т.д.)](data_formats.md#формат-class_namesjson)
 
 ### Примеры
 - [Полный цикл работы](examples.md#пример-1-полный-цикл-работы-с-датасетами)
@@ -75,13 +82,18 @@
 ## Рекомендуемый порядок чтения
 
 1. **Новичок**: Начните с корневого [README.md](../README.md), раздел "Быстрый старт"
-2. **Пользователь**: Изучите [examples.md](examples.md) для практических примеров
-3. **Разработчик**: Ознакомьтесь с [api_reference.md](api_reference.md) для деталей реализации
-4. **Администратор**: Изучите [data_formats.md](data_formats.md) для понимания форматов данных
+2. **Работа с датасетами**: [datasets.md](datasets.md) → при необходимости [data_formats.md](data_formats.md) и [workspace.md](workspace.md)
+3. **Пользователь**: Изучите [examples.md](examples.md) для практических примеров
+4. **Разработчик**: Ознакомьтесь с [api_reference.md](api_reference.md) для деталей реализации
+5. **Администратор**: [data_formats.md](data_formats.md) для полной спецификации форматов
 
 ## Поиск информации
 
 ### По задачам
+
+**Хочу прочитать описание датасетов (что за наборы, классы, пути):**
+- [datasets.md](datasets.md) — навигация; итоговый каталог после сканирования: **`datasets_info.json`** (см. [формат](data_formats.md#формат-datasets_infojson))
+- Команда: `smartrain datasets-json`
 
 **Хочу проанализировать датасеты:**
 - [datasets_json_former.py](api_reference.md#datasets_json_formerpy)
@@ -99,7 +111,10 @@
 - [training_queue.py](api_reference.md#training_queuepy)
 - [Пример использования очереди](examples.md#пример-3-использование-системы-очереди)
 
-### По форматам
+### По форматам и описанию датасетов
+
+**Описание конкретных датасетов (имена, классы, пути):**
+- [datasets.md](datasets.md) — точка входа; фактическое содержимое — **`datasets_info.json`**, см. [формат](data_formats.md#формат-datasets_infojson)
 
 **Формат датасета:**
 - [Структура датасетов YOLO](data_formats.md#структура-датасетов-yolo)
