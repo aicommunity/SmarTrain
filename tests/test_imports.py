@@ -25,6 +25,11 @@ def test_import_cli_modules() -> None:
         "smartrain.cli_argparse",
         "smartrain.cvat11_converter",
         "smartrain.cvat_cli",
+        "smartrain.train_profile",
+        "smartrain.weighted_yolo_dataset",
+        "smartrain.clearml_upload",
+        "smartrain.sahi_cli",
+        "smartrain.heatmap_cli",
         "smartrain.cli",
     ):
         __import__(mod)

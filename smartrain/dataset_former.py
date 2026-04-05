@@ -29,6 +29,34 @@ VAL_PART = 0.1    # 10%
 TEST_PART = 0.1   # 10%
 RANDOM_SEED = random.seed(12345)
 
+_SPLIT_SUM_EPS = 1e-5
+
+
+def parse_fusion_split_arg(value: str | None) -> tuple[float, float, float]:
+    """
+    Три доли train, val, test для переразбиения кадров внутри каждого bucket при fusion.
+    Сумма должна быть 1.0 (с допуском). При value is None — константы модуля.
+    """
+    if value is None or not str(value).strip():
+        return TRAIN_PART, VAL_PART, TEST_PART
+    raw = [x.strip() for x in str(value).split(",")]
+    if len(raw) != 3:
+        raise ValueError(
+            "Ожидается ровно три числа через запятую: train,val,test (например 0.8,0.1,0.1)."
+        )
+    try:
+        tr, va, te = (float(x) for x in raw)
+    except ValueError as e:
+        raise ValueError(f"Некорректные числа в --fusion-split: {value!r}") from e
+    if tr < 0 or va < 0 or te < 0:
+        raise ValueError("Доли в --fusion-split не могут быть отрицательными.")
+    s = tr + va + te
+    if abs(s - 1.0) > _SPLIT_SUM_EPS:
+        raise ValueError(
+            f"Сумма долей --fusion-split должна быть 1.0 (сейчас {s:.6f}): {value!r}"
+        )
+    return tr, va, te
+
 
 def safe_mkdir(path):
     os.makedirs(path, exist_ok=True)
@@ -139,6 +167,15 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Каталог для временных файлов (по умолчанию: <workspace>/tmp или <source-path>/tmp в legacy-режиме)",
+    )
+
+    parser.add_argument(
+        "--fusion-split",
+        type=str,
+        default=None,
+        help="Только fusion: доли train,val,test при случайном переразбиении кадров внутри каждого "
+        "bucket исходного датасета (три числа через запятую, сумма 1.0). По умолчанию "
+        f"{TRAIN_PART},{VAL_PART},{TEST_PART}. Не влияет на scan, train, roi и др.",
     )
 
     return parser
@@ -465,6 +502,17 @@ def main(argv=None):
         argv = sys.argv[1:]
     args = parse_args(argv)
 
+    try:
+        train_part, val_part, test_part = parse_fusion_split_arg(args.fusion_split)
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return
+    if args.fusion_split and str(args.fusion_split).strip():
+        print(
+            f"[INFO] --fusion-split: train={train_part}, val={val_part}, test={test_part} "
+            "(переразбиение внутри каждого bucket исходного датасета)"
+        )
+
     legacy = (
         args.source_path is not None
         and args.target_path is not None
@@ -704,9 +752,11 @@ def main(argv=None):
 
                     random.shuffle(pairs)
                     n = len(pairs)
-                    train_split = pairs[:int(n * TRAIN_PART)]
-                    val_split = pairs[int(n * TRAIN_PART):int(n * (TRAIN_PART + VAL_PART))]
-                    test_split = pairs[int(n * (VAL_PART + TRAIN_PART)):]
+                    train_split = pairs[: int(n * train_part)]
+                    val_split = pairs[
+                        int(n * train_part) : int(n * (train_part + val_part))
+                    ]
+                    test_split = pairs[int(n * (val_part + train_part)) :]
 
                     splits_data = {"train": train_split, "valid": val_split, "test": test_split}
 

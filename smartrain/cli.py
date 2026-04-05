@@ -250,6 +250,48 @@ def cmd_cvat(ctx: typer.Context) -> None:
     _call("smartrain.cvat_cli", "main", ctx)
 
 
+@app.command(
+    "clearml-upload",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_clearml_upload(ctx: typer.Context) -> None:
+    """Загрузка готового прогона в ClearML (extras: pip install 'smartrain[clearml]')."""
+    if _ctx_has_help_flag(ctx):
+        from smartrain.clearml_upload import build_clearml_upload_arg_parser
+
+        _dispatch_argparse_help(ctx, build_clearml_upload_arg_parser, "smartrain clearml-upload")
+    _call("smartrain.clearml_upload", "main", ctx)
+
+
+@app.command(
+    "sahi",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_sahi(ctx: typer.Context) -> None:
+    """Тайловый инференс SAHI (extras: pip install 'smartrain[sahi]')."""
+    if _ctx_has_help_flag(ctx):
+        from smartrain.sahi_cli import build_sahi_arg_parser
+
+        _dispatch_argparse_help(ctx, build_sahi_arg_parser, "smartrain sahi")
+    _call("smartrain.sahi_cli", "main", ctx)
+
+
+@app.command(
+    "heatmap",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_heatmap(ctx: typer.Context) -> None:
+    """Визуализация heatmap (Ultralytics solutions)."""
+    if _ctx_has_help_flag(ctx):
+        from smartrain.heatmap_cli import build_heatmap_arg_parser
+
+        _dispatch_argparse_help(ctx, build_heatmap_arg_parser, "smartrain heatmap")
+    _call("smartrain.heatmap_cli", "main", ctx)
+
+
 def main() -> None:
     app()
 

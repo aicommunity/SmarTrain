@@ -31,6 +31,12 @@ include = ["smartrain*"]
 dev = [
     "pytest>=7.4.0",
 ]
+clearml = [
+    "clearml>=1.14.0",
+]
+sahi = [
+    "sahi>=0.11.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

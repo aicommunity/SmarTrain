@@ -482,7 +482,7 @@ smartrain <подкоманда> [аргументы...]
 
 ```
 # Создание объединённого датасета
-smartrain fusion --target-path /path/to/output --classes "helmet,vest"
+smartrain fusion --target-path /path/to/output --classes "class_a,class_b"
 
 # Обучение
 smartrain train --data /path/to/dataset --model yolov8n --epochs 50 -y
@@ -511,7 +511,7 @@ smartrain train --data /path/to/dataset --model yolov8s --epochs 100 -y
 ### Пример
 
 ```
-smartrain fusion --target-path /path/to/output --classes "helmet,vest" | Выполнено
+smartrain fusion --target-path /path/to/output --classes "class_a,class_b" | Выполнено
 smartrain train --data /path/to/dataset --model yolov8n --epochs 50 | Выполняется
 smartrain train --data /path/to/dataset --model yolov8s --epochs 100 | Ждет выполнения
 ```

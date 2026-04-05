@@ -1,444 +1,535 @@
-# Примеры использования
+# Примеры вызовов CLI
 
-Во всех примерах предполагается установленная команда **`smartrain`** (`pip install -e .` из корня репозитория). Это соответствует коду в [`smartrain/cli.py`](../smartrain/cli.py). Прямой запуск `python smartrain/datasets_json_former.py` устарел; при необходимости вызывайте функции `main` модулей из Python или `python -m smartrain` с нужной подкомандой.
+Ниже — готовые команды для терминала. Полный список флагов у каждой подкоманды: **`smartrain <команда> --help`**. Форматы каталогов и полей JSON — в [data_formats.md](data_formats.md).
 
-## Пример 1: Полный цикл работы с датасетами
+**Глобально для всех подкоманд Typer:** можно задать корень workspace один раз — **`smartrain --workspace /path/to/ws <команда> ...`** или переменная **`SMART_TRAIN_WORKSPACE`** (см. [workspace.md](workspace.md)).
 
-### Шаг 1: Анализ существующих датасетов
+Для любой структуры датасета (`flat`, `nested_split`, `darknet`, `cvat11`, …) типичная цепочка: **`scan`** → **`fusion`** → **`train`**; отличается только то, что попадёт в `datasets_info.json` после `scan`.
 
-Предположим, у вас есть несколько датасетов в директории `/data/datasets`:
-- `archive/`
-- `construction-ppe/`
-- `PPE Dataset for Workplace Safety.v2i.yolov11/`
+---
 
-Запустите анализ:
+## Workspace: deploy, scan, fusion, train
+
+```bash
+export SMART_TRAIN_WORKSPACE=/path/to/workspace
+# или: smartrain --workspace /path/to/workspace deploy
+
+smartrain deploy
+# развернуть структуру в указанном каталоге:
+smartrain deploy /path/to/new_workspace
+
+smartrain scan
+smartrain fusion --output-name my_merge --classes "class_a,class_b"
+smartrain train --data my_merge --model yolov8n --epochs 50 --batch 16 -y
+```
+
+`--data my_merge` — имя каталога в `work_datasets/`, как в `work_datasets/datasets_info.json`.
+
+---
+
+## `smartrain scan`
+
+Сканирование внутри workspace (ищет датасеты под `source_datasets/`, пишет JSON туда же):
+
+```bash
+smartrain scan
+```
+
+Указать корень с датасетами и куда положить `datasets_info.json` / `class_names.json`:
+
 ```bash
 smartrain scan --datasets-path /data/datasets --output-path .
 ```
 
-Результат: созданы файлы `datasets_info.json` и `class_names.json` в текущей директории.
-
-### Шаг 2: Просмотр информации о датасетах
-
-Откройте `datasets_info.json` для просмотра доступных классов:
-```json
-{
-    "archive": {
-        "classes": {"person": 0, "helmet": 1, "gloves": 2},
-        "structure": "flat",
-        "elements_count": 8099
-    },
-    "construction-ppe": {
-        "classes": {"helmet": 0, "gloves": 1, "vest": 2},
-        "structure": "nested_split",
-        "elements_count": [1416, 1426]
-    }
-}
-```
-
-### Шаг 3: Создание объединенного датасета
-
-Создайте датасет только с классами `helmet` и `gloves`:
-```bash
-smartrain fusion \
-    --source-path /data/datasets \
-    --target-path /data/merged_helmet_gloves \
-    --classes "helmet,gloves" \
-    --datasets-info-path .
-```
-
-Результат: создан новый датасет `/data/merged_helmet_gloves` с:
-- Структурой train/valid/test
-- Только классами helmet и gloves
-- Переиндексированными классами (0=helmet, 1=gloves)
-- Файлом `data.yaml`
-
-### Шаг 4: Обучение модели
-
-Обучите модель YOLOv8n на созданном датасете:
-```bash
-smartrain train \
-    --data /data/merged_helmet_gloves \
-    --model yolov8n \
-    --epochs 50 \
-    --batch 16 \
-    --target-path /data/models
-```
-
-Результат: обученная модель сохранена в `/data/models/merged_helmet_gloves/yolov8n_50epochs/`
-
----
-
-## Пример 2: Работа с несколькими классами СИЗ
-
-### Создание датасета с полным набором СИЗ
+Список путей к датасетам в файле:
 
 ```bash
-smartrain fusion \
-    --classes "helmet,gloves,vest,boots,goggles,mask" \
-    --target-path /data/full_ppe_dataset \
-    --exclude-test
+smartrain scan --datasets-list /path/to/datasets_list.txt --output-path .
 ```
 
-**Примечание**: Флаг `--exclude-test` исключает тестовые данные из исходных датасетов, чтобы использовать их только для финального тестирования.
-
-### Обучение разных моделей
+Пересканировать **только** записи с полем `data_path` в уже существующем `datasets_info.json` (полезно после правок путей), в workspace:
 
 ```bash
-# Маленькая модель для быстрого прототипирования
-smartrain train \
-    --data /data/full_ppe_dataset \
-    --model yolov8n \
-    --epochs 30 \
-    --batch 32
-
-# Средняя модель для баланса скорости и точности
-smartrain train \
-    --data /data/full_ppe_dataset \
-    --model yolov8s \
-    --epochs 50 \
-    --batch 16
-
-# Большая модель для максимальной точности
-smartrain train \
-    --data /data/full_ppe_dataset \
-    --model yolov8l \
-    --epochs 100 \
-    --batch 8
+smartrain scan --mode refresh
 ```
 
 ---
 
-## Пример 3: Использование системы очереди
+## `smartrain fusion` (workspace)
 
-### Подготовка файла очереди
+Имя выхода в `work_datasets/`:
 
-По умолчанию исполнитель читает **`queue.txt`** в корне workspace (см. [`workspace_paths.workspace_queue_path`](../smartrain/workspace_paths.py)). Создайте или отредактируйте этот файл:
-
-```
-# Шаг 1: Создание датасета
-smartrain fusion --classes "helmet,vest" --target-path /data/helmet_vest_dataset
-
-# Шаг 2: Обучение yolov8n
-smartrain train --data /data/helmet_vest_dataset --model yolov8n --epochs 50
-
-# Шаг 3: Обучение yolov8s
-smartrain train --data /data/helmet_vest_dataset --model yolov8s --epochs 50
-
-# Шаг 4: Обучение yolov8m
-smartrain train --data /data/helmet_vest_dataset --model yolov8m --epochs 50
+```bash
+smartrain fusion --output-name my_merge --classes "class_a,class_b"
 ```
 
-### Запуск очереди
+Автоимя каталога (timestamp + `-merged`), если `--output-name` не задавать:
+
+```bash
+smartrain fusion --classes "class_a,class_b"
+```
+
+**Без `--classes`:** в merge попадает **объединение всех классов** из всех записей `datasets_info.json` (кроме датасета с именем выходной папки), имена предварительно нормализуются через **`class_names.json`**. В логе будет строка вида «`--classes` не задан: используется объединение классов…». Маппинг в `class_names.json` при этом **всё равно** применяется; вы просто не сужаете список вручную.
+
+```bash
+smartrain fusion --output-name all_classes_auto
+```
+
+Слияние нескольких исходных имён в один класс из `--classes`:
+
+```bash
+smartrain fusion \
+  --output-name unified \
+  --classes "class_x" \
+  --merge-classes "ClassX,class_x_alt,CLASS_X" class_x
+```
+
+Датасеты, где нет **всех** перечисленных в `--classes` классов, но есть часть:
+
+```bash
+smartrain fusion --output-name merged --classes "class_a,class_b,class_c" --include-partial-datasets
+```
+
+Не подмешивать исходные тестовые кадры:
+
+```bash
+smartrain fusion --output-name no_src_test --classes "class_a,class_b" --exclude-test
+```
+
+Доли **train / val / test** при случайном разбиении внутри каждой «корзины» кадров (сумма **1.0**; только **`fusion`**, не `train`):
+
+```bash
+smartrain fusion --output-name split_701020 --classes "class_a,class_b" --fusion-split 0.7,0.2,0.1
+```
+
+Только train + val на выходе:
+
+```bash
+smartrain fusion --output-name tv_only --classes "class_a,class_b" --fusion-split 0.9,0.1,0
+```
+
+После слияния убрать пары image+label с пустыми метками:
+
+```bash
+smartrain fusion --output-name cleaned --classes "class_a,class_b" --drop-empty-images
+```
+
+Сузить набор классов до **пересечения** по датасетам-кандидатам (`--common-classes-only`; часто вместе с осмысленным `--classes`):
+
+```bash
+smartrain fusion --output-name common_only --classes "class_a,class_b" --common-classes-only
+```
+
+Временные файлы (например для cvat11) в явный каталог:
+
+```bash
+smartrain fusion --output-name tmp_here --classes "class_a,class_b" --tmp-dir /path/to/tmp
+```
+
+Явный выход в файловую систему при заданном workspace (вместо только `work_datasets/<name>`):
+
+```bash
+smartrain fusion --output-name my_merge --classes "class_a,class_b" --target-path /data/custom_out
+```
+
+---
+
+## `smartrain fusion` (legacy, без workspace)
+
+Нужны все три пути:
+
+```bash
+smartrain fusion \
+  --source-path /data/datasets \
+  --target-path /data/output/merged \
+  --datasets-info-path . \
+  --classes "class_a,class_b"
+```
+
+Относительные пути от текущей директории:
+
+```bash
+smartrain fusion \
+  --source-path ./datasets \
+  --target-path ./output/merged \
+  --datasets-info-path . \
+  --classes "class_a,class_b"
+```
+
+---
+
+## `smartrain train`
+
+Workspace и имя work-датасета:
+
+```bash
+smartrain train --data my_merge --model yolov8n --epochs 50 --batch 16 -y
+```
+
+Без workspace: каталог с `data.yaml` и база для прогонов:
+
+```bash
+smartrain train \
+  --data /abs/path/to/dataset \
+  --target-path /abs/path/runs \
+  --model yolov8s \
+  --epochs 100 \
+  -y
+```
+
+Профиль Ultralytics (YAML), часть полей можно не дублировать в CLI — см. `smartrain train --help`:
+
+```bash
+smartrain train --workspace . --data my_merge -c /path/to/train_profile.yaml --epochs 100
+```
+
+Другая задача Ultralytics (`detect` по умолчанию):
+
+```bash
+smartrain train --data my_merge --task segment --model yolo11n-seg.pt -y
+```
+
+Размер входа и согласие без вопросов при существующей папке прогона:
+
+```bash
+smartrain train --data my_merge --img-size 1280 --epochs 100 -y
+```
+
+В workspace положить прогоны не в `runs/`, а в свой каталог:
+
+```bash
+smartrain train --data my_merge --target-path /data/my_runs --model yolov8n -y
+```
+
+Взвешенная выборка изображений (дисбаланс классов; патч ultralytics):
+
+```bash
+smartrain train --data my_merge --weighted-sampling -y
+```
+
+Экспорт ONNX после успешного обучения:
+
+```bash
+smartrain train --data my_merge --export-onnx -y
+smartrain train --data my_merge --export-onnx --export-onnx-fp32 -y
+```
+
+Дополнительно см. справку: **`--config`**, **`--val-imgsz`**, **`--val-conf`**, **`--val-iou`** (уже есть пример выше).
+
+Несколько разных моделей на одном датасете:
+
+```bash
+smartrain train --data my_merge --model yolov8n --epochs 30 --batch 32 -y
+smartrain train --data my_merge --model yolov8s --epochs 50 --batch 16 -y
+smartrain train --data my_merge --model yolov8l --epochs 100 --batch 8 -y
+```
+
+Только прогон валидации на test по уже обученному прогону:
+
+```bash
+smartrain train \
+  --test-only \
+  --model-dir /path/to/run_folder \
+  --data /path/to/dataset_with_data_yaml
+```
+
+С явными порогами для `val`:
+
+```bash
+smartrain train --data my_merge --val-imgsz 1280 --val-conf 0.35 --val-iou 0.6 -y
+```
+
+---
+
+## ClearML (опционально)
+
+Пакет: **`pip install 'smartrain[clearml]'`** (или `pip install clearml`). Учётка и сервер — как в документации ClearML (`clearml-init`, переменные окружения).
+
+**Во время обучения** — гиперпараметры из словаря, который уходит в `YOLO.train`, попадают в задачу через `Task.connect`:
+
+```bash
+smartrain train --data my_merge --model yolov8n --epochs 50 -y --clearml
+smartrain train --data my_merge --model yolov8n --epochs 50 -y --clearml --clearml-project MyProject
+```
+
+Имя проекта, если не задано флагом: переменная **`CLEARML_PROJECT`**, иначе **`smartrain`**. Имя задачи в ClearML — последний компонент пути прогона (каталог run).
+
+В YAML-профиле обучения (`-c`): ключи **`clearml: true`** и опционально **`clearml_project: ...`** (они не передаются в Ultralytics).
+
+**После прогона** — отдельная подкоманда: залить каталог run (`train/args.yaml`, `results.csv`, картинки, `best.pt`):
+
+```bash
+smartrain clearml-upload /path/to/run_folder
+smartrain clearml-upload /path/to/run_folder --project MyProject --task-name custom_name
+smartrain clearml-upload /path/to/run_folder --no-images
+```
+
+Справка: **`smartrain clearml-upload --help`**.
+
+---
+
+## `smartrain hash`
+
+Хеш датасета (как при именовании прогонов `train`). По пути к каталогу с `data.yaml`:
+
+```bash
+smartrain hash /path/to/dataset
+```
+
+В workspace по имени work-датасета:
+
+```bash
+smartrain hash --work-dataset my_merge
+```
+
+По имени source-датасета (в т.ч. `.zip` в `source_datasets/`):
+
+```bash
+smartrain hash --source-dataset dataset_key_from_json
+```
+
+Проверка, что хеш совпадает с ожидаемым:
+
+```bash
+smartrain hash /path/to/dataset --validate a1b2c3d4
+```
+
+Для архива `.zip` только метаданные архива (без распаковки):
+
+```bash
+smartrain hash --source-dataset my_zip_dataset --hash-zip-metadata
+```
+
+---
+
+## `smartrain roi`
+
+Кроп датасета по ROI из модели YOLO (detect/segment). В workspace:
+
+```bash
+smartrain roi --dataset-name my_dataset
+```
+
+Явный выход и веса:
+
+```bash
+smartrain roi --dataset-name my_dataset --output-path /data/my_dataset_roi --weights /path/to/model.pt
+```
+
+Сегментационная модель и политика ROI:
+
+```bash
+smartrain roi --dataset-name my_dataset --mode yolo_segment --roi-policy union --conf 0.35
+```
+
+Legacy (родительский каталог датасетов):
+
+```bash
+smartrain roi --dataset-name my_dataset --source-path /data/parent --datasets-info-path .
+```
+
+---
+
+## Очередь: `queue.txt` и `queue-run`
+
+Содержимое `queue.txt` в корне workspace (по одной команде на строку, `#` — комментарий):
+
+```
+# fusion затем три обучения
+smartrain fusion --output-name merged --classes "class_a,class_b"
+smartrain train --data merged --model yolov8n --epochs 50 -y
+smartrain train --data merged --model yolov8s --epochs 50 -y
+smartrain train --data merged --model yolov8m --epochs 50 -y
+```
+
+Запуск исполнителя:
 
 ```bash
 smartrain queue-run
 ```
 
-Система автоматически:
-1. Откроет окно терминала с обновлением статуса
-2. Выполнит задачи последовательно
-3. Обновит статус каждой задачи
-
----
-
-## Пример 4: Работа с форматом Darknet
-
-Если у вас есть датасет в формате Darknet:
-
-```
-darknet_dataset/
-├── obj_train_data/
-│   ├── img001.jpg
-│   ├── img001.txt
-│   └── ...
-├── obj.names
-└── obj.data
-```
-
-Команда **`smartrain scan`** (модуль `datasets_json_former`) автоматически определит структуру:
+Добавить строку в очередь из терминала:
 
 ```bash
-smartrain scan --datasets-path /path/to/darknet_dataset
+smartrain queue add -- smartrain train --data merged --model yolov8n -y --epochs 10
+smartrain queue list
 ```
 
-Результат в `datasets_info.json`:
-```json
-{
-    "darknet_dataset": {
-        "classes": {
-            "person": 0,
-            "helmet": 1
-        },
-        "structure": "darknet",
-        "elements_count": 1500
-    }
-}
-```
-
----
-
-## Пример 5: Тестирование обученной модели
-
-После обучения модели можно протестировать ее на тестовом наборе:
+Удалить строку по номеру из `queue list` или по подстроке:
 
 ```bash
-smartrain train \
-    --test-only \
-    --model-dir /data/models/merged_helmet_gloves/yolov8n_50epochs \
-    --data /data/merged_helmet_gloves
+smartrain queue remove --index 3
+smartrain queue remove --substring "yolov8s"
+smartrain queue remove --substring "obsolete" --all
 ```
 
-Результат: создан файл `test_metrics.csv` с метриками производительности модели.
-
----
-
-## Пример 6: Работа с вложенной структурой (nested_split)
-
-Для датасета со структурой:
-```
-dataset/
-├── images/
-│   ├── train/
-│   ├── val/
-│   └── test/
-└── labels/
-    ├── train/
-    ├── val/
-    └── test/
-```
-
-Скрипты автоматически определяют структуру и обрабатывают ее корректно:
+Очистить очередь:
 
 ```bash
-smartrain scan --datasets-path /path/to/dataset
+smartrain queue clear
 ```
 
-Результат:
-```json
-{
-    "dataset": {
-        "classes": {...},
-        "structure": "nested_split",
-        "elements_count": [1416, 1426, 500]
-    }
-}
-```
-
----
-
-## Пример 7: Фильтрация с нормализацией классов
-
-Предположим, в разных датасетах класс "каска" называется по-разному:
-- `Helmet` в одном датасете
-- `helmet` в другом
-- `Hard Hat` в третьем
-
-Файл `class_names.json` содержит маппинг:
-```json
-{
-    "Helmet": "helmet",
-    "helmet": "helmet",
-    "Hard Hat": "helmet"
-}
-```
-
-При создании объединенного датасета все варианты будут нормализованы:
+Запуск очереди **через подкоманду** `queue run` (как `queue-run`, опционально без GUI):
 
 ```bash
-smartrain fusion --classes "helmet" --target-path /data/helmet_only
+smartrain queue run --no-gui
+smartrain queue run --cwd /path/to/workspace
 ```
 
-Все три варианта будут объединены в один класс `helmet`.
-
----
-
-## Пример 8: Настройка пропорций разделения
-
-Для изменения пропорций train/val/test отредактируйте константы в модуле `smartrain/dataset_former.py`:
-
-```python
-TRAIN_PART = 0.7  # 70%
-VAL_PART = 0.2    # 20%
-TEST_PART = 0.1   # 10%
-```
-
-Или используйте только train и val (без test), установив `TEST_PART = 0.0`.
-
----
-
-## Пример 9: Пакетное обучение с разными конфигурациями
-
-Создайте `queue.txt` в корне workspace для экспериментов:
-
-```
-# Эксперимент 1: Маленькая модель, мало эпох
-smartrain train --data /data/dataset --model yolov8n --epochs 10 --batch 32
-
-# Эксперимент 2: Маленькая модель, много эпох
-smartrain train --data /data/dataset --model yolov8n --epochs 100 --batch 16
-
-# Эксперимент 3: Средняя модель
-smartrain train --data /data/dataset --model yolov8s --epochs 50 --batch 16
-
-# Эксперимент 4: Большая модель
-smartrain train --data /data/dataset --model yolov8l --epochs 50 --batch 8
-
-# Эксперимент 5: YOLOv11
-smartrain train --data /data/dataset --model yolov11n --epochs 50 --batch 16
-```
-
-Запустите очередь и оставьте работать на ночь.
-
----
-
-## Пример 10: Работа с относительными путями
-
-Все пути можно указывать относительно текущей директории:
+Исполнитель **`queue-run`**: свой файл очереди/статуса и рабочий каталог:
 
 ```bash
-# Если вы находитесь в /home/user/project
-smartrain fusion \
-    --source-path ./datasets \
-    --target-path ./output/merged \
-    --classes "helmet,gloves"
-```
-
-Или использовать абсолютные пути для большей надежности:
-
-```bash
-smartrain fusion \
-    --source-path /home/user/project/datasets \
-    --target-path /home/user/project/output/merged \
-    --classes "helmet,gloves"
+smartrain queue-run --no-gui
+smartrain queue-run --queue-file /path/to/queue.txt --status-file /path/to/status.txt
+smartrain queue-run --cwd /path/to/workspace
 ```
 
 ---
 
-## Пример 11: Обработка ошибок
+## `smartrain analyze`
 
-### Ошибка: Датасет не найден
+Корень поиска прогонов по умолчанию — `workspace/runs`, если задан workspace; иначе текущий каталог. Явно:
+
+```bash
+smartrain analyze scan
+smartrain analyze scan --models-root /path/to/runs
+```
+
+Сводная таблица по всем прогонам с `training_metadata.json`:
+
+```bash
+smartrain analyze export-table -o runs_summary.csv
+smartrain analyze export-table --models-root /path/to/runs -o out/summary.csv
+```
+
+Сравнение (как в примере ниже) + опционально сессия артефактов в `workspace/analytics/<name>/`:
+
+```bash
+smartrain analyze compare --baseline /path/to/run1 --others /path/to/run2 /path/to/run3 \
+  --out-csv cmp.csv --out-png cmp.png --metric-column "metrics/mAP50-95(B)"
+```
+
+Интерактивный выбор номеров прогонов в терминале:
+
+```bash
+smartrain analyze interactive --output-dir ./analytics_out
+```
+
+---
+
+## `smartrain plot`
+
+Устаревшая обёртка над модулем анализа; предпочтительно **`smartrain analyze`**. Справка: **`smartrain plot --help`**.
+
+---
+
+## `smartrain registry`
+
+Работает от workspace (`runs/`, `models/`). Список прогонов и детали:
+
+```bash
+smartrain registry runs-list
+smartrain registry runs-info /path/to/specific/run
+smartrain registry runs-info 3
+smartrain registry runs-metrics 3
+```
+
+Промо модели в `models/<имя>/`:
+
+```bash
+smartrain registry models-add 3
+smartrain registry models-list
+smartrain registry models-info my_model_name
+smartrain registry models-remove my_model_name
+```
+
+---
+
+## `smartrain cvat`
+
+Импорт архива CVAT 1.1 → YOLO-папка:
+
+```bash
+smartrain cvat import --cvat-zip /path/to/export.zip --output-dir /path/to/yolo_dataset --force
+```
+
+Экспорт YOLO → CVAT zip:
+
+```bash
+smartrain cvat export --dataset-dir /path/to/yolo_dataset --zip-path /path/to/out.cvat11.zip
+smartrain cvat export --dataset-dir /path/to/yolo_dataset --names "a,b,c"
+```
+
+---
+
+## `smartrain sahi` и `smartrain heatmap`
+
+Нужны extras: **`pip install 'smartrain[sahi]'`**; heatmap использует только `ultralytics`.
+
+Тайловый инференс (изображение или каталог):
+
+```bash
+smartrain sahi --model /path/to/best.pt --source /path/to/image_or_dir --output sahi_out \
+  --slice-h 640 --slice-w 640 --overlap-h 0.2 --overlap-w 0.2 --conf 0.25 --device cuda
+```
+
+Heatmap по одному изображению (без `--output` откроется окно просмотра, если доступно):
+
+```bash
+smartrain heatmap --model /path/to/best.pt --source /path/to/image.jpg --output heat.png
+```
+
+---
+
+## Типичные ошибки (как выглядит вывод)
+
+Датасет для `scan` не найден:
 
 ```bash
 $ smartrain scan --datasets-path /wrong/path
-[ERROR] Папка '/wrong/path' не найдена.
+# [ERROR] Папка '/wrong/path' не найдена.
 ```
 
-**Решение**: Проверьте путь к датасетам.
-
-### Ошибка: Классы не найдены
+Классы не подходят под строгий режим `fusion`:
 
 ```bash
-$ smartrain fusion --classes "nonexistent_class"
-[ERROR] Ни один датасет не содержит все выбранные классы.
+$ smartrain fusion --output-name x --classes "missing_class"
+# [ERROR] Ни один датасет не содержит все выбранные классы.
 ```
 
-**Решение**:
-1. Если нужен общий список классов из каталога, но **ни один** исходный датасет не содержит все эти классы сразу, добавьте **`--include-partial-datasets`**: в слияние войдут датасеты с любым подмножеством выбранных классов.
-2. Проверьте доступные классы в `datasets_info.json`
-3. Проверьте нормализацию в `class_names.json`
-4. Убедитесь, что используете правильные имена классов
-
-### Ошибка: YAML файл не найден
+Попробовать с частичным пересечением:
 
 ```bash
-$ smartrain train --data /path/to/dataset
-[ERROR] Не найден yaml файл: /path/to/dataset/data.yaml
+smartrain fusion --output-name x --classes "class_a,class_b" --include-partial-datasets
 ```
 
-**Решение**: Убедитесь, что датасет содержит файл `data.yaml` или создайте его вручную.
+Нет `data.yaml` у `train`:
 
----
-
-## Пример 12: Интеграция с другими инструментами
-
-### Экспорт метрик в CSV
-
-После тестирования модели метрики сохраняются в CSV:
-
-```python
-import pandas as pd
-
-# Загрузка метрик
-metrics = pd.read_csv('/path/to/model/test_metrics.csv')
-print(metrics.head())
-```
-
-### Использование обученной модели
-
-```python
-from ultralytics import YOLO
-
-# Загрузка обученной модели
-model = YOLO('/path/to/model/train/weights/best.pt')
-
-# Предсказание на изображении
-results = model('/path/to/image.jpg')
-
-# Визуализация результатов
-results[0].show()
+```bash
+$ smartrain train --data /path/to/bad
+# [ERROR] Не найден yaml файл: .../data.yaml
 ```
 
 ---
 
-## Пример 14: Слияние классов при сборке датасета
-
-Итоговые имена классов в `--classes`; `--merge-classes` задаёт соответствие «несколько исходных → одно имя из --classes»:
-
-```bash
-smartrain fusion \
-    --source-path /data/datasets \
-    --target-path /data/merged_head \
-    --classes "head_ppe,vest" \
-    --merge-classes "helmet, hard_hat" head_ppe \
-    --datasets-info-path /data/datasets
-```
-
-## Пример 15: Очередь через CLI и анализ прогонов
-
-```bash
-smartrain queue add -- smartrain train --data /data/m --model yolov8n -y --epochs 2
-smartrain queue list
-smartrain analyze scan --models-root /path/to/Models
-smartrain analyze compare --baseline /path/to/run1 --others /path/to/run2 -o cmp.csv --out-png cmp.png
-```
-
-## Пример 13: Автоматизация с помощью скриптов
-
-Создайте bash скрипт для автоматизации:
+## Скрипт bash: scan → fusion → train
 
 ```bash
 #!/bin/bash
-# auto_train.sh
-
-DATASETS_PATH="/data/datasets"
-OUTPUT_PATH="/data/output"
-CLASSES="helmet,gloves,vest"
-
-# Шаг 1: Анализ датасетов
-echo "Анализ датасетов..."
-smartrain scan --datasets-path $DATASETS_PATH
-
-# Шаг 2: Создание объединенного датасета
-echo "Создание объединенного датасета..."
-smartrain fusion \
-    --source-path $DATASETS_PATH \
-    --target-path $OUTPUT_PATH/merged \
-    --classes $CLASSES
-
-# Шаг 3: Обучение модели
-echo "Обучение модели..."
-smartrain train \
-    --data $OUTPUT_PATH/merged \
-    --model yolov8n \
-    --epochs 50
-
-echo "Готово!"
+set -e
+export SMART_TRAIN_WORKSPACE="/path/to/ws"
+smartrain scan
+smartrain fusion --output-name nightly --classes "class_a,class_b" --fusion-split 0.8,0.1,0.1
+smartrain train --data nightly --model yolov8n --epochs 50 -y
 ```
 
-Сделайте скрипт исполняемым и запустите:
 ```bash
-chmod +x auto_train.sh
-./auto_train.sh
+chmod +x run_nightly.sh
+./run_nightly.sh
 ```
 
+---
+
+## Заметка про `nested_split` и `fusion`
+
+Если после `scan` у датасета несколько пар каталогов `images`/`labels` (например исходные `train`, `val`, `test`), **`fusion` обрабатывает каждую пару отдельно**: кадры перемешиваются и снова делятся пропорциями **`--fusion-split`** на выходные `train`, `valid`, `test`. Это не копирование исходного разбиения один в один.

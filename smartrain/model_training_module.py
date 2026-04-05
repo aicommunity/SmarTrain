@@ -1,13 +1,26 @@
-import sys
+import copy
+import json
 import os
 import argparse
-import json
+import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
 from ultralytics import YOLO
+
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.dataset_hash import calculate_dataset_hash
+from smartrain.train_profile import (
+    apply_cli_smartrain_overrides,
+    dataset_root_from_data_yaml,
+    extract_smartrain_options,
+    load_train_profile,
+    merge_cli_into_ultralytics_cfg,
+    resolve_profile_data_path,
+    task_to_metadata_task_type,
+)
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -34,38 +47,54 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--config",
+        "-c",
+        type=str,
+        default=None,
+        help="YAML-профиль гиперпараметров Ultralytics (формат как у model.train()); CLI переопределяет model/epochs/batch/img-size/task",
+    )
+
+    parser.add_argument(
         "--data",
         type=str,
         default=None,
-        help="Каталог с data.yaml (абсолютный/относительный) или имя записи из work_datasets/datasets_info.json",
+        help="Каталог с data.yaml (абсолютный/относительный) или имя записи из work_datasets/datasets_info.json; "
+        "если задан --config, можно опустить при наличии data: в YAML",
+    )
+
+    parser.add_argument(
+        "--task",
+        type=str,
+        default=argparse.SUPPRESS,
+        help="Задача Ultralytics: detect, segment, classify, pose, obb (по умолчанию из профиля или detect)",
     )
 
     parser.add_argument(
         "--model",
         type=str,
-        default=MODEL_VERSION,
-        help="Модель (например: yolov8n.pt, yolov8s.pt, yolov11n.pt)",
+        default=argparse.SUPPRESS,
+        help=f"Модель (по умолчанию {MODEL_VERSION} или из профиля --config)",
     )
 
     parser.add_argument(
         "--epochs",
         type=int,
-        default=EPOCHS,
-        help="Количество эпох обучения",
+        default=argparse.SUPPRESS,
+        help=f"Эпохи (по умолчанию {EPOCHS} или из профиля)",
     )
 
     parser.add_argument(
         "--batch",
         type=int,
-        default=BATCH,
-        help="Размер batch",
+        default=argparse.SUPPRESS,
+        help=f"Batch (по умолчанию {BATCH} или из профиля)",
     )
 
     parser.add_argument(
         "--img-size",
         type=int,
-        default=IMG_SIZE,
-        help="Размер изображения",
+        default=argparse.SUPPRESS,
+        help=f"imgsz (по умолчанию {IMG_SIZE} или из профиля)",
     )
 
     parser.add_argument(
@@ -115,6 +144,35 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         help="Порог IoU для val() (Ultralytics)",
     )
 
+    parser.add_argument(
+        "--weighted-sampling",
+        action="store_true",
+        help="Взвешенная выборка изображений (классы с меньшим числом объектов чаще); патч ultralytics",
+    )
+
+    parser.add_argument(
+        "--export-onnx",
+        action="store_true",
+        help="После успешного обучения экспорт best.pt в ONNX",
+    )
+    parser.add_argument(
+        "--export-onnx-fp32",
+        action="store_true",
+        help="При --export-onnx не использовать half=True",
+    )
+
+    parser.add_argument(
+        "--clearml",
+        action="store_true",
+        help="Логирование гиперпараметров в ClearML (нужен pip install clearml)",
+    )
+    parser.add_argument(
+        "--clearml-project",
+        type=str,
+        default=None,
+        help="Имя проекта ClearML (иначе CLEARML_PROJECT или smartrain)",
+    )
+
     return parser
 
 
@@ -148,29 +206,91 @@ def resolve_training_data_path(layout: WorkspaceLayout, data_arg: str) -> str:
     return resolve_dataset_root(layout.root, data_arg, entry, layout.work_datasets)
 
 
-def train_yolo(
-    dataset_path,
-    model_version,
-    epochs,
-    batch,
-    img_size,
-    target_dir,
-    non_interactive=False,
-    workspace_root=None,
-):
-    training_start_time = datetime.now()
-    
+def _validate_dataset_dir(dataset_path: str) -> None:
     if not os.path.exists(dataset_path):
         raise FileNotFoundError(f"Папка с датасетом не найдена: {dataset_path}")
-    
     data_yaml = os.path.join(dataset_path, "data.yaml")
-
     if not os.path.exists(data_yaml):
         raise FileNotFoundError(f"Не найден yaml файл: {data_yaml}")
 
+
+def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str, str]:
+    """
+    workspace, dataset_root (каталог с data.yaml), target_base.
+    """
+    try:
+        ws = resolve_workspace_root(args.workspace)
+    except ValueError:
+        ws = None
+
+    if ws is not None:
+        layout = WorkspaceLayout(ws)
+        os.makedirs(layout.runs, exist_ok=True)
+        if args.data is not None:
+            dataset_path = resolve_training_data_path(layout, args.data)
+        elif u_cfg.get("data"):
+            yp = resolve_profile_data_path(str(u_cfg["data"]))
+            dataset_path = dataset_root_from_data_yaml(yp)
+        else:
+            raise ValueError(
+                "При использовании workspace укажите --data или поле data: в профиле --config."
+            )
+        if args.target_path is not None:
+            target_base = os.path.abspath(os.path.expanduser(args.target_path))
+        else:
+            target_base = layout.runs
+        return ws, dataset_path, target_base
+
+    if args.data is not None:
+        dataset_path = os.path.abspath(os.path.expanduser(args.data))
+    elif u_cfg.get("data"):
+        yp = resolve_profile_data_path(str(u_cfg["data"]))
+        dataset_path = dataset_root_from_data_yaml(yp)
+    else:
+        raise ValueError(
+            f"Задайте --workspace (или {WORKSPACE_ENV_VAR}) и --data (или data в YAML), "
+            "либо без workspace — --data и --target-path."
+        )
+
+    if args.target_path is None:
+        raise ValueError(
+            f"Без workspace укажите --target-path (базовый каталог прогонов) или задайте {WORKSPACE_ENV_VAR}."
+        )
+    target_base = os.path.abspath(os.path.expanduser(args.target_path))
+    return None, dataset_path, target_base
+
+
+def _finalize_train_kwargs(ultralytics_cfg: dict[str, Any], data_yaml: str, model_dir: str) -> dict[str, Any]:
+    k = copy.deepcopy(ultralytics_cfg)
+    k.pop("data", None)
+    k["data"] = data_yaml
+    k["project"] = model_dir
+    k["name"] = "train"
+    k["exist_ok"] = False
+    k.setdefault("mode", "train")
+    return k
+
+
+def train_yolo(
+    dataset_path: str,
+    target_dir: str,
+    non_interactive: bool = False,
+    workspace_root: str | None = None,
+    ultralytics_cfg: dict[str, Any] | None = None,
+    smartrain_opts: dict[str, Any] | None = None,
+):
+    ultralytics_cfg = ultralytics_cfg or {}
+    smartrain_opts = smartrain_opts or {}
+
+    training_start_time = datetime.now()
+    _validate_dataset_dir(dataset_path)
+
+    data_yaml = os.path.join(dataset_path, "data.yaml")
     dataset_name = os.path.basename(os.path.normpath(dataset_path))
 
-    # Вычисляем хеш датасета
+    model_version = str(ultralytics_cfg.get("model", MODEL_VERSION))
+    epochs = int(ultralytics_cfg.get("epochs", EPOCHS))
+
     try:
         dataset_hash = calculate_dataset_hash(dataset_path)
         print(f"[INFO] Хеш датасета: {dataset_hash}")
@@ -178,20 +298,13 @@ def train_yolo(
         print(f"[WARNING] Не удалось вычислить хеш датасета: {e}")
         dataset_hash = None
 
-    # Форматируем дату и время в формате YYYY-MM-DD_HH-MM
     timestamp_str = training_start_time.strftime("%Y-%m-%d_%H-%M")
-    
-    # Формируем имя папки с хешем
     folder_name = f"{timestamp_str}_{model_version.replace('.pt', '')}_{epochs}epochs"
     if dataset_hash:
         folder_name = f"{folder_name}-{dataset_hash}"
-    
-    model_dir = os.path.join(
-        target_dir, 
-        dataset_name, 
-        folder_name
-        )
-    
+
+    model_dir = os.path.join(target_dir, dataset_name, folder_name)
+
     if os.path.exists(model_dir):
         if non_interactive:
             print(f"[INFO] Папка уже существует, продолжаем без запроса: {model_dir}")
@@ -200,52 +313,121 @@ def train_yolo(
                 answer = input(
                     f"[WARNING] Папка с таким названием уже существует: {model_dir}. Продолжить обучение? (y/n): \n"
                 ).strip().lower()
-                if answer == 'y':
+                if answer == "y":
                     break
-                elif answer == 'n':
+                elif answer == "n":
                     sys.exit(1)
                 else:
                     print("Пожалуйста, введите только 'y' или 'n'.\n")
     else:
         os.makedirs(model_dir, exist_ok=True)
 
+    train_kw = _finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
+
+    clearml_task = None
+    if smartrain_opts.get("clearml"):
+        try:
+            from clearml import Task
+        except ImportError as e:
+            raise ImportError(
+                "Для --clearml установите: pip install 'smartrain[clearml]' или pip install clearml"
+            ) from e
+        cm_proj = (
+            smartrain_opts.get("clearml_project")
+            or os.environ.get("CLEARML_PROJECT")
+            or "smartrain"
+        )
+        clearml_task = Task.init(
+            project_name=cm_proj,
+            task_name=os.path.basename(model_dir),
+            task_type=Task.TaskTypes.training,
+        )
+        train_kw = clearml_task.connect(train_kw)
+
+    if smartrain_opts.get("weighted_sampling"):
+        from smartrain.weighted_yolo_dataset import setup_weighted_sampling_env
+
+        setup_weighted_sampling_env()
+
     print("\n" + "=" * 60)
-    print(f"[INFO] Обучение модели: {model_version}")
+    print(f"[INFO] Обучение модели: {model_kw_model(train_kw)}")
     print(f"[INFO] Датасет: {dataset_name}")
+    print(f"[INFO] Задача (task): {train_kw.get('task', 'detect')}")
     print(f"[INFO] Конфигурация: {data_yaml}")
     print(f"[INFO] Сохранение результатов в {model_dir}")
     print("=" * 60 + "\n")
 
-    _, model_ext = os.path.splitext(model_version)
-    if model_ext == '':
-        model = YOLO(model_version + ".pt")
+    _, model_ext = os.path.splitext(str(train_kw.get("model", "")))
+    spec = train_kw["model"]
+    if model_ext == "":
+        model = YOLO(str(spec) + ".pt")
     else:
-        model = YOLO(model_version)
+        model = YOLO(str(spec))
+
+    if smartrain_opts.get("weighted_sampling"):
+        from smartrain.weighted_yolo_dataset import register_weighted_sampling_callback
+
+        register_weighted_sampling_callback(model)
 
     training_end_time = None
+    onnx_rel = None
+    best_path = os.path.join(model_dir, "train", "weights", "best.pt")
     try:
-        model.train(
-            data=data_yaml,
-            epochs=epochs,
-            batch=batch,
-            imgsz=img_size,
-            project=model_dir,
-            name="train",
-            exist_ok=False
-        )
-
+        model.train(**train_kw)
         training_end_time = datetime.now()
-        model_path = os.path.join(model_dir, "train", "weights", "best.pt")
-
+        model_path = best_path
         print("\n" + "-" * 60)
         if os.path.exists(model_path):
-            print(f"[OK] Обучение завершено.")
+            print("[OK] Обучение завершено.")
             print(f"[INFO] Модель сохранена по пути:\n{model_path}")
+        if smartrain_opts.get("export_onnx") and os.path.exists(model_path):
+            half = bool(smartrain_opts.get("export_onnx_half", True))
+            simplify = bool(smartrain_opts.get("export_onnx_simplify", True))
+            opset = smartrain_opts.get("export_onnx_opset", 17)
+            dynamic = bool(smartrain_opts.get("export_onnx_dynamic", False))
+            try:
+                ex = model.export(
+                    format="onnx",
+                    dynamic=dynamic,
+                    simplify=simplify,
+                    opset=int(opset),
+                    half=half,
+                )
+                if ex:
+                    onnx_abs = str(ex) if isinstance(ex, (str, Path)) else str(getattr(ex, "path", ex))
+                    if os.path.isfile(onnx_abs):
+                        onnx_rel = os.path.relpath(onnx_abs, model_dir)
+                    else:
+                        cand = os.path.join(model_dir, "train", "weights", "best.onnx")
+                        if os.path.isfile(cand):
+                            onnx_rel = os.path.relpath(cand, model_dir)
+                print(f"[INFO] ONNX экспорт выполнен: {onnx_rel or '(см. каталог weights)'}")
+            except Exception as ex_err:
+                print(f"[WARNING] ONNX экспорт не удался: {ex_err}")
     except Exception as e:
         training_end_time = datetime.now()
-        print(f"[ERROR] Не удалось запустить обучение {model_version} на датасете {dataset_name} на {epochs} эпох: {e}")
-    
-    return model_dir, training_start_time, training_end_time, dataset_hash, workspace_root
+        print(
+            f"[ERROR] Не удалось запустить обучение {model_version} на датасете {dataset_name} "
+            f"на {epochs} эпох: {e}"
+        )
+    finally:
+        if clearml_task is not None:
+            try:
+                clearml_task.close()
+            except Exception:
+                pass
+
+    meta_extras = {
+        "train_kw": {k: v for k, v in train_kw.items() if k != "data"},
+        "task_type": task_to_metadata_task_type(train_kw.get("task")),
+        "onnx_relative": onnx_rel,
+        "training_ok": os.path.isfile(best_path),
+    }
+    return model_dir, training_start_time, training_end_time, dataset_hash, workspace_root, meta_extras
+
+
+def model_kw_model(train_kw: dict) -> str:
+    return str(train_kw.get("model", ""))
 
 
 def test_yolo(
@@ -304,7 +486,7 @@ def test_yolo(
 
         print("\n" + "-" * 60)
         if os.path.exists(csv_file):
-            print(f"[OK] Тестирование завершено.")
+            print("[OK] Тестирование завершено.")
             print(f"[INFO] Результаты сохранены по пути:\n{csv_file}")
         else:
             print("[ERROR] .csv файл не найден. Проверьте лог Ultralytics.")
@@ -320,7 +502,7 @@ def save_metrics_csv(test_result, model_dir):
     base_name = "test_metrics"
     ext = ".csv"
     csv_file = os.path.join(model_dir, base_name + ext)
-    
+
     counter = 1
     while os.path.exists(csv_file):
         csv_file = os.path.join(model_dir, f"{base_name}_{counter}{ext}")
@@ -329,7 +511,7 @@ def save_metrics_csv(test_result, model_dir):
     csv_data = test_result.to_csv()
     with open(csv_file, "w", encoding="utf-8") as f:
         f.write(csv_data)
-    
+
     return csv_file
 
 
@@ -360,74 +542,65 @@ def save_training_metadata(
     dataset_hash=None,
     inference=None,
     workspace_root=None,
+    task_type=None,
+    ultralytics_train_summary=None,
+    onnx_relative=None,
 ):
-    """
-    Сохраняет метаданные обучения в JSON файл рядом с test_metrics.csv
-    
-    Args:
-        model_dir: Директория с результатами обучения
-        dataset_path: Полный путь к датасету
-        model_version: Версия модели (например, 'yolo11n')
-        training_start_time: Время начала обучения
-        training_end_time: Время окончания обучения
-        test_start_time: Время начала тестирования
-        test_end_time: Время окончания тестирования
-        epochs: Количество эпох
-        batch: Размер batch
-        img_size: Размер изображения
-        training_success: Успешность обучения (True/False)
-        training_error: Сообщение об ошибке обучения (если было)
-        test_success: Успешность тестирования (True/False)
-        test_error: Сообщение об ошибке тестирования (если было)
-        dataset_hash: Хеш датасета (8 символов)
-    """
     metadata = {
         "training_info": {
             "framework": "ultralytics",
-            "task_type": "detection",
+            "task_type": task_type or "detection",
             "model": model_version,
             "dataset": {
                 "name": os.path.basename(os.path.normpath(dataset_path)),
                 "path_absolute": os.path.abspath(dataset_path),
                 "path_relative": _get_relative_path(dataset_path, model_dir),
-                "hash": dataset_hash
+                "hash": dataset_hash,
             },
             "hyperparameters": {
                 "epochs": epochs,
                 "batch_size": batch,
-                "image_size": img_size
-            }
+                "image_size": img_size,
+            },
         },
         "timestamps": {
             "training": {
                 "start": training_start_time.isoformat() if training_start_time else None,
                 "end": training_end_time.isoformat() if training_end_time else None,
-                "duration_seconds": (training_end_time - training_start_time).total_seconds() 
-                    if training_start_time and training_end_time else None
+                "duration_seconds": (training_end_time - training_start_time).total_seconds()
+                if training_start_time and training_end_time
+                else None,
             },
             "testing": {
                 "start": test_start_time.isoformat() if test_start_time else None,
                 "end": test_end_time.isoformat() if test_end_time else None,
-                "duration_seconds": (test_end_time - test_start_time).total_seconds() 
-                    if test_start_time and test_end_time else None
-            }
+                "duration_seconds": (test_end_time - test_start_time).total_seconds()
+                if test_start_time and test_end_time
+                else None,
+            },
         },
         "status": {
             "training": {
                 "success": training_success,
-                "error": training_error
+                "error": training_error,
             },
             "testing": {
                 "success": test_success,
-                "error": test_error
-            }
+                "error": test_error,
+            },
         },
         "paths": {
             "model_directory": ".",
-            "best_model": "train/weights/best.pt" if os.path.exists(
-                os.path.join(model_dir, "train", "weights", "best.pt")) else None
-        }
+            "best_model": "train/weights/best.pt"
+            if os.path.exists(os.path.join(model_dir, "train", "weights", "best.pt"))
+            else None,
+        },
     }
+
+    if ultralytics_train_summary:
+        metadata["training_info"]["ultralytics_train"] = ultralytics_train_summary
+    if onnx_relative:
+        metadata["paths"]["onnx"] = onnx_relative
 
     if workspace_root is not None:
         metadata["workspace"] = {
@@ -440,7 +613,7 @@ def save_training_metadata(
         metadata["inference"] = {k: v for k, v in inference.items() if v is not None}
 
     metadata_file = os.path.join(model_dir, "training_metadata.json")
-    
+
     try:
         with open(metadata_file, "w", encoding="utf-8") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
@@ -450,80 +623,79 @@ def save_training_metadata(
 
 
 def _get_relative_path(target_path, base_path):
-    """
-    Вычисляет относительный путь от base_path к target_path.
-    Если пути на разных дисках или не удается вычислить относительный путь,
-    возвращает абсолютный путь.
-    """
     try:
         target = Path(os.path.abspath(target_path))
         base = Path(os.path.abspath(base_path))
-        
-        # Пытаемся вычислить относительный путь
+
         try:
             relative = os.path.relpath(target, base)
-            # Если относительный путь содержит много '..', все равно возвращаем его
-            # (это нормально для датасетов, которые находятся далеко от модели)
             return relative
         except ValueError:
-            # Пути на разных дисках или другие проблемы - возвращаем абсолютный
             return target.as_posix()
     except Exception:
-        # В случае любой ошибки возвращаем абсолютный путь
         return os.path.abspath(target_path)
-    
 
-def _resolve_cli_paths(args):
-    """
-    Возвращает (workspace_root|None, dataset_path, target_base_dir).
-    workspace_root задан — разрешение --data через work_datasets или каталог с yaml.
-    Иначе нужны оба: --data и --target-path (абсолютные каталоги прогонов).
-    """
-    try:
-        ws = resolve_workspace_root(args.workspace)
-    except ValueError:
-        ws = None
-    if ws is not None:
-        layout = WorkspaceLayout(ws)
-        os.makedirs(layout.runs, exist_ok=True)
-        if args.data is None:
-            raise ValueError(
-                "При использовании workspace укажите --data (каталог с data.yaml или имя из work_datasets)."
-            )
-        dataset_path = resolve_training_data_path(layout, args.data)
-        if args.target_path is not None:
-            target_base = os.path.abspath(os.path.expanduser(args.target_path))
-        else:
-            target_base = layout.runs
-        return ws, dataset_path, target_base
-    if args.data is None or args.target_path is None:
-        raise ValueError(
-            f"Задайте --workspace (или {WORKSPACE_ENV_VAR}) либо оба параметра: --data и --target-path."
-        )
-    dataset_path = os.path.abspath(os.path.expanduser(args.data))
-    target_base = os.path.abspath(os.path.expanduser(args.target_path))
-    return None, dataset_path, target_base
+
+def _json_safe_train_summary(train_kw: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not train_kw:
+        return None
+    out: dict[str, Any] = {}
+    for k, v in train_kw.items():
+        if k in ("data",):
+            continue
+        try:
+            json.dumps(v)
+            out[k] = v
+        except (TypeError, ValueError):
+            out[k] = str(v)
+    return out
 
 
 def main(argv=None):
     if argv is None:
-        import sys
         argv = sys.argv[1:]
     args = parse_args(argv)
 
+    profile = load_train_profile(args.config) if args.config else {}
+    u_cfg, sm_opts = extract_smartrain_options(profile)
+    merge_cli_into_ultralytics_cfg(
+        u_cfg,
+        model=getattr(args, "model", None),
+        epochs=getattr(args, "epochs", None),
+        batch=getattr(args, "batch", None),
+        imgsz=getattr(args, "img_size", None),
+        task=getattr(args, "task", None),
+        defaults={
+            "model": MODEL_VERSION,
+            "epochs": EPOCHS,
+            "batch": BATCH,
+            "imgsz": IMG_SIZE,
+            "task": "detect",
+        },
+    )
+    apply_cli_smartrain_overrides(sm_opts, args)
+
+    if args.export_onnx_fp32:
+        sm_opts["export_onnx_half"] = False
+
     try:
-        workspace_root, data, target_dir = _resolve_cli_paths(args)
+        workspace_root, data, target_dir = _resolve_cli_paths_with_profile(args, u_cfg)
     except ValueError as e:
         print(f"[ERROR] {e}")
         return
 
-    model_version = args.model
-    epochs = args.epochs
-    batch = args.batch
-    img_size = args.img_size
+    u_cfg.pop("data", None)
 
-    # Переменные для отслеживания статуса
-    training_success = True
+    model_version = str(u_cfg.get("model", MODEL_VERSION))
+    epochs = int(u_cfg.get("epochs", EPOCHS))
+    batch = int(u_cfg.get("batch", BATCH))
+    img_size = u_cfg.get("imgsz", IMG_SIZE)
+    try:
+        img_size = int(img_size) if img_size is not None else IMG_SIZE
+    except (TypeError, ValueError):
+        img_size = IMG_SIZE
+
+    training_success = False
     training_error = None
     test_success = True
     test_error = None
@@ -533,49 +705,55 @@ def main(argv=None):
     test_end_time = None
     model_dir = None
     inference_info = None
-
-    # Переменная для хранения хеша датасета
     dataset_hash = None
-    
+    meta_extras: dict[str, Any] = {}
+
     if not args.test_only:
-        # Обучение с обработкой ошибок
         try:
-            model_dir, training_start_time, training_end_time, dataset_hash, _ = train_yolo(
+            (
+                model_dir,
+                training_start_time,
+                training_end_time,
+                dataset_hash,
+                _,
+                meta_extras,
+            ) = train_yolo(
                 dataset_path=data,
-                model_version=model_version,
-                epochs=epochs,
-                batch=batch,
-                img_size=img_size,
                 target_dir=target_dir,
                 non_interactive=args.non_interactive,
                 workspace_root=workspace_root,
+                ultralytics_cfg=u_cfg,
+                smartrain_opts=sm_opts,
             )
+            training_success = bool(meta_extras.get("training_ok"))
         except Exception as e:
             training_success = False
             training_error = str(e)
             training_end_time = datetime.now()
             print(f"[ERROR] Ошибка при обучении: {e}")
             training_error = f"{str(e)}\n{traceback.format_exc()}"
-            # Вычисляем хеш для случая ошибки
             try:
                 dataset_hash = calculate_dataset_hash(data)
             except Exception:
                 dataset_hash = None
-            # Создаем директорию для сохранения метаданных об ошибке
             if not model_dir:
                 dataset_name = os.path.basename(os.path.normpath(data))
-                timestamp_str = training_start_time.strftime("%Y-%m-%d_%H-%M") if training_start_time else datetime.now().strftime("%Y-%m-%d_%H-%M")
+                timestamp_str = (
+                    training_start_time.strftime("%Y-%m-%d_%H-%M")
+                    if training_start_time
+                    else datetime.now().strftime("%Y-%m-%d_%H-%M")
+                )
                 folder_name = f"{timestamp_str}_{model_version.replace('.pt', '')}_{epochs}epochs"
                 if dataset_hash:
                     folder_name = f"{folder_name}-{dataset_hash}"
-                model_dir = os.path.join(
-                    target_dir,
-                    dataset_name,
-                    folder_name
-                )
+                model_dir = os.path.join(target_dir, dataset_name, folder_name)
                 os.makedirs(model_dir, exist_ok=True)
+            meta_extras = {
+                "task_type": task_to_metadata_task_type(u_cfg.get("task")),
+                "train_kw": {k: v for k, v in u_cfg.items() if k != "data"},
+                "training_ok": False,
+            }
 
-        # Тестирование с обработкой ошибок (только если обучение прошло успешно)
         if training_success and model_dir:
             try:
                 test_start_time, test_end_time, inference_info = test_yolo(
@@ -594,13 +772,12 @@ def main(argv=None):
                 test_end_time = datetime.now()
                 print(f"[ERROR] Ошибка при тестировании: {e}")
                 test_error = f"{str(e)}\n{traceback.format_exc()}"
-        
-        # Сохраняем метаданные с параметрами обучения и тестирования
+
         if model_dir:
             save_training_metadata(
                 model_dir=model_dir,
                 dataset_path=data,
-                model_version=model_version.replace('.pt', ''),
+                model_version=model_version.replace(".pt", ""),
                 training_start_time=training_start_time,
                 training_end_time=training_end_time,
                 test_start_time=test_start_time,
@@ -615,6 +792,9 @@ def main(argv=None):
                 dataset_hash=dataset_hash,
                 inference=inference_info,
                 workspace_root=workspace_root,
+                task_type=meta_extras.get("task_type") or task_to_metadata_task_type(u_cfg.get("task")),
+                ultralytics_train_summary=_json_safe_train_summary(meta_extras.get("train_kw")),
+                onnx_relative=meta_extras.get("onnx_relative"),
             )
     else:
         model_dir = args.model_dir
@@ -634,8 +814,7 @@ def main(argv=None):
                 test_end_time = datetime.now()
                 print(f"[ERROR] Ошибка при тестировании: {e}")
                 test_error = f"{str(e)}\n{traceback.format_exc()}"
-            
-            # Для режима test-only сохраняем только метаданные тестирования
+
             save_training_metadata(
                 model_dir=model_dir,
                 dataset_path=data,
@@ -645,10 +824,11 @@ def main(argv=None):
                 test_error=test_error,
                 inference=inference_info,
                 workspace_root=workspace_root,
+                task_type=task_to_metadata_task_type(u_cfg.get("task")),
             )
         else:
-            print(f"[ERROR] Не указан путь к модели")
+            print("[ERROR] Не указан путь к модели")
 
-    
+
 if __name__ == "__main__":
     main()

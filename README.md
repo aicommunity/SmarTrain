@@ -64,7 +64,7 @@ smartrain train --data <имя_этого_каталога>
 Сканирование датасетов из файла со списком путей:
 
 ```bash
-smartrain scan --datasets-list /data/MarsSmarTrain/source_datasets/datasets_list.txt
+smartrain scan --datasets-list /path/to/workspace/source_datasets/datasets_list.txt
 ```
 
 Формат `datasets_list.txt`: один путь на строку (поддерживаются директории и `.zip`), строки с `#` и пустые игнорируются. Относительные пути интерпретируются относительно директории самого list-файла.

@@ -178,7 +178,7 @@ main()
 │   ├── iter_image_label_buckets() (dataset_access) → пары images/labels, включая cvat11
 │   ├── Создание пар (изображение, аннотация)
 │   ├── Перемешивание пар
-│   ├── Разделение на train/val/test (80/10/10)
+│   ├── Разделение на train/val/test (доли из `--fusion-split` или константы по умолчанию)
 │   └── Для каждой пары:
 │       ├── filter_label_file() → фильтрация и переиндексация
 │       └── Копирование изображения (если аннотация не пустая)
@@ -209,15 +209,10 @@ main()
   - Сохраняет координаты bounding box без изменений
 
 **Разделение на train/val/test**
-- **Алгоритм**: Простое разделение массива по индексам
-- **Пропорции**: `TRAIN_PART = 0.8`, `VAL_PART = 0.1`, `TEST_PART = 0.1`
-- **Реализация**:
-  ```python
-  train_split = pairs[:int(n * TRAIN_PART)]
-  val_split = pairs[int(n * TRAIN_PART):int(n * (TRAIN_PART + VAL_PART))]
-  test_split = pairs[int(n * (VAL_PART + TRAIN_PART)):]
-  ```
-- **Особенность**: Разделение происходит для каждого датасета отдельно, затем объединение
+- **Алгоритм**: Простое разделение массива по индексам после `random.shuffle` внутри **каждой** пары каталогов (`bucket`), которую вернул `iter_image_label_buckets`.
+- **Пропорции**: по умолчанию `TRAIN_PART`, `VAL_PART`, `TEST_PART` (0.8 / 0.1 / 0.1); переопределяются CLI **`--fusion-split train,val,test`** (сумма 1.0).
+- **Реализация** (упрощённо): `train_split = pairs[:int(n * train_part)]`, затем val и test по накопленной доле.
+- **Особенность**: Для нескольких buckets (например исходный `nested_split`) каждый bucket переразбивается отдельно; исходные имена подпапок `train`/`val`/`test` у источника не задают напрямую выходные split’ы.
 
 #### Структура данных
 
@@ -559,7 +554,7 @@ main()
 **Статусы задач**:
 ```python
 statuses = {
-    "smartrain fusion --classes helmet": "Ждет выполнения",
+    "smartrain fusion --classes class_a": "Ждет выполнения",
     "smartrain train --model yolov8n": "Выполняется",
     ...
 }
@@ -567,7 +562,7 @@ statuses = {
 
 **Формат файла статуса**:
 ```
-smartrain fusion --classes helmet | Ждет выполнения
+smartrain fusion --classes class_a | Ждет выполнения
 smartrain train --model yolov8n | Выполняется
 ```
 
