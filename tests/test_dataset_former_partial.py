@@ -64,6 +64,7 @@ def test_fusion_without_partial_requires_all_classes_in_each_dataset(
             "ds_b",
             "--classes",
             "cat,dog",
+            "--no-include-partial-datasets",
         ]
     )
     out = capsys.readouterr().out + capsys.readouterr().err

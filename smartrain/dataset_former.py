@@ -168,9 +168,11 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--include-partial-datasets",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Брать в слияние датасеты, в которых есть хотя бы один из выбранных классов "
-        "(по умолчанию требуется наличие всех выбранных классов в каждом датасете)",
+        "(по умолчанию включено); используйте --no-include-partial-datasets, "
+        "чтобы требовать наличие всех выбранных классов в каждом датасете",
     )
     parser.add_argument(
         "--drop-empty-images",
