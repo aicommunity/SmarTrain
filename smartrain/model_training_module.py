@@ -37,7 +37,9 @@ IMG_SIZE = 640
 
 
 def build_train_arg_parser() -> argparse.ArgumentParser:
-    parser = CliArgumentParser(description="Обучение моделей")
+    parser = CliArgumentParser(
+        description="Обучение моделей (без аргументов запускается интерактивный режим)"
+    )
 
     parser.add_argument(
         "--workspace",
@@ -178,6 +180,182 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
 
 def parse_args(argv=None):
     return build_train_arg_parser().parse_args(argv)
+
+
+def _prompt_input(label: str, default: str = "", completer=None) -> str:
+    from prompt_toolkit import prompt
+
+    return str(prompt(label, default=default, completer=completer, complete_while_typing=True))
+
+
+def _prompt_yes_no(label: str, default: bool = False) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    default_text = "y" if default else "n"
+    raw = _prompt_input(f"{label} [{suffix}]: ", default=default_text).strip().lower()
+    if not raw:
+        return default
+    return raw in ("y", "yes", "1", "true", "да", "д")
+
+
+def _prompt_int(label: str, default: int) -> int:
+    while True:
+        raw = _prompt_input(f"{label}: ", default=str(default)).strip()
+        if not raw:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            print(f"[ERROR] Ожидается целое число, получено: {raw!r}")
+
+
+def _prompt_optional_int(label: str, default: int | None = None) -> int | None:
+    default_text = "" if default is None else str(default)
+    while True:
+        raw = _prompt_input(f"{label}: ", default=default_text).strip()
+        if not raw:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            print(f"[ERROR] Ожидается целое число или пустое значение, получено: {raw!r}")
+
+
+def _prompt_optional_float(label: str, default: float | None = None) -> float | None:
+    default_text = "" if default is None else str(default)
+    while True:
+        raw = _prompt_input(f"{label}: ", default=default_text).strip()
+        if not raw:
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            print(f"[ERROR] Ожидается число или пустое значение, получено: {raw!r}")
+
+
+def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
+    info_path = layout.work_datasets_info_path()
+    if not os.path.isfile(info_path):
+        return []
+    try:
+        with open(info_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+    return sorted(str(k) for k in data.keys())
+
+
+def _prompt_dataset_name(available: list[str]) -> str:
+    from prompt_toolkit.completion import WordCompleter
+
+    completer = WordCompleter(available, ignore_case=True)
+    while True:
+        raw = _prompt_input(
+            "Датасет (имя из datasets/datasets_info.json): ",
+            default="",
+            completer=completer,
+        ).strip()
+        if raw in available:
+            return raw
+        print("[ERROR] Неизвестное имя датасета. Доступные:", ", ".join(available))
+
+
+def _run_interactive_train_setup(args) -> bool:
+    from prompt_toolkit.completion import WordCompleter
+
+    print("[INFO] Интерактивный режим train (Enter = значение по умолчанию).")
+
+    try:
+        ws = resolve_workspace_root(getattr(args, "workspace", None))
+    except ValueError:
+        ws_raw = _prompt_input("Путь workspace: ", default=os.getcwd()).strip()
+        if not ws_raw:
+            print("[ERROR] Workspace не задан.")
+            return False
+        ws = os.path.abspath(os.path.expanduser(ws_raw))
+        args.workspace = ws
+
+    layout = WorkspaceLayout(ws)
+    dataset_names = _load_available_datasets(layout)
+    if not dataset_names:
+        print(
+            "[ERROR] В datasets/datasets_info.json нет доступных датасетов. "
+            "Сначала выполните scan."
+        )
+        return False
+    print("[INFO] Доступные датасеты:")
+    for name in dataset_names:
+        print(f"  - {name}")
+    args.data = _prompt_dataset_name(dataset_names)
+
+    task_default = str(getattr(args, "task", "detect"))
+    task_choices = ["detect", "segment", "classify", "pose", "obb"]
+    task_completer = WordCompleter(task_choices, ignore_case=True)
+    args.task = (
+        _prompt_input(
+            "Task (detect/segment/classify/pose/obb): ",
+            default=task_default,
+            completer=task_completer,
+        ).strip()
+        or task_default
+    )
+
+    args.model = (_prompt_input("Модель (--model): ", default=str(getattr(args, "model", MODEL_VERSION))).strip()
+                  or MODEL_VERSION)
+    args.epochs = _prompt_int("Эпохи (--epochs)", int(getattr(args, "epochs", EPOCHS)))
+    args.batch = _prompt_int("Batch (--batch)", int(getattr(args, "batch", BATCH)))
+    args.img_size = _prompt_int("Размер изображения (--img-size)", int(getattr(args, "img_size", IMG_SIZE)))
+
+    default_target = str(getattr(args, "target_path", None) or layout.runs)
+    args.target_path = (_prompt_input("Каталог прогонов (--target-path): ", default=default_target).strip()
+                        or default_target)
+
+    args.test_only = _prompt_yes_no("Только тест без обучения (--test-only)", default=bool(getattr(args, "test_only", False)))
+    if args.test_only:
+        model_dir_default = str(getattr(args, "model_dir", "") or "")
+        while True:
+            model_dir = _prompt_input("Путь к модели (--model-dir): ", default=model_dir_default).strip()
+            if model_dir:
+                args.model_dir = model_dir
+                break
+            print("[ERROR] Для --test-only необходимо указать --model-dir.")
+    else:
+        args.model_dir = getattr(args, "model_dir", None)
+
+    args.val_imgsz = _prompt_optional_int("Размер val/test (--val-imgsz, пусто=как train)", getattr(args, "val_imgsz", None))
+    args.val_conf = _prompt_optional_float("Порог conf (--val-conf, пусто=по умолчанию Ultralytics)", getattr(args, "val_conf", None))
+    args.val_iou = _prompt_optional_float("Порог IoU (--val-iou, пусто=по умолчанию Ultralytics)", getattr(args, "val_iou", None))
+
+    args.weighted_sampling = _prompt_yes_no(
+        "Включить weighted sampling (--weighted-sampling)",
+        default=bool(getattr(args, "weighted_sampling", False)),
+    )
+    args.export_onnx = _prompt_yes_no(
+        "Экспортировать ONNX после обучения (--export-onnx)",
+        default=bool(getattr(args, "export_onnx", False)),
+    )
+    args.export_onnx_fp32 = _prompt_yes_no(
+        "Использовать FP32 для ONNX (--export-onnx-fp32)",
+        default=bool(getattr(args, "export_onnx_fp32", False)),
+    )
+    args.clearml = _prompt_yes_no(
+        "Логировать в ClearML (--clearml)",
+        default=bool(getattr(args, "clearml", False)),
+    )
+    if args.clearml:
+        args.clearml_project = (
+            _prompt_input(
+                "Проект ClearML (--clearml-project): ",
+                default=str(getattr(args, "clearml_project", "") or ""),
+            ).strip()
+            or None
+        )
+    args.non_interactive = _prompt_yes_no(
+        "Не спрашивать подтверждения при существующей папке (--yes)",
+        default=bool(getattr(args, "non_interactive", False)),
+    )
+    return True
 
 
 def resolve_training_data_path(layout: WorkspaceLayout, data_arg: str) -> str:
@@ -655,6 +833,21 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
     args = parse_args(argv)
+    interactive_mode = len(argv) == 0
+    if interactive_mode:
+        if not sys.stdin.isatty():
+            print(
+                "[ERROR] Интерактивный режим train требует терминал (TTY). "
+                "Либо запустите в терминале, либо передайте аргументы."
+            )
+            return
+        try:
+            ok = _run_interactive_train_setup(args)
+        except Exception as e:
+            print(f"[ERROR] Ошибка интерактивного режима train: {e}")
+            return
+        if not ok:
+            return
 
     profile = load_train_profile(args.config) if args.config else {}
     u_cfg, sm_opts = extract_smartrain_options(profile)
@@ -675,7 +868,7 @@ def main(argv=None):
     )
     apply_cli_smartrain_overrides(sm_opts, args)
 
-    if args.export_onnx_fp32:
+    if getattr(args, "export_onnx_fp32", False):
         sm_opts["export_onnx_half"] = False
 
     try:

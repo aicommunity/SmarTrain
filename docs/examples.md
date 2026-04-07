@@ -172,6 +172,12 @@ smartrain fusion \
 
 ## `smartrain train`
 
+Интерактивный режим (без аргументов): выбор датасета из `datasets_info.json` и ввод остальных параметров с дефолтами по Enter.
+
+```bash
+smartrain train
+```
+
 Workspace и имя датасета из `datasets/`:
 
 ```bash

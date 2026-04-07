@@ -58,6 +58,8 @@ smartrain scan
 smartrain fusion --dataset ds1 --dataset ds2 --classes "class_a,class_b"
 # создаётся datasets/YYYY-MM-DD_HH-MM-SS-merged (см. вывод [INFO])
 smartrain train --data <имя_этого_каталога>
+# или полностью интерактивно (без аргументов):
+smartrain train
 # фиксированное имя: smartrain fusion --output-name my_merge --dataset ds1 --dataset ds2 --classes ...
 ```
 
