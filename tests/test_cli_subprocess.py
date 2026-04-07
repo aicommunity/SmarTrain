@@ -18,7 +18,7 @@ CLI_HELP_CASES: list[tuple[str, list[str]]] = [
     ("augment", ["--", "--help"]),
     ("balance", ["--", "--help"]),
     ("hash", ["--", "--help"]),
-    ("stats", ["classes", "--", "--help"]),
+    ("stats", ["--", "--help"]),
     ("roi", ["--", "--help"]),
     ("cvat", ["--", "--help"]),
     ("queue", ["list"]),

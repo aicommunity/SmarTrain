@@ -416,6 +416,69 @@ def _print_interactive_catalog(available: dict[str, str]) -> None:
         console.print("  - (не найдены в data.yaml)")
 
 
+def _collect_class_ids_by_name(
+    selected_names: list[str], scanned: dict[str, DatasetStats]
+) -> dict[str, set[int]]:
+    out: dict[str, set[int]] = defaultdict(set)
+    for ds_name in selected_names:
+        ds = scanned[ds_name]
+        for cid, cname in ds.classes_by_id.items():
+            out[str(cname)].add(int(cid))
+    return out
+
+
+def _format_class_id_set(ids: set[int]) -> str:
+    if not ids:
+        return "-"
+    s = sorted(ids)
+    if len(s) == 1:
+        return str(s[0])
+    return f"mixed({','.join(str(x) for x in s)})"
+
+
+def _render_datasets_class_catalog(
+    selected_names: list[str], scanned: dict[str, DatasetStats], *, show_legend: bool
+) -> None:
+    class_ids = _collect_class_ids_by_name(selected_names, scanned)
+    rows: list[tuple[str, str, str, str, str]] = []
+    for cls in sorted(class_ids.keys()):
+        present_in = 0
+        total_instances = 0
+        for ds_name in selected_names:
+            ds = scanned[ds_name]
+            cnt = int(sum(ds.per_class_split_instances.get(cls, {}).values()))
+            total_instances += cnt
+            if cnt > 0:
+                present_in += 1
+        coverage = f"{present_in}/{len(selected_names)}"
+        for ds_name in selected_names:
+            ds = scanned[ds_name]
+            ids_here = sorted([cid for cid, cname in ds.classes_by_id.items() if cname == cls])
+            if not ids_here:
+                continue
+            class_id = "/".join(str(x) for x in ids_here)
+            rows.append((class_id, cls, coverage, str(total_instances), ds_name))
+    table = Table(title="Каталог классов по датасетам")
+    table.add_column("ClassID", justify="right")
+    table.add_column("ClassName")
+    table.add_column("Coverage", justify="right")
+    table.add_column("Total", justify="right")
+    table.add_column("Dataset")
+    last_class_name = None
+    for class_id, class_name, coverage, total, dataset in rows:
+        display_class_name = class_name if class_name != last_class_name else ""
+        table.add_row(class_id, display_class_name, coverage, total, dataset)
+        last_class_name = class_name
+    console.print(table)
+    if show_legend:
+        console.print("[dim]Колонки каталога классов по датасетам:[/dim]")
+        console.print("[dim]- ClassID: индекс класса в конкретном датасете[/dim]")
+        console.print("[dim]- ClassName: имя класса (показывается в первой строке группы)[/dim]")
+        console.print("[dim]- Coverage: в скольких выбранных датасетах класс имеет объекты (present/total)[/dim]")
+        console.print("[dim]- Total: общее число объектов класса по выбранным датасетам[/dim]")
+        console.print("[dim]- Dataset: имя датасета для строки[/dim]")
+
+
 def _render_classes_table(
     selected_names: list[str],
     scanned: dict[str, DatasetStats],
@@ -427,6 +490,7 @@ def _render_classes_table(
 ) -> None:
     class_rows: dict[str, dict[str, int]] = defaultdict(lambda: {s: 0 for s in SPLITS})
     class_images: dict[str, int] = defaultdict(int)
+    class_ids_by_name = _collect_class_ids_by_name(selected_names, scanned)
     for name in selected_names:
         ds = scanned[name]
         for cls, split_map in ds.per_class_split_instances.items():
@@ -450,6 +514,7 @@ def _render_classes_table(
             split_total[s] += split_map[s]
         avg_per_image = total / class_images[cls] if class_images.get(cls, 0) else 0.0
         row = {
+            "class_id": _format_class_id_set(class_ids_by_name.get(cls, set())),
             "class": cls,
             "train": split_map["train"],
             "val": split_map["val"],
@@ -464,6 +529,7 @@ def _render_classes_table(
         rows = rows[:limit]
 
     table = Table(title="Статистика по классам")
+    table.add_column("ClassID", justify="right")
     table.add_column("Class")
     table.add_column("Train", justify="right")
     table.add_column("Val", justify="right")
@@ -473,6 +539,7 @@ def _render_classes_table(
     table.add_column("Avg/Img", justify="right")
     for r in rows:
         table.add_row(
+            r["class_id"],
             r["class"],
             str(r["train"]),
             str(r["val"]),
@@ -484,6 +551,7 @@ def _render_classes_table(
     console.print(table)
     if show_legend:
         console.print("[dim]Колонки classes:[/dim]")
+        console.print("[dim]- ClassID: индекс класса (или mixed(...), если индексы отличаются между датасетами)[/dim]")
         console.print("[dim]- Class: имя класса[/dim]")
         console.print("[dim]- Train: число объектов класса в train[/dim]")
         console.print("[dim]- Val: число объектов класса в val[/dim]")
@@ -508,8 +576,6 @@ def _render_classes_table(
         console.print(
             f"- {label}: ratio={m['ratio']:.3f}, cv={m['cv']:.3f}, gini={m['gini']:.3f}, mean/median={m['mean_median']:.3f}"
         )
-
-
 def _export_issues(layout: WorkspaceLayout, rows: list[dict[str, str]]) -> str:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = os.path.join(layout.analytics, "stats", stamp)
@@ -623,6 +689,11 @@ def _render_datasets_table(
         console.print("[dim]- Imbalance: max/min по числу объектов на класс[/dim]")
         console.print("[dim]- Gini: коэффициент Джини по распределению классов[/dim]")
         console.print("[dim]- Quality: OK/WARN по базовым проверкам разметки[/dim]")
+    _render_datasets_class_catalog(
+        selected_names,
+        scanned,
+        show_legend=not getattr(args, "no_legend", False),
+    )
 
     if any((args.check_duplicates, args.check_near_duplicates)):
         console.print("[bold]Leakage/Duplicate risk[/bold]")
@@ -727,70 +798,38 @@ def _prompt_interactive_datasets(args, available_names: list[str]) -> None:
 
 
 def build_stats_arg_parser() -> argparse.ArgumentParser:
-    parser = CliArgumentParser(description="Статистика датасетов (только datasets/)")
+    parser = CliArgumentParser(description="Единая статистика датасетов и классов (только datasets/)")
     parser.add_argument(
         "--workspace",
         type=str,
         default=None,
         help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); анализируется только datasets/",
     )
-    sub = parser.add_subparsers(dest="stats_command")
-
-    p_cls = sub.add_parser("classes", help="Статистика по классам")
-    p_cls.add_argument("--dataset", action="append", default=None, help="Имя датасета в datasets/ (повторяемый)")
-    p_cls.add_argument("--classes", type=str, default=None, help="Список классов через запятую")
-    p_cls.add_argument("--sort", choices=("total", "train", "val", "test"), default="total")
-    p_cls.add_argument("--desc", action="store_true")
-    p_cls.add_argument("--limit", type=int, default=None)
-    p_cls.add_argument("--no-legend", action="store_true", help="Не выводить расшифровку колонок")
-
-    p_ds = sub.add_parser("datasets", help="Сводка по датасетам")
-    p_ds.add_argument("--dataset", action="append", default=None, help="Имя датасета в datasets/ (повторяемый)")
-    p_ds.add_argument(
+    parser.add_argument("--dataset", action="append", default=None, help="Имя датасета в datasets/ (повторяемый)")
+    parser.add_argument("--classes", type=str, default=None, help="Фильтр классов через запятую (для таблиц классов)")
+    parser.add_argument(
         "--sort",
         choices=("images", "instances", "empty_pct", "gini", "imbalance"),
         default="images",
+        help="Сортировка основной таблицы датасетов",
     )
-    p_ds.add_argument("--desc", action="store_true")
-    p_ds.add_argument("--check-duplicates", action="store_true")
-    p_ds.add_argument("--check-near-duplicates", action="store_true")
-    p_ds.add_argument("--export-issues", action="store_true")
-    p_ds.add_argument("--no-legend", action="store_true", help="Не выводить расшифровку колонок")
+    parser.add_argument("--desc", action="store_true", help="Сортировка основной таблицы по убыванию")
+    parser.add_argument("--check-duplicates", action="store_true")
+    parser.add_argument("--check-near-duplicates", action="store_true")
+    parser.add_argument("--export-issues", action="store_true")
+    parser.add_argument("--no-legend", action="store_true", help="Не выводить расшифровку колонок")
+    parser.add_argument(
+        "--class-sort",
+        choices=("total", "train", "val", "test"),
+        default="total",
+        help="Сортировка таблицы классов",
+    )
+    parser.add_argument("--class-desc", action="store_true", help="Сортировка таблицы классов по убыванию")
+    parser.add_argument("--class-limit", type=int, default=None, help="Лимит строк в таблицах классов")
     return parser
 
 
-def _run_classes(args, layout: WorkspaceLayout) -> int:
-    available = _available_dataset_dirs(layout)
-    if not available:
-        console.print("[ERROR] В datasets/ не найдено ни одного датасета.")
-        return 2
-    interactive = not args.dataset and not args.classes and args.sort == "total" and args.limit is None and not args.desc
-    if interactive and sys.stdin.isatty():
-        console.print("[INFO] Интерактивный режим stats classes")
-        _print_interactive_catalog(available)
-        _prompt_interactive_classes(
-            args,
-            sorted(available.keys()),
-            _collect_available_classes(available),
-        )
-    selected = _filter_dataset_names(available, args.dataset)
-    scanned = {name: _scan_one_dataset(available[name], name) for name in selected}
-    classes_filter = None
-    if args.classes:
-        classes_filter = {x.strip() for x in args.classes.split(",") if x.strip()}
-    _render_classes_table(
-        selected,
-        scanned,
-        classes_filter,
-        args.sort,
-        bool(args.desc),
-        args.limit,
-        show_legend=not bool(getattr(args, "no_legend", False)),
-    )
-    return 0
-
-
-def _run_datasets(args, layout: WorkspaceLayout) -> int:
+def _run_stats(args, layout: WorkspaceLayout) -> int:
     available = _available_dataset_dirs(layout)
     if not available:
         console.print("[ERROR] В datasets/ не найдено ни одного датасета.")
@@ -804,7 +843,7 @@ def _run_datasets(args, layout: WorkspaceLayout) -> int:
         and not args.export_issues
     )
     if interactive and sys.stdin.isatty():
-        console.print("[INFO] Интерактивный режим stats datasets")
+        console.print("[INFO] Интерактивный режим stats")
         _print_interactive_catalog(available)
         _prompt_interactive_datasets(args, sorted(available.keys()))
     selected = _filter_dataset_names(available, args.dataset)
@@ -821,6 +860,18 @@ def _run_datasets(args, layout: WorkspaceLayout) -> int:
             ) = _scan_duplicates(available[name], check_near=bool(args.check_near_duplicates))
         scanned[name] = ds
     _render_datasets_table(selected, scanned, args, layout)
+    classes_filter = None
+    if args.classes:
+        classes_filter = {x.strip() for x in args.classes.split(",") if x.strip()}
+    _render_classes_table(
+        selected,
+        scanned,
+        classes_filter,
+        args.class_sort,
+        bool(args.class_desc),
+        args.class_limit,
+        show_legend=not bool(getattr(args, "no_legend", False)),
+    )
     return 0
 
 
@@ -829,19 +880,10 @@ def main(argv=None):
         argv = sys.argv[1:]
     parser = build_stats_arg_parser()
     args = parser.parse_args(argv)
-    if not args.stats_command:
-        parser.print_help()
-        return
     try:
         root = resolve_workspace_root(args.workspace)
         layout = WorkspaceLayout(root)
-        if args.stats_command == "classes":
-            code = _run_classes(args, layout)
-        elif args.stats_command == "datasets":
-            code = _run_datasets(args, layout)
-        else:
-            console.print(f"[ERROR] Неизвестная подкоманда: {args.stats_command}")
-            code = 2
+        code = _run_stats(args, layout)
     except ValueError as e:
         console.print(f"[ERROR] {e}")
         code = 2

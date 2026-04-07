@@ -35,10 +35,11 @@ def test_stats_classes_counts_and_summary(tmp_path: Path, capsys: pytest.Capture
     (ds / "val" / "labels" / "b.txt").write_text("0 0.4 0.4 0.2 0.2\n", encoding="utf-8")
 
     with pytest.raises(SystemExit) as e:
-        stats_main(["--workspace", str(tmp_path), "classes", "--dataset", "ds_a"])
+        stats_main(["--workspace", str(tmp_path), "--dataset", "ds_a"])
     assert e.value.code == 0
     out = capsys.readouterr().out
     assert "Статистика по классам" in out
+    assert "ClassID" in out
     assert "cat" in out
     assert "dog" in out
     assert "Итог по дисбалансу" in out
@@ -53,11 +54,43 @@ def test_stats_datasets_quality_flags(tmp_path: Path, capsys: pytest.CaptureFixt
     (ds / "train" / "labels" / "orphan.txt").write_text("1 0.5 0.5 0.2 0.2\n", encoding="utf-8")
 
     with pytest.raises(SystemExit) as e:
-        stats_main(["--workspace", str(tmp_path), "datasets", "--dataset", "ds_warn"])
+        stats_main(["--workspace", str(tmp_path), "--dataset", "ds_warn"])
     assert e.value.code == 0
     out = capsys.readouterr().out
     assert "Статистика по датасетам" in out
+    assert "Каталог классов по датасетам" in out
     assert "WARN" in out
+
+
+def test_stats_classes_shows_mixed_class_ids_across_datasets(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deploy_workspace(str(tmp_path))
+    ds_a = _write_ds(tmp_path, "ds_a")
+    (ds_a / "data.yaml").write_text(
+        "path: .\ntrain: train/images\nval: val/images\ntest: test/images\nnames:\n  0: cat\n  1: dog\n",
+        encoding="utf-8",
+    )
+    _write_jpg(ds_a / "train" / "images" / "a.jpg")
+    (ds_a / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_a / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+    ds_b = _write_ds(tmp_path, "ds_b")
+    (ds_b / "data.yaml").write_text(
+        "path: .\ntrain: train/images\nval: val/images\ntest: test/images\nnames:\n  2: cat\n  3: dog\n",
+        encoding="utf-8",
+    )
+    _write_jpg(ds_b / "train" / "images" / "b.jpg")
+    (ds_b / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_b / "train" / "labels" / "b.txt").write_text("2 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as e:
+        stats_main(
+            ["--workspace", str(tmp_path), "--dataset", "ds_a", "--dataset", "ds_b"]
+        )
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert "mixed(0,2)" in out
 
 
 def test_stats_no_legend_flag_hides_column_explanations(
@@ -70,13 +103,13 @@ def test_stats_no_legend_flag_hides_column_explanations(
     (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
 
     with pytest.raises(SystemExit) as e:
-        stats_main(["--workspace", str(tmp_path), "classes", "--dataset", "ds_a", "--no-legend"])
+        stats_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--no-legend"])
     assert e.value.code == 0
     out = capsys.readouterr().out
     assert "Колонки classes:" not in out
 
     with pytest.raises(SystemExit) as e:
-        stats_main(["--workspace", str(tmp_path), "datasets", "--dataset", "ds_a", "--no-legend"])
+        stats_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--no-legend"])
     assert e.value.code == 0
     out = capsys.readouterr().out
     assert "Колонки datasets:" not in out
@@ -110,14 +143,14 @@ def test_stats_datasets_flat_and_cvat11_non_zero(tmp_path: Path, capsys: pytest.
     assert cvat_stats.instances_total == 1
 
     with pytest.raises(SystemExit) as e:
-        stats_main(["--workspace", str(tmp_path), "datasets", "--dataset", "ds_flat"])
+        stats_main(["--workspace", str(tmp_path), "--dataset", "ds_flat"])
     assert e.value.code == 0
     with pytest.raises(SystemExit) as e:
-        stats_main(["--workspace", str(tmp_path), "datasets", "--dataset", "ds_cvat"])
+        stats_main(["--workspace", str(tmp_path), "--dataset", "ds_cvat"])
     assert e.value.code == 0
 
 
-def test_stats_classes_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stats_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     deploy_workspace(str(tmp_path))
     ds = _write_ds(tmp_path, "ds_i")
     _write_jpg(ds / "train" / "images" / "a.jpg")
@@ -125,16 +158,17 @@ def test_stats_classes_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
-    def _fake_prompt(args, available_names, available_classes):
+    def _fake_prompt(args, available_names):
         args.dataset = ["ds_i"]
-        args.classes = None
-        args.sort = "total"
+        args.sort = "images"
         args.desc = False
-        args.limit = None
+        args.check_duplicates = False
+        args.check_near_duplicates = False
+        args.export_issues = False
 
-    monkeypatch.setattr("smartrain.dataset_stats._prompt_interactive_classes", _fake_prompt)
+    monkeypatch.setattr("smartrain.dataset_stats._prompt_interactive_datasets", _fake_prompt)
     with pytest.raises(SystemExit) as e:
-        stats_main(["--workspace", str(tmp_path), "classes"])
+        stats_main(["--workspace", str(tmp_path)])
     assert e.value.code == 0
 
 
@@ -148,16 +182,17 @@ def test_stats_interactive_prints_datasets_and_classes_list(
     (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
-    def _fake_prompt(args, available_names, available_classes):
+    def _fake_prompt(args, available_names):
         args.dataset = ["ds_i_print"]
-        args.classes = None
-        args.sort = "total"
+        args.sort = "images"
         args.desc = False
-        args.limit = None
+        args.check_duplicates = False
+        args.check_near_duplicates = False
+        args.export_issues = False
 
-    monkeypatch.setattr("smartrain.dataset_stats._prompt_interactive_classes", _fake_prompt)
+    monkeypatch.setattr("smartrain.dataset_stats._prompt_interactive_datasets", _fake_prompt)
     with pytest.raises(SystemExit) as e:
-        stats_main(["--workspace", str(tmp_path), "classes"])
+        stats_main(["--workspace", str(tmp_path)])
     assert e.value.code == 0
     out = capsys.readouterr().out
     assert "Доступные датасеты:" in out
@@ -166,7 +201,7 @@ def test_stats_interactive_prints_datasets_and_classes_list(
     assert "cat" in out
 
 
-def test_stats_datasets_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stats_interactive_with_dataset_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     deploy_workspace(str(tmp_path))
     ds = _write_ds(tmp_path, "ds_i2")
     _write_jpg(ds / "train" / "images" / "a.jpg")
@@ -184,6 +219,6 @@ def test_stats_datasets_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr("smartrain.dataset_stats._prompt_interactive_datasets", _fake_prompt)
     with pytest.raises(SystemExit) as e:
-        stats_main(["--workspace", str(tmp_path), "datasets"])
+        stats_main(["--workspace", str(tmp_path)])
     assert e.value.code == 0
 
