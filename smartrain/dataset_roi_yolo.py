@@ -298,7 +298,19 @@ def build_roi_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(
         description="Кроп датасета YOLO по ROI (Ultralytics YOLO detect/segment)"
     )
-    p.add_argument("--dataset-name", required=True, help="Ключ датасета в datasets_info.json")
+    p.add_argument("--dataset-name", required=False, default=None, help="Ключ датасета в datasets_info.json")
+    p.add_argument(
+        "--dataset",
+        action="append",
+        default=None,
+        help="Имя входного датасета (можно повторять).",
+    )
+    p.add_argument(
+        "--datasets",
+        type=str,
+        default=None,
+        help="CSV-список входных датасетов (например ds1,ds2).",
+    )
     p.add_argument(
         "--workspace",
         default=None,
@@ -350,6 +362,151 @@ def build_roi_arg_parser() -> argparse.ArgumentParser:
 
 def parse_args(argv=None) -> argparse.Namespace:
     return build_roi_arg_parser().parse_args(argv)
+
+
+def _parse_selected_datasets(args: argparse.Namespace) -> list[str]:
+    out: list[str] = []
+    single = (args.dataset_name or "").strip()
+    if single:
+        out.append(single)
+    if args.dataset:
+        for item in args.dataset:
+            name = str(item).strip()
+            if name:
+                out.append(name)
+    if args.datasets:
+        for part in str(args.datasets).split(","):
+            name = part.strip()
+            if name:
+                out.append(name)
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for name in out:
+        if name not in seen:
+            seen.add(name)
+            uniq.append(name)
+    return uniq
+
+
+def _prompt_input(label: str, default: str = "", completer=None) -> str:
+    from prompt_toolkit import prompt
+
+    return str(prompt(label, default=default, completer=completer, complete_while_typing=True))
+
+
+def _prompt_yes_no(label: str, default: bool = False) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    default_text = "y" if default else "n"
+    raw = _prompt_input(f"{label} [{suffix}]: ", default=default_text).strip().lower()
+    if not raw:
+        return default
+    return raw in ("y", "yes", "1", "true", "да", "д")
+
+
+def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
+    from prompt_toolkit.completion import WordCompleter
+
+    print("[INFO] Интерактивный режим roi (Enter = значение по умолчанию).")
+    ws = (args.workspace or "").strip() or (os.environ.get(WORKSPACE_ENV_VAR) or "").strip()
+    if not ws:
+        ws = _prompt_input("Путь workspace: ", default=os.getcwd()).strip()
+        if not ws:
+            print("[ERROR] Workspace не задан.")
+            return False
+        args.workspace = ws
+    layout = WorkspaceLayout(os.path.abspath(os.path.expanduser(ws)))
+    info_path = layout.work_datasets_info_path()
+    if not os.path.isfile(info_path):
+        print(f"[ERROR] Не найден {info_path}")
+        return False
+    try:
+        with open(info_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception as e:
+        print(f"[ERROR] Не удалось прочитать {info_path}: {e}")
+        return False
+    if not isinstance(catalog, dict) or not catalog:
+        print("[ERROR] В datasets_info.json нет доступных датасетов.")
+        return False
+    names = sorted(str(k) for k in catalog.keys())
+    print("[INFO] Доступные датасеты:")
+    for n in names:
+        print(f"  - {n}")
+    ds_comp = WordCompleter(names, ignore_case=True)
+    while True:
+        raw = _prompt_input(
+            "Датасеты (--dataset/--datasets) через запятую [default: первый в списке]: ",
+            default=str(args.datasets or args.dataset_name or ""),
+            completer=ds_comp,
+        ).strip()
+        if not raw and names:
+            picked = [names[0]]
+        else:
+            picked = [x.strip() for x in raw.split(",") if x.strip()]
+        if not picked:
+            print("[ERROR] Нужно выбрать хотя бы один датасет.")
+            continue
+        unknown = [x for x in picked if x not in catalog]
+        if unknown:
+            print(f"[ERROR] Неизвестные датасеты: {', '.join(unknown)}")
+            continue
+        args.dataset = picked
+        args.dataset_name = picked[0]
+        break
+    default_out = str(args.output_path or (layout.datasets if len(args.dataset) > 1 else os.path.join(layout.datasets, f"{args.dataset_name}_roi")))
+    out_raw = _prompt_input(
+        f"Выходной каталог (--output-path) [default: {default_out}]: ",
+        default=default_out,
+    ).strip()
+    args.output_path = out_raw or default_out
+    mode_comp = WordCompleter(list(MODES), ignore_case=True)
+    mode_default = str(args.mode or "(из roi_auto)")
+    mode_val = _prompt_input(
+        f"Mode (--mode) [default: {mode_default}]: ",
+        default=str(args.mode or ""),
+        completer=mode_comp,
+    ).strip()
+    args.mode = mode_val or None
+    rp_comp = WordCompleter(list(ROI_POLICIES), ignore_case=True)
+    rp_default = str(args.roi_policy or "(из roi_auto/largest)")
+    rp_val = _prompt_input(
+        f"ROI policy (--roi-policy) [default: {rp_default}]: ",
+        default=str(args.roi_policy or ""),
+        completer=rp_comp,
+    ).strip()
+    args.roi_policy = rp_val or None
+    oe_comp = WordCompleter(list(ON_EMPTY_MODES), ignore_case=True)
+    oe_default = str(args.on_empty or "full_image")
+    oe_val = _prompt_input(
+        f"On empty (--on-empty) [default: {oe_default}]: ",
+        default=str(args.on_empty or "full_image"),
+        completer=oe_comp,
+    ).strip()
+    args.on_empty = oe_val or "full_image"
+    w_default = str(args.weights or "(из roi_auto)")
+    w_raw = _prompt_input(
+        f"Weights (--weights) [default: {w_default}]: ",
+        default=str(args.weights or ""),
+    ).strip()
+    args.weights = w_raw or None
+    c_default = "(из roi_auto/0.25)" if args.conf is None else str(args.conf)
+    c_raw = _prompt_input(
+        f"Confidence (--conf) [default: {c_default}]: ",
+        default="" if args.conf is None else str(args.conf),
+    ).strip()
+    args.conf = float(c_raw) if c_raw else args.conf
+    p_default = "(из roi_auto/0)" if args.pad_px is None else str(args.pad_px)
+    p_raw = _prompt_input(
+        f"Pad px (--pad-px) [default: {p_default}]: ",
+        default="" if args.pad_px is None else str(args.pad_px),
+    ).strip()
+    args.pad_px = int(p_raw) if p_raw else args.pad_px
+    req_default = bool(getattr(args, "require_roi_auto", False))
+    args.require_roi_auto = _prompt_yes_no(
+        f"Требовать roi_auto (--require-roi-auto, default: {'yes' if req_default else 'no'})",
+        default=req_default,
+    )
+    return True
 
 
 def _resolve_catalog_dataset_key(catalog: Dict[str, Any], requested: str) -> str:
@@ -449,12 +606,21 @@ def main(argv=None) -> None:
     if argv is None:
         argv = sys.argv[1:]
     args = parse_args(argv)
+    selected_dataset_names = _parse_selected_datasets(args)
+    if not selected_dataset_names:
+        if not sys.stdin.isatty():
+            sys.exit("[ERROR] Укажите --dataset-name/--dataset/--datasets или запустите команду в интерактивном режиме (TTY).")
+        if not _run_interactive_roi_setup(args):
+            return
+        selected_dataset_names = _parse_selected_datasets(args)
     legacy_source = (args.source_path or "").strip()
     workspace_root: Optional[str] = None
     layout: Optional[WorkspaceLayout] = None
 
     need_default_roi_output = False
     if legacy_source:
+        if len(selected_dataset_names) > 1:
+            sys.exit("[ERROR] Legacy-режим не поддерживает обработку нескольких датасетов за один запуск.")
         if not args.output_path or not str(args.output_path).strip():
             sys.exit("[ERROR] В legacy-режиме (--source-path) укажите --output-path")
         source_path_abs = os.path.abspath(os.path.expanduser(legacy_source))
@@ -488,165 +654,170 @@ def main(argv=None) -> None:
     with open(info_path, "r", encoding="utf-8") as f:
         datasets_info = json.load(f)
 
-    dataset_key = _resolve_catalog_dataset_key(datasets_info, args.dataset_name)
-    if dataset_key != args.dataset_name:
-        print(f"[INFO] Используется ключ датасета в каталоге: {dataset_key!r}")
+    resolved_keys: list[str] = []
+    for req_name in selected_dataset_names:
+        key = _resolve_catalog_dataset_key(datasets_info, req_name)
+        if key not in resolved_keys:
+            resolved_keys.append(key)
+        if key != req_name:
+            print(f"[INFO] Используется ключ датасета в каталоге: {key!r}")
 
-    entry = datasets_info[dataset_key]
+    output_base = os.path.abspath(os.path.expanduser(str(args.output_path).strip())) if (args.output_path or "").strip() else None
+    for dataset_key in resolved_keys:
+        entry = datasets_info[dataset_key]
+        structure = entry.get("structure")
+        if not structure:
+            sys.exit(f"[ERROR] В записи датасета {dataset_key!r} нет поля structure")
+        if legacy_source:
+            source_path_abs = os.path.abspath(os.path.expanduser(legacy_source))
+            dataset_root = _validate_layout_legacy(
+                source_path_abs, dataset_key, args.datasets_info_path
+            )
+            output_root = os.path.abspath(os.path.expanduser(str(args.output_path).strip()))
+        else:
+            assert workspace_root is not None and layout is not None
+            dataset_root = resolve_dataset_root_for_entry(
+                dataset_key,
+                entry,
+                workspace_root=workspace_root,
+                source_catalog_dir=layout.datasets,
+                legacy_source_parent=layout.datasets,
+            )
+            if len(resolved_keys) == 1:
+                output_root = output_base or os.path.join(layout.datasets, f"{dataset_key}_roi")
+            else:
+                base_dir = output_base or layout.datasets
+                output_root = os.path.join(base_dir, f"{dataset_key}_roi")
+        cfg = _load_roi_config(args, entry)
+        os.makedirs(output_root, exist_ok=True)
 
-    if need_default_roi_output:
-        assert layout is not None
-        args.output_path = os.path.join(layout.datasets, f"{dataset_key}_roi")
-    structure = entry.get("structure")
-    if not structure:
-        sys.exit("[ERROR] В записи датасета нет поля structure")
+        model = YOLO(cfg["weights"])
+        if cfg["mode"] == "yolo_segment" and getattr(model, "task", None) != "segment":
+            print(
+                f"[WARNING] mode=yolo_segment, но модель task={getattr(model, 'task', None)}; "
+                "используются ограничивающие прямоугольники детекций/масок."
+            )
 
-    if legacy_source:
-        source_path_abs = os.path.abspath(os.path.expanduser(legacy_source))
-        dataset_root = _validate_layout_legacy(
-            source_path_abs, dataset_key, args.datasets_info_path
-        )
-    else:
-        assert workspace_root is not None and layout is not None
-        dataset_root = resolve_dataset_root_for_entry(
-            dataset_key,
+        buckets = iter_image_label_buckets(
+            dataset_root,
+            structure,
             entry,
-            workspace_root=workspace_root,
-            source_catalog_dir=layout.datasets,
-            legacy_source_parent=layout.datasets,
+            dataset_name=dataset_key,
+            temp_root=temp_root,
+            exclude_test=False,
         )
+        if not buckets:
+            sys.exit(f"[ERROR] Нет пар images/labels для structure={structure}")
 
-    cfg = _load_roi_config(args, entry)
-    output_root = os.path.abspath(os.path.expanduser(str(args.output_path).strip()))
-    os.makedirs(output_root, exist_ok=True)
+        stats = {"images": 0, "skipped": 0}
 
-    model = YOLO(cfg["weights"])
-    if cfg["mode"] == "yolo_segment" and getattr(model, "task", None) != "segment":
+        for img_dir, lbl_dir in buckets:
+            rel_base = _relpath_under_dataset(img_dir, dataset_root, "images")
+            out_img_dir = os.path.join(output_root, rel_base)
+            rel_lbl = _relpath_under_dataset(lbl_dir, dataset_root, "labels")
+            out_lbl_dir = os.path.join(output_root, rel_lbl)
+
+            files = [f for f in sorted(os.listdir(img_dir)) if _is_image_file(f)]
+            for fname in tqdm(files, desc=f"{dataset_key}:{rel_base}"):
+                src_img = os.path.join(img_dir, fname)
+                stem, _ext = os.path.splitext(fname)
+                src_lbl = os.path.join(lbl_dir, stem + ".txt")
+                label_lines = _read_label_lines(src_lbl)
+
+                with Image.open(src_img) as im:
+                    im = im.convert("RGB")
+                    iw, ih = im.size
+
+                results = model.predict(
+                    source=src_img,
+                    conf=cfg["conf"],
+                    verbose=False,
+                )
+                r = results[0]
+                if r.boxes is None or len(r.boxes) == 0:
+                    xyxy, cls, confs = [], [], []
+                else:
+                    xyxy = r.boxes.xyxy.cpu().numpy()
+                    cls = r.boxes.cls.cpu().numpy()
+                    confs = r.boxes.conf.cpu().numpy()
+
+                roi_list = _select_roi_boxes(
+                    xyxy, cls, confs, cfg["class_ids"], cfg["roi_policy"], iw, ih
+                )
+
+                if not roi_list:
+                    if args.on_empty == "fail":
+                        sys.exit(f"[ERROR] Нет детекций для ROI: {src_img}")
+                    if args.on_empty == "skip":
+                        stats["skipped"] += 1
+                        continue
+                    roi_list = [_full_image_crop(iw, ih)]
+
+                def process_one_crop(
+                    crop_unpadded: Tuple[float, float, float, float],
+                    out_stem: str,
+                ) -> None:
+                    x1, y1, x2, y2 = crop_unpadded
+                    crop = _clamp_crop(x1, y1, x2, y2, cfg["pad_px"], iw, ih)
+                    cx0, cy0, cx1, cy1 = crop
+                    with Image.open(src_img) as im2:
+                        im2 = im2.convert("RGB")
+                        cropped = im2.crop((cx0, cy0, cx1, cy1))
+                    out_image_path = os.path.join(out_img_dir, out_stem + os.path.splitext(fname)[1])
+                    os.makedirs(out_img_dir, exist_ok=True)
+                    cropped.save(out_image_path)
+
+                    out_lines: List[str] = []
+                    for raw in label_lines:
+                        new_l = _transform_label_line(raw, crop, iw, ih)
+                        if new_l is not None:
+                            out_lines.append(new_l + "\n")
+                    out_lbl_path = os.path.join(out_lbl_dir, out_stem + ".txt")
+                    _write_label_lines(out_lbl_path, out_lines)
+
+                if cfg["roi_policy"] == "per_box":
+                    for idx, box in enumerate(roi_list, start=1):
+                        process_one_crop(box, f"{stem}_split_{idx}")
+                    stats["images"] += len(roi_list)
+                else:
+                    process_one_crop(roi_list[0], stem)
+                    stats["images"] += 1
+
+        _copy_and_patch_yaml(dataset_root, output_root)
+        _ensure_data_yaml_after_roi(output_root, entry)
+        try:
+            passport_path = write_dataset_passport(
+                output_dataset_dir=output_root,
+                command="roi",
+                source_datasets=[
+                    {
+                        "name": dataset_key,
+                        "path": dataset_root,
+                        "dataset_hash": entry.get("dataset_hash") if isinstance(entry, dict) else None,
+                    }
+                ],
+                parameters=vars(args),
+                transformations=[
+                    {
+                        "mode": cfg["mode"],
+                        "roi_policy": cfg["roi_policy"],
+                        "class_ids": cfg["class_ids"] or [],
+                        "conf": cfg["conf"],
+                        "pad_px": cfg["pad_px"],
+                        "on_empty": args.on_empty,
+                    }
+                ],
+                random_seed=None,
+                stats_before={},
+                stats_after={"output_images": stats["images"], "skipped": stats["skipped"]},
+            )
+            print(f"[OK] Passport: {passport_path}")
+        except Exception as e:
+            print(f"[WARNING] Не удалось записать dataset_passport.json: {e}")
         print(
-            f"[WARNING] mode=yolo_segment, но модель task={getattr(model, 'task', None)}; "
-            "используются ограничивающие прямоугольники детекций/масок."
+            f"[OK] Готово для {dataset_key!r}: {stats['images']} выходных кадров, "
+            f"пропущено {stats['skipped']}, каталог: {output_root}"
         )
-
-    buckets = iter_image_label_buckets(
-        dataset_root,
-        structure,
-        entry,
-        dataset_name=dataset_key,
-        temp_root=temp_root,
-        exclude_test=False,
-    )
-    if not buckets:
-        sys.exit(f"[ERROR] Нет пар images/labels для structure={structure}")
-
-    stats = {"images": 0, "skipped": 0}
-
-    for img_dir, lbl_dir in buckets:
-        rel_base = _relpath_under_dataset(img_dir, dataset_root, "images")
-        out_img_dir = os.path.join(output_root, rel_base)
-        rel_lbl = _relpath_under_dataset(lbl_dir, dataset_root, "labels")
-        out_lbl_dir = os.path.join(output_root, rel_lbl)
-
-        files = [f for f in sorted(os.listdir(img_dir)) if _is_image_file(f)]
-        for fname in tqdm(files, desc=rel_base):
-            src_img = os.path.join(img_dir, fname)
-            stem, _ext = os.path.splitext(fname)
-            src_lbl = os.path.join(lbl_dir, stem + ".txt")
-            label_lines = _read_label_lines(src_lbl)
-
-            with Image.open(src_img) as im:
-                im = im.convert("RGB")
-                iw, ih = im.size
-
-            results = model.predict(
-                source=src_img,
-                conf=cfg["conf"],
-                verbose=False,
-            )
-            r = results[0]
-            if r.boxes is None or len(r.boxes) == 0:
-                xyxy, cls, confs = [], [], []
-            else:
-                xyxy = r.boxes.xyxy.cpu().numpy()
-                cls = r.boxes.cls.cpu().numpy()
-                confs = r.boxes.conf.cpu().numpy()
-
-            roi_list = _select_roi_boxes(
-                xyxy, cls, confs, cfg["class_ids"], cfg["roi_policy"], iw, ih
-            )
-
-            if not roi_list:
-                if args.on_empty == "fail":
-                    sys.exit(f"[ERROR] Нет детекций для ROI: {src_img}")
-                if args.on_empty == "skip":
-                    stats["skipped"] += 1
-                    continue
-                roi_list = [_full_image_crop(iw, ih)]
-
-            def process_one_crop(
-                crop_unpadded: Tuple[float, float, float, float],
-                out_stem: str,
-            ) -> None:
-                x1, y1, x2, y2 = crop_unpadded
-                crop = _clamp_crop(x1, y1, x2, y2, cfg["pad_px"], iw, ih)
-                cx0, cy0, cx1, cy1 = crop
-                with Image.open(src_img) as im2:
-                    im2 = im2.convert("RGB")
-                    cropped = im2.crop((cx0, cy0, cx1, cy1))
-                out_image_path = os.path.join(out_img_dir, out_stem + os.path.splitext(fname)[1])
-                os.makedirs(out_img_dir, exist_ok=True)
-                cropped.save(out_image_path)
-
-                out_lines: List[str] = []
-                for raw in label_lines:
-                    new_l = _transform_label_line(raw, crop, iw, ih)
-                    if new_l is not None:
-                        out_lines.append(new_l + "\n")
-                out_lbl_path = os.path.join(out_lbl_dir, out_stem + ".txt")
-                _write_label_lines(out_lbl_path, out_lines)
-
-            if cfg["roi_policy"] == "per_box":
-                for idx, box in enumerate(roi_list, start=1):
-                    process_one_crop(box, f"{stem}_split_{idx}")
-                stats["images"] += len(roi_list)
-            else:
-                process_one_crop(roi_list[0], stem)
-                stats["images"] += 1
-
-    _copy_and_patch_yaml(dataset_root, output_root)
-    _ensure_data_yaml_after_roi(output_root, entry)
-    try:
-        passport_path = write_dataset_passport(
-            output_dataset_dir=output_root,
-            command="roi",
-            source_datasets=[
-                {
-                    "name": dataset_key,
-                    "path": dataset_root,
-                    "dataset_hash": entry.get("dataset_hash") if isinstance(entry, dict) else None,
-                }
-            ],
-            parameters=vars(args),
-            transformations=[
-                {
-                    "mode": cfg["mode"],
-                    "roi_policy": cfg["roi_policy"],
-                    "class_ids": cfg["class_ids"] or [],
-                    "conf": cfg["conf"],
-                    "pad_px": cfg["pad_px"],
-                    "on_empty": args.on_empty,
-                }
-            ],
-            random_seed=None,
-            stats_before={},
-            stats_after={"output_images": stats["images"], "skipped": stats["skipped"]},
-        )
-        print(f"[OK] Passport: {passport_path}")
-    except Exception as e:
-        print(f"[WARNING] Не удалось записать dataset_passport.json: {e}")
-    print(
-        f"[OK] Готово: {stats['images']} выходных кадров, пропущено {stats['skipped']}, "
-        f"каталог: {output_root}"
-    )
 
 
 if __name__ == "__main__":
