@@ -64,7 +64,7 @@
 
 Единый резолв корня (включая `.zip` в `data_path`) и пары `images`/`labels` для нативных форматов реализованы в [`dataset_access.py`](../smartrain/dataset_access.py) (`resolve_dataset_root_for_entry`, `iter_image_label_buckets`). Команды ниже используют его там, где нужен обход кадров и меток.
 
-| `structure` | `scan` | `fusion` | `roi` (workspace) | `hash` (`--source-dataset`) | `cvat import` / `export` |
+| `structure` | `scan` | `fusion` | `roi` (workspace) | `hash` (`--raw-dataset`) | `cvat import` / `export` |
 |-------------|-----------------|------------------|-------------------|----------------------------|---------------------------|
 | `split` | да | да | да | да (дерево / zip→кэш) | export из YOLO |
 | `flat` | да | да | да | да | export |

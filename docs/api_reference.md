@@ -367,8 +367,8 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 ## dataset_hash.py
 
 ### CLI
-- Ровно один из: позиционный путь к каталогу датасета, `--work-dataset`, `--source-dataset`
-- `--workspace` / `SMART_TRAIN_WORKSPACE` для `--work-dataset` и `--source-dataset`
+- Ровно один из: позиционный путь к каталогу датасета, `--dataset`, `--raw-dataset`
+- `--workspace` / `SMART_TRAIN_WORKSPACE` для `--dataset` и `--raw-dataset`
 - `--hash-zip-metadata` — для `.zip` в `data_path`: хеш по пути/размеру/mtime без распаковки
 - `--validate <hash>` — код выхода `0` при совпадении, `1` при расхождении, `2` при ошибке
 

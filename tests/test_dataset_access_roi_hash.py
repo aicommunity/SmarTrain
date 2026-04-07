@@ -145,7 +145,7 @@ def test_hash_source_dataset_after_zip_resolve(tmp_path: Path) -> None:
             [
                 "--workspace",
                 str(tmp_path),
-                "--source-dataset",
+                "--raw-dataset",
                 "hzip",
             ]
         )
@@ -190,7 +190,7 @@ def test_hash_zip_metadata_flag(tmp_path: Path) -> None:
             [
                 "--workspace",
                 str(tmp_path),
-                "--source-dataset",
+                "--raw-dataset",
                 "meta",
                 "--hash-zip-metadata",
             ]

@@ -486,7 +486,7 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
         type=str,
         choices=("scan", "refresh"),
         default="scan",
-        help="scan: обход подкаталогов source_datasets (или --datasets-path); "
+        help="scan: обход подкаталогов raw_data (или --datasets-path); "
         "refresh: пересканировать только data_path из существующего datasets_info.json",
     )
     parser.add_argument(

@@ -115,8 +115,8 @@ def calculate_zip_metadata_hash(zip_path: str) -> str:
 def resolve_hash_dataset_root(
     workspace_cli: str | None,
     dataset_path_pos: str | None,
-    work_dataset: str | None,
-    source_dataset: str | None,
+    dataset_name: str | None,
+    raw_dataset: str | None,
     *,
     hash_zip_metadata: bool,
 ) -> tuple[str, bool]:
@@ -124,8 +124,8 @@ def resolve_hash_dataset_root(
     Возвращает (путь_к_корню_или_zip, metadata_only).
     Если metadata_only, путь — к .zip, хеш считать через calculate_zip_metadata_hash.
     """
-    if source_dataset is not None and str(source_dataset).strip():
-        name = str(source_dataset).strip()
+    if raw_dataset is not None and str(raw_dataset).strip():
+        name = str(raw_dataset).strip()
         root_ws = resolve_workspace_root(workspace_cli)
         layout = WorkspaceLayout(root_ws)
         info_path = layout.work_datasets_info_path()
@@ -150,8 +150,8 @@ def resolve_hash_dataset_root(
         extracted = resolve_or_extract_dataset_root(root_ws, name, entry, layout.datasets)
         return extracted, False
 
-    if work_dataset is not None and str(work_dataset).strip():
-        name = str(work_dataset).strip()
+    if dataset_name is not None and str(dataset_name).strip():
+        name = str(dataset_name).strip()
         root = resolve_workspace_root(workspace_cli)
         layout = WorkspaceLayout(root)
         expanded = os.path.abspath(os.path.expanduser(name))
@@ -184,7 +184,7 @@ def resolve_hash_dataset_root(
 
     if dataset_path_pos is None or not str(dataset_path_pos).strip():
         raise ValueError(
-            "Укажите путь к папке датасета, или --work-dataset, или --source-dataset "
+            "Укажите путь к папке датасета, или --dataset, или --raw-dataset "
             "с --workspace (или SMART_TRAIN_WORKSPACE)."
         )
     p = os.path.abspath(os.path.expanduser(str(dataset_path_pos).strip()))
@@ -193,7 +193,7 @@ def resolve_hash_dataset_root(
             return p, True
         raise ValueError(
             "Для .zip по позиционному пути укажите --hash-zip-metadata или используйте "
-            "--source-dataset с workspace (распаковка в кэш)."
+            "--raw-dataset с workspace (распаковка в кэш)."
         )
     return p, False
 
@@ -208,27 +208,27 @@ def build_hash_arg_parser() -> argparse.ArgumentParser:
         type=str,
         nargs="?",
         default=None,
-        help="Путь к папке с датасетом (не нужен при --work-dataset)",
+        help="Путь к папке с датасетом (не нужен при --dataset/--raw-dataset)",
     )
     parser.add_argument(
         "--workspace",
         type=str,
         default=None,
-        help="Корень workspace для --work-dataset (иначе SMART_TRAIN_WORKSPACE)",
+        help="Корень workspace для --dataset/--raw-dataset (иначе SMART_TRAIN_WORKSPACE)",
     )
     parser.add_argument(
-        "--work-dataset",
+        "--dataset",
         type=str,
         default=None,
         metavar="NAME",
         help="Имя записи из datasets/datasets_info.json (или каталог с data.yaml)",
     )
     parser.add_argument(
-        "--source-dataset",
+        "--raw-dataset",
         type=str,
         default=None,
         metavar="NAME",
-        help="Имя записи из datasets/datasets_info.json (alias для --work-dataset; zip распаковывается в кэш)",
+        help="Имя источника из raw_data (или data_path в datasets_info.json); zip распаковывается в кэш",
     )
     parser.add_argument(
         "--hash-zip-metadata",
@@ -252,12 +252,12 @@ def main(argv=None):
     args = build_hash_arg_parser().parse_args(argv)
     sel = [
         bool(args.dataset_path and str(args.dataset_path).strip()),
-        bool(args.work_dataset and str(args.work_dataset).strip()),
-        bool(args.source_dataset and str(args.source_dataset).strip()),
+        bool(args.dataset and str(args.dataset).strip()),
+        bool(args.raw_dataset and str(args.raw_dataset).strip()),
     ]
     if sum(sel) > 1:
         print(
-            "[ERROR] Укажите ровно один из: путь к датасету, --work-dataset, --source-dataset.",
+            "[ERROR] Укажите ровно один из: путь к датасету, --dataset, --raw-dataset.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -266,8 +266,8 @@ def main(argv=None):
         root, zip_meta = resolve_hash_dataset_root(
             args.workspace,
             args.dataset_path,
-            args.work_dataset,
-            args.source_dataset,
+            args.dataset,
+            args.raw_dataset,
             hash_zip_metadata=bool(args.hash_zip_metadata),
         )
         computed_hash = (

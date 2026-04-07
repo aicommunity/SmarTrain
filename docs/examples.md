@@ -297,13 +297,13 @@ smartrain hash /path/to/dataset
 В workspace по имени work-датасета:
 
 ```bash
-smartrain hash --work-dataset my_merge
+smartrain hash --dataset my_merge
 ```
 
 По имени датасета из каталога `datasets/`:
 
 ```bash
-smartrain hash --source-dataset dataset_key_from_json
+smartrain hash --raw-dataset dataset_key_from_json
 ```
 
 Проверка, что хеш совпадает с ожидаемым:
@@ -315,7 +315,7 @@ smartrain hash /path/to/dataset --validate a1b2c3d4
 Для архива `.zip` только метаданные архива (без распаковки):
 
 ```bash
-smartrain hash --source-dataset my_zip_dataset --hash-zip-metadata
+smartrain hash --raw-dataset my_zip_dataset --hash-zip-metadata
 ```
 
 ---
