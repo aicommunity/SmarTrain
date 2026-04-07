@@ -5,6 +5,7 @@ import random
 import argparse
 import tempfile
 import sys
+import hashlib
 from datetime import datetime
 from tqdm import tqdm
 
@@ -606,6 +607,136 @@ def filter_label_file(
     return False
 
 
+def _image_content_hash(path: str) -> str:
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _parse_filtered_label_objects(
+    src_label_path: str,
+    class_map: dict,
+    class_names_map: dict,
+    selected_classes: list[str],
+    normalized_to_output_name: dict | None = None,
+) -> list[tuple[int, tuple[float, ...]]]:
+    id_to_normalized = {}
+    for name, idx in class_map.items():
+        normalized = class_names_map.get(name, name)
+        id_to_normalized[idx] = normalized
+    new_id_map = {cls: i for i, cls in enumerate(selected_classes)}
+    out: list[tuple[int, tuple[float, ...]]] = []
+    try:
+        with open(src_label_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return out
+    for raw in lines:
+        parts = raw.strip().split()
+        if not parts:
+            continue
+        try:
+            class_id = int(parts[0])
+        except ValueError:
+            continue
+        normalized_name = id_to_normalized.get(class_id)
+        if normalized_name is None:
+            continue
+        if normalized_to_output_name is not None:
+            output_name = normalized_to_output_name.get(normalized_name)
+            if output_name is None:
+                continue
+        else:
+            output_name = normalized_name
+            if output_name not in selected_classes:
+                continue
+        new_id = new_id_map.get(output_name)
+        if new_id is None:
+            continue
+        try:
+            coords = tuple(round(float(x), 8) for x in parts[1:])
+        except ValueError:
+            continue
+        out.append((new_id, coords))
+    return out
+
+
+def _canonical_label_signature(objs: list[tuple[int, tuple[float, ...]]]) -> tuple:
+    return tuple(sorted(objs))
+
+
+def _bbox_iou_xywh(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+    if len(a) < 4 or len(b) < 4:
+        return 0.0
+    ax, ay, aw, ah = a[0], a[1], a[2], a[3]
+    bx, by, bw, bh = b[0], b[1], b[2], b[3]
+    ax1, ay1, ax2, ay2 = ax - aw / 2.0, ay - ah / 2.0, ax + aw / 2.0, ay + ah / 2.0
+    bx1, by1, bx2, by2 = bx - bw / 2.0, by - bh / 2.0, bx + bw / 2.0, by + bh / 2.0
+    inter_x1, inter_y1 = max(ax1, bx1), max(ay1, by1)
+    inter_x2, inter_y2 = min(ax2, bx2), min(ay2, by2)
+    iw = max(0.0, inter_x2 - inter_x1)
+    ih = max(0.0, inter_y2 - inter_y1)
+    inter = iw * ih
+    if inter <= 0.0:
+        return 0.0
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    den = area_a + area_b - inter
+    if den <= 0.0:
+        return 0.0
+    return inter / den
+
+
+def _union_label_objects(
+    existing: list[tuple[int, tuple[float, ...]]],
+    incoming: list[tuple[int, tuple[float, ...]]],
+    *,
+    iou_threshold: float = 0.95,
+) -> tuple[list[tuple[int, tuple[float, ...]]], int]:
+    merged = list(existing)
+    seen_exact = set(merged)
+    removed_by_dedup = 0
+    for cls_id, coords in incoming:
+        item = (cls_id, coords)
+        if item in seen_exact:
+            removed_by_dedup += 1
+            continue
+        is_dup = False
+        if len(coords) >= 4:
+            for e_cls, e_coords in merged:
+                if e_cls != cls_id or len(e_coords) < 4:
+                    continue
+                if _bbox_iou_xywh(coords, e_coords) >= iou_threshold:
+                    is_dup = True
+                    break
+        if is_dup:
+            removed_by_dedup += 1
+            continue
+        merged.append(item)
+        seen_exact.add(item)
+    return merged, removed_by_dedup
+
+
+def _write_label_objects(path: str, objs: list[tuple[int, tuple[float, ...]]]) -> bool:
+    if not objs:
+        return False
+    lines = []
+    for cls_id, coords in sorted(objs):
+        if coords:
+            vals = " ".join(f"{v:.8f}" for v in coords)
+            lines.append(f"{cls_id} {vals}\n")
+        else:
+            lines.append(f"{cls_id}\n")
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    return True
+
+
 def _update_datasets_sidecar(
     layout: WorkspaceLayout,
     output_key: str,
@@ -951,7 +1082,12 @@ def main(argv=None):
                 total_labels += len([f for f in os.listdir(labels_path) if f.endswith(".txt")])
 
         used_stems = {split: set() for split in ("train", "valid", "test")}
+        dedup_map: dict[str, dict] = {}
         copied_count = 0
+        processed_pairs = 0
+        skipped_equivalent = 0
+        merged_annotations = 0
+        iou_dedup_removed_boxes = 0
 
         with tqdm(total=total_labels, desc="Обработка датасетов", unit="файл") as pbar:
             for dataset_name, info in matching_datasets:
@@ -984,29 +1120,53 @@ def main(argv=None):
 
                     for split_name, split_pairs in splits_data.items():
                         for image_src, label_src in split_pairs:
-                            image_ext = os.path.splitext(image_src)[1]
-                            stem = _unique_merge_stem(
-                                dataset_name, image_src, used_stems[split_name]
-                            )
-                            image_dst = os.path.join(
-                                target_dir, split_name, "images", f"{stem}{image_ext}"
-                            )
-                            label_dst = os.path.join(
-                                target_dir, split_name, "labels", f"{stem}.txt"
-                            )
-
-                            ok = filter_label_file(
+                            processed_pairs += 1
+                            objs = _parse_filtered_label_objects(
                                 label_src,
-                                label_dst,
                                 info["classes"],
                                 class_names_map,
                                 selected_classes,
                                 normalized_to_output_name,
                             )
-                            if ok:
-                                shutil.copy2(image_src, image_dst)
-                                copied_count += 1
+                            if not objs:
+                                pbar.update(1)
+                                continue
+                            img_hash = _image_content_hash(image_src)
+                            sig = _canonical_label_signature(objs)
+                            entry = dedup_map.get(img_hash)
+                            if entry is None:
+                                dedup_map[img_hash] = {
+                                    "image_src": image_src,
+                                    "split_name": split_name,  # keep_source_priority
+                                    "dataset_name": dataset_name,
+                                    "objs": objs,
+                                    "sig": sig,
+                                }
+                                pbar.update(1)
+                                continue
+                            if entry["sig"] == sig:
+                                skipped_equivalent += 1
+                                pbar.update(1)
+                                continue
+                            merged, removed = _union_label_objects(
+                                entry["objs"], objs, iou_threshold=0.95
+                            )
+                            merged_annotations += 1
+                            iou_dedup_removed_boxes += removed
+                            entry["objs"] = merged
+                            entry["sig"] = _canonical_label_signature(merged)
                             pbar.update(1)
+        for entry in dedup_map.values():
+            split_name = entry["split_name"]
+            dataset_name = entry["dataset_name"]
+            image_src = entry["image_src"]
+            image_ext = os.path.splitext(image_src)[1]
+            stem = _unique_merge_stem(dataset_name, image_src, used_stems[split_name])
+            image_dst = os.path.join(target_dir, split_name, "images", f"{stem}{image_ext}")
+            label_dst = os.path.join(target_dir, split_name, "labels", f"{stem}.txt")
+            if _write_label_objects(label_dst, entry["objs"]):
+                shutil.copy2(image_src, image_dst)
+                copied_count += 1
     finally:
         if temp_ctx is not None:
             temp_ctx.cleanup()
@@ -1018,6 +1178,11 @@ def main(argv=None):
             copied_count = max(0, copied_count - pruned)
 
     print(f"\n[DEBUG] Всего label-файлов: {total_labels}")
+    print(f"[DEBUG] Обработано пар image+label: {processed_pairs}")
+    print(f"[DEBUG] Пропущено эквивалентных дублей: {skipped_equivalent}")
+    print(f"[DEBUG] Объединений разметки (same image, different labels): {merged_annotations}")
+    print(f"[DEBUG] Удалено боксов IoU-дедупом: {iou_dedup_removed_boxes}")
+    print(f"[DEBUG] Уникальных изображений после дедупа: {len(dedup_map)}")
     print(f"[DEBUG] Отфильтровано и скопировано: {copied_count}")
     pct = (copied_count / total_labels * 100) if total_labels else 0.0
     print(f"[DEBUG] Процент используемых файлов: {pct:.2f}%")
@@ -1072,7 +1237,14 @@ def main(argv=None):
                 ],
                 random_seed=12345,
                 stats_before={"total_labels": total_labels},
-                stats_after={"copied_images": copied_count},
+                stats_after={
+                    "copied_images": copied_count,
+                    "processed_pairs": processed_pairs,
+                    "skipped_equivalent": skipped_equivalent,
+                    "merged_annotations": merged_annotations,
+                    "iou_dedup_removed_boxes": iou_dedup_removed_boxes,
+                    "unique_images_after_dedup": len(dedup_map),
+                },
             )
             print(f"[OK] Passport: {passport_path}")
         except Exception as e:

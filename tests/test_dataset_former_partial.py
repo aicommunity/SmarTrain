@@ -11,9 +11,9 @@ from smartrain.dataset_former import main as fusion_main, prune_output_empty_lab
 from smartrain.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, deploy_workspace
 
 
-def _write_jpg(path: Path) -> None:
+def _write_jpg(path: Path, color: tuple[int, int, int] = (10, 20, 30)) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (32, 24), color=(10, 20, 30)).save(path, format="JPEG", quality=85)
+    Image.new("RGB", (32, 24), color=color).save(path, format="JPEG", quality=85)
 
 
 def _write_split_dataset(
@@ -26,7 +26,8 @@ def _write_split_dataset(
     base = root / "datasets" / name
     img = base / "train" / "images" / f"{stem}.jpg"
     lbl = base / "train" / "labels" / f"{stem}.txt"
-    _write_jpg(img)
+    seed = sum(ord(ch) for ch in f"{name}-{stem}") % 255
+    _write_jpg(img, color=(seed, (seed * 3) % 255, (seed * 7) % 255))
     lbl.parent.mkdir(parents=True, exist_ok=True)
     lbl.write_text(f"{class_idx} 0.5 0.5 0.2 0.2\n", encoding="utf-8")
 
@@ -313,3 +314,196 @@ def test_prune_output_empty_label_pairs_removes_orphans(tmp_path: Path) -> None:
     assert n == 1
     assert not (split / "labels" / "x.txt").exists()
     assert not (split / "images" / "x.jpg").exists()
+
+
+def test_fusion_dedup_same_image_and_equivalent_labels_keeps_one(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds_a = sd / "ds_a"
+    ds_b = sd / "ds_b"
+    _write_jpg(ds_a / "train" / "images" / "same_a.jpg", color=(100, 100, 100))
+    # identical bytes, different name
+    (ds_b / "train" / "images").mkdir(parents=True, exist_ok=True)
+    shutil_src = ds_a / "train" / "images" / "same_a.jpg"
+    (ds_b / "train" / "images" / "same_b.jpg").write_bytes(shutil_src.read_bytes())
+    (ds_a / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_b / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    # same class semantic, different local ids
+    (ds_a / "train" / "labels" / "same_a.txt").write_text("5 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (ds_b / "train" / "labels" / "same_b.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps(
+            {
+                "ds_a": {"classes": {"cat": 5}, "structure": "split"},
+                "ds_b": {"classes": {"cat": 0}, "structure": "split"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(json.dumps({"cat": "cat"}, ensure_ascii=False, indent=2), encoding="utf-8")
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_dedup_1",
+            "--dataset",
+            "ds_a",
+            "--dataset",
+            "ds_b",
+            "--classes",
+            "cat",
+        ]
+    )
+    out = tmp_path / "datasets" / "merged_dedup_1"
+    assert len(list(out.glob("*/images/*.jpg"))) == 1
+    labels = list(out.glob("*/labels/*.txt"))
+    assert len(labels) == 1
+    assert labels[0].read_text(encoding="utf-8").count("\n") == 1
+
+
+def test_fusion_dedup_different_image_same_labels_keeps_both(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds_a = sd / "ds_a"
+    ds_b = sd / "ds_b"
+    _write_jpg(ds_a / "train" / "images" / "same.jpg", color=(10, 10, 10))
+    _write_jpg(ds_b / "train" / "images" / "same.jpg", color=(200, 200, 200))
+    (ds_a / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_b / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_a / "train" / "labels" / "same.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (ds_b / "train" / "labels" / "same.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps(
+            {
+                "ds_a": {"classes": {"cat": 0}, "structure": "split"},
+                "ds_b": {"classes": {"cat": 0}, "structure": "split"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(json.dumps({"cat": "cat"}, ensure_ascii=False, indent=2), encoding="utf-8")
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_dedup_2",
+            "--dataset",
+            "ds_a",
+            "--dataset",
+            "ds_b",
+            "--classes",
+            "cat",
+        ]
+    )
+    out = tmp_path / "datasets" / "merged_dedup_2"
+    assert len(list(out.glob("*/images/*.jpg"))) == 2
+
+
+def test_fusion_dedup_same_image_different_labels_unions_with_iou_dedup(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds_a = sd / "ds_a"
+    ds_b = sd / "ds_b"
+    _write_jpg(ds_a / "train" / "images" / "img1.jpg", color=(120, 80, 40))
+    (ds_b / "train" / "images").mkdir(parents=True, exist_ok=True)
+    (ds_b / "train" / "images" / "img1_other.jpg").write_bytes(
+        (ds_a / "train" / "images" / "img1.jpg").read_bytes()
+    )
+    (ds_a / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_b / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    # A: one cat box
+    (ds_a / "train" / "labels" / "img1.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    # B: same cat box (should dedup by IoU), plus dog box
+    (ds_b / "train" / "labels" / "img1_other.txt").write_text(
+        "0 0.5 0.5 0.2 0.2\n1 0.2 0.2 0.1 0.1\n",
+        encoding="utf-8",
+    )
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps(
+            {
+                "ds_a": {"classes": {"cat": 0}, "structure": "split"},
+                "ds_b": {"classes": {"cat": 0, "dog": 1}, "structure": "split"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(
+        json.dumps({"cat": "cat", "dog": "dog"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_dedup_3",
+            "--dataset",
+            "ds_a",
+            "--dataset",
+            "ds_b",
+            "--classes",
+            "cat,dog",
+            "--include-partial-datasets",
+        ]
+    )
+    out = tmp_path / "datasets" / "merged_dedup_3"
+    assert len(list(out.glob("*/images/*.jpg"))) == 1
+    labels = list(out.glob("*/labels/*.txt"))
+    assert len(labels) == 1
+    lines = [ln.strip() for ln in labels[0].read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 2
+
+
+def test_fusion_dedup_split_conflict_keeps_first_source_split(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds_a = sd / "ds_a"
+    ds_b = sd / "ds_b"
+    _write_jpg(ds_a / "train" / "images" / "same.jpg", color=(33, 66, 99))
+    (ds_a / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_a / "train" / "labels" / "same.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (ds_b / "test" / "images").mkdir(parents=True, exist_ok=True)
+    (ds_b / "test" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_b / "test" / "images" / "same_other.jpg").write_bytes(
+        (ds_a / "train" / "images" / "same.jpg").read_bytes()
+    )
+    (ds_b / "test" / "labels" / "same_other.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps(
+            {
+                "ds_a": {"classes": {"cat": 0}, "structure": "split"},
+                "ds_b": {"classes": {"cat": 0}, "structure": "split"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(json.dumps({"cat": "cat"}, ensure_ascii=False, indent=2), encoding="utf-8")
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_dedup_4",
+            "--dataset",
+            "ds_a",
+            "--dataset",
+            "ds_b",
+            "--classes",
+            "cat",
+            "--fusion-split",
+            "1,0,0",
+        ]
+    )
+    out = tmp_path / "datasets" / "merged_dedup_4"
+    assert len(list((out / "train" / "images").glob("*.jpg"))) == 1
+    assert len(list((out / "test" / "images").glob("*.jpg"))) == 0
