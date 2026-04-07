@@ -19,7 +19,7 @@ smartrain deploy
 smartrain deploy /path/to/new_workspace
 
 smartrain scan
-smartrain fusion --output-name my_merge --classes "class_a,class_b"
+smartrain fusion --output-name my_merge --dataset ds_a --dataset ds_b --classes "class_a,class_b"
 smartrain train --data my_merge --model yolov8n --epochs 50 --batch 16 -y
 ```
 
@@ -67,19 +67,21 @@ smartrain scan --mode refresh
 Имя выхода в `datasets/`:
 
 ```bash
-smartrain fusion --output-name my_merge --classes "class_a,class_b"
+smartrain fusion --output-name my_merge --dataset ds_a --dataset ds_b --classes "class_a,class_b"
 ```
 
 Автоимя каталога (timestamp + `-merged`), если `--output-name` не задавать:
 
 ```bash
-smartrain fusion --classes "class_a,class_b"
+smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
 ```
+
+Если не передавать `--dataset/--datasets`, команда запускается в интерактивном режиме: показывает доступные датасеты и ждёт ввода списка через запятую с автодополнением.
 
 **Без `--classes`:** в merge попадает **объединение всех классов** из всех записей `datasets_info.json` (кроме датасета с именем выходной папки), имена предварительно нормализуются через **`class_names.json`**. В логе будет строка вида «`--classes` не задан: используется объединение классов…». Маппинг в `class_names.json` при этом **всё равно** применяется; вы просто не сужаете список вручную.
 
 ```bash
-smartrain fusion --output-name all_classes_auto
+smartrain fusion --output-name all_classes_auto --dataset ds_a --dataset ds_b
 ```
 
 Слияние нескольких исходных имён в один класс из `--classes`:
@@ -94,49 +96,49 @@ smartrain fusion \
 Датасеты, где нет **всех** перечисленных в `--classes` классов, но есть часть:
 
 ```bash
-smartrain fusion --output-name merged --classes "class_a,class_b,class_c" --include-partial-datasets
+smartrain fusion --output-name merged --dataset ds_a --dataset ds_b --classes "class_a,class_b,class_c" --include-partial-datasets
 ```
 
 Не подмешивать исходные тестовые кадры:
 
 ```bash
-smartrain fusion --output-name no_src_test --classes "class_a,class_b" --exclude-test
+smartrain fusion --output-name no_src_test --dataset ds_a --dataset ds_b --classes "class_a,class_b" --exclude-test
 ```
 
 Доли **train / val / test** при случайном разбиении внутри каждой «корзины» кадров (сумма **1.0**; только **`fusion`**, не `train`):
 
 ```bash
-smartrain fusion --output-name split_701020 --classes "class_a,class_b" --fusion-split 0.7,0.2,0.1
+smartrain fusion --output-name split_701020 --dataset ds_a --dataset ds_b --classes "class_a,class_b" --fusion-split 0.7,0.2,0.1
 ```
 
 Только train + val на выходе:
 
 ```bash
-smartrain fusion --output-name tv_only --classes "class_a,class_b" --fusion-split 0.9,0.1,0
+smartrain fusion --output-name tv_only --dataset ds_a --dataset ds_b --classes "class_a,class_b" --fusion-split 0.9,0.1,0
 ```
 
 После слияния убрать пары image+label с пустыми метками:
 
 ```bash
-smartrain fusion --output-name cleaned --classes "class_a,class_b" --drop-empty-images
+smartrain fusion --output-name cleaned --dataset ds_a --dataset ds_b --classes "class_a,class_b" --drop-empty-images
 ```
 
 Сузить набор классов до **пересечения** по датасетам-кандидатам (`--common-classes-only`; часто вместе с осмысленным `--classes`):
 
 ```bash
-smartrain fusion --output-name common_only --classes "class_a,class_b" --common-classes-only
+smartrain fusion --output-name common_only --dataset ds_a --dataset ds_b --classes "class_a,class_b" --common-classes-only
 ```
 
 Временные файлы (например для cvat11) в явный каталог:
 
 ```bash
-smartrain fusion --output-name tmp_here --classes "class_a,class_b" --tmp-dir /path/to/tmp
+smartrain fusion --output-name tmp_here --dataset ds_a --dataset ds_b --classes "class_a,class_b" --tmp-dir /path/to/tmp
 ```
 
 Явный выход в файловую систему при заданном workspace (вместо `datasets/<name>`):
 
 ```bash
-smartrain fusion --output-name my_merge --classes "class_a,class_b" --target-path /data/custom_out
+smartrain fusion --output-name my_merge --dataset ds_a --dataset ds_b --classes "class_a,class_b" --target-path /data/custom_out
 ```
 
 ---
@@ -150,6 +152,8 @@ smartrain fusion \
   --source-path /data/datasets \
   --target-path /data/output/merged \
   --datasets-info-path . \
+  --dataset ds_a \
+  --dataset ds_b \
   --classes "class_a,class_b"
 ```
 
@@ -160,6 +164,7 @@ smartrain fusion \
   --source-path ./datasets \
   --target-path ./output/merged \
   --datasets-info-path . \
+  --datasets ds_a,ds_b \
   --classes "class_a,class_b"
 ```
 
@@ -341,9 +346,9 @@ smartrain roi --dataset-name my_dataset --source-path /data/parent --datasets-in
 
 Содержимое `queue.txt` в корне workspace (по одной команде на строку, `#` — комментарий):
 
-```
+```text
 # fusion затем три обучения
-smartrain fusion --output-name merged --classes "class_a,class_b"
+smartrain fusion --output-name merged --dataset ds_a --dataset ds_b --classes "class_a,class_b"
 smartrain train --data merged --model yolov8n --epochs 50 -y
 smartrain train --data merged --model yolov8s --epochs 50 -y
 smartrain train --data merged --model yolov8m --epochs 50 -y
@@ -500,14 +505,14 @@ $ smartrain scan --datasets-path /wrong/path
 Классы не подходят под строгий режим `fusion`:
 
 ```bash
-$ smartrain fusion --output-name x --classes "missing_class"
+$ smartrain fusion --output-name x --dataset ds_a --dataset ds_b --classes "missing_class"
 # [ERROR] Ни один датасет не содержит все выбранные классы.
 ```
 
 Попробовать с частичным пересечением:
 
 ```bash
-smartrain fusion --output-name x --classes "class_a,class_b" --include-partial-datasets
+smartrain fusion --output-name x --dataset ds_a --dataset ds_b --classes "class_a,class_b" --include-partial-datasets
 ```
 
 Нет `data.yaml` у `train`:
@@ -526,7 +531,7 @@ $ smartrain train --data /path/to/bad
 set -e
 export SMART_TRAIN_WORKSPACE="/path/to/ws"
 smartrain scan
-smartrain fusion --output-name nightly --classes "class_a,class_b" --fusion-split 0.8,0.1,0.1
+smartrain fusion --output-name nightly --dataset ds_a --dataset ds_b --classes "class_a,class_b" --fusion-split 0.8,0.1,0.1
 smartrain train --data nightly --model yolov8n --epochs 50 -y
 ```
 

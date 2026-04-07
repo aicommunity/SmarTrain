@@ -55,13 +55,14 @@ smartrain train --help
 
 ```bash
 smartrain scan
-smartrain fusion --classes "class_a,class_b"
+smartrain fusion --dataset ds1 --dataset ds2 --classes "class_a,class_b"
 # создаётся datasets/YYYY-MM-DD_HH-MM-SS-merged (см. вывод [INFO])
 smartrain train --data <имя_этого_каталога>
-# фиксированное имя: smartrain fusion --output-name my_merge --classes ...
+# фиксированное имя: smartrain fusion --output-name my_merge --dataset ds1 --dataset ds2 --classes ...
 ```
 
 Что делает `scan` в актуальной версии:
+
 - синхронизирует новые/обновлённые источники из `raw_data/` в `datasets/`;
 - сравнивает источники и готовые датасеты по контентным хешам (`source_hash`/`dataset_hash`);
 - пропускает перенос, если данные уже есть в `datasets` (даже под другим именем), и печатает предупреждение;
@@ -105,7 +106,7 @@ flowchart TD
 |---------|------------|
 | `deploy` | Создать структуру workspace (Typer; свой `--help`) |
 | `scan` | Сканирование `raw_data`, подготовка копий в `datasets` и обновление `datasets_info.json` / `class_names.json` / `datasets_scan_summary.json` |
-| `fusion` | Сборка объединённого датасета в `datasets/` |
+| `fusion` | Сборка объединённого датасета в `datasets/` из явно выбранных входных датасетов (`--dataset`/`--datasets`, либо интерактивно) |
 | `train` | Обучение YOLO (`model_training_module`) |
 | `hash` | Хеш датасета по файлам и размерам |
 | `roi` | Кроп датасета по ROI (Ultralytics) |

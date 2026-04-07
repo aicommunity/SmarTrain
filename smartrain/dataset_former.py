@@ -4,6 +4,7 @@ import shutil
 import random
 import argparse
 import tempfile
+import sys
 from datetime import datetime
 from tqdm import tqdm
 
@@ -102,6 +103,18 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         help="Имя выходного датасета (подкаталог datasets/) в workspace; "
         "если не задано — YYYY-MM-DD_HH-MM-SS-merged",
     )
+    parser.add_argument(
+        "--dataset",
+        action="append",
+        default=None,
+        help="Имя входного датасета для объединения (можно повторять).",
+    )
+    parser.add_argument(
+        "--datasets",
+        type=str,
+        default=None,
+        help="CSV-список входных датасетов для объединения (например ds1,ds2).",
+    )
 
     parser.add_argument(
         "--source-path",
@@ -183,6 +196,140 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
 
 def parse_args(argv=None):
     return build_dataset_former_arg_parser().parse_args(argv)
+
+
+def _parse_selected_datasets(args) -> list[str]:
+    out: list[str] = []
+    if args.dataset:
+        for item in args.dataset:
+            name = str(item).strip()
+            if name:
+                out.append(name)
+    if args.datasets:
+        for part in str(args.datasets).split(","):
+            name = part.strip()
+            if name:
+                out.append(name)
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for name in out:
+        if name not in seen:
+            seen.add(name)
+            uniq.append(name)
+    return uniq
+
+
+def _prompt_dataset_selection(available: list[str]) -> list[str]:
+    from prompt_toolkit import prompt
+    from prompt_toolkit.completion import WordCompleter
+
+    print("[INFO] Не указаны --dataset/--datasets: интерактивный выбор входных датасетов.")
+    print("[INFO] Доступные датасеты:")
+    for name in available:
+        print(f"  - {name}")
+    completer = WordCompleter(available, ignore_case=True)
+    value = prompt(
+        "Введите датасеты через запятую: ",
+        completer=completer,
+        complete_while_typing=True,
+    )
+    parsed = [x.strip() for x in str(value).split(",") if x.strip()]
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for name in parsed:
+        if name not in seen:
+            seen.add(name)
+            uniq.append(name)
+    return uniq
+
+
+def _prompt_yes_no(label: str, default: bool = False) -> bool:
+    from prompt_toolkit import prompt
+
+    suffix = "Y/n" if default else "y/N"
+    default_text = "y" if default else "n"
+    raw = prompt(f"{label} [{suffix}]: ", default=default_text)
+    val = str(raw).strip().lower()
+    if not val:
+        return default
+    return val in ("y", "yes", "1", "true", "да", "д")
+
+
+def _prompt_interactive_options(
+    args,
+    *,
+    default_output_name: str,
+    class_candidates: list[str],
+) -> None:
+    from prompt_toolkit import prompt
+    from prompt_toolkit.completion import WordCompleter
+
+    print("[INFO] Интерактивная настройка параметров fusion (Enter = значение по умолчанию).")
+    if class_candidates:
+        print(
+            "[INFO] Доступные классы выбранных датасетов: "
+            + ", ".join(class_candidates)
+        )
+    else:
+        print("[WARN] В выбранных датасетах не найдено классов в метаданных.")
+    out_name = prompt("Имя выходного датасета: ", default=default_output_name).strip()
+    args.output_name = out_name or default_output_name
+
+    class_completer = WordCompleter(class_candidates, ignore_case=True)
+    classes_raw = prompt(
+        "Классы через запятую (пусто = авто-объединение): ",
+        default=(args.classes or ""),
+        completer=class_completer,
+        complete_while_typing=True,
+    ).strip()
+    args.classes = classes_raw or None
+
+    split_default = args.fusion_split or f"{TRAIN_PART},{VAL_PART},{TEST_PART}"
+    args.fusion_split = prompt(
+        "Fusion split train,val,test (сумма=1.0): ",
+        default=split_default,
+    ).strip()
+
+    args.include_partial_datasets = _prompt_yes_no(
+        "Включать частичные датасеты (--include-partial-datasets)",
+        default=bool(args.include_partial_datasets),
+    )
+    args.common_classes_only = _prompt_yes_no(
+        "Оставить только общие классы (--common-classes-only)",
+        default=bool(args.common_classes_only),
+    )
+    args.exclude_test = _prompt_yes_no(
+        "Исключить test части источников (--exclude-test)",
+        default=bool(args.exclude_test),
+    )
+    args.drop_empty_images = _prompt_yes_no(
+        "Удалять пары без валидных объектов (--drop-empty-images)",
+        default=bool(args.drop_empty_images),
+    )
+
+    tmp_default = args.tmp_dir or ""
+    tmp_value = prompt("Каталог tmp (пусто = по умолчанию): ", default=tmp_default).strip()
+    args.tmp_dir = tmp_value or None
+
+
+def _validate_requested_classes(
+    selected_classes: list[str],
+    class_candidates: list[str],
+    class_names_map: dict,
+) -> tuple[bool, list[str]]:
+    """
+    Проверка, что пользовательские классы доступны среди выбранных датасетов
+    с учетом нормализации class_names.
+    """
+    if not selected_classes:
+        return True, []
+    available_norm = {_normalize_name(c, class_names_map) for c in class_candidates}
+    missing = [
+        cls
+        for cls in selected_classes
+        if _normalize_name(cls, class_names_map) not in available_norm
+    ]
+    return (len(missing) == 0), missing
 
 
 def _normalize_name(name, class_names_map):
@@ -498,20 +645,8 @@ def _update_datasets_sidecar(
 
 def main(argv=None):
     if argv is None:
-        import sys
         argv = sys.argv[1:]
     args = parse_args(argv)
-
-    try:
-        train_part, val_part, test_part = parse_fusion_split_arg(args.fusion_split)
-    except ValueError as e:
-        print(f"[ERROR] {e}")
-        return
-    if args.fusion_split and str(args.fusion_split).strip():
-        print(
-            f"[INFO] --fusion-split: train={train_part}, val={val_part}, test={test_part} "
-            "(переразбиение внутри каждого bucket исходного датасета)"
-        )
 
     legacy = (
         args.source_path is not None
@@ -549,7 +684,6 @@ def main(argv=None):
                 workspace_out = (
                     f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}-{FUSION_DEFAULT_DIR_SUFFIX}"
                 )
-                print(f"[INFO] --output-name не задан: выходной каталог {workspace_out!r}")
             target_dir = os.path.join(layout.datasets, workspace_out)
 
     json_file = os.path.join(info_dir, DATASETS_INFO_FILE)
@@ -562,6 +696,78 @@ def main(argv=None):
         class_names_map = json.load(f)
 
     output_dataset_name = os.path.basename(target_dir)
+    selected_dataset_names = _parse_selected_datasets(args)
+    interactive_mode = not selected_dataset_names
+    available_dataset_names = sorted(
+        [
+            n
+            for n in datasets_info.keys()
+            if n != output_dataset_name and isinstance(datasets_info.get(n), dict)
+        ]
+    )
+
+    if not selected_dataset_names:
+        if not sys.stdin.isatty():
+            print(
+                "[ERROR] Не указаны входные датасеты. Используйте --dataset/--datasets "
+                "или запустите в интерактивном терминале."
+            )
+            return
+        try:
+            selected_dataset_names = _prompt_dataset_selection(available_dataset_names)
+        except Exception as e:
+            print(f"[ERROR] Не удалось запустить интерактивный выбор датасетов: {e}")
+            return
+
+    if not selected_dataset_names:
+        print("[ERROR] Не выбран ни один датасет для слияния.")
+        return
+
+    unknown = [n for n in selected_dataset_names if n not in datasets_info]
+    if unknown:
+        known = ", ".join(available_dataset_names)
+        print(
+            f"[ERROR] Неизвестные датасеты: {', '.join(unknown)}. "
+            f"Доступные: {known}"
+        )
+        return
+
+    if interactive_mode:
+        class_candidates = all_classes_union_from_datasets(
+            {k: v for k, v in datasets_info.items() if k in set(selected_dataset_names)},
+            output_dataset_name,
+            class_names_map,
+        )
+        try:
+            _prompt_interactive_options(
+                args,
+                default_output_name=output_dataset_name,
+                class_candidates=class_candidates,
+            )
+        except Exception as e:
+            print(f"[ERROR] Ошибка интерактивного ввода параметров fusion: {e}")
+            return
+        if layout is not None and not args.target_path:
+            out_key = (args.output_name or "").strip() or output_dataset_name
+            target_dir = os.path.join(layout.datasets, out_key)
+            output_dataset_name = out_key
+
+    try:
+        train_part, val_part, test_part = parse_fusion_split_arg(args.fusion_split)
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return
+    if args.fusion_split and str(args.fusion_split).strip():
+        print(
+            f"[INFO] --fusion-split: train={train_part}, val={val_part}, test={test_part} "
+            "(переразбиение внутри каждого bucket исходного датасета)"
+        )
+
+    class_candidates_for_selected = all_classes_union_from_datasets(
+        {k: v for k, v in datasets_info.items() if k in set(selected_dataset_names)},
+        output_dataset_name,
+        class_names_map,
+    )
 
     # Выбранные классы
     if args.classes:
@@ -569,11 +775,25 @@ def main(argv=None):
         if not selected_classes:
             print("[ERROR] Параметр --classes задан, но список имён пуст.")
             return
+        is_valid, missing_classes = _validate_requested_classes(
+            selected_classes,
+            class_candidates_for_selected,
+            class_names_map,
+        )
+        if not is_valid:
+            print(
+                "[ERROR] В --classes указаны неизвестные для выбранных датасетов классы: "
+                f"{', '.join(missing_classes)}"
+            )
+            if class_candidates_for_selected:
+                print(
+                    "[INFO] Доступные классы выбранных датасетов: "
+                    f"{', '.join(class_candidates_for_selected)}"
+                )
+            return
         classes_auto = False
     else:
-        selected_classes = all_classes_union_from_datasets(
-            datasets_info, output_dataset_name, class_names_map
-        )
+        selected_classes = class_candidates_for_selected
         classes_auto = True
         if not selected_classes:
             print(
@@ -662,6 +882,8 @@ def main(argv=None):
     matching_datasets = []
     for dataset_name, info in datasets_info.items():
         if dataset_name == output_dataset_name:
+            continue
+        if dataset_name not in selected_dataset_names:
             continue
         if dataset_matches_selection(
             info,

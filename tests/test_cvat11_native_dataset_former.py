@@ -48,7 +48,18 @@ def test_dataset_former_supports_native_cvat11(tmp_path: Path) -> None:
     datasets_json_main(["--workspace", str(tmp_path)])
 
     # 2) Build merged dataset from CVAT source directly.
-    dataset_former_main(["--workspace", str(tmp_path), "--output-name", "merged", "--classes", "cat"])
+    dataset_former_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged",
+            "--dataset",
+            "any_name_here",
+            "--classes",
+            "cat",
+        ]
+    )
 
     out_root = tmp_path / "datasets" / "merged"
     assert (out_root / "data.yaml").exists()

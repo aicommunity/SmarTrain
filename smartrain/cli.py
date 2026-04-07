@@ -116,7 +116,7 @@ def cmd_scan(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_fusion(ctx: typer.Context) -> None:
-    """Сборка объединённого датасета в datasets (модуль dataset_former)."""
+    """Сборка объединённого датасета в datasets (с выбором входных датасетов)."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_former import build_dataset_former_arg_parser
 
