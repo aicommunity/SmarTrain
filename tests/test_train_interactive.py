@@ -14,6 +14,7 @@ def _base_args(workspace: Path) -> argparse.Namespace:
     return argparse.Namespace(
         workspace=str(workspace),
         config=None,
+        ultralytics_yaml=None,
         data=None,
         task="detect",
         model=mtm.MODEL_VERSION,
@@ -46,6 +47,7 @@ def test_train_interactive_defaults_apply(tmp_path: Path, monkeypatch: pytest.Mo
     answers = iter(
         [
             "ds_a",  # dataset
+            "",  # ultralytics_yaml
             "",  # task
             "",  # model
             "",  # epochs
@@ -103,6 +105,7 @@ def test_train_interactive_prints_available_datasets_like_fusion(
             "",
             "",
             "",
+            "",
         ]
     )
     monkeypatch.setattr(mtm, "_prompt_input", lambda *a, **k: next(answers))
@@ -127,6 +130,7 @@ def test_train_interactive_test_only_requires_model_dir(
     answers = iter(
         [
             "ds_a",  # dataset
+            "",  # ultralytics_yaml
             "",  # task
             "",  # model
             "",  # epochs

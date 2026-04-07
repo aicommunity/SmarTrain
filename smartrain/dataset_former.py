@@ -15,6 +15,7 @@ from smartrain.dataset_access import (
     iter_image_label_buckets,
     resolve_dataset_root_for_entry,
 )
+from smartrain.dataset_passport import write_dataset_passport
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -1037,6 +1038,45 @@ def main(argv=None):
         out_key = os.path.basename(os.path.normpath(target_dir))
         _update_datasets_sidecar(layout, out_key, selected_classes, target_dir)
         print(f"[OK] Обновлены {layout.work_datasets_info_path()} и class_names.json в datasets/")
+        try:
+            source_datasets = []
+            for ds_name, info in matching_datasets:
+                source_datasets.append(
+                    {
+                        "name": ds_name,
+                        "path": resolve_dataset_root_for_entry(
+                            ds_name,
+                            info,
+                            workspace_root=workspace_root,
+                            source_catalog_dir=layout.datasets,
+                            legacy_source_parent=source_dir,
+                        ),
+                        "dataset_hash": info.get("dataset_hash"),
+                    }
+                )
+            passport_path = write_dataset_passport(
+                output_dataset_dir=target_dir,
+                command="fusion",
+                source_datasets=source_datasets,
+                parameters=vars(args),
+                transformations=[
+                    {
+                        "selected_classes": list(selected_classes),
+                        "merge_classes": args.merge_classes or [],
+                        "fusion_split": [train_part, val_part, test_part],
+                        "include_partial_datasets": bool(args.include_partial_datasets),
+                        "common_classes_only": bool(args.common_classes_only),
+                        "exclude_test": bool(args.exclude_test),
+                        "drop_empty_images": bool(args.drop_empty_images),
+                    }
+                ],
+                random_seed=12345,
+                stats_before={"total_labels": total_labels},
+                stats_after={"copied_images": copied_count},
+            )
+            print(f"[OK] Passport: {passport_path}")
+        except Exception as e:
+            print(f"[WARNING] Не удалось записать dataset_passport.json: {e}")
 
 
 if __name__ == "__main__":

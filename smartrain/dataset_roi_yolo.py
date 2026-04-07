@@ -20,6 +20,7 @@ from ultralytics import YOLO
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
+from smartrain.dataset_passport import write_dataset_passport
 from smartrain.datasets_json_former import (
     IMAGE_EXTS_FLAT,
     find_yaml_file,
@@ -613,6 +614,35 @@ def main(argv=None) -> None:
 
     _copy_and_patch_yaml(dataset_root, output_root)
     _ensure_data_yaml_after_roi(output_root, entry)
+    try:
+        passport_path = write_dataset_passport(
+            output_dataset_dir=output_root,
+            command="roi",
+            source_datasets=[
+                {
+                    "name": dataset_key,
+                    "path": dataset_root,
+                    "dataset_hash": entry.get("dataset_hash") if isinstance(entry, dict) else None,
+                }
+            ],
+            parameters=vars(args),
+            transformations=[
+                {
+                    "mode": cfg["mode"],
+                    "roi_policy": cfg["roi_policy"],
+                    "class_ids": cfg["class_ids"] or [],
+                    "conf": cfg["conf"],
+                    "pad_px": cfg["pad_px"],
+                    "on_empty": args.on_empty,
+                }
+            ],
+            random_seed=None,
+            stats_before={},
+            stats_after={"output_images": stats["images"], "skipped": stats["skipped"]},
+        )
+        print(f"[OK] Passport: {passport_path}")
+    except Exception as e:
+        print(f"[WARNING] Не удалось записать dataset_passport.json: {e}")
     print(
         f"[OK] Готово: {stats['images']} выходных кадров, пропущено {stats['skipped']}, "
         f"каталог: {output_root}"

@@ -139,6 +139,34 @@ def cmd_train(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "augment",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_augment(ctx: typer.Context) -> None:
+    """Офлайн-аугментация датасета в новый datasets/<name>."""
+    if _ctx_has_help_flag(ctx):
+        from smartrain.dataset_augment import build_augment_arg_parser
+
+        _dispatch_argparse_help(ctx, build_augment_arg_parser, "smartrain augment")
+    _call("smartrain.dataset_augment", "main", ctx)
+
+
+@app.command(
+    "balance",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_balance(ctx: typer.Context) -> None:
+    """Балансировка датасета в новый datasets/<name>."""
+    if _ctx_has_help_flag(ctx):
+        from smartrain.dataset_balance import build_balance_arg_parser
+
+        _dispatch_argparse_help(ctx, build_balance_arg_parser, "smartrain balance")
+    _call("smartrain.dataset_balance", "main", ctx)
+
+
+@app.command(
     "hash",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,

@@ -71,6 +71,13 @@ smartrain train
 - пропускает перенос, если данные уже есть в `datasets` (даже под другим именем), и печатает предупреждение;
 - обнаруживает ручные изменения в `datasets` и автоматически ставит `modified=true` (такой датасет больше не обновляется из `raw_data`).
 
+Про `smartrain train` и YAML-конфиги:
+
+- `--config` — базовый профиль smart-train.
+- `--ultralytics_yaml` — внешний Ultralytics `args.yaml`.
+- Приоритеты: `CLI > --ultralytics_yaml > --config > defaults`.
+- Поле `data` из `--ultralytics_yaml` не используется: путь к датасету берётся из выбранного `--data`.
+
 Сканирование датасетов из файла со списком путей:
 
 ```bash
@@ -111,6 +118,8 @@ flowchart TD
 | `scan` | Сканирование `raw_data`, подготовка копий в `datasets` и обновление `datasets_info.json` / `class_names.json` / `datasets_scan_summary.json` |
 | `fusion` | Сборка объединённого датасета в `datasets/` из явно выбранных входных датасетов (`--dataset`/`--datasets`, либо интерактивно) |
 | `train` | Обучение YOLO (`model_training_module`) |
+| `augment` | Офлайн-аугментация в новый `datasets/<name>` (`<dataset>_aug[_N]`) |
+| `balance` | Балансировка в новый `datasets/<name>` (`<dataset>_balanced[_N]`) |
 | `stats` | Статистика по датасетам в `datasets/`: `classes`, `datasets` |
 | `hash` | Хеш датасета по файлам и размерам |
 | `roi` | Кроп датасета по ROI (Ultralytics) |
@@ -121,6 +130,18 @@ flowchart TD
 | `plot` | Устаревшая обёртка; передаёт аргументы в `analyze` |
 
 В файле очереди указывайте полные вызовы, например: `smartrain train --data myset -y`.
+
+Все команды, создающие новый датасет, сохраняют паспорт изменений:
+`datasets/<new_dataset>/dataset_passport.json` — источник, параметры, трансформации, хеши и метрики до/после.
+
+Типы паспортов:
+
+- `scan` — **начальный паспорт** (`parameters.kind=initial`) для датасета в `datasets/`, если файла ещё не было.
+- `fusion` — паспорт объединения нескольких датасетов.
+- `roi` — паспорт ROI-кропа (политика ROI, порог, class_ids, on_empty).
+- `augment` — паспорт офлайн-аугментации (`<dataset>_aug[_N]`).
+- `balance` — паспорт балансировки (`<dataset>_balanced[_N]`).
+- `cvat import` — паспорт конвертации CVAT 1.1 zip -> YOLO.
 
 ## Очередь
 

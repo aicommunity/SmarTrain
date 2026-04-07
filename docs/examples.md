@@ -195,11 +195,20 @@ smartrain train \
   -y
 ```
 
-Профиль Ultralytics (YAML), часть полей можно не дублировать в CLI — см. `smartrain train --help`:
+Базовый профиль smart-train (`--config`), часть полей можно не дублировать в CLI:
 
 ```bash
 smartrain train --workspace . --data my_merge -c /path/to/train_profile.yaml --epochs 100
 ```
+
+Внешний Ultralytics `args.yaml`:
+
+```bash
+smartrain train --workspace . --data my_merge --ultralytics_yaml /path/to/args.yaml --epochs 100
+```
+
+Приоритет параметров: `CLI > --ultralytics_yaml > --config > defaults`.  
+`data` из `--ultralytics_yaml` игнорируется, используется выбранный `--data`.
 
 Другая задача Ultralytics (`detect` по умолчанию):
 
@@ -232,7 +241,7 @@ smartrain train --data my_merge --export-onnx -y
 smartrain train --data my_merge --export-onnx --export-onnx-fp32 -y
 ```
 
-Дополнительно см. справку: **`--config`**, **`--val-imgsz`**, **`--val-conf`**, **`--val-iou`** (уже есть пример выше).
+Дополнительно см. справку: **`--config`**, **`--ultralytics_yaml`**, **`--val-imgsz`**, **`--val-conf`**, **`--val-iou`**.
 
 Несколько разных моделей на одном датасете:
 
@@ -309,6 +318,43 @@ smartrain stats datasets --dataset my_merge --sort gini --desc
 
 ```bash
 smartrain stats datasets --check-duplicates --check-near-duplicates --export-issues
+```
+
+---
+
+## `smartrain augment`
+
+Создаёт новый датасет в `datasets/` (по умолчанию: `<dataset>_aug`, при конфликте — `_aug_2`, `_aug_3`, ...).
+
+```bash
+smartrain augment --dataset my_merge
+smartrain augment --dataset my_merge --policy robust --multiplier 2 --splits train,val
+smartrain augment --dataset my_merge --classes "cat,dog" --output-name my_merge_aug_custom
+```
+
+Интерактивный режим:
+
+```bash
+smartrain augment
+```
+
+---
+
+## `smartrain balance`
+
+Создаёт новый датасет в `datasets/` (по умолчанию: `<dataset>_balanced`, при конфликте — `_balanced_2`, `_balanced_3`, ...).
+
+```bash
+smartrain balance --dataset my_merge --strategy oversample --target 1.5
+smartrain balance --dataset my_merge --strategy undersample --target 0.8
+smartrain balance --dataset my_merge --class cat
+smartrain balance --dataset my_merge --classes "cat,dog" --emit-train-config
+```
+
+Интерактивный режим:
+
+```bash
+smartrain balance
 ```
 
 ---

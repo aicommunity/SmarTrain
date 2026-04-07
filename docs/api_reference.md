@@ -8,7 +8,12 @@
 
 Соответствие имён подкоманд и модулей см. исходный файл [`smartrain/cli.py`](../smartrain/cli.py).
 
-Добавлена подкоманда `smartrain stats` (аргпарс-модуль `smartrain.dataset_stats`), режимы:
+Добавлены подкоманды:
+- `smartrain augment` (модуль `smartrain.dataset_augment`)
+- `smartrain balance` (модуль `smartrain.dataset_balance`)
+- `smartrain stats` (модуль `smartrain.dataset_stats`)
+
+Для `stats` режимы:
 - `smartrain stats classes`
 - `smartrain stats datasets`
 
@@ -257,6 +262,12 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 **CLI**: `--workspace` и `--data` (каталог с `data.yaml` или имя из `datasets/datasets_info.json`), либо без workspace — обязательны `--data` и `--target-path`. Прогоны по умолчанию в `workspace/runs`.
 
+YAML-источники:
+- `--config` — базовый профиль smart-train;
+- `--ultralytics_yaml` — внешний Ultralytics `args.yaml`;
+- приоритеты: `CLI > --ultralytics_yaml > --config > defaults`;
+- `data` из `--ultralytics_yaml` игнорируется (используется выбранный `--data`).
+
 **Исключения**:
 - `FileNotFoundError` - если датасет или `data.yaml` не найдены
 
@@ -398,6 +409,37 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 - `classes`: per-class counts по split и total, `images_with_class`, `avg_instances_per_image`, итог по дисбалансу (`ratio`, `cv`, `gini`, `mean/median`)
 - `datasets`: `num_classes`, `images_total`, `labeled_images`, `empty_images`, `instances_total`, `orphan_images/labels`, `broken_label_lines`, `unknown_class_ids`
 - Опционально: `--check-duplicates`, `--check-near-duplicates`, `--export-issues`
+
+---
+
+## dataset_augment.py
+
+### CLI
+- Команда: `smartrain augment`
+- Источник: датасет из `datasets/datasets_info.json`
+- Результат: новый датасет в `datasets/<name>` (по умолчанию `<dataset>_aug`, авто-нумерация при конфликте)
+- Интерактивный режим: запуск без аргументов в TTY
+- Паспорт изменений: `dataset_passport.json` в корне выходного датасета
+
+---
+
+## dataset_balance.py
+
+### CLI
+- Команда: `smartrain balance`
+- Стратегии: `oversample`, `undersample`, `class-aware`, `weights`
+- Фильтр классов: `--class` или `--classes`
+- Результат: новый датасет в `datasets/<name>` (по умолчанию `<dataset>_balanced`, авто-нумерация при конфликте)
+- Интерактивный режим: запуск без аргументов в TTY
+- Паспорт изменений: `dataset_passport.json` в корне выходного датасета
+
+---
+
+## dataset_passport.py
+
+Утилиты воспроизводимости для команд, создающих новые датасеты:
+- `next_dataset_name(...)` — авто-нумерация имени при конфликте
+- `write_dataset_passport(...)` — запись `dataset_passport.json` с параметрами, источником, хешами и метриками
 
 ---
 

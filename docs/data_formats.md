@@ -282,6 +282,31 @@ smartrain scan --datasets-list /abs/path/to/datasets_list.txt
 
 Поля `added` / `removed` сравнивают результат с содержимым **предыдущих** `datasets_info.json` и `class_names.json` на диске до записи.
 
+### `dataset_passport.json` (паспорт датасета)
+
+Все команды, которые создают новый датасет или выполняют первичную синхронизацию, создают
+`dataset_passport.json` в корне датасета.
+
+Общие поля:
+
+- `command` — команда-источник преобразования (`scan`, `fusion`, `roi`, `augment`, `balance`, `cvat import`).
+- `created_at` — UTC timestamp создания.
+- `source_dataset` — список входных датасетов/источников.
+- `created_dataset` — имя и абсолютный путь выходного датасета.
+- `parameters` — аргументы запуска команды.
+- `transformations` — список применённых преобразований.
+- `input_hash` / `output_hash` — входные и итоговый хеши содержимого.
+- `stats_before` / `stats_after` — метрики до/после преобразования.
+
+Типы паспортов:
+
+- `scan` — начальный паспорт (`parameters.kind=initial`), если у датасета ещё нет файла паспорта.
+- `fusion` — объединение нескольких входных датасетов.
+- `roi` — ROI-кроп по модели.
+- `augment` — офлайн-аугментация.
+- `balance` — балансировка классов.
+- `cvat import` — импорт CVAT zip в YOLO.
+
 ### Структура
 
 ```json

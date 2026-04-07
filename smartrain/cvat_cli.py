@@ -7,6 +7,7 @@ from typing import Optional
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cvat11_converter import import_cvat11_zip_to_yolo, export_yolo_to_cvat11_zip
+from smartrain.dataset_passport import write_dataset_passport
 
 
 def build_cvat_arg_parser() -> argparse.ArgumentParser:
@@ -87,6 +88,34 @@ def main(argv: list[str] | None = None) -> None:
             force=bool(args.force),
             tmp_base_dir=tmp_base_dir,
         )
+        try:
+            write_dataset_passport(
+                output_dataset_dir=str(Path(info["output_dir"])),
+                command="cvat import",
+                source_datasets=[
+                    {
+                        "name": Path(args.cvat_zip).name,
+                        "path": str(Path(args.cvat_zip).expanduser().resolve()),
+                        "dataset_hash": None,
+                    }
+                ],
+                parameters=vars(args),
+                transformations=[
+                    {
+                        "type": "cvat11_to_yolo",
+                        "task_name": args.task_name,
+                    }
+                ],
+                random_seed=None,
+                stats_before={},
+                stats_after={
+                    "nc": info.get("nc"),
+                    "images_count": info.get("images_count"),
+                    "labels_count": info.get("labels_count"),
+                },
+            )
+        except Exception as e:
+            print(f"[WARNING] Не удалось записать dataset_passport.json: {e}")
         print(f"[OK] CVAT import -> YOLO: {info['output_dir']}")
         print(f"[OK] classes={info['nc']} images={info['images_count']} labels={info['labels_count']}")
         return

@@ -286,6 +286,7 @@ def test_roi_workspace_flat_mock_yolo(tmp_path: Path) -> None:
 
     assert (out_dir / "images" / "one.jpg").is_file()
     assert (out_dir / "labels" / "one.txt").is_file()
+    assert (out_dir / "dataset_passport.json").is_file()
 
 
 def test_roi_workspace_external_path_via_datasets_list(tmp_path: Path) -> None:

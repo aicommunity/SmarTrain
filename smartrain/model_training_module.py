@@ -34,6 +34,18 @@ MODEL_VERSION = "yolov8n"
 EPOCHS = 50
 BATCH = 16
 IMG_SIZE = 640
+_ULTRALYTICS_YAML_IGNORED_KEYS = frozenset(
+    {
+        "data",
+        "project",
+        "name",
+        "exist_ok",
+        "task",
+        "model_dir",
+        "target_path",
+        "workspace",
+    }
+)
 
 
 def build_train_arg_parser() -> argparse.ArgumentParser:
@@ -53,7 +65,13 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         "-c",
         type=str,
         default=None,
-        help="YAML-профиль гиперпараметров Ultralytics (формат как у model.train()); CLI переопределяет model/epochs/batch/img-size/task",
+        help="YAML-профиль smart-train (базовый конфиг). Можно смешивать с --ultralytics_yaml; приоритет CLI > --ultralytics_yaml > --config",
+    )
+    parser.add_argument(
+        "--ultralytics_yaml",
+        type=str,
+        default=None,
+        help="Внешний Ultralytics args.yaml; несовместимые ключи (data/project/name/exist_ok/task/...) игнорируются с предупреждением",
     )
 
     parser.add_argument(
@@ -61,7 +79,7 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Каталог с data.yaml (абсолютный/относительный) или имя записи из datasets/datasets_info.json; "
-        "если задан --config, можно опустить при наличии data: в YAML",
+        "при --workspace обычно задаётся явно (значение data из --ultralytics_yaml не используется)",
     )
 
     parser.add_argument(
@@ -288,6 +306,18 @@ def _run_interactive_train_setup(args) -> bool:
     for name in dataset_names:
         print(f"  - {name}")
     args.data = _prompt_dataset_name(dataset_names)
+    args.ultralytics_yaml = (
+        _prompt_input(
+            "Путь к внешнему Ultralytics args.yaml (--ultralytics_yaml, пусто=не использовать): ",
+            default=str(getattr(args, "ultralytics_yaml", "") or ""),
+        ).strip()
+        or None
+    )
+    if args.ultralytics_yaml:
+        print(
+            "[INFO] Для --ultralytics_yaml: data/project/name/exist_ok/task и служебные path-ключи "
+            "игнорируются; data всегда берётся из выбранного датасета."
+        )
 
     task_default = str(getattr(args, "task", "detect"))
     task_choices = ["detect", "segment", "classify", "pose", "obb"]
@@ -440,13 +470,76 @@ def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str,
 
 def _finalize_train_kwargs(ultralytics_cfg: dict[str, Any], data_yaml: str, model_dir: str) -> dict[str, Any]:
     k = copy.deepcopy(ultralytics_cfg)
+    overwritten: list[str] = []
+    if "data" in k:
+        overwritten.append("data")
+    if "project" in k:
+        overwritten.append("project")
+    if "name" in k:
+        overwritten.append("name")
+    if "exist_ok" in k:
+        overwritten.append("exist_ok")
     k.pop("data", None)
     k["data"] = data_yaml
     k["project"] = model_dir
     k["name"] = "train"
     k["exist_ok"] = False
     k.setdefault("mode", "train")
+    if overwritten:
+        print(
+            "[WARNING] Принудительно переопределены служебные ключи train: "
+            + ", ".join(sorted(set(overwritten)))
+        )
     return k
+
+
+def _load_ultralytics_yaml(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    raw = load_train_profile(path)
+    if not isinstance(raw, dict):
+        return {}
+    return raw
+
+
+def _merge_sources_with_priority(
+    *,
+    config_profile: dict[str, Any],
+    ultralytics_profile: dict[str, Any],
+    args: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    # Base: --config
+    u_cfg, sm_opts = extract_smartrain_options(config_profile)
+
+    # Overlay: --ultralytics_yaml (minus ignored keys)
+    if ultralytics_profile:
+        ignored = sorted(k for k in ultralytics_profile.keys() if k in _ULTRALYTICS_YAML_IGNORED_KEYS)
+        if ignored:
+            print(
+                "[WARNING] --ultralytics_yaml: проигнорированы ключи: "
+                + ", ".join(ignored)
+            )
+        filtered = {k: v for k, v in ultralytics_profile.items() if k not in _ULTRALYTICS_YAML_IGNORED_KEYS}
+        u_from_ultra, sm_from_ultra = extract_smartrain_options(filtered)
+        cli_key_map = {
+            "model": "model",
+            "epochs": "epochs",
+            "batch": "batch",
+            "imgsz": "img_size",
+            "task": "task",
+        }
+        overridden_by_cli: list[str] = []
+        for yaml_key, cli_attr in cli_key_map.items():
+            if yaml_key in u_from_ultra and hasattr(args, cli_attr):
+                overridden_by_cli.append(yaml_key)
+        if overridden_by_cli:
+            print(
+                "[WARNING] --ultralytics_yaml: следующие ключи будут переопределены CLI: "
+                + ", ".join(sorted(overridden_by_cli))
+            )
+        u_cfg.update(u_from_ultra)
+        sm_opts.update(sm_from_ultra)
+    return u_cfg, sm_opts
 
 
 def train_yolo(
@@ -850,7 +943,12 @@ def main(argv=None):
             return
 
     profile = load_train_profile(args.config) if args.config else {}
-    u_cfg, sm_opts = extract_smartrain_options(profile)
+    ultra_profile = _load_ultralytics_yaml(getattr(args, "ultralytics_yaml", None))
+    u_cfg, sm_opts = _merge_sources_with_priority(
+        config_profile=profile,
+        ultralytics_profile=ultra_profile,
+        args=args,
+    )
     merge_cli_into_ultralytics_cfg(
         u_cfg,
         model=getattr(args, "model", None),

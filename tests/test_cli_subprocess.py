@@ -15,6 +15,8 @@ CLI_HELP_CASES: list[tuple[str, list[str]]] = [
     ("scan", ["--", "--help"]),
     ("fusion", ["--", "--help"]),
     ("train", ["--", "--help"]),
+    ("augment", ["--", "--help"]),
+    ("balance", ["--", "--help"]),
     ("hash", ["--", "--help"]),
     ("stats", ["classes", "--", "--help"]),
     ("roi", ["--", "--help"]),

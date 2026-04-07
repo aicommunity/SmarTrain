@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
 from smartrain.dataset_hash import calculate_dataset_hash
+from smartrain.dataset_passport import write_dataset_passport
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -862,6 +863,49 @@ def _append_to_datasets_list(list_path: str, value: str) -> None:
         f.write("\n")
 
 
+def _ensure_scan_initial_passport(
+    *,
+    dataset_dir: str,
+    dataset_name: str,
+    entry: dict,
+    workspace_root: str,
+) -> None:
+    passport_path = os.path.join(dataset_dir, "dataset_passport.json")
+    if os.path.isfile(passport_path):
+        return
+    src_ref = entry.get(SOURCE_REF_KEY)
+    src_payload: dict[str, Any] = {
+        "name": str(src_ref) if src_ref else dataset_name,
+        "path": str(src_ref) if src_ref else None,
+        "dataset_hash": entry.get(SOURCE_HASH_KEY),
+        "source_signature": entry.get(SOURCE_SIGNATURE_KEY),
+    }
+    # Clean None to keep passport compact and deterministic.
+    src_payload = {k: v for k, v in src_payload.items() if v is not None}
+    write_dataset_passport(
+        output_dataset_dir=dataset_dir,
+        command="scan",
+        source_datasets=[src_payload],
+        parameters={
+            "workspace": workspace_root,
+            "kind": "initial",
+        },
+        transformations=[
+            {
+                "type": "initial_sync_from_raw_data",
+                "source_ref": src_ref,
+                "structure": entry.get("structure"),
+            }
+        ],
+        random_seed=None,
+        stats_before={},
+        stats_after={
+            "classes": len(entry.get("names", []) or []),
+            "dataset_hash": entry.get(DATASET_HASH_KEY),
+        },
+    )
+
+
 def _append_explicit_dataset(
     *,
     raw: str,
@@ -1263,6 +1307,26 @@ def main(argv=None):
                 datasets_info[name][DATASET_HASH_KEY] = current_hash
             elif MODIFIED_KEY not in datasets_info[name]:
                 datasets_info[name][MODIFIED_KEY] = bool(datasets_info[name].get(MODIFIED_KEY, False))
+
+    if use_workspace:
+        for name, entry in datasets_info.items():
+            if not isinstance(entry, dict):
+                continue
+            try:
+                dataset_root = resolve_or_extract_dataset_root(layout.root, name, entry, datasets_dir)
+            except Exception:
+                dataset_root = os.path.join(datasets_dir, name)
+            if not os.path.isdir(dataset_root):
+                continue
+            try:
+                _ensure_scan_initial_passport(
+                    dataset_dir=dataset_root,
+                    dataset_name=name,
+                    entry=entry,
+                    workspace_root=layout.root,
+                )
+            except Exception as e:
+                print(f"[WARNING] Не удалось записать initial passport для {name!r}: {e}")
 
     old_ds_keys: Set[str] = set()
     if 'previous_info_for_diff' in locals() and isinstance(previous_info_for_diff, dict):

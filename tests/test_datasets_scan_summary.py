@@ -52,6 +52,11 @@ def test_datasets_json_writes_scan_summary_and_diff(tmp_path: Path) -> None:
     assert j1["datasets"]["added"] == ["ds_a"]
     assert j1["datasets"]["removed"] == []
     assert "bee" in j1["class_names"]["final"]
+    passport_1 = tmp_path / "datasets" / "ds_a" / "dataset_passport.json"
+    assert passport_1.is_file()
+    p1 = json.loads(passport_1.read_text(encoding="utf-8"))
+    assert p1["command"] == "scan"
+    assert p1["parameters"]["kind"] == "initial"
 
     _flat_dataset(sd, "ds_b")
     (sd / "ds_b" / "data.yaml").write_text("nc: 1\nnames: ['antelope']\n", encoding="utf-8")
@@ -62,6 +67,7 @@ def test_datasets_json_writes_scan_summary_and_diff(tmp_path: Path) -> None:
     assert j2["datasets"]["added"] == ["ds_b"]
     assert j2["datasets"]["removed"] == []
     assert "antelope" in j2["class_names"]["added"]
+    assert (tmp_path / "datasets" / "ds_b" / "dataset_passport.json").is_file()
 
     import shutil
 

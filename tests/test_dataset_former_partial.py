@@ -233,6 +233,7 @@ def test_fusion_accepts_datasets_csv(tmp_path: Path) -> None:
         ]
     )
     assert (tmp_path / "datasets" / "merged_csv" / "data.yaml").is_file()
+    assert (tmp_path / "datasets" / "merged_csv" / "dataset_passport.json").is_file()
 
 
 def test_fusion_interactive_mode_without_dataset_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
