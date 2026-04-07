@@ -23,16 +23,23 @@ smartrain fusion --output-name my_merge --classes "class_a,class_b"
 smartrain train --data my_merge --model yolov8n --epochs 50 --batch 16 -y
 ```
 
-`--data my_merge` — имя каталога в `work_datasets/`, как в `work_datasets/datasets_info.json`.
+`--data my_merge` — имя каталога в `datasets/`, как в `datasets/datasets_info.json`.
 
 ---
 
 ## `smartrain scan`
 
-Сканирование внутри workspace (ищет датасеты под `source_datasets/`, пишет JSON туда же):
+Сканирование внутри workspace (синхронизирует источники из `raw_data/` в `datasets/`, индекс строит по `datasets/`):
 
 ```bash
 smartrain scan
+```
+
+Явный источник (добавляется в `raw_data/datasets_list.txt`):
+
+```bash
+smartrain scan --dataset my_dataset
+smartrain scan --dataset /abs/path/to/external_dataset
 ```
 
 Указать корень с датасетами и куда положить `datasets_info.json` / `class_names.json`:
@@ -57,7 +64,7 @@ smartrain scan --mode refresh
 
 ## `smartrain fusion` (workspace)
 
-Имя выхода в `work_datasets/`:
+Имя выхода в `datasets/`:
 
 ```bash
 smartrain fusion --output-name my_merge --classes "class_a,class_b"
@@ -126,7 +133,7 @@ smartrain fusion --output-name common_only --classes "class_a,class_b" --common-
 smartrain fusion --output-name tmp_here --classes "class_a,class_b" --tmp-dir /path/to/tmp
 ```
 
-Явный выход в файловую систему при заданном workspace (вместо только `work_datasets/<name>`):
+Явный выход в файловую систему при заданном workspace (вместо `datasets/<name>`):
 
 ```bash
 smartrain fusion --output-name my_merge --classes "class_a,class_b" --target-path /data/custom_out
@@ -160,7 +167,7 @@ smartrain fusion \
 
 ## `smartrain train`
 
-Workspace и имя work-датасета:
+Workspace и имя датасета из `datasets/`:
 
 ```bash
 smartrain train --data my_merge --model yolov8n --epochs 50 --batch 16 -y
@@ -282,7 +289,7 @@ smartrain hash /path/to/dataset
 smartrain hash --work-dataset my_merge
 ```
 
-По имени source-датасета (в т.ч. `.zip` в `source_datasets/`):
+По имени датасета из каталога `datasets/`:
 
 ```bash
 smartrain hash --source-dataset dataset_key_from_json

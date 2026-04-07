@@ -1,15 +1,18 @@
 import os
+import copy
 import yaml
 import json
 import sys
 import argparse
 import hashlib
 import zipfile
+import shutil
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 import xml.etree.ElementTree as ET
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -26,6 +29,11 @@ sys.stdout.reconfigure(encoding='utf-8')
 OUTPUT_FILE = DATASETS_INFO_FILE
 OUTPUT_CLASS_NAMES_FILE = CLASS_NAMES_FILE
 DEFAULT_DATASETS_LIST_FILE = "datasets_list.txt"
+SOURCE_SIGNATURE_KEY = "source_signature"
+DATASET_HASH_KEY = "dataset_hash"
+SOURCE_HASH_KEY = "source_hash"
+SOURCE_REF_KEY = "source_ref"
+MODIFIED_KEY = "modified"
 
 
 def find_yaml_file(folder_path):
@@ -456,7 +464,7 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); JSON пишутся в source_datasets/",
+        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); scan читает raw_data/ и пишет datasets/",
     )
 
     parser.add_argument(
@@ -487,6 +495,12 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="TXT-файл со списком путей к датасетам (по одному на строку): директории или .zip",
     )
+    parser.add_argument(
+        "--dataset",
+        action="append",
+        default=None,
+        help="Явно указать датасет (имя из raw_data или путь). Флаг можно повторять.",
+    )
 
     return parser
 
@@ -496,7 +510,16 @@ def parse_args(argv=None):
 
 
 # Поля записи датасета, сохраняемые при пересканировании (вручную в JSON)
-_PRESERVED_DATASET_INFO_KEYS = ("roi_auto", "tags", "data_path")
+_PRESERVED_DATASET_INFO_KEYS = (
+    "roi_auto",
+    "tags",
+    "data_path",
+    SOURCE_SIGNATURE_KEY,
+    DATASET_HASH_KEY,
+    SOURCE_HASH_KEY,
+    SOURCE_REF_KEY,
+    MODIFIED_KEY,
+)
 
 
 def _sorted_diff(old: Set[str], new: Set[str]) -> Tuple[List[str], List[str]]:
@@ -708,7 +731,7 @@ def _append_roots_from_datasets_list(
                         layout.root,
                         logical_name,
                         {"data_path": data_path_value},
-                        layout.source_datasets,
+                        layout.raw_data,
                     )
                 else:
                     extracted = _extract_zip_for_scan(
@@ -727,6 +750,141 @@ def _append_roots_from_datasets_list(
         )
 
 
+def _compute_source_signature(path: str) -> str:
+    ap = os.path.abspath(path)
+    if os.path.isfile(ap) and ap.lower().endswith(".zip"):
+        st = os.stat(ap)
+        payload = f"zip|{ap}|{st.st_size}|{getattr(st, 'st_mtime_ns', int(st.st_mtime * 1e9))}"
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+    rows: list[str] = []
+    for root, dirs, files in os.walk(ap):
+        dirs.sort()
+        files.sort()
+        rel_root = os.path.relpath(root, ap)
+        rows.append(f"d:{rel_root}")
+        for fn in files:
+            fp = os.path.join(root, fn)
+            try:
+                st = os.stat(fp)
+            except OSError:
+                continue
+            rel = os.path.relpath(fp, ap)
+            rows.append(f"f:{rel}:{st.st_size}:{getattr(st, 'st_mtime_ns', int(st.st_mtime * 1e9))}")
+    joined = "\n".join(rows).encode("utf-8")
+    return hashlib.sha1(joined).hexdigest()[:16]
+
+
+def _copy_source_to_training(src_root: str, dst_root: str) -> None:
+    if os.path.isdir(dst_root):
+        shutil.rmtree(dst_root, ignore_errors=True)
+    os.makedirs(os.path.dirname(dst_root), exist_ok=True)
+    shutil.copytree(src_root, dst_root)
+
+
+def _dataset_content_hash(path: str) -> Optional[str]:
+    try:
+        return str(calculate_dataset_hash(path))
+    except Exception as e:
+        print(f"[WARNING] Не удалось вычислить dataset_hash для {path!r}: {e}")
+        return None
+
+
+def _ensure_prev_entry(previous_info: dict, key: str) -> dict:
+    entry = previous_info.get(key)
+    if not isinstance(entry, dict):
+        entry = {}
+        previous_info[key] = entry
+    return entry
+
+
+def _append_to_datasets_list(list_path: str, value: str) -> None:
+    existing: set[str] = set()
+    if os.path.isfile(list_path):
+        with open(list_path, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if s and not s.startswith("#"):
+                    existing.add(s)
+    if value in existing:
+        return
+    with open(list_path, "a", encoding="utf-8") as f:
+        if existing:
+            f.write("\n")
+        f.write(value)
+        f.write("\n")
+
+
+def _append_explicit_dataset(
+    *,
+    raw: str,
+    layout: WorkspaceLayout,
+    output_file: str,
+    folder_roots: list[tuple[str, str, dict]],
+    used_names: set[str],
+) -> None:
+    token = (raw or "").strip()
+    if not token:
+        return
+    candidate = os.path.abspath(os.path.expanduser(token))
+    if os.path.exists(candidate):
+        src_path = candidate
+        base_name = os.path.splitext(os.path.basename(src_path))[0] if src_path.lower().endswith(".zip") else os.path.basename(src_path)
+        list_value = src_path
+    else:
+        name = token[:-4] if token.lower().endswith(".zip") else token
+        dir_candidate = os.path.join(layout.raw_data, name)
+        zip_candidate = os.path.join(layout.raw_data, f"{name}.zip")
+        if os.path.isdir(dir_candidate):
+            src_path = dir_candidate
+            base_name = name
+            list_value = name
+        elif os.path.isfile(zip_candidate):
+            src_path = zip_candidate
+            base_name = name
+            list_value = f"{name}.zip"
+        else:
+            print(f"[WARNING] --dataset {raw!r}: путь/имя не найдено")
+            return
+    logical_name = _unique_dataset_key(base_name, used_names)
+    sig = _compute_source_signature(src_path)
+    prev_sig = None
+    if os.path.isfile(output_file):
+        try:
+            with open(output_file, "r", encoding="utf-8") as f:
+                prev = json.load(f)
+            if isinstance(prev, dict) and isinstance(prev.get(logical_name), dict):
+                prev_sig = prev[logical_name].get(SOURCE_SIGNATURE_KEY)
+        except Exception:
+            prev_sig = None
+    dst = os.path.join(layout.datasets, logical_name)
+    if src_path.lower().endswith(".zip"):
+        try:
+            extracted = resolve_or_extract_dataset_root(
+                layout.root,
+                logical_name,
+                {"data_path": os.path.relpath(src_path, layout.root)},
+                layout.raw_data,
+            )
+        except Exception as e:
+            print(f"[WARNING] --dataset {raw!r}: не удалось распаковать zip ({e})")
+            return
+        source_for_copy = extracted
+    else:
+        source_for_copy = src_path
+    if not (prev_sig == sig and _dir_has_content(dst)):
+        _copy_source_to_training(source_for_copy, dst)
+    else:
+        print(f"[INFO] Пропуск {logical_name!r}: источник не изменился.")
+    folder_roots.append(
+        (
+            logical_name,
+            dst,
+            {"data_path": os.path.relpath(dst, layout.root), SOURCE_SIGNATURE_KEY: sig},
+        )
+    )
+    _append_to_datasets_list(os.path.join(layout.raw_data, DEFAULT_DATASETS_LIST_FILE), list_value)
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -743,13 +901,17 @@ def main(argv=None):
             return
         use_workspace = True
         layout = WorkspaceLayout(root)
-        os.makedirs(layout.source_datasets, exist_ok=True)
+        os.makedirs(layout.raw_data, exist_ok=True)
+        os.makedirs(layout.datasets, exist_ok=True)
 
     if use_workspace:
-        output_dir = layout.source_datasets
+        # Источник истины для индекса — каталог datasets (готовые датасеты).
+        # raw_data используется только как источник новых/обновлённых данных.
+        output_dir = layout.datasets
         output_file = os.path.join(output_dir, OUTPUT_FILE)
         output_class_names_file = os.path.join(output_dir, OUTPUT_CLASS_NAMES_FILE)
-        datasets_dir = layout.source_datasets
+        datasets_dir = layout.datasets
+        raw_source_dir = layout.raw_data
     else:
         datasets_dir = os.path.abspath(os.path.expanduser(args.datasets_path))
         if args.output_path:
@@ -795,77 +957,259 @@ def main(argv=None):
         if not os.path.exists(datasets_dir):
             print(f"[ERROR] Папка '{datasets_dir}' не найдена.")
             return
+        previous_info = {}
+        if os.path.isfile(output_file):
+            try:
+                with open(output_file, "r", encoding="utf-8") as f:
+                    loaded_prev = json.load(f)
+                if isinstance(loaded_prev, dict):
+                    previous_info = loaded_prev
+            except Exception as e:
+                print(f"[WARNING] Не удалось прочитать существующий {output_file}: {e}")
+        previous_info_for_diff = copy.deepcopy(previous_info)
         folder_roots = []
         used_names: set[str] = set()
-        for folder_name in os.listdir(datasets_dir):
-            folder_path = os.path.join(datasets_dir, folder_name)
-            if os.path.isdir(folder_path):
-                folder_roots.append((folder_name, folder_path, {}))
-                used_names.add(folder_name)
-            elif use_workspace and folder_name.lower().endswith(".zip"):
-                zip_path = folder_path
-                logical_name = os.path.splitext(folder_name)[0]
-                existing_dir = os.path.join(datasets_dir, logical_name)
-                if _dir_has_content(existing_dir):
-                    print(
-                        f"[INFO] Пропуск архива {folder_name!r}: найден непустой каталог "
-                        f"{existing_dir!r}"
-                    )
+
+        def _sync_one_source(*, logical_name: str, source_for_copy: str, source_ref: str, source_signature: str) -> None:
+            dst_dir = os.path.join(layout.datasets, logical_name)
+            prev_entry = previous_info.get(logical_name)
+            if isinstance(prev_entry, dict) and bool(prev_entry.get(MODIFIED_KEY)):
+                print(f"[WARNING] Пропуск синхронизации {logical_name!r}: modified=true.")
+                return
+
+            source_hash = _dataset_content_hash(source_for_copy)
+            if source_hash:
+                for ds_name in os.listdir(layout.datasets):
+                    ds_path = os.path.join(layout.datasets, ds_name)
+                    if not os.path.isdir(ds_path):
+                        continue
+                    if ds_name == logical_name:
+                        continue
+                    ds_hash = None
+                    if isinstance(previous_info.get(ds_name), dict):
+                        ds_hash = previous_info[ds_name].get(DATASET_HASH_KEY)
+                    if not ds_hash:
+                        ds_hash = _dataset_content_hash(ds_path)
+                    if ds_hash and ds_hash == source_hash:
+                        print(
+                            f"[WARNING] Пропуск источника {logical_name!r}: данные совпадают с datasets/{ds_name!r}."
+                        )
+                        return
+
+            prev_sig = prev_entry.get(SOURCE_SIGNATURE_KEY) if isinstance(prev_entry, dict) else None
+            if prev_sig == source_signature and _dir_has_content(dst_dir):
+                print(f"[INFO] Пропуск {logical_name!r}: источник не изменился.")
+            else:
+                _copy_source_to_training(source_for_copy, dst_dir)
+
+            entry = _ensure_prev_entry(previous_info, logical_name)
+            entry[SOURCE_SIGNATURE_KEY] = source_signature
+            entry[SOURCE_REF_KEY] = source_ref
+            entry[MODIFIED_KEY] = bool(entry.get(MODIFIED_KEY, False))
+            if source_hash:
+                entry[SOURCE_HASH_KEY] = source_hash
+                entry[DATASET_HASH_KEY] = source_hash
+
+        if use_workspace:
+            if os.path.isdir(raw_source_dir):
+                for src_name in os.listdir(raw_source_dir):
+                    src_path = os.path.join(raw_source_dir, src_name)
+                    if not (os.path.isdir(src_path) or src_name.lower().endswith(".zip")):
+                        continue
+                    logical_name = os.path.splitext(src_name)[0] if src_name.lower().endswith(".zip") else src_name
+                    if src_name.lower().endswith(".zip"):
+                        sig = _compute_source_signature(src_path)
+                        try:
+                            extracted = resolve_or_extract_dataset_root(
+                                layout.root,
+                                logical_name,
+                                {"data_path": os.path.relpath(src_path, layout.root)},
+                                raw_source_dir,
+                            )
+                        except Exception as e:
+                            print(f"[WARNING] Пропуск архива {src_name!r} из raw_data: {e}")
+                            continue
+                        _sync_one_source(
+                            logical_name=logical_name,
+                            source_for_copy=extracted,
+                            source_ref=os.path.relpath(src_path, layout.root),
+                            source_signature=sig,
+                        )
+                    else:
+                        _sync_one_source(
+                            logical_name=logical_name,
+                            source_for_copy=src_path,
+                            source_ref=os.path.relpath(src_path, layout.root),
+                            source_signature=_compute_source_signature(src_path),
+                        )
+
+        if use_workspace and args.dataset:
+            used_names_for_explicit = {
+                d for d in os.listdir(layout.datasets) if os.path.isdir(os.path.join(layout.datasets, d))
+            }
+            for raw_item in args.dataset:
+                token = (raw_item or "").strip()
+                if not token:
                     continue
-                try:
-                    extracted = resolve_or_extract_dataset_root(
-                        layout.root,
-                        logical_name,
-                        {"data_path": os.path.relpath(zip_path, layout.root)},
-                        datasets_dir,
+                candidate = os.path.abspath(os.path.expanduser(token))
+                if os.path.exists(candidate):
+                    src_path = candidate
+                    base_name = (
+                        os.path.splitext(os.path.basename(src_path))[0]
+                        if src_path.lower().endswith(".zip")
+                        else os.path.basename(src_path)
                     )
-                except Exception as e:
-                    print(f"[WARNING] Пропуск {folder_name!r}: не удалось распаковать zip ({e})")
-                    continue
-                folder_roots.append(
-                    (
-                        logical_name,
-                        extracted,
-                        {"data_path": os.path.relpath(zip_path, layout.root)},
+                    list_value = src_path
+                else:
+                    name = token[:-4] if token.lower().endswith(".zip") else token
+                    dir_candidate = os.path.join(layout.raw_data, name)
+                    zip_candidate = os.path.join(layout.raw_data, f"{name}.zip")
+                    if os.path.isdir(dir_candidate):
+                        src_path = dir_candidate
+                        base_name = name
+                        list_value = name
+                    elif os.path.isfile(zip_candidate):
+                        src_path = zip_candidate
+                        base_name = name
+                        list_value = f"{name}.zip"
+                    else:
+                        print(f"[WARNING] --dataset {raw_item!r}: путь/имя не найдено")
+                        continue
+                logical_name = _unique_dataset_key(base_name, used_names_for_explicit)
+                if src_path.lower().endswith(".zip"):
+                    sig = _compute_source_signature(src_path)
+                    try:
+                        extracted = resolve_or_extract_dataset_root(
+                            layout.root,
+                            logical_name,
+                            {"data_path": os.path.relpath(src_path, layout.root)},
+                            layout.raw_data,
+                        )
+                    except Exception as e:
+                        print(f"[WARNING] --dataset {raw_item!r}: не удалось распаковать zip ({e})")
+                        continue
+                    _sync_one_source(
+                        logical_name=logical_name,
+                        source_for_copy=extracted,
+                        source_ref=src_path,
+                        source_signature=sig,
                     )
+                else:
+                    _sync_one_source(
+                        logical_name=logical_name,
+                        source_for_copy=src_path,
+                        source_ref=src_path,
+                        source_signature=_compute_source_signature(src_path),
+                    )
+                _append_to_datasets_list(
+                    os.path.join(layout.raw_data, DEFAULT_DATASETS_LIST_FILE), list_value
                 )
-                used_names.add(logical_name)
         if args.datasets_list:
             list_path = os.path.abspath(os.path.expanduser(args.datasets_list))
             if not os.path.isfile(list_path):
                 print(f"[ERROR] Не найден файл --datasets-list: {list_path}")
                 return
         elif use_workspace:
-            auto_list = os.path.join(datasets_dir, DEFAULT_DATASETS_LIST_FILE)
+            auto_list = os.path.join(raw_source_dir, DEFAULT_DATASETS_LIST_FILE)
             list_path = auto_list if os.path.isfile(auto_list) else None
         else:
             list_path = None
         if list_path:
-            _append_roots_from_datasets_list(
-                list_path=list_path,
-                folder_roots=folder_roots,
-                used_names=used_names,
-                use_workspace=use_workspace,
-                layout=layout,
-                output_dir=output_dir,
-            )
+            # В workspace-режиме datasets_list.txt описывает внешние источники,
+            # из которых нужно подготовить копии в datasets и включить их в индекс.
+            if use_workspace:
+                entries = _load_datasets_list_file(list_path)
+                for src_path in entries:
+                    if not os.path.exists(src_path):
+                        print(f"[WARNING] Пропуск из datasets-list: путь не найден: {src_path}")
+                        continue
+                    base_name = (
+                        os.path.splitext(os.path.basename(src_path))[0]
+                        if src_path.lower().endswith(".zip")
+                        else os.path.basename(src_path)
+                    )
+                    logical_name = _unique_dataset_key(base_name, used_names)
+                    dst_dir = os.path.join(layout.datasets, logical_name)
+                    sig = _compute_source_signature(src_path)
+                    prev_sig = None
+                    if os.path.isfile(output_file):
+                        try:
+                            with open(output_file, "r", encoding="utf-8") as pf:
+                                prev_j = json.load(pf)
+                            if isinstance(prev_j, dict) and isinstance(prev_j.get(logical_name), dict):
+                                prev_sig = prev_j[logical_name].get(SOURCE_SIGNATURE_KEY)
+                        except Exception:
+                            prev_sig = None
+                    if src_path.lower().endswith(".zip"):
+                        try:
+                            extracted = _extract_zip_for_scan(
+                                src_path,
+                                os.path.join(output_dir, "tmp", "datasets_list_extract"),
+                            )
+                        except Exception as e:
+                            print(f"[WARNING] Пропуск архива из datasets-list {src_path!r}: {e}")
+                            continue
+                        source_for_copy = extracted
+                    else:
+                        source_for_copy = src_path
+                    _sync_one_source(
+                        logical_name=logical_name,
+                        source_for_copy=source_for_copy,
+                        source_ref=src_path,
+                        source_signature=sig,
+                    )
+            else:
+                _append_roots_from_datasets_list(
+                    list_path=list_path,
+                    folder_roots=folder_roots,
+                    used_names=used_names,
+                    use_workspace=use_workspace,
+                    layout=layout,
+                    output_dir=output_dir,
+                )
+
+        for folder_name in os.listdir(datasets_dir):
+            folder_path = os.path.join(datasets_dir, folder_name)
+            if not os.path.isdir(folder_path):
+                continue
+            overrides: dict[str, Any] = {}
+            if use_workspace:
+                rel = os.path.relpath(folder_path, layout.root)
+                overrides = {"data_path": rel}
+            folder_roots.append((folder_name, folder_path, overrides))
+            used_names.add(folder_name)
+
         datasets_info, class_names = _run_scan_folder_roots(folder_roots)
-        previous_info = {}
-        if os.path.isfile(output_file):
-            try:
-                with open(output_file, "r", encoding="utf-8") as f:
-                    previous_info = json.load(f)
-            except Exception as e:
-                print(f"[WARNING] Не удалось прочитать существующий {output_file}: {e}")
 
     for name in list(datasets_info.keys()):
         if name in previous_info and isinstance(previous_info[name], dict):
             datasets_info[name] = _merge_preserved_dataset_fields(
                 datasets_info[name], previous_info[name]
             )
+        if use_workspace:
+            ds_path = os.path.join(layout.datasets, name)
+            current_hash = _dataset_content_hash(ds_path)
+            if current_hash:
+                prev_hash = datasets_info[name].get(DATASET_HASH_KEY)
+                was_modified = bool(datasets_info[name].get(MODIFIED_KEY, False))
+                if prev_hash and prev_hash != current_hash and not was_modified:
+                    print(
+                        f"[WARNING] Датасет {name!r} изменён вручную в datasets; "
+                        "установлен modified=true, синхронизация из raw_data отключена."
+                    )
+                    datasets_info[name][MODIFIED_KEY] = True
+                elif not was_modified:
+                    datasets_info[name][MODIFIED_KEY] = False
+                else:
+                    datasets_info[name][MODIFIED_KEY] = True
+                datasets_info[name][DATASET_HASH_KEY] = current_hash
+            elif MODIFIED_KEY not in datasets_info[name]:
+                datasets_info[name][MODIFIED_KEY] = bool(datasets_info[name].get(MODIFIED_KEY, False))
 
     old_ds_keys: Set[str] = set()
-    if isinstance(previous_info, dict):
+    if 'previous_info_for_diff' in locals() and isinstance(previous_info_for_diff, dict):
+        old_ds_keys = {str(k) for k in previous_info_for_diff.keys()}
+    elif isinstance(previous_info, dict):
         old_ds_keys = {str(k) for k in previous_info.keys()}
     new_ds_keys = set(datasets_info.keys())
     ds_added, ds_removed = _sorted_diff(old_ds_keys, new_ds_keys)

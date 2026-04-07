@@ -23,8 +23,11 @@ class WorkspaceLayout:
 
     def __init__(self, root: str):
         self.root = os.path.abspath(os.path.expanduser(root))
-        self.source_datasets = os.path.join(self.root, "source_datasets")
-        self.work_datasets = os.path.join(self.root, "work_datasets")
+        self.raw_data = os.path.join(self.root, "raw_data")
+        self.datasets = os.path.join(self.root, "datasets")
+        # Backward-compatible aliases for legacy code paths.
+        self.source_datasets = self.raw_data
+        self.work_datasets = self.datasets
         self.runs = os.path.join(self.root, "runs")
         self.analytics = os.path.join(self.root, "analytics")
         self.models = os.path.join(self.root, "models")
@@ -217,8 +220,8 @@ def deploy_workspace(target_root: str | None = None) -> dict[str, Any]:
     skipped: list[str] = []
 
     dir_specs = [
-        ("source_datasets", layout.source_datasets),
-        ("work_datasets", layout.work_datasets),
+        ("raw_data", layout.raw_data),
+        ("datasets", layout.datasets),
         ("runs", layout.runs),
         ("analytics", layout.analytics),
         ("models", layout.models),

@@ -244,7 +244,7 @@ JSON файл с метаданными о всех доступных дата�
 
 ### Источники датасетов для `scan`
 
-По умолчанию команда сканирует подкаталоги `source_datasets/` (или путь из `--datasets-path`).
+По умолчанию команда берёт источники из `raw_data/`, синхронизирует их в `datasets/`, а индекс строит по текущему состоянию `datasets/` (или путь из `--datasets-path` в legacy-режиме).
 
 Дополнительно можно передать файл списка:
 
@@ -258,9 +258,9 @@ smartrain scan --datasets-list /abs/path/to/datasets_list.txt
 - пустые строки и строки-комментарии (`# ...`) игнорируются;
 - относительные пути интерпретируются относительно каталога, где лежит `datasets_list.txt`.
 
-В workspace-режиме (`smartrain scan` без `--datasets-path`) файл `source_datasets/datasets_list.txt` используется автоматически, если он есть.
+В workspace-режиме (`smartrain scan` без `--datasets-path`) файл `raw_data/datasets_list.txt` используется автоматически, если он есть.
 
-Каждый успешный прогон перезаписывает `datasets_info.json` и `class_names.json` **только** по фактически найденным датасетам (каталоги в родительской папке + записи из списка). Рядом создаётся/обновляется **`datasets_scan_summary.json`**:
+Каждый успешный прогон перезаписывает `datasets_info.json` и `class_names.json` **по фактическому содержимому `datasets/`**. Рядом создаётся/обновляется **`datasets_scan_summary.json`**:
 
 ```json
 {
@@ -334,7 +334,7 @@ smartrain scan --datasets-list /abs/path/to/datasets_list.txt
 
 ##### `data_path`
 
-Строка: **абсолютный** путь к корню датасета на диске или путь **относительно корня workspace** (`SMART_TRAIN_WORKSPACE`). Если ключа нет, корень данных считается равным `<каталог_каталога>/<ключ_записи>` (например `source_datasets/MyDataset` в режиме workspace).
+Строка: **абсолютный** путь к корню датасета на диске или путь **относительно корня workspace** (`SMART_TRAIN_WORKSPACE`). Если ключа нет, корень данных считается равным `<каталог_каталога>/<ключ_записи>` (например `datasets/MyDataset` в режиме workspace).
 
 ##### `tags`
 
@@ -366,17 +366,17 @@ smartrain scan --datasets-list /abs/path/to/datasets_list.txt
   - `best_conf` — кроп по боксу с максимальным `conf`;
   - `per_box` — отдельное изображение и файл меток на каждый бокс; имена: `{stem}_split_1`, `{stem}_split_2`, …
 
-**Основной режим (workspace):** корень данных берётся из записи в `source_datasets/datasets_info.json` через `data_path` (включая `.zip` и пути из `datasets_list.txt`); физическая папка `source_datasets/<ключ>` не обязательна.
+**Основной режим (workspace):** корень данных берётся из записи в `datasets/datasets_info.json` через `data_path`; физическая папка `datasets/<ключ>` используется по умолчанию.
 
 ```bash
 export SMART_TRAIN_WORKSPACE=/path/to/workspace
 smartrain roi \
   --dataset-name MyDataset \
   --weights /path/to/model.onnx
-# --output-path по умолчанию: source_datasets/MyDataset_roi
+# --output-path по умолчанию: datasets/MyDataset_roi
 ```
 
-Имя датасета — **ключ** из `datasets_info.json` (для архива в `source_datasets` это имя файла **без** `.zip`). Допустимо передать и имя с `.zip`: команда сопоставит его с ключом без расширения.
+Имя датасета — **ключ** из `datasets_info.json` (для архива в `raw_data` ключ обычно совпадает с именем файла **без** `.zip`). Допустимо передать и имя с `.zip`: команда сопоставит его с ключом без расширения.
 
 **Legacy:** каталог датасета лежит в `{source-path}/{dataset-name}/`, JSON рядом:
 

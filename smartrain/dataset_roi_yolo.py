@@ -311,12 +311,12 @@ def build_roi_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--output-path",
         default=None,
-        help="Корень нового датасета (по умолчанию в workspace: source_datasets/<dataset-name>_roi)",
+        help="Корень нового датасета (по умолчанию в workspace: datasets/<dataset-name>_roi)",
     )
     p.add_argument(
         "--datasets-info-path",
         default=None,
-        help="Файл datasets_info.json или каталог с ним (по умолчанию: source_datasets/ в workspace или --source-path)",
+        help="Файл datasets_info.json или каталог с ним (по умолчанию: datasets/ в workspace или --source-path)",
     )
     p.add_argument(
         "--tmp-dir",
@@ -353,7 +353,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def _resolve_catalog_dataset_key(catalog: Dict[str, Any], requested: str) -> str:
     """
-    Ключ в datasets_info для zip в source_datasets задаётся без суффикса .zip
+    Ключ в datasets_info для zip в datasets задаётся без суффикса .zip
     (как в scan). Принимаем и полное имя файла архива.
     """
     if requested in catalog:
@@ -471,7 +471,7 @@ def main(argv=None) -> None:
         workspace_root = os.path.abspath(os.path.expanduser(ws))
         layout = WorkspaceLayout(workspace_root)
         info_path = _resolve_datasets_info_file(
-            args.datasets_info_path, layout.source_datasets_info_path()
+            args.datasets_info_path, layout.work_datasets_info_path()
         )
         if args.tmp_dir and str(args.tmp_dir).strip():
             temp_root = os.path.abspath(os.path.expanduser(str(args.tmp_dir).strip()))
@@ -495,7 +495,7 @@ def main(argv=None) -> None:
 
     if need_default_roi_output:
         assert layout is not None
-        args.output_path = os.path.join(layout.source_datasets, f"{dataset_key}_roi")
+        args.output_path = os.path.join(layout.datasets, f"{dataset_key}_roi")
     structure = entry.get("structure")
     if not structure:
         sys.exit("[ERROR] В записи датасета нет поля structure")
@@ -511,8 +511,8 @@ def main(argv=None) -> None:
             dataset_key,
             entry,
             workspace_root=workspace_root,
-            source_catalog_dir=layout.source_datasets,
-            legacy_source_parent=layout.source_datasets,
+            source_catalog_dir=layout.datasets,
+            legacy_source_parent=layout.datasets,
         )
 
     cfg = _load_roi_config(args, entry)

@@ -92,14 +92,14 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); JSON в source_datasets/, вывод в work_datasets/",
+        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); работа только с datasets/",
     )
 
     parser.add_argument(
         "--output-name",
         type=str,
         default=None,
-        help="Имя выходного work-датасета (подкаталог work_datasets/) в workspace; "
+        help="Имя выходного датасета (подкаталог datasets/) в workspace; "
         "если не задано — YYYY-MM-DD_HH-MM-SS-merged",
     )
 
@@ -114,7 +114,7 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         "--target-path",
         type=str,
         default=None,
-        help="Legacy: полный путь к выходному датасету; в workspace — переопределяет work_datasets/<output-name>",
+        help="Legacy: полный путь к выходному датасету; в workspace — переопределяет datasets/<output-name>",
     )
 
     parser.add_argument(
@@ -128,7 +128,7 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         "--datasets-info-path",
         type=str,
         default=None,
-        help="Legacy: каталог с datasets_info.json; в workspace не нужен (всегда source_datasets/)",
+        help="Legacy: каталог с datasets_info.json; в workspace не нужен (всегда datasets/)",
     )
 
     parser.add_argument(
@@ -458,13 +458,13 @@ def filter_label_file(
     return False
 
 
-def _update_work_datasets_sidecar(
+def _update_datasets_sidecar(
     layout: WorkspaceLayout,
     output_key: str,
     selected_classes: list,
     target_dir: str,
 ) -> None:
-    os.makedirs(layout.work_datasets, exist_ok=True)
+    os.makedirs(layout.datasets, exist_ok=True)
     rel = os.path.relpath(os.path.abspath(target_dir), layout.root)
     entry = {
         "classes": {name: idx for idx, name in enumerate(selected_classes)},
@@ -536,10 +536,9 @@ def main(argv=None):
             )
             return
         layout = WorkspaceLayout(workspace_root)
-        os.makedirs(layout.source_datasets, exist_ok=True)
-        os.makedirs(layout.work_datasets, exist_ok=True)
-        info_dir = layout.source_datasets
-        source_dir = layout.source_datasets
+        os.makedirs(layout.datasets, exist_ok=True)
+        info_dir = layout.datasets
+        source_dir = layout.datasets
         if args.target_path:
             target_dir = os.path.abspath(os.path.expanduser(args.target_path))
         else:
@@ -551,7 +550,7 @@ def main(argv=None):
                     f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}-{FUSION_DEFAULT_DIR_SUFFIX}"
                 )
                 print(f"[INFO] --output-name не задан: выходной каталог {workspace_out!r}")
-            target_dir = os.path.join(layout.work_datasets, workspace_out)
+            target_dir = os.path.join(layout.datasets, workspace_out)
 
     json_file = os.path.join(info_dir, DATASETS_INFO_FILE)
     class_names_file = os.path.join(info_dir, CLASS_NAMES_FILE)
@@ -713,7 +712,7 @@ def main(argv=None):
                 dataset_name,
                 info,
                 workspace_root=workspace_root,
-                source_catalog_dir=layout.source_datasets if layout else source_dir,
+                source_catalog_dir=layout.datasets if layout else source_dir,
                 legacy_source_parent=source_dir,
             )
             buckets = iter_image_label_buckets(
@@ -814,8 +813,8 @@ def main(argv=None):
 
     if layout is not None:
         out_key = os.path.basename(os.path.normpath(target_dir))
-        _update_work_datasets_sidecar(layout, out_key, selected_classes, target_dir)
-        print(f"[OK] Обновлены {layout.work_datasets_info_path()} и class_names.json в work_datasets/")
+        _update_datasets_sidecar(layout, out_key, selected_classes, target_dir)
+        print(f"[OK] Обновлены {layout.work_datasets_info_path()} и class_names.json в datasets/")
 
 
 if __name__ == "__main__":

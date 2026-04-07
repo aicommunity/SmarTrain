@@ -81,14 +81,14 @@ def test_resolve_dataset_root_zip_workspace(tmp_path: Path) -> None:
     (flat / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
     _write_minimal_data_yaml(flat / "images")
 
-    zip_path = tmp_path / "source_datasets" / "packed.zip"
+    zip_path = tmp_path / "datasets" / "packed.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for f in flat.rglob("*"):
             if f.is_file():
                 zf.write(f, arcname=str(f.relative_to(flat)))
 
-    rel = "source_datasets/packed.zip"
-    info_path = tmp_path / "source_datasets" / DATASETS_INFO_FILE
+    rel = "datasets/packed.zip"
+    info_path = tmp_path / "datasets" / DATASETS_INFO_FILE
     info_path.write_text(
         json.dumps(
             {
@@ -109,8 +109,8 @@ def test_resolve_dataset_root_zip_workspace(tmp_path: Path) -> None:
         "packed",
         entry,
         workspace_root=str(tmp_path),
-        source_catalog_dir=str(tmp_path / "source_datasets"),
-        legacy_source_parent=str(tmp_path / "source_datasets"),
+        source_catalog_dir=str(tmp_path / "datasets"),
+        legacy_source_parent=str(tmp_path / "datasets"),
     )
     assert Path(root).is_dir()
     assert (Path(root) / "images" / "a.jpg").is_file()
@@ -125,7 +125,7 @@ def test_hash_source_dataset_after_zip_resolve(tmp_path: Path) -> None:
     (flat / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
     _write_minimal_data_yaml(flat / "images")
 
-    zip_path = tmp_path / "source_datasets" / "hzip.zip"
+    zip_path = tmp_path / "raw_data" / "hzip.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for f in flat.rglob("*"):
             if f.is_file():
@@ -175,7 +175,7 @@ def test_hash_zip_metadata_flag(tmp_path: Path) -> None:
     _write_jpg(flat / "images" / "a.jpg", size=(16, 16))
     (flat / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
     _write_minimal_data_yaml(flat / "images")
-    zip_path = tmp_path / "source_datasets" / "meta.zip"
+    zip_path = tmp_path / "raw_data" / "meta.zip"
     _zip_flat(flat, zip_path)
     datasets_json_main(["--workspace", str(tmp_path)])
 
@@ -219,7 +219,7 @@ def test_ensure_data_yaml_after_roi_when_no_source_yaml(tmp_path: Path) -> None:
 
 def test_roi_dataset_name_with_zip_suffix_resolves_key(tmp_path: Path) -> None:
     deploy_workspace(tmp_path)
-    sd = tmp_path / "source_datasets" / "dszip"
+    sd = tmp_path / "raw_data" / "dszip"
     (sd / "images").mkdir(parents=True)
     (sd / "labels").mkdir(parents=True)
     _write_jpg(sd / "images" / "a.jpg", size=(32, 32))
@@ -232,7 +232,7 @@ def test_roi_dataset_name_with_zip_suffix_resolves_key(tmp_path: Path) -> None:
     fake_model = MagicMock()
     fake_model.task = "detect"
     fake_model.predict = MagicMock(return_value=[fake_result])
-    out_dir = tmp_path / "source_datasets" / "from_zip_suffix"
+    out_dir = tmp_path / "datasets" / "from_zip_suffix"
 
     with patch("smartrain.dataset_roi_yolo.YOLO", return_value=fake_model):
         roi_main(
@@ -253,7 +253,7 @@ def test_roi_dataset_name_with_zip_suffix_resolves_key(tmp_path: Path) -> None:
 
 def test_roi_workspace_flat_mock_yolo(tmp_path: Path) -> None:
     deploy_workspace(tmp_path)
-    sd = tmp_path / "source_datasets" / "roi_ds"
+    sd = tmp_path / "raw_data" / "roi_ds"
     (sd / "images").mkdir(parents=True)
     (sd / "labels").mkdir(parents=True)
     _write_jpg(sd / "images" / "one.jpg", size=(64, 64))
@@ -261,7 +261,7 @@ def test_roi_workspace_flat_mock_yolo(tmp_path: Path) -> None:
     _write_minimal_data_yaml(sd / "images")
 
     datasets_json_main(["--workspace", str(tmp_path)])
-    out_dir = tmp_path / "source_datasets" / "roi_ds_roi_test"
+    out_dir = tmp_path / "datasets" / "roi_ds_roi_test"
 
     fake_result = MagicMock()
     fake_result.boxes = None
@@ -297,16 +297,19 @@ def test_roi_workspace_external_path_via_datasets_list(tmp_path: Path) -> None:
     (ext / "labels" / "e.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
     _write_minimal_data_yaml(ext / "images")
 
-    list_file = tmp_path / "source_datasets" / "datasets_list.txt"
+    list_file = tmp_path / "raw_data" / "datasets_list.txt"
     list_file.write_text(f"{ext}\n", encoding="utf-8")
     datasets_json_main(["--workspace", str(tmp_path)])
 
-    info = json.loads((tmp_path / "source_datasets" / DATASETS_INFO_FILE).read_text(encoding="utf-8"))
+    info = json.loads((tmp_path / "datasets" / DATASETS_INFO_FILE).read_text(encoding="utf-8"))
     key = "ext_ds"
     assert key in info
-    assert resolve_path_under_workspace(str(tmp_path), info[key]["data_path"]) == str(ext.resolve())
+    # scan копирует внешние датасеты в datasets и индексирует копию (raw_data — только источник)
+    assert resolve_path_under_workspace(str(tmp_path), info[key]["data_path"]) == str(
+        (tmp_path / "datasets" / key).resolve()
+    )
 
-    out_dir = tmp_path / "source_datasets" / "ext_roi"
+    out_dir = tmp_path / "datasets" / "ext_roi"
     fake_result = MagicMock()
     fake_result.boxes = None
     fake_model = MagicMock()

@@ -23,7 +23,7 @@ def _write_split_dataset(
     class_idx: int,
     stem: str,
 ) -> None:
-    base = root / "source_datasets" / name
+    base = root / "datasets" / name
     img = base / "train" / "images" / f"{stem}.jpg"
     lbl = base / "train" / "labels" / f"{stem}.txt"
     _write_jpg(img)
@@ -35,7 +35,7 @@ def test_fusion_without_partial_requires_all_classes_in_each_dataset(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     deploy_workspace(str(tmp_path))
-    sd = tmp_path / "source_datasets"
+    sd = tmp_path / "datasets"
     _write_split_dataset(tmp_path, "ds_a", "cat", 0, "a1")
     _write_split_dataset(tmp_path, "ds_b", "dog", 0, "b1")
 
@@ -63,12 +63,12 @@ def test_fusion_without_partial_requires_all_classes_in_each_dataset(
     )
     out = capsys.readouterr().out + capsys.readouterr().err
     assert "Ни один датасет не содержит все выбранные классы" in out
-    assert not (tmp_path / "work_datasets" / "merged" / "data.yaml").is_file()
+    assert not (tmp_path / "datasets" / "merged" / "data.yaml").is_file()
 
 
 def test_fusion_include_partial_merges_disjoint_class_datasets(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
-    sd = tmp_path / "source_datasets"
+    sd = tmp_path / "datasets"
     _write_split_dataset(tmp_path, "ds_a", "cat", 0, "a1")
     _write_split_dataset(tmp_path, "ds_b", "dog", 0, "b1")
 
@@ -96,7 +96,7 @@ def test_fusion_include_partial_merges_disjoint_class_datasets(tmp_path: Path) -
         ]
     )
 
-    out_root = tmp_path / "work_datasets" / "merged"
+    out_root = tmp_path / "datasets" / "merged"
     assert (out_root / "data.yaml").is_file()
     yaml_text = (out_root / "data.yaml").read_text(encoding="utf-8")
     assert "cat" in yaml_text and "dog" in yaml_text
@@ -106,7 +106,7 @@ def test_fusion_include_partial_merges_disjoint_class_datasets(tmp_path: Path) -
 
 def test_fusion_default_output_name_is_timestamp_merged(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
-    sd = tmp_path / "source_datasets"
+    sd = tmp_path / "datasets"
     _write_split_dataset(tmp_path, "ds_a", "cat", 0, "a1")
     _write_split_dataset(tmp_path, "ds_b", "dog", 0, "b1")
 
@@ -132,8 +132,8 @@ def test_fusion_default_output_name_is_timestamp_merged(tmp_path: Path) -> None:
         ]
     )
 
-    wd = tmp_path / "work_datasets"
-    subdirs = [p for p in wd.iterdir() if p.is_dir()]
+    wd = tmp_path / "datasets"
+    subdirs = [p for p in wd.iterdir() if p.is_dir() and p.name not in {"ds_a", "ds_b"}]
     assert len(subdirs) == 1
     name = subdirs[0].name
     assert re.match(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-merged$", name)

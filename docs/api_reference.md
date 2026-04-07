@@ -36,7 +36,7 @@ CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
 Корень: непустой `--workspace` перекрывает переменную окружения; иначе `ValueError`.
 
 ### `class WorkspaceLayout`
-В `__init__(root)` задаются поля: `root`, `source_datasets`, `work_datasets`, `runs`, `analytics`, `models` и методы путей к `datasets_info.json` / `class_names.json` в source и work.
+В `__init__(root)` задаются поля: `root`, `raw_data`, `datasets`, `runs`, `analytics`, `models`, а также alias-поля совместимости `source_datasets` и `work_datasets`.
 
 ### `resolve_path_under_workspace(workspace_root, relative_or_absolute) -> str`
 ### `resolve_dataset_root(workspace_root, entry_key, entry_dict, catalog_dir) -> str`
@@ -169,7 +169,16 @@ CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
 
 Если выходной `datasets_info.json` уже существует, перед записью он читается; для каждого имени датасета, снова присутствующего в новом скане, в запись переносятся из старого файла необязательные ключи **`roi_auto`**, **`tags`** и **`data_path`** (остальное берётся из свежего `process_dataset`).
 
-**CLI**: `--workspace` (результат в `source_datasets/`) или пара `--datasets-path` + опционально `--output-path`; `--mode scan|refresh` (refresh только с workspace).
+`scan` использует `raw_data` как источник и индексирует текущее состояние `datasets`.
+
+Служебные поля scan в записи датасета:
+- `dataset_hash`
+- `source_hash`
+- `source_ref`
+- `source_signature`
+- `modified`
+
+**CLI**: `--workspace` (результат в `datasets/`) или пара `--datasets-path` + опционально `--output-path`; `--mode scan|refresh` (refresh только с workspace); `--dataset` (повторяемый).
 
 ---
 
@@ -177,7 +186,7 @@ CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
 
 CLI: кроп датасета по ROI модели Ultralytics (detect/segment), пересчёт нормализованных меток. Подробности и формат `roi_auto` — в [data_formats.md](data_formats.md#опциональные-поля-не-перезаписываются-сканером).
 
-**Основные аргументы (workspace, предпочтительно)**: `--dataset-name` (ключ в `source_datasets/datasets_info.json`), `--workspace` / `SMART_TRAIN_WORKSPACE`, опционально `--output-path` (по умолчанию `source_datasets/<dataset-name>_roi`), `--tmp-dir`, `--datasets-info-path` (файл или каталог с JSON), переопределения `--weights`, `--conf`, `--pad-px`, `--roi-policy`, `--mode`, `--on-empty`, `--require-roi-auto`.
+**Основные аргументы (workspace, предпочтительно)**: `--dataset-name` (ключ в `datasets/datasets_info.json`), `--workspace` / `SMART_TRAIN_WORKSPACE`, опционально `--output-path` (по умолчанию `datasets/<dataset-name>_roi`), `--tmp-dir`, `--datasets-info-path` (файл или каталог с JSON), переопределения `--weights`, `--conf`, `--pad-px`, `--roi-policy`, `--mode`, `--on-empty`, `--require-roi-auto`.
 
 **Legacy**: `--source-path`, обязательный `--output-path`, прежняя проверка `{source-path}/{dataset-name}/`.
 
@@ -189,7 +198,7 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 ### Параметры CLI (дополнительно)
 
-- **`--output-name`** — подкаталог в `work_datasets/`; если не указан, используется **`YYYY-MM-DD_HH-MM-SS-merged`** (локальное время на момент запуска).
+- **`--output-name`** — подкаталог в `datasets/`; если не указан, используется **`YYYY-MM-DD_HH-MM-SS-merged`** (локальное время на момент запуска).
 - **`--classes`** — если не задан, список классов строится как **объединение** всех классов из всех записей `datasets_info.json` (кроме датасета с именем выходной папки), с нормализацией имён через `class_names.json`; порядок в итоговом списке — по возрастанию нормализованного имени.
 - **`--include-partial-datasets`** — по умолчанию в merge попадают только датасеты, в которых объявлены **все** выбранные классы; с этим флагом берутся датасеты с **любым непустым пересечением** с выбранным набором (удобно при авто-объединении классов из разных источников).
 - **`--drop-empty-images`** — после записи выходного каталога удалить пары `images/*` + `labels/*.txt`, где в метке нет ни одной валидной строки YOLO (пустые или битые файлы).
@@ -239,7 +248,7 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 **Параметры**: `dataset_path`, `model_version`, `epochs`, `batch`, `img_size`, `target_dir`, `non_interactive`, опционально `workspace_root` для метаданных.
 
-**CLI**: `--workspace` и `--data` (каталог с `data.yaml` или имя из `work_datasets/datasets_info.json`), либо без workspace — обязательны `--data` и `--target-path`. Прогоны по умолчанию в `workspace/runs`.
+**CLI**: `--workspace` и `--data` (каталог с `data.yaml` или имя из `datasets/datasets_info.json`), либо без workspace — обязательны `--data` и `--target-path`. Прогоны по умолчанию в `workspace/runs`.
 
 **Исключения**:
 - `FileNotFoundError` - если датасет или `data.yaml` не найдены

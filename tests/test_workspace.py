@@ -18,8 +18,8 @@ from smartrain.workspace_paths import (
 def test_deploy_workspace_creates_structure(tmp_path: Path) -> None:
     info = deploy_workspace(str(tmp_path))
     assert info["root"] == str(tmp_path.resolve())
-    assert "source_datasets" in info["created_dirs"]
-    assert "work_datasets" in info["created_dirs"]
+    assert "raw_data" in info["created_dirs"]
+    assert "datasets" in info["created_dirs"]
     assert "runs" in info["created_dirs"]
     assert "tmp" in info["created_dirs"]
     layout = WorkspaceLayout(str(tmp_path))

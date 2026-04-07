@@ -102,7 +102,7 @@ def _dispatch_argparse_help(
     add_help_option=False,
 )
 def cmd_scan(ctx: typer.Context) -> None:
-    """Сканирование source_datasets → datasets_info.json / class_names.json / datasets_scan_summary.json."""
+    """Сканирование raw_data и подготовка datasets + JSON-индексов."""
     if _ctx_has_help_flag(ctx):
         from smartrain.datasets_json_former import build_datasets_json_arg_parser
 
@@ -116,7 +116,7 @@ def cmd_scan(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_fusion(ctx: typer.Context) -> None:
-    """Сборка объединённого work-датасета (модуль dataset_former)."""
+    """Сборка объединённого датасета в datasets (модуль dataset_former)."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_former import build_dataset_former_arg_parser
 

@@ -1,6 +1,6 @@
 # Smart Train (smartrain)
 
-Инструменты для подготовки датасетов YOLO (Ultralytics), обучения, очереди задач и анализа прогонов. Всё завязано на **корень workspace** — каталог с `source_datasets/`, `work_datasets/`, `runs/` и т.д.
+Инструменты для подготовки датасетов YOLO (Ultralytics), обучения, очереди задач и анализа прогонов. Всё завязано на **корень workspace** — каталог с `raw_data/`, `datasets/`, `runs/` и т.д.
 
 ## Требования
 
@@ -34,7 +34,7 @@ cd /path/to/my_workspace
 smartrain deploy
 ```
 
-Создаются: `source_datasets/`, `work_datasets/`, `runs/`, `analytics/`, `models/`, `tmp/` и при необходимости пустые JSON в `source_datasets/` и `work_datasets/`.
+Создаются: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `tmp/` и при необходимости пустые JSON в `raw_data/` и `datasets/`.
 
 ## Справка по CLI
 
@@ -51,33 +51,61 @@ smartrain scan --help
 smartrain train --help
 ```
 
-Типовой сценарий из корня workspace (после `deploy` и заполнения `source_datasets/`):
+Типовой сценарий из корня workspace (после `deploy` и заполнения `raw_data/`):
 
 ```bash
 smartrain scan
 smartrain fusion --classes "class_a,class_b"
-# создаётся work_datasets/YYYY-MM-DD_HH-MM-SS-merged (см. вывод [INFO])
+# создаётся datasets/YYYY-MM-DD_HH-MM-SS-merged (см. вывод [INFO])
 smartrain train --data <имя_этого_каталога>
 # фиксированное имя: smartrain fusion --output-name my_merge --classes ...
 ```
 
+Что делает `scan` в актуальной версии:
+- синхронизирует новые/обновлённые источники из `raw_data/` в `datasets/`;
+- сравнивает источники и готовые датасеты по контентным хешам (`source_hash`/`dataset_hash`);
+- пропускает перенос, если данные уже есть в `datasets` (даже под другим именем), и печатает предупреждение;
+- обнаруживает ручные изменения в `datasets` и автоматически ставит `modified=true` (такой датасет больше не обновляется из `raw_data`).
+
 Сканирование датасетов из файла со списком путей:
 
 ```bash
-smartrain scan --datasets-list /path/to/workspace/source_datasets/datasets_list.txt
+smartrain scan --datasets-list /path/to/workspace/raw_data/datasets_list.txt
 ```
 
 Формат `datasets_list.txt`: один путь на строку (поддерживаются директории и `.zip`), строки с `#` и пустые игнорируются. Относительные пути интерпретируются относительно директории самого list-файла.
 
-В workspace-режиме файл `source_datasets/datasets_list.txt` подхватывается автоматически (если существует), даже без явного `--datasets-list`.
+В workspace-режиме файл `raw_data/datasets_list.txt` подхватывается автоматически (если существует), даже без явного `--datasets-list`.
+
+Явно обработать датасет по имени или пути и добавить его в `raw_data/datasets_list.txt`:
+
+```bash
+smartrain scan --dataset my_dataset
+smartrain scan --dataset /abs/path/to/external_dataset
+```
+
+## Логика scan (схема)
+
+```mermaid
+flowchart TD
+  raw[raw_data sources] --> scan[scan sync step]
+  list[datasets_list entries] --> scan
+  explicit[--dataset entries] --> scan
+  scan --> compare[hash compare source_hash vs dataset_hash]
+  compare -->|match| skip[skip copy + warn on different name]
+  compare -->|different| copy[copy/update datasets/name]
+  copy --> index[index datasets directory]
+  skip --> index
+  index --> info[datasets_info.json + summary]
+```
 
 ## Команды CLI
 
 | Команда | Назначение |
 |---------|------------|
 | `deploy` | Создать структуру workspace (Typer; свой `--help`) |
-| `scan` | Сканирование `source_datasets` → `datasets_info.json` / `class_names.json` / `datasets_scan_summary.json` |
-| `fusion` | Сборка объединённого work-датасета в `work_datasets/` |
+| `scan` | Сканирование `raw_data`, подготовка копий в `datasets` и обновление `datasets_info.json` / `class_names.json` / `datasets_scan_summary.json` |
+| `fusion` | Сборка объединённого датасета в `datasets/` |
 | `train` | Обучение YOLO (`model_training_module`) |
 | `hash` | Хеш датасета по файлам и размерам |
 | `roi` | Кроп датасета по ROI (Ultralytics) |
@@ -115,5 +143,5 @@ pytest
 ## Устранение неполадок
 
 - **«Не задан корень workspace»** — задайте `SMART_TRAIN_WORKSPACE` или `smartrain --workspace ...` для команд, которые резолвят workspace через `resolve_workspace_root`.
-- **Неверное имя датасета в `train --data`** — имя должно быть ключом в `work_datasets/datasets_info.json`; в сообщении об ошибке перечислены известные имена.
+- **Неверное имя датасета в `train --data`** — имя должно быть ключом в `datasets/datasets_info.json`; в сообщении об ошибке перечислены известные имена.
 - Больше примеров и типичных ошибок: [`docs/examples.md`](docs/examples.md).

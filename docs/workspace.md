@@ -8,9 +8,10 @@
 
 | Путь | Назначение |
 |------|------------|
-| `source_datasets/datasets_info.json` | Описание исходных датасетов |
-| `source_datasets/class_names.json` | Нормализация имён классов |
-| `work_datasets/` | Рабочие датасеты; `fusion` пишет данные в `work_datasets/<имя>/` (по умолчанию `<YYYY-MM-DD_HH-MM-SS>-merged`, иначе `--output-name`) и обновляет `work_datasets/datasets_info.json` |
+| `raw_data/` | Исходные датасеты для команды `scan` |
+| `datasets/datasets_info.json` | Описание датасетов, пригодных для обучения |
+| `datasets/class_names.json` | Нормализация имён классов |
+| `datasets/` | Рабочий каталог датасетов; `scan` пишет подготовленные копии, `fusion` создаёт merged-наборы в `datasets/<имя>/` |
 | `runs/` | Прогоны обучения (`train` / `model_training_module`) |
 | `analytics/` | Сессии анализа (`analyze export-table` и др. с `--analytics-session`) |
 | `models/` | Промотированные веса (`registry models-add`, …) |
@@ -21,7 +22,30 @@
 
 ## Поле `data_path` в `datasets_info.json`
 
-Строка: **абсолютный** путь или путь **относительно корня workspace**. Если ключа нет, корень данных = `source_datasets/<ключ_записи>` или `work_datasets/<ключ>` для каталога work.
+Строка: **абсолютный** путь или путь **относительно корня workspace**. Если ключа нет, корень данных = `datasets/<ключ_записи>`.
+
+## Поля синхронизации scan
+
+В записях `datasets_info.json` используются служебные поля:
+- `dataset_hash` — хеш текущего каталога в `datasets/<name>`
+- `source_hash` — хеш источника, из которого был выполнен перенос
+- `source_ref` — ссылка на источник (`raw_data/...`, путь из list-файла, путь из `--dataset`)
+- `source_signature` — быстрый маркер изменений источника
+- `modified` — признак ручной модификации датасета в `datasets`; при `true` синхронизация из `raw_data` блокируется
+
+## Сценарий обновления
+
+```mermaid
+flowchart TD
+  raw[raw_data] --> scan[scan]
+  list[datasets_list] --> scan
+  scan --> ds[datasets]
+  ds --> check{modified true}
+  check -->|yes| keep[keep local version]
+  check -->|no| update[allow source sync]
+  keep --> info[datasets_info.json]
+  update --> info
+```
 
 ## Код
 

@@ -69,7 +69,7 @@ def test_smartrain_deploy_twice(subprocess_env: dict[str, str], tmp_path: Path) 
     r1 = _run(["deploy"], cwd=tmp_path, env=env)
     assert r1.returncode in (0, 2)
     o1 = (r1.stdout or "") + (r1.stderr or "")
-    assert "source_datasets" in o1 or "+ каталог" in o1
+    assert "raw_data" in o1 or "+ каталог" in o1
     r2 = _run(["deploy"], cwd=tmp_path, env=env)
     assert r2.returncode in (0, 2)
     o2 = (r2.stdout or "") + (r2.stderr or "")

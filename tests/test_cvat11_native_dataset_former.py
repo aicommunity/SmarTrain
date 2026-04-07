@@ -18,8 +18,8 @@ def _write_jpg(path: Path, *, size: tuple[int, int] = (64, 48)) -> None:
 def test_dataset_former_supports_native_cvat11(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
 
-    # Create CVAT extracted dataset inside source_datasets without relying on folder name.
-    ds_root = tmp_path / "source_datasets" / "any_name_here"
+    # Create CVAT extracted dataset inside raw_data without relying on folder name.
+    ds_root = tmp_path / "raw_data" / "any_name_here"
     nested = ds_root / "export_payload"
     images_dir = nested / "images"
     _write_jpg(images_dir / "img001.jpg", size=(100, 80))
@@ -50,7 +50,7 @@ def test_dataset_former_supports_native_cvat11(tmp_path: Path) -> None:
     # 2) Build merged dataset from CVAT source directly.
     dataset_former_main(["--workspace", str(tmp_path), "--output-name", "merged", "--classes", "cat"])
 
-    out_root = tmp_path / "work_datasets" / "merged"
+    out_root = tmp_path / "datasets" / "merged"
     assert (out_root / "data.yaml").exists()
 
     # At least one image/label pair must be produced (may land in test split for n=1).

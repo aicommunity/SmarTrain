@@ -73,7 +73,7 @@
 | `darknet` | да | да | да | да | — |
 | `cvat11` | да | да (временные `.txt`) | да (те же временные метки) | да | import в YOLO |
 
-Обучение (`train`) по контракту принимает уже готовый YOLO-каталог с `data.yaml` (обычно из `work_datasets` после `fusion`).
+Обучение (`train`) по контракту принимает уже готовый YOLO-каталог с `data.yaml` (обычно из `datasets` после `fusion`).
 
 ---
 
@@ -265,7 +265,7 @@ pair = (image_path: str, label_path: str)
 
 #### Зависимости
 - `dataset_access`: `resolve_dataset_root_for_entry`, `iter_image_label_buckets` (включая zip и `cvat11`)
-- Режим **workspace**: `source_datasets/datasets_info.json`, ключ `--dataset-name`; **legacy**: `--source-path` / `--output-path`
+- Режим **workspace**: `datasets/datasets_info.json`, ключ `--dataset-name`; **legacy**: `--source-path` / `--output-path`
 - Поля `structure` и опционально `roi_auto` в записи датасета
 - `find_yaml_file` / `load_yaml` для копии `data.yaml` с обновлённым `path`
 

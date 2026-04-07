@@ -43,7 +43,7 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); прогоны в runs/, разрешение --data по work_datasets",
+        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); прогоны в runs/, разрешение --data по datasets",
     )
 
     parser.add_argument(
@@ -58,7 +58,7 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         "--data",
         type=str,
         default=None,
-        help="Каталог с data.yaml (абсолютный/относительный) или имя записи из work_datasets/datasets_info.json; "
+        help="Каталог с data.yaml (абсолютный/относительный) или имя записи из datasets/datasets_info.json; "
         "если задан --config, можно опустить при наличии data: в YAML",
     )
 
@@ -198,7 +198,7 @@ def resolve_training_data_path(layout: WorkspaceLayout, data_arg: str) -> str:
         names = ", ".join(sorted(catalog.keys()))
         hint = f" Известные имена: {names}." if names else ""
         raise ValueError(
-            f"Имя датасета {data_arg!r} отсутствует в work_datasets/{DATASETS_INFO_FILE}.{hint}"
+            f"Имя датасета {data_arg!r} отсутствует в datasets/{DATASETS_INFO_FILE}.{hint}"
         )
     entry = catalog[data_arg]
     if not isinstance(entry, dict):

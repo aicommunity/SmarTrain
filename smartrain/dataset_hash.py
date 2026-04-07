@@ -128,7 +128,7 @@ def resolve_hash_dataset_root(
         name = str(source_dataset).strip()
         root_ws = resolve_workspace_root(workspace_cli)
         layout = WorkspaceLayout(root_ws)
-        info_path = layout.source_datasets_info_path()
+        info_path = layout.work_datasets_info_path()
         if not os.path.isfile(info_path):
             raise FileNotFoundError(f"Не найден {info_path}.")
         with open(info_path, "r", encoding="utf-8") as f:
@@ -136,7 +136,7 @@ def resolve_hash_dataset_root(
         if not isinstance(catalog, dict):
             raise ValueError(f"{info_path}: ожидается объект JSON.")
         if name not in catalog:
-            raise KeyError(f"Имя {name!r} отсутствует в source_datasets/{DATASETS_INFO_FILE}.")
+            raise KeyError(f"Имя {name!r} отсутствует в datasets/{DATASETS_INFO_FILE}.")
         entry = catalog[name]
         if not isinstance(entry, dict):
             raise TypeError(f"Запись {name!r} должна быть объектом JSON.")
@@ -144,10 +144,10 @@ def resolve_hash_dataset_root(
         if isinstance(raw_dp, str) and raw_dp.strip():
             resolved = resolve_path_under_workspace(root_ws, raw_dp)
         else:
-            resolved = os.path.join(layout.source_datasets, name)
+            resolved = os.path.join(layout.datasets, name)
         if hash_zip_metadata and resolved.lower().endswith(".zip") and os.path.isfile(resolved):
             return resolved, True
-        extracted = resolve_or_extract_dataset_root(root_ws, name, entry, layout.source_datasets)
+        extracted = resolve_or_extract_dataset_root(root_ws, name, entry, layout.datasets)
         return extracted, False
 
     if work_dataset is not None and str(work_dataset).strip():
@@ -157,7 +157,7 @@ def resolve_hash_dataset_root(
         expanded = os.path.abspath(os.path.expanduser(name))
         yaml_here = os.path.join(expanded, "data.yaml")
         if os.path.isdir(expanded) and os.path.isfile(yaml_here):
-            return expanded
+            return expanded, False
         info_path = layout.work_datasets_info_path()
         if not os.path.isfile(info_path):
             raise FileNotFoundError(
@@ -169,16 +169,16 @@ def resolve_hash_dataset_root(
             raise ValueError(f"{info_path}: ожидается объект JSON.")
         if name not in catalog:
             raise KeyError(
-                f"Имя {name!r} отсутствует в work_datasets/{DATASETS_INFO_FILE}."
+                f"Имя {name!r} отсутствует в datasets/{DATASETS_INFO_FILE}."
             )
         entry = catalog[name]
         if not isinstance(entry, dict):
             raise TypeError(f"Запись {name!r} должна быть объектом JSON.")
-        root = resolve_dataset_root(layout.root, name, entry, layout.work_datasets)
+        root = resolve_dataset_root(layout.root, name, entry, layout.datasets)
         if hash_zip_metadata and root.lower().endswith(".zip") and os.path.isfile(root):
             return root, True
         if root.lower().endswith(".zip") and os.path.isfile(root):
-            extracted = resolve_or_extract_dataset_root(layout.root, name, entry, layout.work_datasets)
+            extracted = resolve_or_extract_dataset_root(layout.root, name, entry, layout.datasets)
             return extracted, False
         return root, False
 
@@ -221,14 +221,14 @@ def build_hash_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         metavar="NAME",
-        help="Имя записи из work_datasets/datasets_info.json (или каталог с data.yaml)",
+        help="Имя записи из datasets/datasets_info.json (или каталог с data.yaml)",
     )
     parser.add_argument(
         "--source-dataset",
         type=str,
         default=None,
         metavar="NAME",
-        help="Имя записи из source_datasets/datasets_info.json (zip распаковывается в кэш при обходе дерева)",
+        help="Имя записи из datasets/datasets_info.json (alias для --work-dataset; zip распаковывается в кэш)",
     )
     parser.add_argument(
         "--hash-zip-metadata",
