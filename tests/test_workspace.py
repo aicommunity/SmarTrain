@@ -25,6 +25,8 @@ def test_deploy_workspace_creates_structure(tmp_path: Path) -> None:
     layout = WorkspaceLayout(str(tmp_path))
     assert Path(layout.source_datasets_info_path()).is_file()
     assert Path(layout.work_datasets_info_path()).is_file()
+    assert (Path(layout.raw_data) / "datasets_list.txt").is_file()
+    assert (Path(layout.raw_data) / "datasets_list.txt").read_text(encoding="utf-8") == ""
     with open(layout.source_datasets_info_path(), encoding="utf-8") as f:
         assert json.load(f) == {}
 

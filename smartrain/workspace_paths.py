@@ -238,13 +238,17 @@ def deploy_workspace(target_root: str | None = None) -> dict[str, Any]:
     file_specs = [
         ("source_datasets_info", layout.source_datasets_info_path()),
         ("work_datasets_info", layout.work_datasets_info_path()),
+        ("datasets_list", os.path.join(layout.raw_data, "datasets_list.txt")),
     ]
     for label, fpath in file_specs:
         if os.path.isfile(fpath):
             skipped.append(f"file:{label}")
         else:
             with open(fpath, "w", encoding="utf-8") as f:
-                json.dump({}, f, ensure_ascii=False, indent=2)
+                if label == "datasets_list":
+                    f.write("")
+                else:
+                    json.dump({}, f, ensure_ascii=False, indent=2)
             created_files.append(label)
 
     return {
