@@ -8,6 +8,10 @@
 
 Соответствие имён подкоманд и модулей см. исходный файл [`smartrain/cli.py`](../smartrain/cli.py).
 
+Добавлена подкоманда `smartrain stats` (аргпарс-модуль `smartrain.dataset_stats`), режимы:
+- `smartrain stats classes`
+- `smartrain stats datasets`
+
 ## cvat_cli.py (команда `smartrain cvat`)
 
 CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
@@ -377,6 +381,23 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 ### `calculate_zip_metadata_hash(zip_path: str) -> str`
 Хеш метаданных архива (без обхода содержимого).
+
+---
+
+## dataset_stats.py
+
+### CLI
+- Команда: `smartrain stats`
+- Подкоманды:
+  - `classes` — статистика по классам в `datasets/` (train/val/test/total)
+  - `datasets` — сводка по датасетам в `datasets/` (объем, quality flags, imbalance)
+- Источник данных: только файловая система `datasets/` (без `raw_data/`)
+- Интерактивный режим: для `classes`/`datasets` без фильтров в TTY
+
+### Основные метрики
+- `classes`: per-class counts по split и total, `images_with_class`, `avg_instances_per_image`, итог по дисбалансу (`ratio`, `cv`, `gini`, `mean/median`)
+- `datasets`: `num_classes`, `images_total`, `labeled_images`, `empty_images`, `instances_total`, `orphan_images/labels`, `broken_label_lines`, `unknown_class_ids`
+- Опционально: `--check-duplicates`, `--check-near-duplicates`, `--export-issues`
 
 ---
 

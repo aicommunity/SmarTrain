@@ -153,6 +153,20 @@ def cmd_hash(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "stats",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_stats(ctx: typer.Context) -> None:
+    """Статистика датасетов в datasets/: classes и datasets."""
+    if _ctx_has_help_flag(ctx):
+        from smartrain.dataset_stats import build_stats_arg_parser
+
+        _dispatch_argparse_help(ctx, build_stats_arg_parser, "smartrain stats")
+    _call("smartrain.dataset_stats", "main", ctx)
+
+
+@app.command(
     "roi",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,

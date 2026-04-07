@@ -21,6 +21,24 @@ def _flat_dataset(root: Path, name: str) -> None:
     (ds / "data.yaml").write_text("nc: 1\nnames: ['bee']\n", encoding="utf-8")
 
 
+def _cvat11_dataset(root: Path, name: str) -> None:
+    ds = root / name
+    (ds / "images").mkdir(parents=True, exist_ok=True)
+    (ds / "images" / "img001.jpg").write_bytes(b"\x00")
+    (ds / "annotations.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<annotations>
+  <version>1.1</version>
+  <meta><task><labels><label><name>bee</name></label></labels></task></meta>
+  <image id="0" name="img001.jpg" width="100" height="80">
+    <box label="bee" xtl="10" ytl="10" xbr="40" ybr="30"/>
+  </image>
+</annotations>
+""",
+        encoding="utf-8",
+    )
+
+
 def test_datasets_json_writes_scan_summary_and_diff(tmp_path: Path) -> None:
     deploy_workspace(tmp_path)
     sd = tmp_path / "raw_data"
@@ -97,3 +115,17 @@ def test_scan_marks_modified_and_stops_sync_for_dataset(tmp_path: Path) -> None:
     info3 = json.loads(info_path.read_text(encoding="utf-8"))
     assert info3["ds_a"]["modified"] is True
     assert info3["ds_a"]["dataset_hash"] == info2["ds_a"]["dataset_hash"]
+
+
+def test_scan_converts_cvat11_to_training_ready_layout(tmp_path: Path) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _cvat11_dataset(rd, "cvat_src")
+
+    datasets_json_main(["--workspace", str(tmp_path)])
+    out_root = tmp_path / "datasets" / "cvat_src"
+    assert (out_root / "data.yaml").is_file()
+    assert (out_root / "labels" / "img001.txt").is_file()
+    yaml_text = (out_root / "data.yaml").read_text(encoding="utf-8")
+    assert "train: ./images" in yaml_text
+    assert "names:" in yaml_text

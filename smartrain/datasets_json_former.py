@@ -7,11 +7,13 @@ import argparse
 import hashlib
 import zipfile
 import shutil
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 import xml.etree.ElementTree as ET
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
@@ -779,6 +781,52 @@ def _copy_source_to_training(src_root: str, dst_root: str) -> None:
         shutil.rmtree(dst_root, ignore_errors=True)
     os.makedirs(os.path.dirname(dst_root), exist_ok=True)
     shutil.copytree(src_root, dst_root)
+    _ensure_training_ready_after_copy(dst_root)
+
+
+def _ensure_training_ready_after_copy(dataset_root: str) -> bool:
+    """
+    Нормализует скопированный датасет к виду, пригодному для обучения.
+    Сейчас критичный кейс: cvat11 (annotations.xml + images/) -> YOLO labels + data.yaml.
+    """
+    structure = detect_structure(dataset_root)
+    if structure != "cvat11":
+        return False
+
+    xml_path = _find_cvat_annotations_xml(dataset_root)
+    if not xml_path:
+        return False
+    names = _load_cvat11_label_names(xml_path)
+    if not names:
+        print(f"[WARNING] CVAT 1.1: не удалось определить список классов для {dataset_root}")
+        return False
+
+    labels_dir = os.path.join(dataset_root, "labels")
+    had_labels_before = os.path.isdir(labels_dir) and any(
+        os.path.isfile(os.path.join(labels_dir, n)) for n in os.listdir(labels_dir)
+    )
+    had_yaml_before = os.path.isfile(os.path.join(dataset_root, "data.yaml"))
+    os.makedirs(labels_dir, exist_ok=True)
+    class_name_to_id = {name: idx for idx, name in enumerate(names)}
+    try:
+        _images_dir, _images_found, _labels_written = generate_temp_yolo_labels_from_cvat11_extracted(
+            dataset_root=Path(dataset_root),
+            labels_out_dir=Path(labels_dir),
+            class_name_to_id=class_name_to_id,
+        )
+    except Exception as e:
+        print(f"[WARNING] CVAT 1.1: не удалось сгенерировать YOLO labels для {dataset_root}: {e}")
+        return False
+
+    data_yaml = os.path.join(dataset_root, "data.yaml")
+    with open(data_yaml, "w", encoding="utf-8") as f:
+        # Для flat-представления train/val/test указываем на images.
+        f.write("train: ./images\n")
+        f.write("val: ./images\n")
+        f.write("test: ./images\n\n")
+        f.write(f"nc: {len(names)}\n")
+        f.write(f"names: {names}\n")
+    return (not had_labels_before) or (not had_yaml_before)
 
 
 def _dataset_content_hash(path: str) -> Optional[str]:
@@ -973,6 +1021,7 @@ def main(argv=None):
         def _sync_one_source(*, logical_name: str, source_for_copy: str, source_ref: str, source_signature: str) -> None:
             dst_dir = os.path.join(layout.datasets, logical_name)
             prev_entry = previous_info.get(logical_name)
+            normalized_on_skip = False
             if isinstance(prev_entry, dict) and bool(prev_entry.get(MODIFIED_KEY)):
                 print(f"[WARNING] Пропуск синхронизации {logical_name!r}: modified=true.")
                 return
@@ -999,6 +1048,8 @@ def main(argv=None):
             prev_sig = prev_entry.get(SOURCE_SIGNATURE_KEY) if isinstance(prev_entry, dict) else None
             if prev_sig == source_signature and _dir_has_content(dst_dir):
                 print(f"[INFO] Пропуск {logical_name!r}: источник не изменился.")
+                # Даже при skip поддерживаем совместимость: донастраиваем training-ready layout.
+                normalized_on_skip = _ensure_training_ready_after_copy(dst_dir)
             else:
                 _copy_source_to_training(source_for_copy, dst_dir)
 
@@ -1008,7 +1059,14 @@ def main(argv=None):
             entry[MODIFIED_KEY] = bool(entry.get(MODIFIED_KEY, False))
             if source_hash:
                 entry[SOURCE_HASH_KEY] = source_hash
-                entry[DATASET_HASH_KEY] = source_hash
+            # dataset_hash должен отражать фактическое содержимое datasets/<name>
+            # после возможной нормализации в training-ready layout.
+            # Не перетираем dataset_hash при обычном skip (иначе потеряем детекцию ручных правок).
+            # Обновляем его только после фактической синхронизации либо нормализации cvat11.
+            if not (prev_sig == source_signature and _dir_has_content(dst_dir)) or normalized_on_skip:
+                current_dst_hash = _dataset_content_hash(dst_dir)
+                if current_dst_hash:
+                    entry[DATASET_HASH_KEY] = current_dst_hash
 
         if use_workspace:
             if os.path.isdir(raw_source_dir):

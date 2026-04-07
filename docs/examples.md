@@ -286,6 +286,33 @@ smartrain clearml-upload /path/to/run_folder --no-images
 
 ---
 
+## `smartrain stats`
+
+Статистика считается только по каталогу `datasets/` (не по `raw_data/`).
+
+Таблица по классам (train/val/test/total + итог по дисбалансу):
+
+```bash
+smartrain stats classes
+smartrain stats classes --dataset my_merge
+smartrain stats classes --dataset my_merge --classes "cat,dog" --sort total --desc
+```
+
+Сводка по датасетам в целом:
+
+```bash
+smartrain stats datasets
+smartrain stats datasets --dataset my_merge --sort gini --desc
+```
+
+Проверки duplicate/leakage risk и экспорт списка проблем в `analytics/stats/...`:
+
+```bash
+smartrain stats datasets --check-duplicates --check-near-duplicates --export-issues
+```
+
+---
+
 ## `smartrain hash`
 
 Хеш датасета (как при именовании прогонов `train`). По пути к каталогу с `data.yaml`:

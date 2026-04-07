@@ -49,6 +49,7 @@ cd /path/to/my_workspace
 smartrain deploy
 smartrain scan --help
 smartrain train --help
+smartrain stats classes --help
 ```
 
 Типовой сценарий из корня workspace (после `deploy` и заполнения `raw_data/`):
@@ -110,6 +111,7 @@ flowchart TD
 | `scan` | Сканирование `raw_data`, подготовка копий в `datasets` и обновление `datasets_info.json` / `class_names.json` / `datasets_scan_summary.json` |
 | `fusion` | Сборка объединённого датасета в `datasets/` из явно выбранных входных датасетов (`--dataset`/`--datasets`, либо интерактивно) |
 | `train` | Обучение YOLO (`model_training_module`) |
+| `stats` | Статистика по датасетам в `datasets/`: `classes`, `datasets` |
 | `hash` | Хеш датасета по файлам и размерам |
 | `roi` | Кроп датасета по ROI (Ultralytics) |
 | `queue` | Подкоманды: `list`, `add`, `remove`, `clear`, `run` |
