@@ -403,6 +403,18 @@ def _prompt_yes_no(label: str, default: bool = False) -> bool:
     return raw in ("y", "yes", "1", "true", "да", "д")
 
 
+def _list_workspace_detector_models(workspace_root: str) -> list[str]:
+    exts = {".pt", ".onnx"}
+    root = Path(workspace_root)
+    if not root.is_dir():
+        return []
+    out: list[str] = []
+    for p in sorted(root.iterdir()):
+        if p.is_file() and p.suffix.lower() in exts:
+            out.append(p.name)
+    return out
+
+
 def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
     from prompt_toolkit.completion import WordCompleter
 
@@ -484,9 +496,16 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
     ).strip()
     args.on_empty = oe_val or "full_image"
     w_default = str(args.weights or "(из roi_auto)")
+    models = _list_workspace_detector_models(layout.root)
+    if models:
+        print("[INFO] ROI-детекторы в корне workspace:")
+        for m in models:
+            print(f"  - {m}")
+    weights_completer = WordCompleter(models, ignore_case=True) if models else None
     w_raw = _prompt_input(
         f"Weights (--weights) [default: {w_default}]: ",
         default=str(args.weights or ""),
+        completer=weights_completer,
     ).strip()
     args.weights = w_raw or None
     c_default = "(из roi_auto/0.25)" if args.conf is None else str(args.conf)

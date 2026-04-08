@@ -26,6 +26,19 @@ def _prepare_workspace(tmp_path: Path) -> None:
     scan_main(["--workspace", str(tmp_path)])
 
 
+def _prepare_workspace_two_images(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    raw = tmp_path / "raw_data" / "ds_a"
+    (raw / "train" / "images").mkdir(parents=True, exist_ok=True)
+    (raw / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    _write_jpg(raw / "train" / "images" / "a.jpg")
+    _write_jpg(raw / "train" / "images" / "b.jpg")
+    (raw / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (raw / "train" / "labels" / "b.txt").write_text("0 0.4 0.4 0.2 0.2\n", encoding="utf-8")
+    (raw / "data.yaml").write_text("nc: 1\nnames: ['cat']\n", encoding="utf-8")
+    scan_main(["--workspace", str(tmp_path)])
+
+
 def test_augment_creates_new_dataset_and_passport(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
     augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--multiplier", "1"])
@@ -34,6 +47,11 @@ def test_augment_creates_new_dataset_and_passport(tmp_path: Path) -> None:
     assert (out / "dataset_passport.json").is_file()
     p = json.loads((out / "dataset_passport.json").read_text(encoding="utf-8"))
     assert p["command"] == "augment"
+    aug_labels = list((out / "train" / "labels").glob("*__a-*.txt"))
+    assert aug_labels
+    info = json.loads((tmp_path / "datasets" / "datasets_info.json").read_text(encoding="utf-8"))
+    assert "ds_a_aug" in info
+    assert info["ds_a_aug"]["data_path"] == "datasets/ds_a_aug"
 
 
 def test_augment_default_name_is_incremented(tmp_path: Path) -> None:
@@ -42,4 +60,48 @@ def test_augment_default_name_is_incremented(tmp_path: Path) -> None:
     augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--multiplier", "1"])
     assert (tmp_path / "datasets" / "ds_a_aug").is_dir()
     assert (tmp_path / "datasets" / "ds_a_aug_2").is_dir()
+
+
+def test_augment_vertical_flip_changes_y_coordinate(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_a",
+            "--enable-flip",
+            "--flip",
+            "vertical",
+            "--multiplier",
+            "1",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
+    aug_file = next(out.glob("*__a-*.txt"))
+    line = aug_file.read_text(encoding="utf-8").strip()
+    parts = line.split()
+    assert len(parts) == 5
+    assert abs(float(parts[1]) - 0.5) < 1e-6
+    assert abs(float(parts[2]) - 0.5) < 1e-6
+
+
+def test_augment_enable_conveyor_uses_conveyor_tag(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    augment_main(
+        ["--workspace", str(tmp_path), "--dataset", "ds_a", "--enable-conveyor", "--multiplier", "1"]
+    )
+    out = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
+    aug_file = next(out.glob("*__a-*.txt"))
+    assert "__a-c" in aug_file.stem
+
+
+def test_augment_keeps_all_original_images_without_overwrite(tmp_path: Path) -> None:
+    _prepare_workspace_two_images(tmp_path)
+    augment_main(
+        ["--workspace", str(tmp_path), "--dataset", "ds_a", "--multiplier", "1"]
+    )
+    out_images = tmp_path / "datasets" / "ds_a_aug" / "train" / "images"
+    originals = {p.name for p in out_images.glob("*.jpg") if "__a-" not in p.stem}
+    assert originals == {"a.jpg", "b.jpg"}
 

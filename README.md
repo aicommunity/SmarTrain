@@ -131,7 +131,7 @@ flowchart TD
 | `scan` | Сканирование `raw_data`, подготовка копий в `datasets` и обновление `datasets_info.json` / `class_names.json` / `datasets_scan_summary.json` |
 | `fusion` | Сборка объединённого датасета в `datasets/` из явно выбранных входных датасетов (`--dataset`/`--datasets`, либо интерактивно) |
 | `train` | Обучение YOLO (`model_training_module`) |
-| `augment` | Офлайн-аугментация в новый `datasets/<name>` (`<dataset>_aug[_N]`) |
+| `augment` | Офлайн-аугментация (`basic`/`conveyor`/`bbox_copy`) в новый `datasets/<name>` (`<dataset>_aug[_N]`) |
 | `balance` | Балансировка в новый `datasets/<name>` (`<dataset>_balanced[_N]`) |
 | `stats` | Статистика по датасетам в `datasets/`: `classes`, `datasets` |
 | `hash` | Хеш датасета по файлам и размерам |

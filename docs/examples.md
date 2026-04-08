@@ -356,15 +356,26 @@ smartrain stats compare
 
 ```bash
 smartrain augment --dataset my_merge
-smartrain augment --dataset my_merge --policy robust --multiplier 2 --splits train,val
+smartrain augment --dataset my_merge --enable-flip --flip vertical --enable-conveyor --multiplier 2 --splits train,val
+smartrain augment --dataset my_merge --enable-flip --flip both --enable-photometric --multiplier 1
+smartrain augment --dataset my_merge --enable-bbox-copy --placement-mode detector --roi-model yolo11n.pt --copy-paste-count 2
+smartrain augment --dataset my_merge --enable-bbox-copy --placement-mode bbox --copy-paste-count 2
+smartrain augment --dataset my_merge --enable-bbox-copy --placement-mode none --copy-paste-count 2
 smartrain augment --dataset my_merge --classes "cat,dog" --output-name my_merge_aug_custom
 ```
+
+Имена аугментированных файлов имеют короткий тег: `<orig>__a-<mode><flip><v><idx>`, например `img_001__a-bhn1.jpg`.
 
 Интерактивный режим:
 
 ```bash
 smartrain augment
 ```
+
+Для `bbox_copy` в интерактиве доступен выбор ROI-режима:
+- `detector` (по умолчанию) — ROI через детектор;
+- `bbox` — ROI по существующей разметке;
+- `none` — без ROI-ограничений.
 
 ---
 

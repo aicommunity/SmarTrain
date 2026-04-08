@@ -424,6 +424,15 @@ YAML-источники:
 - Результат: новый датасет в `datasets/<name>` (по умолчанию `<dataset>_aug`, авто-нумерация при конфликте)
 - Интерактивный режим: запуск без аргументов в TTY
 - Паспорт изменений: `dataset_passport.json` в корне выходного датасета
+- Блоки аугментации: `--enable-flip`, `--enable-photometric`, `--enable-conveyor`, `--enable-bbox-copy`
+- `flip`: `--flip horizontal|vertical|both|none`
+- `photometric`: `--brightness-limit`, `--contrast-limit`
+- `conveyor`: умеренные геометрические/фотометрические аугментации для конвейерных кадров
+- `bbox_copy`: вставка bbox-объектов с ограничениями по IoU
+- ROI режимы для `bbox_copy`: `--placement-mode none|bbox|detector` (по умолчанию `detector`)
+- `bbox`: ROI строится по существующей разметке текущего изображения
+- `detector`: ROI определяется детектором (`--roi-model`, `--roi-conf`, `--roi-class-ids`)
+- Короткое именование аугментированных файлов: `<orig>__a-<mode><flip><v><idx>` (тот же stem для image/label)
 
 ---
 
