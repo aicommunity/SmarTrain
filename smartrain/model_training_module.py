@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
 from ultralytics import YOLO
 
 from smartrain.cli_argparse import CliArgumentParser
@@ -41,6 +42,14 @@ _ULTRALYTICS_YAML_IGNORED_KEYS = frozenset(
         "project",
         "name",
         "exist_ok",
+        # В Ultralytics `cfg` может указывать на внешний YAML с гиперпараметрами,
+        # но smart-train уже читает заданный пользователем `--ultralytics_yaml`,
+        # поэтому `cfg` часто бывает "остатком" и может ссылаться на файл,
+        # которого нет на текущей машине.
+        "cfg",
+        # device мы задаём через окружение/CLI; значения из сохранённых args.yaml
+        # (например '0,1,2') часто не соответствуют доступным GPU на машине.
+        "device",
         "model_dir",
         "target_path",
         "workspace",
@@ -479,6 +488,56 @@ def _validate_dataset_dir(dataset_path: str) -> None:
         raise FileNotFoundError(f"Не найден yaml файл: {data_yaml}")
 
 
+def _pick_split_relative_dir(dataset_path: str, split_aliases: tuple[str, ...]) -> str | None:
+    """
+    Ищет директорию split внутри выбранного dataset_path.
+    Возвращает относительный путь (предпочтительно с images/) или None.
+    """
+    candidates: list[str] = []
+    for split in split_aliases:
+        candidates.extend([f"{split}/images", f"images/{split}", split])
+    for rel in candidates:
+        abs_p = os.path.join(dataset_path, rel)
+        if os.path.isdir(abs_p):
+            return rel
+    return None
+
+
+def _build_runtime_data_yaml(dataset_path: str, run_dir: str, *, stage: str) -> str:
+    """
+    Создаёт служебный data.yaml для Ultralytics с привязкой к текущему dataset_path.
+    Это защищает от старых абсолютных путей в исходном data.yaml (другая машина).
+    """
+    src_yaml = os.path.join(dataset_path, "data.yaml")
+    with open(src_yaml, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Некорректный YAML формата data.yaml: {src_yaml}")
+
+    train_rel = _pick_split_relative_dir(dataset_path, ("train",))
+    val_rel = _pick_split_relative_dir(dataset_path, ("val", "valid"))
+    test_rel = _pick_split_relative_dir(dataset_path, ("test",))
+    if train_rel is None or val_rel is None:
+        raise FileNotFoundError(
+            f"Не найдены обязательные split-папки train/val внутри {dataset_path}."
+        )
+
+    runtime_cfg = dict(raw)
+    runtime_cfg["path"] = dataset_path
+    runtime_cfg["train"] = train_rel
+    runtime_cfg["val"] = val_rel
+    if test_rel is not None:
+        runtime_cfg["test"] = test_rel
+
+    out_yaml = os.path.join(run_dir, f"_runtime_data_{stage}.yaml")
+    with open(out_yaml, "w", encoding="utf-8") as f:
+        yaml.safe_dump(runtime_cfg, f, allow_unicode=True, sort_keys=False)
+    print(
+        f"[INFO] Runtime data.yaml ({stage}) сформирован для выбранного датасета: {out_yaml}"
+    )
+    return out_yaml
+
+
 def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str, str]:
     """
     workspace, dataset_root (каталог с data.yaml), target_base.
@@ -613,7 +672,7 @@ def train_yolo(
     training_start_time = datetime.now()
     _validate_dataset_dir(dataset_path)
 
-    data_yaml = os.path.join(dataset_path, "data.yaml")
+    data_yaml = _build_runtime_data_yaml(dataset_path, target_dir, stage="train")
     dataset_name = os.path.basename(os.path.normpath(dataset_path))
 
     model_version = str(ultralytics_cfg.get("model", MODEL_VERSION))
@@ -771,7 +830,7 @@ def test_yolo(
 ):
     test_start_time = datetime.now()
 
-    data_yaml = os.path.join(dataset_path, "data.yaml")
+    data_yaml = _build_runtime_data_yaml(dataset_path, model_dir, stage="test")
     imgsz = val_imgsz if val_imgsz is not None else train_img_size
 
     inference_record = {

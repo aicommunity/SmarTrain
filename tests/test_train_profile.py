@@ -103,6 +103,18 @@ def test_merge_sources_ignores_forced_keys_from_ultralytics_yaml(capsys):
     assert "data" not in u_cfg
 
 
+def test_merge_sources_ignores_cfg_key_from_ultralytics_yaml():
+    args = argparse.Namespace(model=None, epochs=None, batch=None, img_size=None, task=None)
+    u_cfg, _sm_opts = mtm._merge_sources_with_priority(
+        config_profile={},
+        ultralytics_profile={"cfg": "/missing/args_mars.yaml", "device": "0,1,2", "epochs": 25},
+        args=args,
+    )
+    assert "cfg" not in u_cfg
+    assert "device" not in u_cfg
+    assert u_cfg["epochs"] == 25
+
+
 def test_finalize_train_kwargs_forces_dataset_and_run_paths():
     out = mtm._finalize_train_kwargs(
         {"data": "/tmp/from_yaml.yaml", "project": "/tmp/proj", "name": "custom", "exist_ok": True, "epochs": 2},
