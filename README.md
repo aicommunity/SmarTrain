@@ -72,7 +72,8 @@ smartrain train --data merged
 | `queue` | Подкоманды: `list`, `add`, `remove`, `clear`, `run` |
 | `queue-run` | Последовательный исполнитель очереди (без подменю) |
 | `registry` | Реестр прогонов и моделей: `runs-list`, `runs-info`, … |
-| `analyze` | `scan`, `export-table`, `compare`, `interactive` |
+| `analyze` | `scan`, `export-table`, `compare`, `interactive`, `pr-curves`, `inference-benchmark`, `inference-plot` |
+| `migrate-models` | Добавление `training_metadata.json` в legacy run-каталоги (`train/results.csv`) |
 | `plot` | Устаревшая обёртка; передаёт аргументы в `analyze` |
 
 В файле очереди указывайте полные вызовы, например: `smartrain train --data myset -y`.

@@ -237,6 +237,20 @@ def cmd_plot(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "migrate-models",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_migrate_models(ctx: typer.Context) -> None:
+    """Миграция legacy моделей: добавление training_metadata.json для analyze."""
+    if _ctx_has_help_flag(ctx):
+        from smartrain.migrate_models_to_smartrain import build_migrate_models_arg_parser
+
+        _dispatch_argparse_help(ctx, build_migrate_models_arg_parser, "smartrain migrate-models")
+    _call("smartrain.migrate_models_to_smartrain", "main", ctx)
+
+
+@app.command(
     "cvat",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
