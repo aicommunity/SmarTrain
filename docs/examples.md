@@ -356,11 +356,13 @@ smartrain stats compare
 
 ```bash
 smartrain augment --dataset my_merge
-smartrain augment --dataset my_merge --enable-flip --flip vertical --enable-conveyor --multiplier 2 --splits train,val
-smartrain augment --dataset my_merge --enable-flip --flip both --enable-photometric --multiplier 1
-smartrain augment --dataset my_merge --enable-bbox-copy --placement-mode detector --roi-model yolo11n.pt --copy-paste-count 2
+smartrain augment --dataset my_merge --enable-flip --flip vertical --flip-prob 0.7 --enable-conveyor --splits train,val
+smartrain augment --dataset my_merge --enable-center-rotate --center-rotate-deg 5 --rotate-copies 2
+smartrain augment --dataset my_merge --enable-bbox-copy --bbox-copy-copies 2 --placement-mode detector --roi-model yolo11n.pt --copy-paste-count 2
 smartrain augment --dataset my_merge --enable-bbox-copy --placement-mode bbox --copy-paste-count 2
 smartrain augment --dataset my_merge --enable-bbox-copy --placement-mode none --copy-paste-count 2
+smartrain augment --dataset my_merge --enable-bbox-copy --copy-paste-placement-style uniform-grid --copy-paste-min-center-dist 0.2
+smartrain augment --dataset my_merge --imbalance-mode soft --imbalance-strength 1.0
 smartrain augment --dataset my_merge --classes "cat,dog" --output-name my_merge_aug_custom
 ```
 
@@ -376,6 +378,10 @@ smartrain augment
 - `detector` (по умолчанию) — ROI через детектор;
 - `bbox` — ROI по существующей разметке;
 - `none` — без ROI-ограничений.
+
+Для `bbox_copy` также доступен стиль размещения:
+- `random` — полностью случайный выбор валидной позиции;
+- `uniform-grid` — более равномерное покрытие ROI/кадра по сетке.
 
 ---
 

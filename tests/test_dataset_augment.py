@@ -41,7 +41,7 @@ def _prepare_workspace_two_images(tmp_path: Path) -> None:
 
 def test_augment_creates_new_dataset_and_passport(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
-    augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--multiplier", "1"])
+    augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a"])
     out = tmp_path / "datasets" / "ds_a_aug"
     assert out.is_dir()
     assert (out / "dataset_passport.json").is_file()
@@ -56,8 +56,8 @@ def test_augment_creates_new_dataset_and_passport(tmp_path: Path) -> None:
 
 def test_augment_default_name_is_incremented(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
-    augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--multiplier", "1"])
-    augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--multiplier", "1"])
+    augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a"])
+    augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a"])
     assert (tmp_path / "datasets" / "ds_a_aug").is_dir()
     assert (tmp_path / "datasets" / "ds_a_aug_2").is_dir()
 
@@ -73,8 +73,9 @@ def test_augment_vertical_flip_changes_y_coordinate(tmp_path: Path) -> None:
             "--enable-flip",
             "--flip",
             "vertical",
-            "--multiplier",
-            "1",
+            "--flip-prob",
+            "1.0",
+            "--disable-center-rotate",
         ]
     )
     out = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
@@ -89,18 +90,56 @@ def test_augment_vertical_flip_changes_y_coordinate(tmp_path: Path) -> None:
 def test_augment_enable_conveyor_uses_conveyor_tag(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
     augment_main(
-        ["--workspace", str(tmp_path), "--dataset", "ds_a", "--enable-conveyor", "--multiplier", "1"]
+        ["--workspace", str(tmp_path), "--dataset", "ds_a", "--enable-conveyor", "--disable-center-rotate"]
     )
     out = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
     aug_file = next(out.glob("*__a-*.txt"))
     assert "__a-c" in aug_file.stem
 
 
+def test_augment_flip_prob_zero_skips_flip_variant(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_a",
+            "--enable-flip",
+            "--flip-prob",
+            "0.0",
+            "--disable-center-rotate",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
+    assert not any("__a-f" in p.stem for p in out.glob("*__a-*.txt"))
+
+
+def test_augment_rotate_copies_creates_multiple_variants(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_a",
+            "--enable-center-rotate",
+            "--rotate-copies",
+            "2",
+            "--center-rotate-deg",
+            "5",
+                "--min-diversity-iou",
+                "1.1",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
+    rot = [p for p in out.glob("*__a-*.txt") if "__a-r" in p.stem]
+    assert len(rot) >= 2
+
+
 def test_augment_keeps_all_original_images_without_overwrite(tmp_path: Path) -> None:
     _prepare_workspace_two_images(tmp_path)
-    augment_main(
-        ["--workspace", str(tmp_path), "--dataset", "ds_a", "--multiplier", "1"]
-    )
+    augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a"])
     out_images = tmp_path / "datasets" / "ds_a_aug" / "train" / "images"
     originals = {p.name for p in out_images.glob("*.jpg") if "__a-" not in p.stem}
     assert originals == {"a.jpg", "b.jpg"}

@@ -36,20 +36,37 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dataset", type=str, default=None, help="Имя исходного датасета из datasets_info.json")
     p.add_argument("--output-name", type=str, default=None, help="Имя выходного датасета (по умолчанию <dataset>_aug)")
     p.add_argument("--enable-flip", action="store_true", help="Включить flip-аугментацию")
+    p.add_argument("--flip-prob", type=float, default=0.5, help="Вероятность создания flip-варианта на кадр [0..1]")
     p.add_argument("--enable-photometric", action="store_true", help="Включить brightness/contrast")
     p.add_argument("--enable-conveyor", action="store_true", help="Включить конвейерные шум/blur/shift/rotate")
-    p.add_argument("--enable-center-rotate", action="store_true", default=True, help="Включить поворот кадра вокруг центра")
+    p.add_argument("--enable-center-rotate", action="store_true", dest="enable_center_rotate", help="Включить поворот кадра вокруг центра")
+    p.add_argument("--disable-center-rotate", action="store_false", dest="enable_center_rotate", help="Выключить поворот кадра вокруг центра")
+    p.set_defaults(enable_center_rotate=True)
     p.add_argument("--center-rotate-deg", type=float, default=5.0, help="Максимальный угол поворота в обе стороны")
+    p.add_argument("--rotate-copies", type=int, default=1, help="Число rotate-вариантов на кадр")
     p.add_argument("--enable-bbox-copy", action="store_true", help="Включить bbox-copy аугментацию")
+    p.add_argument("--bbox-copy-copies", type=int, default=1, help="Число bbox_copy-вариантов на кадр")
     p.add_argument("--flip", choices=("horizontal", "vertical", "both", "none"), default="horizontal")
     p.add_argument("--brightness-limit", type=float, default=0.1, help="Для policy=basic: диапазон brightness")
     p.add_argument("--contrast-limit", type=float, default=0.1, help="Для policy=basic: диапазон contrast")
     p.add_argument("--copy-paste-count", type=int, default=1, help="Для policy=bbox_copy: число вставок на изображение")
-    p.add_argument("--copy-paste-rotation", type=float, default=12.0, help="Для policy=bbox_copy: max |угол| для поворота вставки")
-    p.add_argument("--copy-paste-scale-min", type=float, default=0.85, help="Для policy=bbox_copy: min scale (inner)")
-    p.add_argument("--copy-paste-scale-max", type=float, default=1.2, help="Для policy=bbox_copy: max scale (inner)")
+    p.add_argument("--copy-paste-rotation", type=float, default=0.0, help="Для policy=bbox_copy: max |угол| для поворота вставки")
+    p.add_argument("--copy-paste-scale-min", type=float, default=1.0, help="Для policy=bbox_copy: min scale (inner)")
+    p.add_argument("--copy-paste-scale-max", type=float, default=1.0, help="Для policy=bbox_copy: max scale (inner)")
     p.add_argument("--copy-paste-max-iou", type=float, default=0.0, help="Макс. IoU вставки с существующими bbox")
     p.add_argument("--copy-paste-tries", type=int, default=25, help="Число попыток подобрать валидное размещение")
+    p.add_argument(
+        "--copy-paste-min-center-dist",
+        type=float,
+        default=0.15,
+        help="Минимальная дистанция между центрами новых вставок (доля диагонали кадра)",
+    )
+    p.add_argument(
+        "--copy-paste-placement-style",
+        choices=("random", "uniform-grid"),
+        default="random",
+        help="Стиль выбора позиции вставки bbox_copy",
+    )
     p.add_argument(
         "--class-balance",
         choices=("on", "off"),
@@ -79,7 +96,10 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--roi-conf", type=float, default=0.25, help="Порог confidence для ROI-детектора")
     p.add_argument("--roi-class-ids", type=str, default=None, help="CSV class ids для ROI-детектора (пусто=все)")
     p.add_argument("--side-tolerance-px", type=float, default=3.0, help="Допуск в px для классификации стороны ROI")
-    p.add_argument("--multiplier", type=int, default=1, help="Сколько аугментированных копий на исходное изображение")
+    p.add_argument("--imbalance-mode", choices=("off", "soft"), default="soft", help="Балансировка по дефицитным классам")
+    p.add_argument("--imbalance-strength", type=float, default=1.0, help="Сила балансировки >=0")
+    p.add_argument("--min-diversity-iou", type=float, default=0.97, help="Порог схожести bbox (выше -> почти дубликат)")
+    p.add_argument("--min-angle-delta", type=float, default=1.0, help="Минимальная разница углов между rotate-вариантами")
     p.add_argument("--splits", type=str, default="train", help="CSV: train,val,test")
     p.add_argument("--classes", type=str, default=None, help="Ограничить аугментацию классами CSV")
     p.add_argument("--seed", type=int, default=12345)
@@ -222,16 +242,58 @@ def _variant_code(args) -> str:
 
 
 def _flip_code(args) -> str:
-    if args.enable_bbox_copy:
-        return "n"
     if not args.enable_flip:
         return "n"
     return {"horizontal": "h", "vertical": "v", "both": "b", "none": "n"}[args.flip]
 
 
-def _aug_stem(stem: str, args, idx: int) -> str:
-    mode = "p" if args.enable_bbox_copy else ("c" if args.enable_conveyor else "b")
+def _aug_stem(stem: str, args, idx: int, mode: str) -> str:
     return f"{stem}__a-{mode}{_flip_code(args)}{_variant_code(args)}{_base36(idx)}"
+
+
+def _labels_signature_iou(
+    a: list[tuple[int, float, float, float, float]],
+    b: list[tuple[int, float, float, float, float]],
+    w: int,
+    h: int,
+) -> float:
+    if not a or not b:
+        return 0.0
+    a_xy = [_to_xyxy(x, w, h) for x in a]
+    b_xy = [_to_xyxy(x, w, h) for x in b]
+    sims: list[float] = []
+    for aa in a_xy:
+        sims.append(max((_iou(aa, bb) for bb in b_xy), default=0.0))
+    return float(sum(sims) / len(sims)) if sims else 0.0
+
+
+def _collect_class_freq(items: list[dict]) -> dict[int, int]:
+    freq: dict[int, int] = {}
+    for it in items:
+        for cls, *_ in _parse_yolo_labels(it["lbl"]):
+            freq[int(cls)] = freq.get(int(cls), 0) + 1
+    return freq
+
+
+def _image_soft_weight(class_ids: set[int], class_freq: dict[int, int], alpha: float) -> float:
+    if not class_ids:
+        return 1.0
+    vals: list[float] = []
+    for c in class_ids:
+        f = max(1, int(class_freq.get(int(c), 1)))
+        vals.append((1.0 / float(f)) ** float(alpha))
+    if not vals:
+        return 1.0
+    return float(sum(vals) / len(vals))
+
+
+def _scaled_copies(base: int, image_weight: float, args) -> int:
+    base = max(0, int(base))
+    if str(getattr(args, "imbalance_mode", "soft")) != "soft" or base == 0:
+        return base
+    strength = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
+    scaled = int(round(base * (1.0 + image_weight * strength)))
+    return max(0, scaled)
 
 
 def _to_xyxy(box: tuple[int, float, float, float, float], w: int, h: int) -> tuple[int, int, int, int]:
@@ -265,6 +327,50 @@ def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
     union = area_a + area_b - inter
     return (inter / union) if union > 0 else 0.0
+
+
+def _center(box: tuple[int, int, int, int]) -> tuple[float, float]:
+    x1, y1, x2, y2 = box
+    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+
+def _pick_uniform_grid_position(
+    *,
+    rng: random.Random,
+    roi: tuple[int, int, int, int] | None,
+    placement_mode: str,
+    w: int,
+    h: int,
+    pw: int,
+    ph: int,
+    occupied: list[tuple[int, int, int, int]],
+) -> tuple[int, int]:
+    if placement_mode in ("bbox", "detector") and roi is not None:
+        x_min, y_min, x_max, y_max = roi
+    else:
+        x_min, y_min, x_max, y_max = 0, 0, w, h
+    x_max = max(x_min, x_max - pw)
+    y_max = max(y_min, y_max - ph)
+    cell = max(8, int(max(pw, ph) * 0.8))
+    xs = list(range(x_min, x_max + 1, cell)) or [x_min]
+    ys = list(range(y_min, y_max + 1, cell)) or [y_min]
+    candidates: list[tuple[float, int, int]] = []
+    for gx in xs:
+        for gy in ys:
+            cand = (gx, gy, gx + pw, gy + ph)
+            cx, cy = _center(cand)
+            if not occupied:
+                score = 1.0
+            else:
+                d = min(np.hypot(cx - _center(ob)[0], cy - _center(ob)[1]) for ob in occupied)
+                score = float(d)
+            # Небольшой шум, чтобы не залипать в один и тот же паттерн.
+            score += rng.random() * 0.01
+            candidates.append((score, gx, gy))
+    candidates.sort(key=lambda t: t[0], reverse=True)
+    top_k = min(10, len(candidates))
+    _, x, y = candidates[rng.randrange(0, top_k)]
+    return int(x), int(y)
 
 
 def _roi_from_labels(labels: list[tuple[int, float, float, float, float]], img_w: int, img_h: int) -> tuple[int, int, int, int] | None:
@@ -342,13 +448,56 @@ def _detect_roi_box(image_path: str, args) -> tuple[int, int, int, int] | None:
     return (int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)))
 
 
-def _apply_geom_aug(image_path: str, label_path: str, out_img: str, out_lbl: str, args) -> None:
+def _build_detector_roi_cache(items: list[dict], args) -> dict[str, tuple[int, int, int, int] | None]:
+    cache: dict[str, tuple[int, int, int, int] | None] = {}
+    progress = tqdm(
+        items,
+        total=len(items),
+        desc="augment:roi-detector",
+        unit="img",
+        disable=bool(args.no_legend),
+    )
+    for it in progress:
+        img_path = it["img"]
+        cache[img_path] = _detect_roi_box(img_path, args)
+    progress.close()
+    return cache
+
+
+def _apply_geom_aug(
+    image_path: str,
+    label_path: str,
+    out_img: str,
+    out_lbl: str,
+    args,
+    *,
+    enable_flip: bool | None = None,
+    enable_photometric: bool | None = None,
+    enable_conveyor: bool | None = None,
+    enable_center_rotate: bool | None = None,
+) -> list[tuple[int, float, float, float, float]]:
     image = np.array(Image.open(image_path).convert("RGB"))
     raw_labels = _parse_yolo_labels(label_path)
     labels = [x for x in (_sanitize_yolo_box(lb) for lb in raw_labels) if x is not None]
     bboxes = [(x, y, w, h) for _, x, y, w, h in labels]
     class_labels = [cls for cls, *_ in labels]
-    pipeline = _compose_for_basic(args)
+    # Локально отключаем/включаем отдельные блоки, не мутируя основной args.
+    class _LocalArgs:
+        pass
+
+    local = _LocalArgs()
+    for k, v in vars(args).items():
+        setattr(local, k, v)
+    if enable_flip is not None:
+        local.enable_flip = bool(enable_flip)
+    if enable_photometric is not None:
+        local.enable_photometric = bool(enable_photometric)
+    if enable_conveyor is not None:
+        local.enable_conveyor = bool(enable_conveyor)
+    if enable_center_rotate is not None:
+        local.enable_center_rotate = bool(enable_center_rotate)
+
+    pipeline = _compose_for_basic(local)
     transformed = pipeline(image=image, bboxes=bboxes, class_labels=class_labels)
     new_img = transformed["image"]
     new_labels_raw = [
@@ -360,6 +509,58 @@ def _apply_geom_aug(image_path: str, label_path: str, out_img: str, out_lbl: str
     os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
     Image.fromarray(new_img).save(out_img)
     Path(out_lbl).write_text(_serialize_yolo_labels(new_labels), encoding="utf-8")
+    return new_labels
+
+
+def _apply_exact_center_rotate(
+    image_path: str,
+    label_path: str,
+    out_img: str,
+    out_lbl: str,
+    args,
+    angle: float,
+    *,
+    detector_roi: tuple[int, int, int, int] | None = None,
+) -> list[tuple[int, float, float, float, float]] | None:
+    img = Image.open(image_path).convert("RGB")
+    w, h = img.size
+    labels = _parse_yolo_labels(label_path)
+    placement_mode = str(getattr(args, "placement_mode", "detector"))
+    rotate_use_roi = bool(getattr(args, "enable_bbox_copy", False)) and placement_mode in ("bbox", "detector")
+    roi: tuple[int, int, int, int] | None = None
+    if rotate_use_roi and placement_mode == "bbox":
+        roi = _roi_from_labels(labels, w, h)
+    elif rotate_use_roi and placement_mode == "detector":
+        roi = detector_roi
+    if rotate_use_roi and roi is None:
+        return None
+    if rotate_use_roi and roi is not None:
+        cx = (roi[0] + roi[2]) / 2.0
+        cy = (roi[1] + roi[3]) / 2.0
+    else:
+        cx = w / 2.0
+        cy = h / 2.0
+    m = cv2.getRotationMatrix2D((cx, cy), float(angle), 1.0)
+    src = np.array(img.convert("RGB"))
+    dst = cv2.warpAffine(src, m, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    new_labels: list[tuple[int, float, float, float, float]] = []
+    for lb in labels:
+        cls, *_ = lb
+        x1, y1, x2, y2 = _to_xyxy(lb, w, h)
+        corners = np.array([[x1, y1, 1.0], [x2, y1, 1.0], [x2, y2, 1.0], [x1, y2, 1.0]], dtype=np.float32)
+        tr = (m @ corners.T).T
+        nx1 = max(0, min(w, int(np.floor(np.min(tr[:, 0])))))
+        ny1 = max(0, min(h, int(np.floor(np.min(tr[:, 1])))))
+        nx2 = max(0, min(w, int(np.ceil(np.max(tr[:, 0])))))
+        ny2 = max(0, min(h, int(np.ceil(np.max(tr[:, 1])))))
+        if nx2 <= nx1 or ny2 <= ny1:
+            continue
+        new_labels.append(_to_yolo(int(cls), (nx1, ny1, nx2, ny2), w, h))
+    os.makedirs(os.path.dirname(out_img), exist_ok=True)
+    os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
+    Image.fromarray(dst).save(out_img)
+    Path(out_lbl).write_text(_serialize_yolo_labels(new_labels), encoding="utf-8")
+    return new_labels
 
 
 def _build_donor_pool(items: list[dict], args) -> list[dict]:
@@ -434,6 +635,36 @@ def _pick_donor_any(donors: list[dict], rng: random.Random) -> dict:
     return donors[rng.randrange(0, len(donors))]
 
 
+def _pick_donor_soft(
+    donors: list[dict],
+    class_usage: dict[int, int],
+    class_freq: dict[int, int],
+    args,
+    rng: random.Random,
+) -> dict:
+    by_class: dict[int, list[dict]] = {}
+    for d in donors:
+        by_class.setdefault(int(d["class_id"]), []).append(d)
+    alpha = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
+    weights: list[tuple[int, float]] = []
+    for c in by_class.keys():
+        f = max(1, int(class_freq.get(c, 1)))
+        generated = int(class_usage.get(c, 0))
+        w = (1.0 / float(f + generated)) ** alpha
+        weights.append((c, max(1e-9, w)))
+    total = sum(w for _, w in weights)
+    pick = rng.random() * total
+    acc = 0.0
+    chosen = weights[-1][0]
+    for c, w in weights:
+        acc += w
+        if pick <= acc:
+            chosen = c
+            break
+    pool = by_class[chosen]
+    return pool[rng.randrange(0, len(pool))]
+
+
 def _apply_copy_paste(
     image_path: str,
     label_path: str,
@@ -442,7 +673,11 @@ def _apply_copy_paste(
     args,
     donors: list[dict],
     class_usage: dict[int, int],
-) -> bool:
+    *,
+    variant_seed: int = 0,
+    class_freq: dict[int, int] | None = None,
+    detector_roi: tuple[int, int, int, int] | None = None,
+) -> tuple[bool, list[tuple[int, float, float, float, float]]]:
     img = Image.open(image_path).convert("RGB")
     w, h = img.size
     labels = _parse_yolo_labels(label_path)
@@ -451,73 +686,22 @@ def _apply_copy_paste(
     if placement_mode == "bbox":
         roi = _roi_from_labels(labels, w, h)
     elif placement_mode == "detector":
-        roi = _detect_roi_box(image_path, args)
+        roi = detector_roi
     if placement_mode in ("bbox", "detector") and roi is None:
-        return False
-    # Опциональный поворот кадра перед copy-paste.
-    if bool(getattr(args, "enable_center_rotate", False)):
-        path_seed = zlib.crc32(image_path.encode("utf-8")) & 0xFFFFFFFF
-        rng_rot = random.Random(int(args.seed) + 101 + path_seed)
-        angle = rng_rot.uniform(-float(getattr(args, "center_rotate_deg", 5.0)), float(getattr(args, "center_rotate_deg", 5.0)))
-        img_arr = np.array(img.convert("RGB"))
-        if placement_mode in ("bbox", "detector") and roi is not None:
-            cx = (roi[0] + roi[2]) / 2.0
-            cy = (roi[1] + roi[3]) / 2.0
-        else:
-            cx = w / 2.0
-            cy = h / 2.0
-        m = cv2.getRotationMatrix2D((cx, cy), angle, 1.0)
-        rot = cv2.warpAffine(img_arr, m, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        img = Image.fromarray(rot)
-        new_labels: list[tuple[int, float, float, float, float]] = []
-        for lb in labels:
-            cls, x, y, bw, bh = lb
-            x1, y1, x2, y2 = _to_xyxy(lb, w, h)
-            corners = np.array(
-                [[x1, y1, 1.0], [x2, y1, 1.0], [x2, y2, 1.0], [x1, y2, 1.0]],
-                dtype=np.float32,
-            )
-            tr = (m @ corners.T).T
-            nx1 = int(np.floor(np.min(tr[:, 0])))
-            ny1 = int(np.floor(np.min(tr[:, 1])))
-            nx2 = int(np.ceil(np.max(tr[:, 0])))
-            ny2 = int(np.ceil(np.max(tr[:, 1])))
-            nx1 = max(0, min(w, nx1))
-            ny1 = max(0, min(h, ny1))
-            nx2 = max(0, min(w, nx2))
-            ny2 = max(0, min(h, ny2))
-            if nx2 <= nx1 or ny2 <= ny1:
-                continue
-            new_labels.append(_to_yolo(int(cls), (nx1, ny1, nx2, ny2), w, h))
-        labels = new_labels
-        if roi is not None:
-            rx1, ry1, rx2, ry2 = roi
-            rc = np.array(
-                [[rx1, ry1, 1.0], [rx2, ry1, 1.0], [rx2, ry2, 1.0], [rx1, ry2, 1.0]],
-                dtype=np.float32,
-            )
-            rr = (m @ rc.T).T
-            rx1n = int(np.floor(np.min(rr[:, 0])))
-            ry1n = int(np.floor(np.min(rr[:, 1])))
-            rx2n = int(np.ceil(np.max(rr[:, 0])))
-            ry2n = int(np.ceil(np.max(rr[:, 1])))
-            roi = (
-                max(0, min(w, rx1n)),
-                max(0, min(h, ry1n)),
-                max(0, min(w, rx2n)),
-                max(0, min(h, ry2n)),
-            )
-            if roi[2] <= roi[0] or roi[3] <= roi[1]:
-                return False
+        return False, []
     existing = [_to_xyxy(lb, w, h) for lb in labels]
-    rng = random.Random(int(args.seed))
+    placed_boxes: list[tuple[int, int, int, int]] = []
+    path_seed = zlib.crc32(image_path.encode("utf-8")) & 0xFFFFFFFF
+    rng = random.Random(int(args.seed) + int(variant_seed) + int(path_seed))
     total_placed = 0
     for _ in range(int(args.copy_paste_count)):
         if not donors:
             break
         placed = False
         for _try in range(int(args.copy_paste_tries)):
-            if str(getattr(args, "class_balance", "on")) == "on":
+            if str(getattr(args, "imbalance_mode", "soft")) == "soft" and class_freq:
+                d = _pick_donor_soft(donors, class_usage, class_freq, args, rng)
+            elif str(getattr(args, "class_balance", "on")) == "on":
                 d = _pick_donor_balanced(donors, class_usage, rng)
             else:
                 d = _pick_donor_any(donors, rng)
@@ -560,16 +744,54 @@ def _apply_copy_paste(
                         x = rng.randint(rx1, max(rx1, rx2 - pw))
                         y = max(ry1, ry2 - ph)
                 else:
-                    x = rng.randint(rx1, max(rx1, rx2 - pw))
-                    y = rng.randint(ry1, max(ry1, ry2 - ph))
+                    if str(getattr(args, "copy_paste_placement_style", "random")) == "uniform-grid":
+                        x, y = _pick_uniform_grid_position(
+                            rng=rng,
+                            roi=roi,
+                            placement_mode=placement_mode,
+                            w=w,
+                            h=h,
+                            pw=pw,
+                            ph=ph,
+                            occupied=existing + placed_boxes,
+                        )
+                    else:
+                        x = rng.randint(rx1, max(rx1, rx2 - pw))
+                        y = rng.randint(ry1, max(ry1, ry2 - ph))
             else:
-                x = rng.randint(0, w - pw)
-                y = rng.randint(0, h - ph)
+                if str(getattr(args, "copy_paste_placement_style", "random")) == "uniform-grid":
+                    x, y = _pick_uniform_grid_position(
+                        rng=rng,
+                        roi=None,
+                        placement_mode=placement_mode,
+                        w=w,
+                        h=h,
+                        pw=pw,
+                        ph=ph,
+                        occupied=existing + placed_boxes,
+                    )
+                else:
+                    x = rng.randint(0, w - pw)
+                    y = rng.randint(0, h - ph)
             cand = (x, y, x + pw, y + ph)
             if placement_mode in ("bbox", "detector") and roi is not None and not _inside(cand, roi):
                 continue
             if any(_iou(cand, ex) > float(args.copy_paste_max_iou) for ex in existing):
                 continue
+            # Анти-скопление: избегаем слишком близких центров новых вставок в одном кадре.
+            min_center_dist = max(0.0, float(getattr(args, "copy_paste_min_center_dist", 0.15)))
+            if min_center_dist > 0.0 and placed_boxes:
+                cx, cy = _center(cand)
+                diag = max(1.0, float(np.hypot(w, h)))
+                min_px = min_center_dist * diag
+                too_close = False
+                for pb in placed_boxes:
+                    px, py = _center(pb)
+                    if np.hypot(cx - px, cy - py) < min_px:
+                        too_close = True
+                        break
+                if too_close:
+                    continue
             region = img.crop((x, y, x + pw, y + ph))
             patch_arr = np.array(patch.convert("RGB"))
             region_arr = np.array(region.convert("RGB"))
@@ -581,6 +803,7 @@ def _apply_copy_paste(
             )
             img.paste(Image.fromarray(blended), (x, y))
             existing.append(cand)
+            placed_boxes.append(cand)
             labels.append(_to_yolo(int(d["class_id"]), cand, w, h))
             class_usage[int(d["class_id"])] = class_usage.get(int(d["class_id"]), 0) + 1
             placed = True
@@ -589,12 +812,12 @@ def _apply_copy_paste(
         if not placed:
             continue
     if total_placed == 0:
-        return False
+        return False, labels
     os.makedirs(os.path.dirname(out_img), exist_ok=True)
     os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
     img.save(out_img)
     Path(out_lbl).write_text(_serialize_yolo_labels(labels), encoding="utf-8")
-    return True
+    return True, labels
 
 
 def _write_data_yaml(out_dir: str, names: list[str]) -> None:
@@ -683,6 +906,10 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             ).strip()
             or args.flip
         )
+        args.flip_prob = float(
+            prompt("Flip probability [0..1]: ", default=str(getattr(args, "flip_prob", 0.5))).strip()
+            or str(getattr(args, "flip_prob", 0.5))
+        )
     args.enable_photometric = (
         prompt("Включить brightness/contrast? [y/N]: ", default=("y" if args.enable_photometric else "n")).strip().lower()
         in ("y", "yes", "1", "true")
@@ -700,11 +927,37 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             prompt("Предел угла поворота (градусы, +-): ", default=str(getattr(args, "center_rotate_deg", 5.0))).strip()
             or str(getattr(args, "center_rotate_deg", 5.0))
         )
+        args.rotate_copies = int(
+            prompt("Сколько rotate-вариантов на кадр: ", default=str(getattr(args, "rotate_copies", 1))).strip()
+            or str(getattr(args, "rotate_copies", 1))
+        )
     args.enable_bbox_copy = (
         prompt("Включить bbox_copy? [y/N]: ", default=("y" if args.enable_bbox_copy else "n")).strip().lower()
         in ("y", "yes", "1", "true")
     )
-    args.multiplier = int(prompt("Multiplier: ", default=str(args.multiplier)).strip() or str(args.multiplier))
+    # Параметры soft-balance и разнообразия релевантны только rotate/bbox_copy.
+    if args.enable_center_rotate or args.enable_bbox_copy:
+        args.imbalance_mode = (
+            prompt(
+                "Балансировка классов (off/soft): ",
+                default=str(getattr(args, "imbalance_mode", "soft")),
+                completer=WordCompleter(["off", "soft"], ignore_case=True),
+            ).strip()
+            or str(getattr(args, "imbalance_mode", "soft"))
+        )
+        args.imbalance_strength = float(
+            prompt("Сила балансировки (>=0): ", default=str(getattr(args, "imbalance_strength", 1.0))).strip()
+            or str(getattr(args, "imbalance_strength", 1.0))
+        )
+        args.min_diversity_iou = float(
+            prompt("Порог дубликата по IoU [0..1]: ", default=str(getattr(args, "min_diversity_iou", 0.97))).strip()
+            or str(getattr(args, "min_diversity_iou", 0.97))
+        )
+    if args.enable_center_rotate:
+        args.min_angle_delta = float(
+            prompt("Мин. разница углов (градусы): ", default=str(getattr(args, "min_angle_delta", 1.0))).strip()
+            or str(getattr(args, "min_angle_delta", 1.0))
+        )
     if args.enable_bbox_copy:
         args.placement_mode = (
             prompt(
@@ -757,6 +1010,25 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
         )
         args.copy_paste_count = int(
             prompt("Copy-paste count: ", default=str(args.copy_paste_count)).strip() or str(args.copy_paste_count)
+        )
+        args.copy_paste_min_center_dist = float(
+            prompt(
+                "Мин. дистанция между вставками [0..1] (доля диагонали): ",
+                default=str(getattr(args, "copy_paste_min_center_dist", 0.15)),
+            ).strip()
+            or str(getattr(args, "copy_paste_min_center_dist", 0.15))
+        )
+        args.copy_paste_placement_style = (
+            prompt(
+                "Стиль размещения вставок (random/uniform-grid): ",
+                default=str(getattr(args, "copy_paste_placement_style", "random")),
+                completer=WordCompleter(["random", "uniform-grid"], ignore_case=True),
+            ).strip()
+            or str(getattr(args, "copy_paste_placement_style", "random"))
+        )
+        args.bbox_copy_copies = int(
+            prompt("Сколько bbox_copy-вариантов на кадр: ", default=str(getattr(args, "bbox_copy_copies", 1))).strip()
+            or str(getattr(args, "bbox_copy_copies", 1))
         )
     args.splits = prompt("Splits CSV (train,val,test): ", default=args.splits).strip() or args.splits
     args.classes = (
@@ -847,7 +1119,14 @@ def main(argv=None):
             os.makedirs(os.path.join(out_dir, split, "images"), exist_ok=True)
             os.makedirs(os.path.join(out_dir, split, "labels"), exist_ok=True)
     donors = _build_donor_pool(items, args) if args.enable_bbox_copy else []
+    detector_roi_cache: dict[str, tuple[int, int, int, int] | None] = {}
+    if str(getattr(args, "placement_mode", "detector")) == "detector" and (
+        bool(args.enable_bbox_copy) or bool(args.enable_center_rotate)
+    ):
+        detector_roi_cache = _build_detector_roi_cache(items, args)
     class_usage: dict[int, int] = {}
+    class_freq = _collect_class_freq(items)
+    alpha = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
     progress = tqdm(
         items,
         total=len(items),
@@ -876,22 +1155,149 @@ def main(argv=None):
             copied += 1
             if split not in split_filter:
                 continue
-            for i in range(args.multiplier):
-                aug_stem = _aug_stem(stem, args, i + 1)
+            image_weight = _image_soft_weight(classes_in_image, class_freq, alpha)
+            seen_labels: list[list[tuple[int, float, float, float, float]]] = []
+
+            if args.enable_flip and random.Random(int(args.seed) + zlib.crc32(img_src.encode("utf-8"))).random() <= float(
+                getattr(args, "flip_prob", 0.5)
+            ):
+                aug_stem = _aug_stem(stem, args, 1, "f")
                 if not args.dry_run:
                     out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
                     out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
-                    if args.enable_bbox_copy:
-                        ok = _apply_copy_paste(img_src, lbl_src, out_img, out_lbl, args, donors, class_usage)
+                    new_labels = _apply_geom_aug(
+                        img_src,
+                        lbl_src,
+                        out_img,
+                        out_lbl,
+                        args,
+                        enable_flip=True,
+                        enable_photometric=False,
+                        enable_conveyor=False,
+                        enable_center_rotate=False,
+                    )
+                    seen_labels.append(new_labels)
+                    augmented += 1
+                else:
+                    augmented += 1
+
+            if args.enable_photometric or args.enable_conveyor:
+                geom_mode = "c" if args.enable_conveyor else "b"
+                aug_stem = _aug_stem(stem, args, 1, geom_mode)
+                if not args.dry_run:
+                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
+                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                    new_labels = _apply_geom_aug(
+                        img_src,
+                        lbl_src,
+                        out_img,
+                        out_lbl,
+                        args,
+                        enable_flip=False,
+                        enable_photometric=bool(args.enable_photometric),
+                        enable_conveyor=bool(args.enable_conveyor),
+                        enable_center_rotate=False,
+                    )
+                    if any(
+                        _labels_signature_iou(prev, new_labels, 1000, 1000)
+                        >= float(getattr(args, "min_diversity_iou", 0.97))
+                        for prev in seen_labels
+                    ):
+                        try:
+                            os.remove(out_img)
+                            os.remove(out_lbl)
+                        except OSError:
+                            pass
+                    else:
+                        seen_labels.append(new_labels)
+                        augmented += 1
+                else:
+                    augmented += 1
+
+            if args.enable_center_rotate:
+                rot_copies = _scaled_copies(int(getattr(args, "rotate_copies", 1)), image_weight, args)
+                path_seed = zlib.crc32(img_src.encode("utf-8")) & 0xFFFFFFFF
+                rng_rot = random.Random(int(args.seed) + 5003 + path_seed)
+                used_angles: list[float] = []
+                rot_saved = 0
+                tries_left = max(1, rot_copies * 8)
+                while rot_saved < rot_copies and tries_left > 0:
+                    tries_left -= 1
+                    angle = rng_rot.uniform(
+                        -float(getattr(args, "center_rotate_deg", 5.0)),
+                        float(getattr(args, "center_rotate_deg", 5.0)),
+                    )
+                    if any(abs(angle - prev) < float(getattr(args, "min_angle_delta", 1.0)) for prev in used_angles):
+                        continue
+                    used_angles.append(angle)
+                    aug_stem = _aug_stem(stem, args, rot_saved + 1, "r")
+                    if not args.dry_run:
+                        out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
+                        out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                        new_labels = _apply_exact_center_rotate(
+                            img_src,
+                            lbl_src,
+                            out_img,
+                            out_lbl,
+                            args,
+                            angle,
+                            detector_roi=detector_roi_cache.get(img_src),
+                        )
+                        if new_labels is None:
+                            if args.placement_mode in ("bbox", "detector"):
+                                skipped_roi_missing += 1
+                            continue
+                        if any(
+                            _labels_signature_iou(prev, new_labels, 1000, 1000) >= float(getattr(args, "min_diversity_iou", 0.97))
+                            for prev in seen_labels
+                        ):
+                            try:
+                                os.remove(out_img)
+                                os.remove(out_lbl)
+                            except OSError:
+                                pass
+                            continue
+                        seen_labels.append(new_labels)
+                    rot_saved += 1
+                    augmented += 1
+
+            if args.enable_bbox_copy:
+                cp_copies = _scaled_copies(int(getattr(args, "bbox_copy_copies", 1)), image_weight, args)
+                for i in range(cp_copies):
+                    aug_stem = _aug_stem(stem, args, i + 1, "p")
+                    if not args.dry_run:
+                        out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
+                        out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                        ok, new_labels = _apply_copy_paste(
+                            img_src,
+                            lbl_src,
+                            out_img,
+                            out_lbl,
+                            args,
+                            donors,
+                            class_usage,
+                            variant_seed=i + 1,
+                            class_freq=class_freq,
+                            detector_roi=detector_roi_cache.get(img_src),
+                        )
                         if ok:
+                            if any(
+                                _labels_signature_iou(prev, new_labels, 1000, 1000)
+                                >= float(getattr(args, "min_diversity_iou", 0.97))
+                                for prev in seen_labels
+                            ):
+                                try:
+                                    os.remove(out_img)
+                                    os.remove(out_lbl)
+                                except OSError:
+                                    pass
+                                continue
+                            seen_labels.append(new_labels)
                             augmented += 1
                         elif args.placement_mode in ("bbox", "detector"):
                             skipped_roi_missing += 1
                     else:
-                        _apply_geom_aug(img_src, lbl_src, out_img, out_lbl, args)
                         augmented += 1
-                else:
-                    augmented += 1
             progress.set_postfix(
                 copied=copied,
                 augmented=augmented,
@@ -922,12 +1328,20 @@ def main(argv=None):
         transformations=[
             {
                 "enable_flip": bool(args.enable_flip),
+                "flip_prob": float(getattr(args, "flip_prob", 0.5)),
                 "flip": args.flip,
                 "enable_photometric": bool(args.enable_photometric),
                 "enable_conveyor": bool(args.enable_conveyor),
+                "enable_center_rotate": bool(args.enable_center_rotate),
+                "center_rotate_deg": float(getattr(args, "center_rotate_deg", 5.0)),
+                "rotate_copies": int(getattr(args, "rotate_copies", 1)),
                 "enable_bbox_copy": bool(args.enable_bbox_copy),
+                "bbox_copy_copies": int(getattr(args, "bbox_copy_copies", 1)),
+                "copy_paste_min_center_dist": float(getattr(args, "copy_paste_min_center_dist", 0.15)),
+                "copy_paste_placement_style": str(getattr(args, "copy_paste_placement_style", "random")),
                 "placement_mode": args.placement_mode,
-                "multiplier": args.multiplier,
+                "imbalance_mode": str(getattr(args, "imbalance_mode", "soft")),
+                "imbalance_strength": float(getattr(args, "imbalance_strength", 1.0)),
                 "splits": sorted(split_filter),
             }
         ],

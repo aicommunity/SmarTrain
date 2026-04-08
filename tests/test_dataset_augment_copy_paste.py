@@ -42,10 +42,9 @@ def test_copy_paste_roi_mode_skips_images_without_roi(tmp_path: Path) -> None:
             "ds_a",
             "--enable-bbox-copy",
             "--placement-roi",
-            "--multiplier",
-            "1",
             "--copy-paste-count",
             "1",
+                "--disable-center-rotate",
         ]
     )
     out_labels = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"

@@ -424,11 +424,18 @@ YAML-источники:
 - Результат: новый датасет в `datasets/<name>` (по умолчанию `<dataset>_aug`, авто-нумерация при конфликте)
 - Интерактивный режим: запуск без аргументов в TTY
 - Паспорт изменений: `dataset_passport.json` в корне выходного датасета
-- Блоки аугментации: `--enable-flip`, `--enable-photometric`, `--enable-conveyor`, `--enable-bbox-copy`
-- `flip`: `--flip horizontal|vertical|both|none`
+- Блоки аугментации: `--enable-flip`, `--enable-photometric`, `--enable-conveyor`, `--enable-center-rotate`, `--enable-bbox-copy`
+- `flip`: `--flip horizontal|vertical|both|none`, `--flip-prob`
 - `photometric`: `--brightness-limit`, `--contrast-limit`
 - `conveyor`: умеренные геометрические/фотометрические аугментации для конвейерных кадров
+- `center_rotate`: `--center-rotate-deg`, `--rotate-copies`, `--disable-center-rotate`
 - `bbox_copy`: вставка bbox-объектов с ограничениями по IoU
+- Интенсивность `bbox_copy`: `--bbox-copy-copies`
+- Параметры размещения `bbox_copy`:
+  - `--copy-paste-placement-style random|uniform-grid`
+  - `--copy-paste-min-center-dist` (минимальная дистанция между центрами новых вставок в кадре, доля диагонали)
+- Балансировка дефицитных классов: `--imbalance-mode off|soft`, `--imbalance-strength`
+- Контроль разнообразия результатов: `--min-diversity-iou`, `--min-angle-delta`
 - ROI режимы для `bbox_copy`: `--placement-mode none|bbox|detector` (по умолчанию `detector`)
 - `bbox`: ROI строится по существующей разметке текущего изображения
 - `detector`: ROI определяется детектором (`--roi-model`, `--roi-conf`, `--roi-class-ids`)
