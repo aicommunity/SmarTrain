@@ -228,3 +228,67 @@ def test_train_interactive_skips_prompts_for_values_from_ultralytics_yaml(
     assert args.clearml is True
     assert args.clearml_project == "ProjA"
 
+
+def test_collect_available_base_runs_prioritizes_selected_dataset(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    (tmp_path / "runs" / "ds_a" / "run1" / "train").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "runs" / "ds_a" / "run1" / "train" / "args.yaml").write_text("epochs: 5\n", encoding="utf-8")
+    (tmp_path / "runs" / "ds_b" / "run2" / "train").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "runs" / "ds_b" / "run2" / "train" / "args.yaml").write_text("epochs: 7\n", encoding="utf-8")
+    runs = mtm._collect_available_base_runs(mtm.WorkspaceLayout(str(tmp_path)), "ds_b")
+    assert len(runs) == 2
+    assert runs[0]["dataset"] == "ds_b"
+    assert runs[1]["dataset"] == "ds_a"
+
+
+def test_train_interactive_uses_selected_base_run_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deploy_workspace(str(tmp_path))
+    (tmp_path / "datasets" / DATASETS_INFO_FILE).write_text(
+        json.dumps({"ds_a": {"classes": {"cat": 0}}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    base_run_dir = tmp_path / "runs" / "ds_a" / "run_base" / "train"
+    base_run_dir.mkdir(parents=True, exist_ok=True)
+    (base_run_dir / "args.yaml").write_text(
+        "task: detect\nmodel: yolo11m.pt\nepochs: 42\nbatch: 6\nimgsz: 960\n",
+        encoding="utf-8",
+    )
+
+    args = _base_args(tmp_path)
+    args.task = None
+    args.model = None
+    args.epochs = None
+    args.batch = None
+    args.img_size = None
+    answers = iter(
+        [
+            "ds_a",  # dataset
+            "1",  # select base run
+            "",  # ultralytics_yaml
+            "",  # task default from base
+            "",  # model default from base
+            "",  # epochs default from base
+            "",  # batch default from base
+            "",  # img_size default from base
+            "",  # target_path
+            "",  # test_only
+            "",  # val_imgsz
+            "",  # val_conf
+            "",  # val_iou
+            "",  # weighted_sampling
+            "",  # export_onnx
+            "",  # export_onnx_fp32
+            "",  # clearml
+            "",  # non_interactive
+        ]
+    )
+    monkeypatch.setattr(mtm, "_prompt_input", lambda *a, **k: next(answers))
+
+    assert mtm._run_interactive_train_setup(args) is True
+    assert args.model == "yolo11m.pt"
+    assert args.epochs == 42
+    assert args.batch == 6
+    assert args.img_size == 960
+

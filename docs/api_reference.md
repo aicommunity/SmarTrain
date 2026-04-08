@@ -262,6 +262,8 @@ CLI: кроп датасета по ROI модели Ultralytics (detect/segment
 
 **CLI**: `--workspace` и `--data` (каталог с `data.yaml` или имя из `datasets/datasets_info.json`), либо без workspace — обязательны `--data` и `--target-path`. Прогоны по умолчанию в `workspace/runs`.
 
+Интерактивный `train` после выбора датасета предлагает опционально выбрать базовый прогон из `runs/`; его `args.yaml` используется как источник дефолтов для дальнейших prompt'ов.
+
 YAML-источники:
 - `--config` — базовый профиль smart-train;
 - `--ultralytics_yaml` — внешний Ultralytics `args.yaml`;

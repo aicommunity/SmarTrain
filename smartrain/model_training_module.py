@@ -294,6 +294,75 @@ def _prompt_dataset_name(available: list[str]) -> str:
         print("[ERROR] Неизвестное имя датасета. Доступные:", ", ".join(available))
 
 
+def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    runs_root = Path(layout.runs)
+    if not runs_root.is_dir():
+        return out
+    for ds_dir in sorted(runs_root.iterdir()):
+        if not ds_dir.is_dir():
+            continue
+        ds_name = ds_dir.name
+        for run_dir in sorted(ds_dir.iterdir()):
+            if not run_dir.is_dir():
+                continue
+            args_train = run_dir / "train" / "args.yaml"
+            args_root = run_dir / "args.yaml"
+            args_path: Path | None = None
+            if args_train.is_file():
+                args_path = args_train
+            elif args_root.is_file():
+                args_path = args_root
+            if args_path is None:
+                continue
+            out.append(
+                {
+                    "dataset": ds_name,
+                    "run_dir": str(run_dir),
+                    "args_yaml": str(args_path),
+                }
+            )
+    out.sort(key=lambda x: (x["dataset"] != selected_dataset, x["dataset"], x["run_dir"]))
+    return out
+
+
+def _print_available_base_runs(selected_dataset: str, runs: list[dict[str, str]]) -> None:
+    if not runs:
+        print("[INFO] Базовые прогоны в runs/ не найдены.")
+        return
+    print("[INFO] Доступные базовые прогоны (сверху — для выбранного датасета):")
+    for i, r in enumerate(runs, start=1):
+        mark = " [selected-dataset]" if r["dataset"] == selected_dataset else ""
+        print(f"  {i:>3}. {r['dataset']} :: {r['run_dir']}{mark}")
+
+
+def _prompt_base_run_args_yaml(runs: list[dict[str, str]]) -> str | None:
+    if not runs:
+        return None
+    while True:
+        raw = _prompt_input("Базовый прогон (номер, пусто=без базового): ", default="").strip()
+        if not raw:
+            return None
+        try:
+            idx = int(raw)
+        except ValueError:
+            print(f"[ERROR] Ожидается номер прогона, получено: {raw!r}")
+            continue
+        if 1 <= idx <= len(runs):
+            return runs[idx - 1]["args_yaml"]
+        print(f"[ERROR] Номер вне диапазона 1..{len(runs)}")
+
+
+def _get_interactive_default(args, attr: str, fallback, baseline_cfg: dict[str, Any], baseline_key: str):
+    if hasattr(args, attr):
+        val = getattr(args, attr)
+        if val is not None and (fallback is None or val != fallback):
+            return val
+    if baseline_key in baseline_cfg:
+        return baseline_cfg[baseline_key]
+    return fallback
+
+
 def _run_interactive_train_setup(args) -> bool:
     from prompt_toolkit.completion import WordCompleter
 
@@ -321,6 +390,23 @@ def _run_interactive_train_setup(args) -> bool:
     for name in dataset_names:
         print(f"  - {name}")
     args.data = _prompt_dataset_name(dataset_names)
+    baseline_u_cfg: dict[str, Any] = {}
+    baseline_sm_opts: dict[str, Any] = {}
+    available_runs = _collect_available_base_runs(layout, args.data)
+    _print_available_base_runs(args.data, available_runs)
+    baseline_args_yaml = _prompt_base_run_args_yaml(available_runs)
+    if baseline_args_yaml:
+        try:
+            baseline_profile = _load_ultralytics_yaml(baseline_args_yaml)
+            baseline_filtered = {
+                k: v for k, v in baseline_profile.items() if k not in _ULTRALYTICS_YAML_IGNORED_KEYS
+            }
+            baseline_u_cfg, baseline_sm_opts = extract_smartrain_options(baseline_filtered)
+            print(f"[INFO] Используется базовый прогон: {baseline_args_yaml}")
+        except Exception as e:
+            print(f"[WARNING] Не удалось прочитать args.yaml базового прогона: {e}")
+            baseline_u_cfg, baseline_sm_opts = {}, {}
+
     args.ultralytics_yaml = (
         _prompt_input(
             "Путь к внешнему Ultralytics args.yaml (--ultralytics_yaml, пусто=не использовать): ",
@@ -351,7 +437,9 @@ def _run_interactive_train_setup(args) -> bool:
         args.task = str(ultra_u_cfg["task"])
         print(f"[INFO] Task взят из --ultralytics_yaml: {args.task}")
     else:
-        task_default = str(getattr(args, "task", "detect"))
+        task_default = str(
+            _get_interactive_default(args, "task", "detect", baseline_u_cfg, "task")
+        )
         task_completer = WordCompleter(task_choices, ignore_case=True)
         args.task = (
             _prompt_input(
@@ -366,26 +454,37 @@ def _run_interactive_train_setup(args) -> bool:
         args.model = str(ultra_u_cfg["model"])
         print(f"[INFO] Модель взята из --ultralytics_yaml: {args.model}")
     else:
+        model_default = str(_get_interactive_default(args, "model", MODEL_VERSION, baseline_u_cfg, "model"))
         args.model = (
-            _prompt_input("Модель (--model): ", default=str(getattr(args, "model", MODEL_VERSION))).strip()
-            or MODEL_VERSION
+            _prompt_input(
+                "Модель (--model): ",
+                default=model_default,
+            ).strip()
+            or model_default
         )
     if "epochs" in ultra_u_cfg:
         args.epochs = int(ultra_u_cfg["epochs"])
         print(f"[INFO] Эпохи взяты из --ultralytics_yaml: {args.epochs}")
     else:
-        args.epochs = _prompt_int("Эпохи (--epochs)", int(getattr(args, "epochs", EPOCHS)))
+        args.epochs = _prompt_int(
+            "Эпохи (--epochs)",
+            int(_get_interactive_default(args, "epochs", EPOCHS, baseline_u_cfg, "epochs")),
+        )
     if "batch" in ultra_u_cfg:
         args.batch = int(ultra_u_cfg["batch"])
         print(f"[INFO] Batch взят из --ultralytics_yaml: {args.batch}")
     else:
-        args.batch = _prompt_int("Batch (--batch)", int(getattr(args, "batch", BATCH)))
+        args.batch = _prompt_int(
+            "Batch (--batch)",
+            int(_get_interactive_default(args, "batch", BATCH, baseline_u_cfg, "batch")),
+        )
     if "imgsz" in ultra_u_cfg:
         args.img_size = int(ultra_u_cfg["imgsz"])
         print(f"[INFO] Размер изображения взят из --ultralytics_yaml: {args.img_size}")
     else:
         args.img_size = _prompt_int(
-            "Размер изображения (--img-size)", int(getattr(args, "img_size", IMG_SIZE))
+            "Размер изображения (--img-size)",
+            int(_get_interactive_default(args, "img_size", IMG_SIZE, baseline_u_cfg, "imgsz")),
         )
 
     default_target = str(getattr(args, "target_path", None) or layout.runs)
@@ -404,46 +503,61 @@ def _run_interactive_train_setup(args) -> bool:
     else:
         args.model_dir = getattr(args, "model_dir", None)
 
-    args.val_imgsz = _prompt_optional_int("Размер val/test (--val-imgsz, пусто=как train)", getattr(args, "val_imgsz", None))
-    args.val_conf = _prompt_optional_float("Порог conf (--val-conf, пусто=по умолчанию Ultralytics)", getattr(args, "val_conf", None))
-    args.val_iou = _prompt_optional_float("Порог IoU (--val-iou, пусто=по умолчанию Ultralytics)", getattr(args, "val_iou", None))
+    args.val_imgsz = _prompt_optional_int(
+        "Размер val/test (--val-imgsz, пусто=как train)",
+        _get_interactive_default(args, "val_imgsz", None, baseline_u_cfg, "imgsz"),
+    )
+    args.val_conf = _prompt_optional_float(
+        "Порог conf (--val-conf, пусто=по умолчанию Ultralytics)",
+        _get_interactive_default(args, "val_conf", None, baseline_u_cfg, "conf"),
+    )
+    args.val_iou = _prompt_optional_float(
+        "Порог IoU (--val-iou, пусто=по умолчанию Ultralytics)",
+        _get_interactive_default(args, "val_iou", None, baseline_u_cfg, "iou"),
+    )
 
     if "weighted_sampling" in ultra_sm_opts:
         args.weighted_sampling = bool(ultra_sm_opts["weighted_sampling"])
     else:
         args.weighted_sampling = _prompt_yes_no(
             "Включить weighted sampling (--weighted-sampling)",
-            default=bool(getattr(args, "weighted_sampling", False)),
+            default=bool(_get_interactive_default(args, "weighted_sampling", False, baseline_sm_opts, "weighted_sampling")),
         )
     if "export_onnx" in ultra_sm_opts:
         args.export_onnx = bool(ultra_sm_opts["export_onnx"])
     else:
         args.export_onnx = _prompt_yes_no(
             "Экспортировать ONNX после обучения (--export-onnx)",
-            default=bool(getattr(args, "export_onnx", False)),
+            default=bool(_get_interactive_default(args, "export_onnx", False, baseline_sm_opts, "export_onnx")),
         )
     if "export_onnx_half" in ultra_sm_opts:
         args.export_onnx_fp32 = not bool(ultra_sm_opts["export_onnx_half"])
     else:
+        default_fp32 = bool(getattr(args, "export_onnx_fp32", False))
+        if "export_onnx_half" in baseline_sm_opts:
+            default_fp32 = not bool(baseline_sm_opts["export_onnx_half"])
         args.export_onnx_fp32 = _prompt_yes_no(
             "Использовать FP32 для ONNX (--export-onnx-fp32)",
-            default=bool(getattr(args, "export_onnx_fp32", False)),
+            default=default_fp32,
         )
     if "clearml" in ultra_sm_opts:
         args.clearml = bool(ultra_sm_opts["clearml"])
     else:
         args.clearml = _prompt_yes_no(
             "Логировать в ClearML (--clearml)",
-            default=bool(getattr(args, "clearml", False)),
+            default=bool(_get_interactive_default(args, "clearml", False, baseline_sm_opts, "clearml")),
         )
     if args.clearml:
         if "clearml_project" in ultra_sm_opts:
             args.clearml_project = str(ultra_sm_opts["clearml_project"]).strip() or None
         else:
+            default_cm_project = str(getattr(args, "clearml_project", "") or "")
+            if "clearml_project" in baseline_sm_opts:
+                default_cm_project = str(baseline_sm_opts["clearml_project"] or "")
             args.clearml_project = (
                 _prompt_input(
                     "Проект ClearML (--clearml-project): ",
-                    default=str(getattr(args, "clearml_project", "") or ""),
+                    default=default_cm_project,
                 ).strip()
                 or None
             )
