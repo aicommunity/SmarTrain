@@ -35,6 +35,12 @@ smartrain train --data my_merge --model yolov8n --epochs 50 --batch 16 -y
 smartrain scan
 ```
 
+Очистить из `raw_data` источники, которые были обработаны и синхронизированы в `datasets/` в текущем запуске (с предупреждением и подтверждением, по умолчанию `Y`):
+
+```bash
+smartrain scan --purge-processed-raw
+```
+
 Явный источник (добавляется в `raw_data/datasets_list.txt`):
 
 ```bash
@@ -300,6 +306,13 @@ smartrain clearml-upload /path/to/run_folder --no-images
 
 Статистика считается только по каталогу `datasets/` (не по `raw_data/`).
 
+Быстрый режим (без подкоманды) показывает сводку по датасетам и классам:
+
+```bash
+smartrain stats
+smartrain stats --dataset my_merge
+```
+
 Таблица по классам (train/val/test/total + итог по дисбалансу):
 
 ```bash
@@ -319,6 +332,20 @@ smartrain stats datasets --dataset my_merge --sort gini --desc
 
 ```bash
 smartrain stats datasets --check-duplicates --check-near-duplicates --export-issues
+```
+
+Сравнение двух датасетов:
+
+```bash
+smartrain stats compare --left 170325 --right 291124
+smartrain stats compare --left 170325 --right 291124 --details all --top-n 30
+smartrain stats compare --left 170325 --right 291124 --export-json --export-csv
+```
+
+Интерактивный compare (выбор left/right и опций):
+
+```bash
+smartrain stats compare
 ```
 
 ---

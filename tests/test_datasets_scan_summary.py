@@ -135,3 +135,32 @@ def test_scan_converts_cvat11_to_training_ready_layout(tmp_path: Path) -> None:
     yaml_text = (out_root / "data.yaml").read_text(encoding="utf-8")
     assert "train: ./images" in yaml_text
     assert "names:" in yaml_text
+
+
+def test_scan_purge_processed_raw_yes_deletes_processed_source(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _flat_dataset(rd, "ds_a")
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    datasets_json_main(["--workspace", str(tmp_path), "--purge-processed-raw"])
+    out = capsys.readouterr().out
+    assert "Запрошено удаление обработанных источников" in out
+    assert not (rd / "ds_a").exists()
+    assert (tmp_path / "datasets" / "ds_a").is_dir()
+
+
+def test_scan_purge_processed_raw_no_keeps_sources(tmp_path: Path, monkeypatch, capsys) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _flat_dataset(rd, "ds_a")
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    datasets_json_main(["--workspace", str(tmp_path), "--purge-processed-raw"])
+    out = capsys.readouterr().out
+    assert "удаление обработанных источников из raw_data отменено".lower() in out.lower()
+    assert (rd / "ds_a").is_dir()

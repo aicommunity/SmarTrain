@@ -187,7 +187,7 @@ CLI-обёртка для конвертации **CVAT 1.1 (Images + bbox)**:
 - `source_signature`
 - `modified`
 
-**CLI**: `--workspace` (результат в `datasets/`) или пара `--datasets-path` + опционально `--output-path`; `--mode scan|refresh` (refresh только с workspace); `--dataset` (повторяемый).
+**CLI**: `--workspace` (результат в `datasets/`) или пара `--datasets-path` + опционально `--output-path`; `--mode scan|refresh` (refresh только с workspace); `--dataset` (повторяемый); `--purge-processed-raw` (только workspace/scan: удалить обработанные источники из `raw_data` после подтверждения).
 
 ---
 
@@ -402,13 +402,15 @@ YAML-источники:
 - Подкоманды:
   - `classes` — статистика по классам в `datasets/` (train/val/test/total)
   - `datasets` — сводка по датасетам в `datasets/` (объем, quality flags, imbalance)
+  - `compare` — сравнение двух датасетов (`--left/--right`) с дельтами и class diff
 - Источник данных: только файловая система `datasets/` (без `raw_data/`)
-- Интерактивный режим: для `classes`/`datasets` без фильтров в TTY
+- Интерактивный режим: для `classes`/`datasets` без фильтров в TTY, а также для `compare` без `--left/--right`
 
 ### Основные метрики
 - `classes`: per-class counts по split и total, `images_with_class`, `avg_instances_per_image`, итог по дисбалансу (`ratio`, `cv`, `gini`, `mean/median`)
 - `datasets`: `num_classes`, `images_total`, `labeled_images`, `empty_images`, `instances_total`, `orphan_images/labels`, `broken_label_lines`, `unknown_class_ids`
 - Опционально: `--check-duplicates`, `--check-near-duplicates`, `--export-issues`
+- `compare`: summary-delta (`images`, `instances`, `empty_pct`, `imbalance`, `gini`), issues-delta, `left_only/right_only`, common class diff (`--details all|classes`, `--top-n`, `--abs`, `--export-json`, `--export-csv`)
 
 ---
 

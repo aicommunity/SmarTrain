@@ -188,9 +188,12 @@ def cmd_hash(ctx: typer.Context) -> None:
 def cmd_stats(ctx: typer.Context) -> None:
     """Статистика датасетов в datasets/: classes и datasets."""
     if _ctx_has_help_flag(ctx):
-        from smartrain.dataset_stats import build_stats_arg_parser
+        from smartrain.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
 
-        _dispatch_argparse_help(ctx, build_stats_arg_parser, "smartrain stats")
+        if ctx.args and ctx.args[0] == "compare":
+            _dispatch_argparse_help(ctx, build_stats_compare_arg_parser, "smartrain stats compare")
+        else:
+            _dispatch_argparse_help(ctx, build_stats_arg_parser, "smartrain stats")
     _call("smartrain.dataset_stats", "main", ctx)
 
 

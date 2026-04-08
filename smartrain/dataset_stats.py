@@ -576,6 +576,208 @@ def _render_classes_table(
         console.print(
             f"- {label}: ratio={m['ratio']:.3f}, cv={m['cv']:.3f}, gini={m['gini']:.3f}, mean/median={m['mean_median']:.3f}"
         )
+
+
+def _class_totals(ds: DatasetStats) -> dict[str, int]:
+    return {k: int(sum(v.values())) for k, v in ds.per_class_split_instances.items()}
+
+
+def compare_dataset_stats(left: DatasetStats, right: DatasetStats) -> dict:
+    left_classes = _class_totals(left)
+    right_classes = _class_totals(right)
+    left_set = set(left_classes.keys())
+    right_set = set(right_classes.keys())
+    common = sorted(left_set & right_set)
+    rows = []
+    for cls in common:
+        l_split = left.per_class_split_instances.get(cls, {})
+        r_split = right.per_class_split_instances.get(cls, {})
+        l_total = left_classes.get(cls, 0)
+        r_total = right_classes.get(cls, 0)
+        rows.append(
+            {
+                "class": cls,
+                "left_total": l_total,
+                "right_total": r_total,
+                "delta_total": r_total - l_total,
+                "left_train": int(l_split.get("train", 0)),
+                "right_train": int(r_split.get("train", 0)),
+                "delta_train": int(r_split.get("train", 0)) - int(l_split.get("train", 0)),
+                "left_val": int(l_split.get("val", 0)),
+                "right_val": int(r_split.get("val", 0)),
+                "delta_val": int(r_split.get("val", 0)) - int(l_split.get("val", 0)),
+                "left_test": int(l_split.get("test", 0)),
+                "right_test": int(r_split.get("test", 0)),
+                "delta_test": int(r_split.get("test", 0)) - int(l_split.get("test", 0)),
+            }
+        )
+    rows.sort(key=lambda r: abs(int(r["delta_total"])), reverse=True)
+    left_m = _imbalance_summary(left_classes)
+    right_m = _imbalance_summary(right_classes)
+    left_empty_pct = (100.0 * left.empty_images / left.images_total) if left.images_total else 0.0
+    right_empty_pct = (100.0 * right.empty_images / right.images_total) if right.images_total else 0.0
+    left_q_ok = (
+        left.broken_label_lines == 0
+        and left.unknown_class_ids == 0
+        and left.orphan_images == 0
+        and left.orphan_labels == 0
+    )
+    right_q_ok = (
+        right.broken_label_lines == 0
+        and right.unknown_class_ids == 0
+        and right.orphan_images == 0
+        and right.orphan_labels == 0
+    )
+    return {
+        "summary": {
+            "left": {
+                "name": left.name,
+                "images": left.images_total,
+                "instances": left.instances_total,
+                "empty_pct": left_empty_pct,
+                "imbalance_ratio": left_m["ratio"],
+                "gini": left_m["gini"],
+                "quality_ok": left_q_ok,
+            },
+            "right": {
+                "name": right.name,
+                "images": right.images_total,
+                "instances": right.instances_total,
+                "empty_pct": right_empty_pct,
+                "imbalance_ratio": right_m["ratio"],
+                "gini": right_m["gini"],
+                "quality_ok": right_q_ok,
+            },
+            "delta": {
+                "images": right.images_total - left.images_total,
+                "instances": right.instances_total - left.instances_total,
+                "empty_pct": right_empty_pct - left_empty_pct,
+                "imbalance_ratio": right_m["ratio"] - left_m["ratio"],
+                "gini": right_m["gini"] - left_m["gini"],
+            },
+            "issues": {
+                "broken_label_lines": right.broken_label_lines - left.broken_label_lines,
+                "unknown_class_ids": right.unknown_class_ids - left.unknown_class_ids,
+                "orphan_images": right.orphan_images - left.orphan_images,
+                "orphan_labels": right.orphan_labels - left.orphan_labels,
+                "duplicates": right.duplicate_groups - left.duplicate_groups,
+                "near_duplicates": right.near_duplicate_groups - left.near_duplicate_groups,
+            },
+        },
+        "classes": {
+            "left_only": sorted(left_set - right_set),
+            "right_only": sorted(right_set - left_set),
+            "common": rows,
+        },
+    }
+
+
+def _render_compare_summary(report: dict, *, abs_values: bool = False) -> None:
+    s = report["summary"]
+    table = Table(title=f"Сравнение датасетов: {s['left']['name']} vs {s['right']['name']}")
+    table.add_column("Metric")
+    table.add_column("Left", justify="right")
+    table.add_column("Right", justify="right")
+    table.add_column("Delta(R-L)", justify="right")
+    for key in ("images", "instances", "empty_pct", "imbalance_ratio", "gini"):
+        lv = s["left"][key]
+        rv = s["right"][key]
+        dv = s["delta"][key]
+        if abs_values:
+            dv = abs(dv)
+        if isinstance(lv, float):
+            table.add_row(key, f"{lv:.3f}", f"{rv:.3f}", f"{dv:.3f}")
+        else:
+            table.add_row(key, str(lv), str(rv), str(dv))
+    table.add_row("quality_ok", str(s["left"]["quality_ok"]), str(s["right"]["quality_ok"]), "-")
+    console.print(table)
+    issues = s["issues"]
+    console.print(
+        "[bold]Issues delta (R-L):[/bold] "
+        f"broken={issues['broken_label_lines']}, unknown={issues['unknown_class_ids']}, "
+        f"orphan_i={issues['orphan_images']}, orphan_l={issues['orphan_labels']}, "
+        f"dup={issues['duplicates']}, near_dup={issues['near_duplicates']}"
+    )
+
+
+def _render_compare_classes(report: dict, *, top_n: int | None = None, abs_values: bool = False) -> None:
+    left_only = report["classes"]["left_only"]
+    right_only = report["classes"]["right_only"]
+    if left_only:
+        console.print(f"[bold]Только в left:[/bold] {', '.join(left_only)}")
+    if right_only:
+        console.print(f"[bold]Только в right:[/bold] {', '.join(right_only)}")
+    rows = list(report["classes"]["common"])
+    if top_n is not None and top_n > 0:
+        rows = rows[:top_n]
+    table = Table(title="Diff по общим классам")
+    table.add_column("Class")
+    table.add_column("L_total", justify="right")
+    table.add_column("R_total", justify="right")
+    table.add_column("Delta", justify="right")
+    table.add_column("L_train", justify="right")
+    table.add_column("R_train", justify="right")
+    table.add_column("L_val", justify="right")
+    table.add_column("R_val", justify="right")
+    table.add_column("L_test", justify="right")
+    table.add_column("R_test", justify="right")
+    for r in rows:
+        d = int(r["delta_total"])
+        if abs_values:
+            d = abs(d)
+        table.add_row(
+            r["class"],
+            str(r["left_total"]),
+            str(r["right_total"]),
+            str(d),
+            str(r["left_train"]),
+            str(r["right_train"]),
+            str(r["left_val"]),
+            str(r["right_val"]),
+            str(r["left_test"]),
+            str(r["right_test"]),
+        )
+    console.print(table)
+
+
+def _export_compare_report(layout: WorkspaceLayout, report: dict, *, export_json: bool, export_csv: bool) -> list[str]:
+    out_paths: list[str] = []
+    if not (export_json or export_csv):
+        return out_paths
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = os.path.join(layout.analytics, "stats", stamp)
+    os.makedirs(out_dir, exist_ok=True)
+    if export_json:
+        jp = os.path.join(out_dir, "compare_report.json")
+        with open(jp, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        out_paths.append(jp)
+    if export_csv:
+        cp = os.path.join(out_dir, "compare_classes.csv")
+        with open(cp, "w", encoding="utf-8", newline="") as f:
+            wr = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "class",
+                    "left_total",
+                    "right_total",
+                    "delta_total",
+                    "left_train",
+                    "right_train",
+                    "delta_train",
+                    "left_val",
+                    "right_val",
+                    "delta_val",
+                    "left_test",
+                    "right_test",
+                    "delta_test",
+                ],
+            )
+            wr.writeheader()
+            for row in report["classes"]["common"]:
+                wr.writerow(row)
+        out_paths.append(cp)
+    return out_paths
 def _export_issues(layout: WorkspaceLayout, rows: list[dict[str, str]]) -> str:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = os.path.join(layout.analytics, "stats", stamp)
@@ -797,6 +999,36 @@ def _prompt_interactive_datasets(args, available_names: list[str]) -> None:
     )
 
 
+def prompt_interactive_compare_args(args, available_names: list[str]) -> None:
+    from prompt_toolkit import prompt
+    from prompt_toolkit.completion import WordCompleter
+
+    names_comp = WordCompleter(available_names, ignore_case=True)
+    details_comp = WordCompleter(["summary", "classes", "all"], ignore_case=True)
+    while True:
+        left = prompt("Left dataset: ", default=str(getattr(args, "left", "") or ""), completer=names_comp, complete_while_typing=True).strip()
+        right = prompt("Right dataset: ", default=str(getattr(args, "right", "") or ""), completer=names_comp, complete_while_typing=True).strip()
+        if left and right and left != right:
+            args.left = left
+            args.right = right
+            break
+        console.print("[ERROR] Нужно задать разные left/right датасеты.")
+    args.details = (
+        prompt(
+            "Details (summary/classes/all): ",
+            default=str(getattr(args, "details", "summary")),
+            completer=details_comp,
+            complete_while_typing=True,
+        ).strip()
+        or "summary"
+    )
+    raw_top = prompt("Top-N классов (пусто=без лимита): ", default="").strip()
+    args.top_n = int(raw_top) if raw_top else None
+    args.abs = _prompt_yes_no("Показывать абсолютные дельты (--abs)", default=bool(getattr(args, "abs", False)))
+    args.export_json = _prompt_yes_no("Экспорт JSON (--export-json)", default=bool(getattr(args, "export_json", False)))
+    args.export_csv = _prompt_yes_no("Экспорт CSV (--export-csv)", default=bool(getattr(args, "export_csv", False)))
+
+
 def build_stats_arg_parser() -> argparse.ArgumentParser:
     parser = CliArgumentParser(description="Единая статистика датасетов и классов (только datasets/)")
     parser.add_argument(
@@ -826,6 +1058,25 @@ def build_stats_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--class-desc", action="store_true", help="Сортировка таблицы классов по убыванию")
     parser.add_argument("--class-limit", type=int, default=None, help="Лимит строк в таблицах классов")
+    return parser
+
+
+def build_stats_compare_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(description="Сравнение двух датасетов из datasets/")
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); анализируется только datasets/",
+    )
+    parser.add_argument("--left", type=str, default=None, help="Левый датасет (baseline)")
+    parser.add_argument("--right", type=str, default=None, help="Правый датасет (candidate)")
+    parser.add_argument("--details", choices=("summary", "classes", "all"), default="summary")
+    parser.add_argument("--top-n", type=int, default=None, help="Лимит строк для class diff")
+    parser.add_argument("--abs", action="store_true", help="Показывать абсолютные дельты")
+    parser.add_argument("--export-json", action="store_true", help="Экспорт отчёта compare в JSON")
+    parser.add_argument("--export-csv", action="store_true", help="Экспорт class diff в CSV")
+    parser.add_argument("--no-legend", action="store_true", help="Не выводить расшифровку колонок")
     return parser
 
 
@@ -875,15 +1126,55 @@ def _run_stats(args, layout: WorkspaceLayout) -> int:
     return 0
 
 
+def _run_stats_compare(args, layout: WorkspaceLayout) -> int:
+    available = _available_dataset_dirs(layout)
+    if not available:
+        console.print("[ERROR] В datasets/ не найдено ни одного датасета.")
+        return 2
+    if (not args.left or not args.right) and sys.stdin.isatty():
+        console.print("[INFO] Интерактивный режим stats compare")
+        _print_interactive_catalog(available)
+        prompt_interactive_compare_args(args, sorted(available.keys()))
+    if not args.left or not args.right:
+        console.print("[ERROR] Для compare нужны --left и --right.")
+        return 2
+    if args.left == args.right:
+        console.print("[ERROR] --left и --right должны быть разными.")
+        return 2
+    _ = _filter_dataset_names(available, [args.left, args.right])
+    left = _scan_one_dataset(available[args.left], args.left)
+    right = _scan_one_dataset(available[args.right], args.right)
+    report = compare_dataset_stats(left, right)
+    _render_compare_summary(report, abs_values=bool(args.abs))
+    if args.details in ("classes", "all"):
+        _render_compare_classes(report, top_n=args.top_n, abs_values=bool(args.abs))
+    out_paths = _export_compare_report(
+        layout,
+        report,
+        export_json=bool(args.export_json),
+        export_csv=bool(args.export_csv),
+    )
+    for p in out_paths:
+        console.print(f"[OK] Экспорт: {p}")
+    return 0
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
-    parser = build_stats_arg_parser()
+    subcmd = None
+    if argv and argv[0] in ("datasets", "classes", "compare"):
+        subcmd = argv[0]
+        argv = argv[1:]
+    parser = build_stats_compare_arg_parser() if subcmd == "compare" else build_stats_arg_parser()
     args = parser.parse_args(argv)
     try:
         root = resolve_workspace_root(args.workspace)
         layout = WorkspaceLayout(root)
-        code = _run_stats(args, layout)
+        if subcmd == "compare":
+            code = _run_stats_compare(args, layout)
+        else:
+            code = _run_stats(args, layout)
     except ValueError as e:
         console.print(f"[ERROR] {e}")
         code = 2

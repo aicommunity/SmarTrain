@@ -504,6 +504,11 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Явно указать датасет (имя из raw_data или путь). Флаг можно повторять.",
     )
+    parser.add_argument(
+        "--purge-processed-raw",
+        action="store_true",
+        help="Только workspace/scan: после подтверждения удалить из raw_data источники, обработанные в текущем запуске.",
+    )
 
     return parser
 
@@ -863,6 +868,37 @@ def _append_to_datasets_list(list_path: str, value: str) -> None:
         f.write("\n")
 
 
+def _confirm_purge_processed_raw(paths: list[str]) -> bool:
+    if not paths:
+        return False
+    print("[WARNING] Запрошено удаление обработанных источников из raw_data.")
+    print("[WARNING] Будут удалены:")
+    for p in paths:
+        print(f"  - {p}")
+    if not sys.stdin.isatty():
+        print("[WARNING] Нет интерактивного TTY: удаление отменено.")
+        return False
+    ans = input("Продолжить удаление? [Y/n]: ").strip().lower()
+    return ans in ("", "y", "yes", "1", "true", "да", "д")
+
+
+def _purge_raw_sources(paths: list[str]) -> tuple[int, int]:
+    removed = 0
+    failed = 0
+    for p in paths:
+        try:
+            if os.path.isdir(p):
+                shutil.rmtree(p)
+                removed += 1
+            elif os.path.isfile(p):
+                os.remove(p)
+                removed += 1
+        except Exception as e:
+            failed += 1
+            print(f"[WARNING] Не удалось удалить {p}: {e}")
+    return removed, failed
+
+
 def _ensure_scan_initial_passport(
     *,
     dataset_dir: str,
@@ -1016,9 +1052,13 @@ def main(argv=None):
 
     datasets_info: dict = {}
     class_names: dict = {}
+    processed_raw_sources: set[str] = set()
 
     if args.mode == "refresh" and not use_workspace:
         print("[ERROR] Режим --mode refresh поддерживается только без --datasets-path (через workspace).")
+        return
+    if args.purge_processed_raw and (not use_workspace or args.mode != "scan"):
+        print("[ERROR] --purge-processed-raw доступен только в workspace при --mode scan.")
         return
 
     if use_workspace and args.mode == "refresh":
@@ -1062,13 +1102,13 @@ def main(argv=None):
         folder_roots = []
         used_names: set[str] = set()
 
-        def _sync_one_source(*, logical_name: str, source_for_copy: str, source_ref: str, source_signature: str) -> None:
+        def _sync_one_source(*, logical_name: str, source_for_copy: str, source_ref: str, source_signature: str) -> bool:
             dst_dir = os.path.join(layout.datasets, logical_name)
             prev_entry = previous_info.get(logical_name)
             normalized_on_skip = False
             if isinstance(prev_entry, dict) and bool(prev_entry.get(MODIFIED_KEY)):
                 print(f"[WARNING] Пропуск синхронизации {logical_name!r}: modified=true.")
-                return
+                return False
 
             source_hash = _dataset_content_hash(source_for_copy)
             if source_hash:
@@ -1087,7 +1127,7 @@ def main(argv=None):
                         print(
                             f"[WARNING] Пропуск источника {logical_name!r}: данные совпадают с datasets/{ds_name!r}."
                         )
-                        return
+                        return False
 
             prev_sig = prev_entry.get(SOURCE_SIGNATURE_KEY) if isinstance(prev_entry, dict) else None
             if prev_sig == source_signature and _dir_has_content(dst_dir):
@@ -1111,6 +1151,7 @@ def main(argv=None):
                 current_dst_hash = _dataset_content_hash(dst_dir)
                 if current_dst_hash:
                     entry[DATASET_HASH_KEY] = current_dst_hash
+            return True
 
         if use_workspace:
             if os.path.isdir(raw_source_dir):
@@ -1131,19 +1172,23 @@ def main(argv=None):
                         except Exception as e:
                             print(f"[WARNING] Пропуск архива {src_name!r} из raw_data: {e}")
                             continue
-                        _sync_one_source(
+                        synced = _sync_one_source(
                             logical_name=logical_name,
                             source_for_copy=extracted,
                             source_ref=os.path.relpath(src_path, layout.root),
                             source_signature=sig,
                         )
+                        if synced:
+                            processed_raw_sources.add(os.path.abspath(src_path))
                     else:
-                        _sync_one_source(
+                        synced = _sync_one_source(
                             logical_name=logical_name,
                             source_for_copy=src_path,
                             source_ref=os.path.relpath(src_path, layout.root),
                             source_signature=_compute_source_signature(src_path),
                         )
+                        if synced:
+                            processed_raw_sources.add(os.path.abspath(src_path))
 
         if use_workspace and args.dataset:
             used_names_for_explicit = {
@@ -1282,6 +1327,20 @@ def main(argv=None):
             used_names.add(folder_name)
 
         datasets_info, class_names = _run_scan_folder_roots(folder_roots)
+
+    if use_workspace and args.mode == "scan" and args.purge_processed_raw:
+        root_raw = os.path.abspath(layout.raw_data)
+        list_path = os.path.abspath(os.path.join(root_raw, DEFAULT_DATASETS_LIST_FILE))
+        purge_candidates = sorted(
+            p
+            for p in processed_raw_sources
+            if p.startswith(root_raw + os.sep) and os.path.abspath(p) != list_path
+        )
+        if _confirm_purge_processed_raw(purge_candidates):
+            removed, failed = _purge_raw_sources(purge_candidates)
+            print(f"[INFO] Удалено из raw_data: {removed}, ошибок: {failed}")
+        else:
+            print("[INFO] Удаление обработанных источников из raw_data отменено.")
 
     for name in list(datasets_info.keys()):
         if name in previous_info and isinstance(previous_info[name], dict):
