@@ -175,3 +175,56 @@ def test_train_main_no_args_enters_interactive(monkeypatch: pytest.MonkeyPatch) 
     mtm.main([])
     assert called["interactive"] == 1
 
+
+def test_train_interactive_skips_prompts_for_values_from_ultralytics_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deploy_workspace(str(tmp_path))
+    (tmp_path / "datasets" / DATASETS_INFO_FILE).write_text(
+        json.dumps({"ds_a": {"classes": {"cat": 0}}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    args = _base_args(tmp_path)
+
+    answers = iter(
+        [
+            "ds_a",  # dataset
+            "/tmp/ultra.yaml",  # ultralytics_yaml
+            "",  # target_path
+            "",  # test_only
+            "",  # val_imgsz
+            "",  # val_conf
+            "",  # val_iou
+            "",  # non_interactive
+        ]
+    )
+    monkeypatch.setattr(mtm, "_prompt_input", lambda *a, **k: next(answers))
+    monkeypatch.setattr(
+        mtm,
+        "_load_ultralytics_yaml",
+        lambda _path: {
+            "model": "yolo11s.pt",
+            "epochs": 7,
+            "batch": 4,
+            "imgsz": 512,
+            "task": "segment",
+            "weighted_sampling": True,
+            "export_onnx": True,
+            "export_onnx_half": False,
+            "clearml": True,
+            "clearml_project": "ProjA",
+        },
+    )
+
+    assert mtm._run_interactive_train_setup(args) is True
+    assert args.task == "segment"
+    assert args.model == "yolo11s.pt"
+    assert args.epochs == 7
+    assert args.batch == 4
+    assert args.img_size == 512
+    assert args.weighted_sampling is True
+    assert args.export_onnx is True
+    assert args.export_onnx_fp32 is True
+    assert args.clearml is True
+    assert args.clearml_project == "ProjA"
+

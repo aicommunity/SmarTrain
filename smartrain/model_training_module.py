@@ -4,6 +4,7 @@ import os
 import argparse
 import sys
 import traceback
+import gc
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,6 @@ _ULTRALYTICS_YAML_IGNORED_KEYS = frozenset(
         "project",
         "name",
         "exist_ok",
-        "task",
         "model_dir",
         "target_path",
         "workspace",
@@ -71,7 +71,7 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         "--ultralytics_yaml",
         type=str,
         default=None,
-        help="Внешний Ultralytics args.yaml; несовместимые ключи (data/project/name/exist_ok/task/...) игнорируются с предупреждением",
+        help="Внешний Ultralytics args.yaml; несовместимые ключи (data/project/name/exist_ok/...) игнорируются с предупреждением",
     )
 
     parser.add_argument(
@@ -162,6 +162,12 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Порог IoU для val() (Ultralytics)",
+    )
+    parser.add_argument(
+        "--val-batch",
+        type=int,
+        default=None,
+        help="Batch для val/test (по умолчанию: как batch обучения; для --test-only берётся из training_metadata.json при наличии)",
     )
 
     parser.add_argument(
@@ -315,27 +321,63 @@ def _run_interactive_train_setup(args) -> bool:
     )
     if args.ultralytics_yaml:
         print(
-            "[INFO] Для --ultralytics_yaml: data/project/name/exist_ok/task и служебные path-ключи "
+            "[INFO] Для --ultralytics_yaml: data/project/name/exist_ok и служебные path-ключи "
             "игнорируются; data всегда берётся из выбранного датасета."
         )
+    ultra_u_cfg: dict[str, Any] = {}
+    ultra_sm_opts: dict[str, Any] = {}
+    if args.ultralytics_yaml:
+        try:
+            ultra_profile = _load_ultralytics_yaml(args.ultralytics_yaml)
+        except Exception as e:
+            print(f"[ERROR] Не удалось прочитать --ultralytics_yaml: {e}")
+            return False
+        filtered = {
+            k: v for k, v in ultra_profile.items() if k not in _ULTRALYTICS_YAML_IGNORED_KEYS
+        }
+        ultra_u_cfg, ultra_sm_opts = extract_smartrain_options(filtered)
 
-    task_default = str(getattr(args, "task", "detect"))
     task_choices = ["detect", "segment", "classify", "pose", "obb"]
-    task_completer = WordCompleter(task_choices, ignore_case=True)
-    args.task = (
-        _prompt_input(
-            "Task (detect/segment/classify/pose/obb): ",
-            default=task_default,
-            completer=task_completer,
-        ).strip()
-        or task_default
-    )
+    if "task" in ultra_u_cfg:
+        args.task = str(ultra_u_cfg["task"])
+        print(f"[INFO] Task взят из --ultralytics_yaml: {args.task}")
+    else:
+        task_default = str(getattr(args, "task", "detect"))
+        task_completer = WordCompleter(task_choices, ignore_case=True)
+        args.task = (
+            _prompt_input(
+                "Task (detect/segment/classify/pose/obb): ",
+                default=task_default,
+                completer=task_completer,
+            ).strip()
+            or task_default
+        )
 
-    args.model = (_prompt_input("Модель (--model): ", default=str(getattr(args, "model", MODEL_VERSION))).strip()
-                  or MODEL_VERSION)
-    args.epochs = _prompt_int("Эпохи (--epochs)", int(getattr(args, "epochs", EPOCHS)))
-    args.batch = _prompt_int("Batch (--batch)", int(getattr(args, "batch", BATCH)))
-    args.img_size = _prompt_int("Размер изображения (--img-size)", int(getattr(args, "img_size", IMG_SIZE)))
+    if "model" in ultra_u_cfg:
+        args.model = str(ultra_u_cfg["model"])
+        print(f"[INFO] Модель взята из --ultralytics_yaml: {args.model}")
+    else:
+        args.model = (
+            _prompt_input("Модель (--model): ", default=str(getattr(args, "model", MODEL_VERSION))).strip()
+            or MODEL_VERSION
+        )
+    if "epochs" in ultra_u_cfg:
+        args.epochs = int(ultra_u_cfg["epochs"])
+        print(f"[INFO] Эпохи взяты из --ultralytics_yaml: {args.epochs}")
+    else:
+        args.epochs = _prompt_int("Эпохи (--epochs)", int(getattr(args, "epochs", EPOCHS)))
+    if "batch" in ultra_u_cfg:
+        args.batch = int(ultra_u_cfg["batch"])
+        print(f"[INFO] Batch взят из --ultralytics_yaml: {args.batch}")
+    else:
+        args.batch = _prompt_int("Batch (--batch)", int(getattr(args, "batch", BATCH)))
+    if "imgsz" in ultra_u_cfg:
+        args.img_size = int(ultra_u_cfg["imgsz"])
+        print(f"[INFO] Размер изображения взят из --ultralytics_yaml: {args.img_size}")
+    else:
+        args.img_size = _prompt_int(
+            "Размер изображения (--img-size)", int(getattr(args, "img_size", IMG_SIZE))
+        )
 
     default_target = str(getattr(args, "target_path", None) or layout.runs)
     args.target_path = (_prompt_input("Каталог прогонов (--target-path): ", default=default_target).strip()
@@ -357,30 +399,45 @@ def _run_interactive_train_setup(args) -> bool:
     args.val_conf = _prompt_optional_float("Порог conf (--val-conf, пусто=по умолчанию Ultralytics)", getattr(args, "val_conf", None))
     args.val_iou = _prompt_optional_float("Порог IoU (--val-iou, пусто=по умолчанию Ultralytics)", getattr(args, "val_iou", None))
 
-    args.weighted_sampling = _prompt_yes_no(
-        "Включить weighted sampling (--weighted-sampling)",
-        default=bool(getattr(args, "weighted_sampling", False)),
-    )
-    args.export_onnx = _prompt_yes_no(
-        "Экспортировать ONNX после обучения (--export-onnx)",
-        default=bool(getattr(args, "export_onnx", False)),
-    )
-    args.export_onnx_fp32 = _prompt_yes_no(
-        "Использовать FP32 для ONNX (--export-onnx-fp32)",
-        default=bool(getattr(args, "export_onnx_fp32", False)),
-    )
-    args.clearml = _prompt_yes_no(
-        "Логировать в ClearML (--clearml)",
-        default=bool(getattr(args, "clearml", False)),
-    )
-    if args.clearml:
-        args.clearml_project = (
-            _prompt_input(
-                "Проект ClearML (--clearml-project): ",
-                default=str(getattr(args, "clearml_project", "") or ""),
-            ).strip()
-            or None
+    if "weighted_sampling" in ultra_sm_opts:
+        args.weighted_sampling = bool(ultra_sm_opts["weighted_sampling"])
+    else:
+        args.weighted_sampling = _prompt_yes_no(
+            "Включить weighted sampling (--weighted-sampling)",
+            default=bool(getattr(args, "weighted_sampling", False)),
         )
+    if "export_onnx" in ultra_sm_opts:
+        args.export_onnx = bool(ultra_sm_opts["export_onnx"])
+    else:
+        args.export_onnx = _prompt_yes_no(
+            "Экспортировать ONNX после обучения (--export-onnx)",
+            default=bool(getattr(args, "export_onnx", False)),
+        )
+    if "export_onnx_half" in ultra_sm_opts:
+        args.export_onnx_fp32 = not bool(ultra_sm_opts["export_onnx_half"])
+    else:
+        args.export_onnx_fp32 = _prompt_yes_no(
+            "Использовать FP32 для ONNX (--export-onnx-fp32)",
+            default=bool(getattr(args, "export_onnx_fp32", False)),
+        )
+    if "clearml" in ultra_sm_opts:
+        args.clearml = bool(ultra_sm_opts["clearml"])
+    else:
+        args.clearml = _prompt_yes_no(
+            "Логировать в ClearML (--clearml)",
+            default=bool(getattr(args, "clearml", False)),
+        )
+    if args.clearml:
+        if "clearml_project" in ultra_sm_opts:
+            args.clearml_project = str(ultra_sm_opts["clearml_project"]).strip() or None
+        else:
+            args.clearml_project = (
+                _prompt_input(
+                    "Проект ClearML (--clearml-project): ",
+                    default=str(getattr(args, "clearml_project", "") or ""),
+                ).strip()
+                or None
+            )
     args.non_interactive = _prompt_yes_no(
         "Не спрашивать подтверждения при существующей папке (--yes)",
         default=bool(getattr(args, "non_interactive", False)),
@@ -710,6 +767,7 @@ def test_yolo(
     val_imgsz=None,
     val_conf=None,
     val_iou=None,
+    val_batch=None,
 ):
     test_start_time = datetime.now()
 
@@ -720,6 +778,7 @@ def test_yolo(
         "imgsz": imgsz,
         "conf": val_conf,
         "iou": val_iou,
+        "batch": val_batch,
     }
 
     model_path = os.path.join(model_dir, "train", "weights", "best.pt")
@@ -738,6 +797,8 @@ def test_yolo(
         val_kwargs["conf"] = val_conf
     if val_iou is not None:
         val_kwargs["iou"] = val_iou
+    if val_batch is not None:
+        val_kwargs["batch"] = int(val_batch)
 
     print("\n" + "=" * 60)
     print(f"[INFO] Тестирование модели: {model_dir}")
@@ -745,7 +806,7 @@ def test_yolo(
     print(f"[INFO] Конфигурация: {data_yaml}")
     print(f"[INFO] Сохранение результатов в {model_dir}")
     if imgsz is not None:
-        print(f"[INFO] val imgsz={imgsz}, conf={val_conf}, iou={val_iou}")
+        print(f"[INFO] val imgsz={imgsz}, batch={val_batch}, conf={val_conf}, iou={val_iou}")
     print("=" * 60 + "\n")
 
     test_end_time = None
@@ -922,6 +983,53 @@ def _json_safe_train_summary(train_kw: dict[str, Any] | None) -> dict[str, Any] 
     return out
 
 
+def _load_batch_from_training_metadata(model_dir: str) -> int | None:
+    """
+    В режиме --test-only хотим тестировать с тем же batch, что был при обучении.
+    Берём из training_metadata.json если файл есть и формат ожидаемый.
+    """
+    try:
+        meta_path = os.path.join(model_dir, "training_metadata.json")
+        if not os.path.isfile(meta_path):
+            return None
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        bs = (
+            meta.get("training_info", {})
+            .get("hyperparameters", {})
+            .get("batch_size")
+        )
+        if bs is None:
+            return None
+        bs_i = int(bs)
+        return bs_i if bs_i > 0 else None
+    except Exception:
+        return None
+
+
+def _maybe_free_cuda_memory() -> None:
+    """
+    Смягчение OOM между train и val/test в одном процессе.
+    """
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            # Иногда помогает собрать IPC кэш, но не обязателен.
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+    except Exception:
+        # torch может быть недоступен в окружениях без GPU/torch; это не критично.
+        pass
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -1047,6 +1155,8 @@ def main(argv=None):
 
         if training_success and model_dir:
             try:
+                _maybe_free_cuda_memory()
+                val_batch = args.val_batch if args.val_batch is not None else batch
                 test_start_time, test_end_time, inference_info = test_yolo(
                     model_dir,
                     data,
@@ -1056,6 +1166,7 @@ def main(argv=None):
                     val_imgsz=args.val_imgsz,
                     val_conf=args.val_conf,
                     val_iou=args.val_iou,
+                    val_batch=val_batch,
                 )
             except Exception as e:
                 test_success = False
@@ -1091,6 +1202,11 @@ def main(argv=None):
         model_dir = args.model_dir
         if model_dir:
             try:
+                val_batch = (
+                    args.val_batch
+                    if args.val_batch is not None
+                    else (_load_batch_from_training_metadata(model_dir) or batch)
+                )
                 test_start_time, test_end_time, inference_info = test_yolo(
                     model_dir,
                     data,
@@ -1098,6 +1214,7 @@ def main(argv=None):
                     val_imgsz=args.val_imgsz,
                     val_conf=args.val_conf,
                     val_iou=args.val_iou,
+                    val_batch=val_batch,
                 )
             except Exception as e:
                 test_success = False

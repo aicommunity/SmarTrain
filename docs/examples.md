@@ -241,7 +241,7 @@ smartrain train --data my_merge --export-onnx -y
 smartrain train --data my_merge --export-onnx --export-onnx-fp32 -y
 ```
 
-Дополнительно см. справку: **`--config`**, **`--ultralytics_yaml`**, **`--val-imgsz`**, **`--val-conf`**, **`--val-iou`**.
+Дополнительно см. справку: **`--config`**, **`--ultralytics_yaml`**, **`--val-imgsz`**, **`--val-batch`**, **`--val-conf`**, **`--val-iou`**.
 
 Несколько разных моделей на одном датасете:
 
@@ -257,7 +257,8 @@ smartrain train --data my_merge --model yolov8l --epochs 100 --batch 8 -y
 smartrain train \
   --test-only \
   --model-dir /path/to/run_folder \
-  --data /path/to/dataset_with_data_yaml
+  --data /path/to/dataset_with_data_yaml \
+  --val-imgsz 1280 --val-batch 1
 ```
 
 С явными порогами для `val`:

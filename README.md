@@ -77,6 +77,19 @@ smartrain train
 - `--ultralytics_yaml` — внешний Ultralytics `args.yaml`.
 - Приоритеты: `CLI > --ultralytics_yaml > --config > defaults`.
 - Поле `data` из `--ultralytics_yaml` не используется: путь к датасету берётся из выбранного `--data`.
+- Если после обучения падает тест (`CUDA out of memory`), снижайте нагрузку на `val()` через `--val-imgsz` и/или `--val-batch`.
+- Отдельный тест уже обученной модели: `--test-only` + `--model-dir` (папка прогона).
+
+Примеры:
+
+```bash
+# Только тест уже обученной модели (часто помогает, т.к. это отдельный процесс)
+smartrain train --workspace /data/MarsSmarTrain \
+  --data 2026-04-07_18-57-33-merged \
+  --test-only \
+  --model-dir /data/MarsSmarTrain/runs/<dataset>/<run_folder> \
+  --val-imgsz 1280 --val-batch 1
+```
 
 Сканирование датасетов из файла со списком путей:
 
