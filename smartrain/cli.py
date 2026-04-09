@@ -212,6 +212,7 @@ def cmd_scan(ctx: typer.Context) -> None:
         module="smartrain.datasets_json_former",
         build_parser=build_datasets_json_arg_parser,
         prog="smartrain scan",
+        empty_args_mode="invoke_if_tty_else_help",
     )
 
 
