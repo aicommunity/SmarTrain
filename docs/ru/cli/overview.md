@@ -2,7 +2,7 @@
 
 # CLI: обзор
 
-Точка входа: `smartrain` (Typer-роутер + делегирование в argparse-модули).
+Точка входа: `smartrain` (Typer-роутер с единым поведением команд).
 
 ## Группы команд
 
@@ -26,3 +26,7 @@ smartrain <команда> --help
 smartrain queue list --help
 smartrain analyze inference-benchmark --help
 ```
+
+Вызов `smartrain <команда>` без обязательных аргументов обычно выводит справку этой команды.
+Исключение: `smartrain train` без аргументов запускает интерактивную настройку (нужен TTY).
+Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.

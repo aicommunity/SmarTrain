@@ -32,6 +32,27 @@ CLI_HELP_CASES: list[tuple[str, list[str]]] = [
     ("plot", ["compare", "--", "--help"]),
 ]
 
+NO_ARGS_HELP_CASES: list[str] = [
+    "queue",
+    "registry",
+    "analyze",
+    "scan",
+    "fusion",
+    "augment",
+    "balance",
+    "hash",
+    "stats",
+    "roi",
+    "queue-run",
+    "plot",
+    "migrate-models",
+    "cvat",
+    "clearml-upload",
+    "sahi",
+    "heatmap",
+    "orient",
+]
+
 
 def _run(
     args: list[str],
@@ -108,4 +129,67 @@ def test_group_without_subcommand_shows_help_and_exits_zero(
     r = _run([group_name], cwd=tmp_path, env=env)
     out = (r.stdout or "") + (r.stderr or "")
     assert r.returncode == 0, out
-    assert "Usage:" in out
+    assert "usage:" in out.lower()
+
+
+@pytest.mark.parametrize("cmd", NO_ARGS_HELP_CASES)
+def test_command_without_args_shows_help(cmd: str, subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run([cmd], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "usage:" in out.lower()
+
+
+def test_analyze_help_is_argparse_style(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["analyze"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "usage: smartrain analyze" in out.lower()
+    assert "interactive" in out
+    assert "inference-benchmark" in out
+
+
+@pytest.mark.parametrize(
+    "cmd,required_phrase",
+    [
+        (["analyze", "compare", "--help"], "usage:"),
+        (["train", "--", "--help"], "Examples:"),
+        (["cvat", "--", "--help"], "Examples:"),
+        (["sahi", "--", "--help"], "Examples:"),
+        (["heatmap", "--", "--help"], "Examples:"),
+    ],
+)
+def test_key_help_commands_include_examples(
+    cmd: list[str],
+    required_phrase: str,
+    subprocess_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(cmd, cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode in (0, 2), out
+    assert required_phrase.lower() in out.lower()
+
+
+def test_train_without_args_dispatches_to_interactive_flow(
+    subprocess_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["train"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    # In non-TTY subprocesses interactive train reports this message;
+    # this proves we call train main([]) instead of printing argparse help.
+    assert "interactive train mode requires a terminal" in out.lower()

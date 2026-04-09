@@ -72,7 +72,9 @@ Current documentation is organized into sections in `docs/`:
 
 ## Important details
 
-- For commands with argparse, always use `smartrain <command> --help`.
+- Running `smartrain <command>` without required arguments usually prints command help.
+- `smartrain train` without arguments starts interactive mode (requires TTY terminal).
+- Command help now includes practical `Examples` / `Quick examples` blocks for common workflows.
 - For `hash --validate`: `0` for a match, `1` for a mismatch, `2` for an error.
 - By default, the workspace queue uses `queue.txt` and `tmp/status.txt`.
 - Dependency extras:
