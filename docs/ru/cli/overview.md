@@ -30,3 +30,9 @@ smartrain analyze inference-benchmark --help
 Вызов `smartrain <команда>` без обязательных аргументов обычно выводит справку этой команды.
 Исключение: `smartrain train` без аргументов запускает интерактивную настройку (нужен TTY).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
+
+Дополнения для балансировки и статистики:
+
+- `smartrain balance` поддерживает стратегии `weights`, `rfs`, `hybrid` и параметры их настройки.
+- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` применяет готовые настройки под типовые сценарии.
+- `smartrain stats --balance-ready` выводит метрики дисбаланса и рекомендации для балансировщика.

@@ -75,6 +75,10 @@ Current documentation is organized into sections in `docs/`:
 - Running `smartrain <command>` without required arguments usually prints command help.
 - `smartrain train` without arguments starts interactive mode (requires TTY terminal).
 - Command help now includes practical `Examples` / `Quick examples` blocks for common workflows.
+- `smartrain balance` presets:
+  - `--preset weights-safe` for conservative balancing
+  - `--preset rfs-aggressive` for stronger tail upsampling
+  - `--preset hybrid-default` as a general default
 - For `hash --validate`: `0` for a match, `1` for a mismatch, `2` for an error.
 - By default, the workspace queue uses `queue.txt` and `tmp/status.txt`.
 - Dependency extras:

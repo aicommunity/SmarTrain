@@ -30,3 +30,9 @@ smartrain analyze inference-benchmark --help
 Calling `smartrain <command>` without required arguments usually prints that command's help.
 `smartrain train` is special: without arguments it enters interactive setup (TTY required).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
+
+Balance and stats additions:
+
+- `smartrain balance` supports `weights`, `rfs`, and `hybrid` strategies, plus weight/rfs tuning flags.
+- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` applies tuned defaults for common scenarios.
+- `smartrain stats --balance-ready` prints imbalance metrics and balancing recommendations.

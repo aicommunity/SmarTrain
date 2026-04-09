@@ -658,6 +658,15 @@ def cmd_analyze_inference_plot(ctx: typer.Context) -> None:
     _invoke_module_main("smartrain.results_analyzer", ["inference-plot", *list(ctx.args)])
 
 
+@analyze_app.command(
+    "test-metrics-plot",
+    short_help="Plot test metrics from CSV files.",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def cmd_analyze_test_metrics_plot(ctx: typer.Context) -> None:
+    _invoke_module_main("smartrain.results_analyzer", ["test-metrics-plot", *list(ctx.args)])
+
+
 def _analyze_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         from smartrain.results_analyzer import build_analyze_arg_parser

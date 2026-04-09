@@ -45,3 +45,49 @@ def test_balance_name_increment_and_class_filter(tmp_path: Path) -> None:
     assert (tmp_path / "datasets" / "ds_b_balanced").is_dir()
     assert (tmp_path / "datasets" / "ds_b_balanced_2").is_dir()
 
+
+def test_balance_weights_and_report_manifest(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "weights",
+            "--weight-mode",
+            "effective",
+            "--emit-balance-report",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_b_balanced"
+    manifest = json.loads((out / "balance_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["strategy"] == "weights"
+    assert manifest["weight_mode"] == "effective"
+    assert "class_counts_before_bbox" in manifest
+    assert "class_counts_after_bbox" in manifest
+
+
+def test_balance_preset_applies_defaults_and_allows_override(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--preset",
+            "hybrid-default",
+            "--target",
+            "1.1",
+            "--emit-balance-report",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_b_balanced"
+    manifest = json.loads((out / "balance_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["strategy"] == "hybrid"
+    # Overridden explicitly by CLI flag; preset should not overwrite it.
+    assert abs(float(manifest["target"]) - 1.1) < 1e-9
+    assert manifest["weight_mode"] == "effective"
+

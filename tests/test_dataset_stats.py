@@ -222,3 +222,30 @@ def test_stats_interactive_with_dataset_prompt(tmp_path: Path, monkeypatch: pyte
         stats_main(["--workspace", str(tmp_path)])
     assert e.value.code == 0
 
+
+def test_stats_balance_ready_and_export(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _write_ds(tmp_path, "ds_balance")
+    _write_jpg(ds / "train" / "images" / "a.jpg")
+    _write_jpg(ds / "train" / "images" / "b.jpg")
+    (ds / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (ds / "train" / "labels" / "b.txt").write_text("1 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    out_json = tmp_path / "balance_ready.json"
+    with pytest.raises(SystemExit) as e:
+        stats_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--dataset",
+                "ds_balance",
+                "--balance-ready",
+                "--export-balance-report",
+                str(out_json),
+            ]
+        )
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert "Balance-ready dataset metrics" in out
+    assert out_json.is_file()
+
