@@ -847,6 +847,7 @@ def cmd_orient(ctx: typer.Context) -> None:
         module="smartrain.dataset_orient",
         build_parser=build_orient_arg_parser,
         prog="smartrain orient",
+        empty_args_mode="invoke_if_tty_else_help",
     )
 
 
