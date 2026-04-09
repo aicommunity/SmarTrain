@@ -375,11 +375,13 @@ smartrain augment
 ```
 
 Для `bbox_copy` в интерактиве доступен выбор ROI-режима:
+
 - `detector` (по умолчанию) — ROI через детектор;
 - `bbox` — ROI по существующей разметке;
 - `none` — без ROI-ограничений.
 
 Для `bbox_copy` также доступен стиль размещения:
+
 - `random` — полностью случайный выбор валидной позиции;
 - `uniform-grid` — более равномерное покрытие ROI/кадра по сетке.
 
@@ -407,21 +409,53 @@ smartrain balance
 ## `smartrain orient`
 
 Исправляет поворот кадров на 0/90/180/270, когда часть изображений в датасете оказалась повернута на 90°.
-Работает **по эталонным изображениям** в правильной ориентации (`--reference ...`) и создаёт новый датасет в `datasets/`.
+Поддерживает два режима:
+
+- **`--method reference`**: по эталонным изображениям в правильной ориентации (`--reference ...`).
+- **`--method rotnet`**: self-supervised RotNet — обучаемый классификатор угла 0/90/180/270 на синтетических поворотах, сохраняет чекпойнт внутри исходного датасета для повторного применения/дообучения.
 
 ```bash
 export SMART_TRAIN_WORKSPACE=/path/to/workspace
 
 # 1+ эталона правильной ориентации
 smartrain orient --dataset 2026-04-07_18-57-33-merged \
+  --method reference \
   --reference /path/to/correct1.jpg \
   --reference /path/to/correct2.jpg
+```
+
+RotNet (обучение и применение; модель сохраняется в `<dataset_root>/.orient_rotnet/model.pt`):
+
+```bash
+smartrain orient --dataset 2026-04-07_18-57-33-merged \
+  --method rotnet \
+  --rotnet-epochs 4 \
+  --rotnet-image-size 96 \
+  --rotnet-device auto
+```
+
+Повторное применение без обучения (если модель уже сохранена в датасете):
+
+```bash
+smartrain orient --dataset 2026-04-07_18-57-33-merged \
+  --method rotnet \
+  --rotnet-epochs 0
+```
+
+Дообучение существующей модели:
+
+```bash
+smartrain orient --dataset 2026-04-07_18-57-33-merged \
+  --method rotnet \
+  --rotnet-finetune \
+  --rotnet-epochs 2
 ```
 
 Только отчёт (без записи нового датасета):
 
 ```bash
 smartrain orient --dataset 2026-04-07_18-57-33-merged \
+  --method reference \
   --reference /path/to/correct.jpg \
   --report-only
 ```
@@ -434,6 +468,9 @@ smartrain orient --dataset 2026-04-07_18-57-33-merged \
   --min-score 10 \
   --on-uncertain skip
 ```
+
+После выполнения команда сохраняет CSV-отчёт в корне выходного датасета:
+`datasets/<output_name>/orient_stats.csv` (по каждому файлу: был ли повёрнут, на какой угол, score и критерии выбора).
 
 ---
 

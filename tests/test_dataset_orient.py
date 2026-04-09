@@ -69,6 +69,12 @@ def test_orient_creates_new_dataset_and_rotates_bbox(tmp_path: Path) -> None:
     out = tmp_path / "datasets" / "ds_o_oriented"
     assert out.is_dir()
     assert (out / "dataset_passport.json").is_file()
+    stats_csv = out / "orient_stats.csv"
+    assert stats_csv.is_file()
+    assert (
+        "image_path,label_path,method,raw_k,offset_k,final_k,rotated,score_best,scores_json,uncertain,on_uncertain,action,output_image_path,output_label_path"
+        in stats_csv.read_text(encoding="utf-8").splitlines()[0]
+    )
     p = json.loads((out / "dataset_passport.json").read_text(encoding="utf-8"))
     assert p["command"] == "orient"
 
@@ -87,4 +93,57 @@ def test_orient_creates_new_dataset_and_rotates_bbox(tmp_path: Path) -> None:
     info = json.loads((tmp_path / "datasets" / "datasets_info.json").read_text(encoding="utf-8"))
     assert "ds_o_oriented" in info
     assert info["ds_o_oriented"]["data_path"] == "datasets/ds_o_oriented"
+
+
+def test_orient_rotnet_saves_model_in_dataset_and_can_reuse(tmp_path: Path) -> None:
+    ref, _bad = _prepare_workspace(tmp_path)
+    # First run: train RotNet (fast: 1 epoch) and orient.
+    orient_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_o",
+            "--method",
+            "rotnet",
+            "--rotnet-epochs",
+            "1",
+            "--rotnet-image-size",
+            "64",
+            "--rotnet-device",
+            "cpu",
+            "--min-score",
+            "0",
+            "--on-uncertain",
+            "keep",
+            "--no-legend",
+        ]
+    )
+    # Model should be saved inside source dataset root (datasets copy of ds_o).
+    ds_root = tmp_path / "datasets" / "ds_o"
+    model_path = ds_root / ".orient_rotnet" / "model.pt"
+    assert model_path.is_file()
+
+    # Second run: reuse saved model without training.
+    orient_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_o",
+            "--method",
+            "rotnet",
+            "--rotnet-epochs",
+            "0",
+            "--rotnet-device",
+            "cpu",
+            "--min-score",
+            "0",
+            "--on-uncertain",
+            "keep",
+            "--no-legend",
+        ]
+    )
+    out2 = tmp_path / "datasets" / "ds_o_oriented_2"
+    assert (out2 / "orient_stats.csv").is_file()
 
