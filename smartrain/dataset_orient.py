@@ -15,6 +15,8 @@ import numpy as np
 from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_prompts import prompt_yes_no
+from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.dataset_passport import next_dataset_name, write_dataset_passport
@@ -116,83 +118,71 @@ def _load_catalog(layout: WorkspaceLayout) -> dict:
 def _interactive_fill(args, *, dataset_names: list[str]) -> None:
     from prompt_toolkit import prompt
     from prompt_toolkit.completion import WordCompleter
+    from smartrain.cli_prompts import prompt_choice, prompt_text
 
     print("[INFO] Интерактивный режим orient")
     print("[INFO] Доступные датасеты:")
     for n in dataset_names:
         print(f"  - {n}")
     args.dataset = prompt("Датасет: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
-    args.output_name = prompt("Имя выходного датасета (пусто=авто): ", default=(args.output_name or "")).strip() or None
-    args.method = (
-        prompt(
-            "method (reference/rotnet): ",
-            default=str(getattr(args, "method", "reference")),
-            completer=WordCompleter(list(METHODS), ignore_case=True),
-        ).strip()
-        or str(getattr(args, "method", "reference"))
-    )
+    args.output_name = prompt_text("Имя выходного датасета (пусто=авто)", default=(args.output_name or "")) or None
+    args.method = prompt_choice("Метод", list(METHODS), default=str(getattr(args, "method", "reference")))
 
     if args.method == "reference":
         refs: list[str] = []
         print("[INFO] Эталоны (правильная ориентация). Введите пути, пустая строка = конец.")
         while True:
-            r = prompt("reference: ", default="").strip()
+            r = prompt("Путь к reference-изображению (пусто=закончить): ", default="").strip()
             if not r:
                 break
             refs.append(r)
         if refs:
             args.reference = refs
     else:
-        raw_epochs = prompt("rotnet_epochs: ", default=str(getattr(args, "rotnet_epochs", 4))).strip()
+        raw_epochs = prompt_text("Число эпох RotNet (--rotnet-epochs)", default=str(getattr(args, "rotnet_epochs", 4))).strip()
         if raw_epochs:
             try:
                 args.rotnet_epochs = int(raw_epochs)
             except ValueError:
                 pass
-        raw_size = prompt("rotnet_image_size: ", default=str(getattr(args, "rotnet_image_size", 96))).strip()
+        raw_size = prompt_text("Размер входа RotNet (--rotnet-image-size)", default=str(getattr(args, "rotnet_image_size", 96))).strip()
         if raw_size:
             try:
                 args.rotnet_image_size = int(raw_size)
             except ValueError:
                 pass
-        raw_bs = prompt("rotnet_batch_size: ", default=str(getattr(args, "rotnet_batch_size", 64))).strip()
+        raw_bs = prompt_text("Размер batch RotNet (--rotnet-batch-size)", default=str(getattr(args, "rotnet_batch_size", 64))).strip()
         if raw_bs:
             try:
                 args.rotnet_batch_size = int(raw_bs)
             except ValueError:
                 pass
-        raw_lr = prompt("rotnet_lr: ", default=str(getattr(args, "rotnet_lr", 1e-3))).strip()
+        raw_lr = prompt_text("Learning rate RotNet (--rotnet-lr)", default=str(getattr(args, "rotnet_lr", 1e-3))).strip()
         if raw_lr:
             try:
                 args.rotnet_lr = float(raw_lr)
             except ValueError:
                 pass
-        args.rotnet_device = (
-            prompt(
-                "rotnet_device (auto/cpu/cuda): ",
-                default=str(getattr(args, "rotnet_device", "auto")),
-                completer=WordCompleter(["auto", "cpu", "cuda"], ignore_case=True),
-            ).strip()
-            or str(getattr(args, "rotnet_device", "auto"))
+        args.rotnet_device = prompt_choice(
+            "Устройство RotNet (--rotnet-device)",
+            ["auto", "cpu", "cuda"],
+            default=str(getattr(args, "rotnet_device", "auto")),
         )
-        args.rotnet_model_path = prompt(
-            "rotnet_model_path (пусто=внутри датасета): ",
+        args.rotnet_model_path = prompt_text(
+            "Путь к модели RotNet (--rotnet-model-path, пусто=внутри датасета)",
             default=str(getattr(args, "rotnet_model_path", "") or ""),
         ).strip() or None
-        args.rotnet_pretrained = prompt(
-            "rotnet_pretrained (пусто=нет): ",
+        args.rotnet_pretrained = prompt_text(
+            "Путь к pretrained RotNet (--rotnet-pretrained, пусто=нет)",
             default=str(getattr(args, "rotnet_pretrained", "") or ""),
         ).strip() or None
-        args.rotnet_anchor_mode = (
-            prompt(
-                "rotnet_anchor_mode (reference/majority): ",
-                default=str(getattr(args, "rotnet_anchor_mode", "majority")),
-                completer=WordCompleter(["reference", "majority"], ignore_case=True),
-            ).strip()
-            or str(getattr(args, "rotnet_anchor_mode", "majority"))
+        args.rotnet_anchor_mode = prompt_choice(
+            "Режим якоря RotNet (--rotnet-anchor-mode)",
+            ["reference", "majority"],
+            default=str(getattr(args, "rotnet_anchor_mode", "majority")),
         )
-        raw_anchor_samples = prompt(
-            "rotnet_anchor_samples: ",
+        raw_anchor_samples = prompt_text(
+            "Число anchor-samples RotNet (--rotnet-anchor-samples)",
             default=str(getattr(args, "rotnet_anchor_samples", 256)),
         ).strip()
         if raw_anchor_samples:
@@ -200,27 +190,21 @@ def _interactive_fill(args, *, dataset_names: list[str]) -> None:
                 args.rotnet_anchor_samples = int(raw_anchor_samples)
             except ValueError:
                 pass
-        args.rotnet_finetune = (
-            prompt("rotnet_finetune? [y/N]: ", default=("y" if args.rotnet_finetune else "n")).strip().lower()
-            in ("y", "yes", "1", "true", "да", "д")
-        )
+        args.rotnet_finetune = prompt_yes_no("Включить дообучение RotNet (--rotnet-finetune)?", default=bool(args.rotnet_finetune))
 
-    raw = prompt("min_score: ", default=str(getattr(args, "min_score", 8))).strip()
+    raw = prompt_text("Минимальный score (--min-score)", default=str(getattr(args, "min_score", 8))).strip()
     if raw:
         try:
             args.min_score = int(raw)
         except ValueError:
             pass
-    args.on_uncertain = (
-        prompt(
-            "on_uncertain (keep/skip/fail): ",
-            default=str(getattr(args, "on_uncertain", "keep")),
-            completer=WordCompleter(list(ON_UNCERTAIN), ignore_case=True),
-        ).strip()
-        or getattr(args, "on_uncertain", "keep")
+    args.on_uncertain = prompt_choice(
+        "Поведение при uncertainty (--on-uncertain)",
+        list(ON_UNCERTAIN),
+        default=str(getattr(args, "on_uncertain", "keep")),
     )
-    args.report_only = (prompt("report_only? [y/N]: ", default=("y" if args.report_only else "n")).strip().lower() in ("y", "yes", "1", "true", "да", "д"))
-    args.dry_run = (prompt("dry_run? [y/N]: ", default=("y" if args.dry_run else "n")).strip().lower() in ("y", "yes", "1", "true", "да", "д"))
+    args.report_only = prompt_yes_no("Только отчёт без записи датасета (--report-only)?", default=bool(args.report_only))
+    args.dry_run = prompt_yes_no("Выполнить dry-run (--dry-run)?", default=bool(args.dry_run))
 
 
 def _read_gray(path: str) -> np.ndarray:
@@ -627,7 +611,9 @@ def _write_orient_stats_csv(out_dir: str, rows: list[dict]) -> str:
 
 def main(argv=None) -> None:
     argv = sys.argv[1:] if argv is None else argv
-    args = build_orient_arg_parser().parse_args(argv)
+    parser = build_orient_arg_parser()
+    args = parser.parse_args(argv)
+    interactive_used = False
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
     catalog = _load_catalog(layout)
@@ -637,6 +623,7 @@ def main(argv=None) -> None:
 
     if args.dataset is None and sys.stdin.isatty():
         _interactive_fill(args, dataset_names=sorted(catalog.keys()))
+        interactive_used = True
     if not args.dataset:
         print("[ERROR] Укажите --dataset или используйте интерактивный режим.")
         return
@@ -646,6 +633,10 @@ def main(argv=None) -> None:
     if args.method == "reference" and not args.reference:
         print("[ERROR] Нужен хотя бы один --reference (эталон правильной ориентации).")
         return
+    replay_cmd = None
+    if interactive_used:
+        replay_cmd = build_non_interactive_command("orient", parser, args)
+        print_replay_command("перед запуском", replay_cmd)
 
     entry = catalog[args.dataset]
     structure = str(entry.get("structure", "split"))
@@ -863,6 +854,8 @@ def main(argv=None) -> None:
         print(f"  rotnet_model: {rotnet_model_path}")
 
     if args.report_only or args.dry_run:
+        if replay_cmd:
+            print_replay_command("после выполнения", replay_cmd)
         return
 
     _copy_tree_structure_if_exists(src_root, out_dir)
@@ -894,4 +887,6 @@ def main(argv=None) -> None:
         ],
         random_seed=None,
     )
+    if replay_cmd:
+        print_replay_command("после выполнения", replay_cmd)
 

@@ -13,6 +13,8 @@ from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_prompts import prompt_choice, prompt_multi_choice_csv, prompt_text, prompt_yes_no
+from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.dataset_passport import next_dataset_name, write_dataset_passport
@@ -83,32 +85,37 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
     for c in class_names:
         print(f"  - {c}")
     args.dataset = prompt("Датасет: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
-    args.strategy = prompt(
-        "Strategy (oversample/undersample/class-aware/weights): ",
+    args.strategy = prompt_choice(
+        "Strategy",
+        ["oversample", "undersample", "class-aware", "weights"],
         default=args.strategy,
-        completer=WordCompleter(["oversample", "undersample", "class-aware", "weights"], ignore_case=True),
-    ).strip() or args.strategy
-    args.output_name = prompt("Имя выходного датасета (пусто=авто): ", default=(args.output_name or "")).strip() or None
-    args.target = float(prompt("Target multiplier: ", default=str(args.target)).strip() or str(args.target))
-    args.max_ratio = float(prompt("Max ratio: ", default=str(args.max_ratio)).strip() or str(args.max_ratio))
-    mode = prompt("Классы: all/single/list [all]: ", default="all").strip().lower() or "all"
+    )
+    args.output_name = prompt_text("Имя выходного датасета (пусто=авто)", default=(args.output_name or "")).strip() or None
+    args.target = float(
+        prompt_text("Множитель размера train (--target)", default=str(args.target)).strip() or str(args.target)
+    )
+    args.max_ratio = float(
+        prompt_text("Ограничение max/min (--max-ratio)", default=str(args.max_ratio)).strip() or str(args.max_ratio)
+    )
+    mode = prompt_choice("Классы", ["all", "single", "list"], default="all").lower()
     if mode == "single":
         args.single_class = prompt("Класс: ", completer=WordCompleter(class_names, ignore_case=True)).strip()
         args.classes = None
     elif mode == "list":
-        args.classes = prompt(
-            "Классы CSV: ", completer=WordCompleter(class_names, ignore_case=True), complete_while_typing=True
-        ).strip() or None
+        selected = prompt_multi_choice_csv("Классы", class_names, default_values=[])
+        args.classes = ",".join(selected) if selected else None
         args.single_class = None
     else:
         args.single_class = None
         args.classes = None
-    args.dry_run = (prompt("Dry-run? [y/N]: ", default="n").strip().lower() in ("y", "yes", "1", "true"))
+    args.dry_run = prompt_yes_no("Выполнить dry-run (--dry-run)?", default=bool(args.dry_run))
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    args = build_balance_arg_parser().parse_args(argv)
+    parser = build_balance_arg_parser()
+    args = parser.parse_args(argv)
+    interactive_used = False
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
     catalog = _load_catalog(layout)
@@ -119,12 +126,17 @@ def main(argv=None):
     if args.dataset is None and sys.stdin.isatty():
         all_classes = sorted({k for v in catalog.values() if isinstance(v, dict) for k in (v.get("classes") or {}).keys()})
         _interactive_fill(args, sorted(catalog.keys()), all_classes)
+        interactive_used = True
     if not args.dataset:
         print("[ERROR] Укажите --dataset или используйте интерактивный режим.")
         return
     if args.dataset not in catalog:
         print(f"[ERROR] Неизвестный датасет: {args.dataset}")
         return
+    replay_cmd = None
+    if interactive_used:
+        replay_cmd = build_non_interactive_command("balance", parser, args)
+        print_replay_command("перед запуском", replay_cmd)
 
     random.seed(args.seed)
     entry = catalog[args.dataset]
@@ -203,6 +215,8 @@ def main(argv=None):
 
     if args.dry_run:
         print(f"[OK] dry-run: strategy={args.strategy}, train_in={len(train_items)}, train_out={len(balanced_train)}, output={out_name}")
+        if replay_cmd:
+            print_replay_command("после выполнения", replay_cmd)
         return
 
     for split in ("train", "val", "test"):
@@ -268,6 +282,8 @@ def main(argv=None):
     )
     print(f"[OK] Создан датасет: {out_dir}")
     print(f"[OK] Passport: {passport_path}")
+    if replay_cmd:
+        print_replay_command("после выполнения", replay_cmd)
 
 
 if __name__ == "__main__":

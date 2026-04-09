@@ -19,6 +19,8 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_prompts import prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.dataset_passport import next_dataset_name, write_dataset_passport
@@ -910,64 +912,43 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
         ).strip()
         or None
     )
-    args.output_name = prompt("Имя выходного датасета (пусто=авто): ", default=(args.output_name or "")).strip() or None
+    args.output_name = prompt_text("Имя выходного датасета (пусто=авто)", default=(args.output_name or "")).strip() or None
     print("[INFO] Блок: flip")
-    args.enable_flip = (
-        prompt("Включить flip? [Y/n]: ", default=("y" if args.enable_flip else "n")).strip().lower()
-        in ("y", "yes", "1", "true")
-    )
+    args.enable_flip = prompt_yes_no("Включить flip?", default=bool(args.enable_flip))
     if args.enable_flip:
-        args.flip = (
-            prompt(
-                "Flip (horizontal/vertical/both/none): ",
-                default=args.flip,
-                completer=WordCompleter(["horizontal", "vertical", "both", "none"], ignore_case=True),
-            ).strip()
-            or args.flip
+        args.flip = prompt_choice(
+            "Режим flip (--flip)",
+            ["horizontal", "vertical", "both", "none"],
+            default=args.flip,
         )
         args.flip_prob = float(
-            prompt("Flip probability [0..1]: ", default=str(getattr(args, "flip_prob", 0.5))).strip()
+            prompt_text("Вероятность flip [0..1] (--flip-prob)", default=str(getattr(args, "flip_prob", 0.5))).strip()
             or str(getattr(args, "flip_prob", 0.5))
         )
     print("[INFO] Блок: photometric/conveyor")
-    args.enable_photometric = (
-        prompt("Включить brightness/contrast? [y/N]: ", default=("y" if args.enable_photometric else "n")).strip().lower()
-        in ("y", "yes", "1", "true")
-    )
-    args.enable_conveyor = (
-        prompt("Включить conveyor шум/blur/shift/rotate? [y/N]: ", default=("y" if args.enable_conveyor else "n")).strip().lower()
-        in ("y", "yes", "1", "true")
-    )
-    args.enable_center_rotate = (
-        prompt("Включить поворот кадра вокруг центра? [y/N]: ", default=("y" if args.enable_center_rotate else "n")).strip().lower()
-        in ("y", "yes", "1", "true")
-    )
+    args.enable_photometric = prompt_yes_no("Включить brightness/contrast?", default=bool(args.enable_photometric))
+    args.enable_conveyor = prompt_yes_no("Включить conveyor шум/blur/shift/rotate?", default=bool(args.enable_conveyor))
+    args.enable_center_rotate = prompt_yes_no("Включить поворот кадра вокруг центра?", default=bool(args.enable_center_rotate))
     if args.enable_center_rotate:
         print("[INFO] Блок: center-rotate")
         args.center_rotate_deg = float(
-            prompt("Предел угла поворота (градусы, +-): ", default=str(getattr(args, "center_rotate_deg", 5.0))).strip()
+            prompt_text("Предел угла поворота (градусы, +-) (--center-rotate-deg)", default=str(getattr(args, "center_rotate_deg", 5.0))).strip()
             or str(getattr(args, "center_rotate_deg", 5.0))
         )
         args.rotate_copies = int(
-            prompt("Сколько rotate-вариантов на кадр: ", default=str(getattr(args, "rotate_copies", 1))).strip()
+            prompt_text("Число rotate-вариантов на кадр (--rotate-copies)", default=str(getattr(args, "rotate_copies", 1))).strip()
             or str(getattr(args, "rotate_copies", 1))
         )
-    args.enable_bbox_copy = (
-        prompt("Включить bbox_copy? [y/N]: ", default=("y" if args.enable_bbox_copy else "n")).strip().lower()
-        in ("y", "yes", "1", "true")
-    )
+    args.enable_bbox_copy = prompt_yes_no("Включить bbox_copy?", default=bool(args.enable_bbox_copy))
     if args.enable_center_rotate or args.enable_bbox_copy:
         print("[INFO] Блок: ROI-источник (общий)")
         roi_mode_default = "detector" if str(getattr(args, "placement_mode", "detector")) == "detector" else (
             "bbox" if str(getattr(args, "placement_mode", "detector")) == "bbox" else "none"
         )
-        roi_mode = (
-            prompt(
-                "ROI mode для rotate/bbox_copy (none/bbox/detector): ",
-                default=roi_mode_default,
-                completer=WordCompleter(["none", "bbox", "detector"], ignore_case=True),
-            ).strip()
-            or roi_mode_default
+        roi_mode = prompt_choice(
+            "ROI mode для rotate/bbox_copy (--placement-mode)",
+            ["none", "bbox", "detector"],
+            default=roi_mode_default,
         )
         args.placement_mode = roi_mode
         args.center_rotate_anchor = {"none": "center", "bbox": "bbox", "detector": "detector"}[roi_mode]
@@ -977,99 +958,85 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
                 print("[INFO] ROI-детекторы в корне workspace:")
                 for m in models:
                     print(f"  - {m}")
-            model_completer = WordCompleter(models, ignore_case=True) if models else None
-            args.roi_model = (
-                prompt(
-                    "ROI detector model (--roi-model): ",
-                    default=str(getattr(args, "roi_model", "yolo11n.pt")),
-                    completer=model_completer,
-                    complete_while_typing=True,
-                ).strip()
-                or str(getattr(args, "roi_model", "yolo11n.pt"))
-            )
+            args.roi_model = prompt_text(
+                "ROI detector model (--roi-model)",
+                default=str(getattr(args, "roi_model", "yolo11n.pt")),
+                choices=models if models else None,
+            ).strip() or str(getattr(args, "roi_model", "yolo11n.pt"))
             args.roi_conf = float(
-                prompt("ROI conf (--roi-conf): ", default=str(getattr(args, "roi_conf", 0.25))).strip()
+                prompt_text("Порог ROI conf (--roi-conf)", default=str(getattr(args, "roi_conf", 0.25))).strip()
                 or str(getattr(args, "roi_conf", 0.25))
             )
             args.roi_class_ids = (
-                prompt("ROI class ids CSV (--roi-class-ids, пусто=все): ", default=str(getattr(args, "roi_class_ids", "") or "")).strip()
+                prompt_text("ROI class ids CSV (--roi-class-ids, пусто=все)", default=str(getattr(args, "roi_class_ids", "") or "")).strip()
                 or None
             )
     # Параметры soft-balance и разнообразия релевантны только rotate/bbox_copy.
     if args.enable_center_rotate or args.enable_bbox_copy:
         print("[INFO] Блок: балансировка/разнообразие")
-        args.imbalance_mode = (
-            prompt(
-                "Балансировка классов (off/soft): ",
-                default=str(getattr(args, "imbalance_mode", "soft")),
-                completer=WordCompleter(["off", "soft"], ignore_case=True),
-            ).strip()
-            or str(getattr(args, "imbalance_mode", "soft"))
+        args.imbalance_mode = prompt_choice(
+            "Балансировка классов (--imbalance-mode)",
+            ["off", "soft"],
+            default=str(getattr(args, "imbalance_mode", "soft")),
         )
         args.imbalance_strength = float(
-            prompt("Сила балансировки (>=0): ", default=str(getattr(args, "imbalance_strength", 1.0))).strip()
+            prompt_text("Сила балансировки (>=0) (--imbalance-strength)", default=str(getattr(args, "imbalance_strength", 1.0))).strip()
             or str(getattr(args, "imbalance_strength", 1.0))
         )
         args.min_diversity_iou = float(
-            prompt("Порог дубликата по IoU [0..1]: ", default=str(getattr(args, "min_diversity_iou", 0.97))).strip()
+            prompt_text("Порог дубликата по IoU [0..1] (--min-diversity-iou)", default=str(getattr(args, "min_diversity_iou", 0.97))).strip()
             or str(getattr(args, "min_diversity_iou", 0.97))
         )
     if args.enable_center_rotate:
         args.min_angle_delta = float(
-            prompt("Мин. разница углов (градусы): ", default=str(getattr(args, "min_angle_delta", 1.0))).strip()
+            prompt_text("Мин. разница углов (градусы) (--min-angle-delta)", default=str(getattr(args, "min_angle_delta", 1.0))).strip()
             or str(getattr(args, "min_angle_delta", 1.0))
         )
     if args.enable_bbox_copy:
         print("[INFO] Блок: bbox_copy")
-        args.class_balance = (
-            prompt(
-                "Class balance (on/off): ",
-                default=str(getattr(args, "class_balance", "on")),
-                completer=WordCompleter(["on", "off"], ignore_case=True),
-            ).strip()
-            or str(getattr(args, "class_balance", "on"))
+        args.class_balance = prompt_choice(
+            "Class balance (--class-balance)",
+            ["on", "off"],
+            default=str(getattr(args, "class_balance", "on")),
         )
-        args.color_match = (
-            prompt(
-                "Color match (meanstd/off): ",
-                default=str(getattr(args, "color_match", "meanstd")),
-                completer=WordCompleter(["meanstd", "off"], ignore_case=True),
-            ).strip()
-            or str(getattr(args, "color_match", "meanstd"))
+        args.color_match = prompt_choice(
+            "Color match (--color-match)",
+            ["meanstd", "off"],
+            default=str(getattr(args, "color_match", "meanstd")),
         )
         args.blend_feather = float(
-            prompt("Blend feather [0..0.5]: ", default=str(getattr(args, "blend_feather", 0.16))).strip()
+            prompt_text("Параметр feather [0..0.5] (--blend-feather)", default=str(getattr(args, "blend_feather", 0.16))).strip()
             or str(getattr(args, "blend_feather", 0.16))
         )
         args.copy_paste_count = int(
-            prompt("Copy-paste count: ", default=str(args.copy_paste_count)).strip() or str(args.copy_paste_count)
+            prompt_text("Число вставок copy-paste (--copy-paste-count)", default=str(args.copy_paste_count)).strip()
+            or str(args.copy_paste_count)
         )
         args.copy_paste_min_center_dist = float(
-            prompt(
-                "Мин. дистанция между вставками [0..1] (доля диагонали): ",
+            prompt_text(
+                "Мин. дистанция между вставками [0..1] (--copy-paste-min-center-dist)",
                 default=str(getattr(args, "copy_paste_min_center_dist", 0.15)),
             ).strip()
             or str(getattr(args, "copy_paste_min_center_dist", 0.15))
         )
-        args.copy_paste_placement_style = (
-            prompt(
-                "Стиль размещения вставок (random/uniform-grid): ",
-                default=str(getattr(args, "copy_paste_placement_style", "random")),
-                completer=WordCompleter(["random", "uniform-grid"], ignore_case=True),
-            ).strip()
-            or str(getattr(args, "copy_paste_placement_style", "random"))
+        args.copy_paste_placement_style = prompt_choice(
+            "Стиль размещения вставок (--copy-paste-placement-style)",
+            ["random", "uniform-grid"],
+            default=str(getattr(args, "copy_paste_placement_style", "random")),
         )
         args.bbox_copy_copies = int(
-            prompt("Сколько bbox_copy-вариантов на кадр: ", default=str(getattr(args, "bbox_copy_copies", 1))).strip()
+            prompt_text("Число bbox_copy-вариантов на кадр (--bbox-copy-copies)", default=str(getattr(args, "bbox_copy_copies", 1))).strip()
             or str(getattr(args, "bbox_copy_copies", 1))
         )
-    args.splits = prompt("Сплиты через запятую (train,val,test): ", default=args.splits).strip() or args.splits
-    args.dry_run = (prompt("Dry-run? [y/N]: ", default="n").strip().lower() in ("y", "yes", "1", "true"))
+    args.splits = prompt_text("Сплиты через запятую (train,val,test)", default=args.splits).strip() or args.splits
+    args.dry_run = prompt_yes_no("Выполнить dry-run (--dry-run)?", default=bool(args.dry_run))
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    args = build_augment_arg_parser().parse_args(argv)
+    parser = build_augment_arg_parser()
+    args = parser.parse_args(argv)
+    interactive_used = False
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
     catalog = _load_catalog(layout)
@@ -1083,6 +1050,7 @@ def main(argv=None):
     if args.dataset is None and sys.stdin.isatty():
         all_classes = sorted({k for v in catalog.values() if isinstance(v, dict) for k in (v.get("classes") or {}).keys()})
         _interactive_fill(args, sorted(catalog.keys()), all_classes, layout.root)
+        interactive_used = True
 
     if not args.dataset:
         print("[ERROR] Укажите --dataset или используйте интерактивный режим.")
@@ -1090,6 +1058,10 @@ def main(argv=None):
     if args.dataset not in catalog:
         print(f"[ERROR] Неизвестный датасет: {args.dataset}")
         return
+    replay_cmd = None
+    if interactive_used:
+        replay_cmd = build_non_interactive_command("augment", parser, args)
+        print_replay_command("перед запуском", replay_cmd)
     if bool(getattr(args, "placement_roi", False)):
         args.placement_mode = "bbox"
 
@@ -1339,6 +1311,8 @@ def main(argv=None):
 
     if args.dry_run:
         print(f"[OK] dry-run: copied={copied}, augmented={augmented}, output={out_name}")
+        if replay_cmd:
+            print_replay_command("после выполнения", replay_cmd)
         return
 
     all_names = [str(x) for _, x in sorted(names_by_id.items())]
@@ -1388,6 +1362,8 @@ def main(argv=None):
     )
     print(f"[OK] Создан датасет: {out_dir}")
     print(f"[OK] Passport: {passport_path}")
+    if replay_cmd:
+        print_replay_command("после выполнения", replay_cmd)
 
 
 if __name__ == "__main__":

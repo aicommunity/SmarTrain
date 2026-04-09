@@ -15,7 +15,7 @@ from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 app = typer.Typer(
     name="smartrain",
-    add_completion=False,
+    add_completion=True,
     help="Датасеты YOLO, обучение, очередь, анализ прогонов. Работайте из корня workspace.",
 )
 console = Console()
@@ -73,6 +73,14 @@ def _call(module: str, attr: str, ctx: typer.Context) -> None:
     fn = getattr(m, attr)
     # Не передавать None: иначе argparse прочитает sys.argv (команда smartrain, а не подкоманда).
     fn(list(ctx.args))
+
+
+def _call_with_args(module: str, attr: str, args: list[str]) -> None:
+    import importlib
+
+    m = importlib.import_module(module)
+    fn = getattr(m, attr)
+    fn(args)
 
 
 def _ctx_has_help_flag(ctx: typer.Context) -> bool:
@@ -211,18 +219,35 @@ def cmd_roi(ctx: typer.Context) -> None:
     _call("smartrain.dataset_roi_yolo", "main", ctx)
 
 
-@app.command(
-    "queue",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-    add_help_option=False,
-)
-def cmd_queue(ctx: typer.Context) -> None:
-    """Очередь: list | add | remove | clear | run (бывш. training_queue_cli)."""
-    if _ctx_has_help_flag(ctx):
-        from smartrain.training_queue_cli import build_queue_cli_arg_parser
+queue_app = typer.Typer(help="Очередь: list | add | remove | clear | run.")
 
-        _dispatch_argparse_help(ctx, build_queue_cli_arg_parser, "smartrain queue")
-    _call("smartrain.training_queue_cli", "main", ctx)
+
+@queue_app.command("list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_queue_list(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.training_queue_cli", "main", ["list", *list(ctx.args)])
+
+
+@queue_app.command("add", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_queue_add(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.training_queue_cli", "main", ["add", *list(ctx.args)])
+
+
+@queue_app.command("remove", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_queue_remove(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.training_queue_cli", "main", ["remove", *list(ctx.args)])
+
+
+@queue_app.command("clear", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_queue_clear(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.training_queue_cli", "main", ["clear", *list(ctx.args)])
+
+
+@queue_app.command("run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_queue_run_sub(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.training_queue_cli", "main", ["run", *list(ctx.args)])
+
+
+app.add_typer(queue_app, name="queue")
 
 
 @app.command(
@@ -239,32 +264,71 @@ def cmd_queue_run(ctx: typer.Context) -> None:
     _call("smartrain.training_queue", "main", ctx)
 
 
-@app.command(
-    "registry",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-    add_help_option=False,
-)
-def cmd_registry(ctx: typer.Context) -> None:
-    """Реестр runs / models (бывш. registry_cli)."""
-    if _ctx_has_help_flag(ctx):
-        from smartrain.registry_cli import build_registry_arg_parser
-
-        _dispatch_argparse_help(ctx, build_registry_arg_parser, "smartrain registry")
-    _call("smartrain.registry_cli", "main", ctx)
+registry_app = typer.Typer(help="Реестр runs / models.")
 
 
-@app.command(
-    "analyze",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-    add_help_option=False,
-)
-def cmd_analyze(ctx: typer.Context) -> None:
-    """Анализ прогонов: scan, export-table, compare, interactive."""
-    if _ctx_has_help_flag(ctx):
-        from smartrain.results_analyzer import build_analyze_arg_parser
+@registry_app.command("runs-list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_registry_runs_list(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.registry_cli", "main", ["runs-list", *list(ctx.args)])
 
-        _dispatch_argparse_help(ctx, build_analyze_arg_parser, "smartrain analyze")
-    _call("smartrain.results_analyzer", "main", ctx)
+
+@registry_app.command("runs-info", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_registry_runs_info(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.registry_cli", "main", ["runs-info", *list(ctx.args)])
+
+
+@registry_app.command("runs-metrics", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_registry_runs_metrics(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.registry_cli", "main", ["runs-metrics", *list(ctx.args)])
+
+
+@registry_app.command("models-add", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_registry_models_add(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.registry_cli", "main", ["models-add", *list(ctx.args)])
+
+
+@registry_app.command("models-list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_registry_models_list(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.registry_cli", "main", ["models-list", *list(ctx.args)])
+
+
+@registry_app.command("models-info", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_registry_models_info(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.registry_cli", "main", ["models-info", *list(ctx.args)])
+
+
+@registry_app.command("models-remove", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_registry_models_remove(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.registry_cli", "main", ["models-remove", *list(ctx.args)])
+
+
+app.add_typer(registry_app, name="registry")
+
+
+analyze_app = typer.Typer(help="Анализ прогонов: scan, export-table, compare, interactive.")
+
+
+@analyze_app.command("scan", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_analyze_scan(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.results_analyzer", "main", ["scan", *list(ctx.args)])
+
+
+@analyze_app.command("export-table", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_analyze_export_table(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.results_analyzer", "main", ["export-table", *list(ctx.args)])
+
+
+@analyze_app.command("compare", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_analyze_compare(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.results_analyzer", "main", ["compare", *list(ctx.args)])
+
+
+@analyze_app.command("interactive", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_analyze_interactive(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.results_analyzer", "main", ["interactive", *list(ctx.args)])
+
+
+app.add_typer(analyze_app, name="analyze")
 
 
 @app.command(

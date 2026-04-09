@@ -20,6 +20,7 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.dataset_passport import write_dataset_passport
 from smartrain.datasets_json_former import (
@@ -389,16 +390,30 @@ def _parse_selected_datasets(args: argparse.Namespace) -> list[str]:
     return uniq
 
 
-def _prompt_input(label: str, default: str = "", completer=None) -> str:
+def _prompt_input(label: str, default: str = "", completer=None, show_default_hint: bool = True) -> str:
     from prompt_toolkit import prompt
 
-    return str(prompt(label, default=default, completer=completer, complete_while_typing=True))
+    prompt_label = f"{label} [default: {default}]: " if (default != "" and show_default_hint) else label
+    value = str(prompt(prompt_label, default="", completer=completer, complete_while_typing=True)).strip()
+    if value:
+        return value
+    if default != "":
+        if sys.stdin.isatty():
+            try:
+                sys.stdout.write("\x1b[1A\r")
+                sys.stdout.write(f"{prompt_label}{default}\n")
+                sys.stdout.flush()
+            except Exception:
+                print(default)
+        else:
+            print(default)
+    return str(default)
 
 
 def _prompt_yes_no(label: str, default: bool = False) -> bool:
     suffix = "Y/n" if default else "y/N"
     default_text = "y" if default else "n"
-    raw = _prompt_input(f"{label} [{suffix}]: ", default=default_text).strip().lower()
+    raw = _prompt_input(f"{label} [{suffix}]: ", default=default_text, show_default_hint=False).strip().lower()
     if not raw:
         return default
     return raw in ("y", "yes", "1", "true", "да", "д")
@@ -448,7 +463,7 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
     ds_comp = WordCompleter(names, ignore_case=True)
     while True:
         raw = _prompt_input(
-            "Датасеты (--dataset/--datasets) через запятую [default: первый в списке]: ",
+            "Датасеты (--dataset/--datasets) через запятую (пусто = первый в списке)",
             default=str(args.datasets or args.dataset_name or ""),
             completer=ds_comp,
         ).strip()
@@ -468,35 +483,31 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
         break
     default_out = str(args.output_path or (layout.datasets if len(args.dataset) > 1 else os.path.join(layout.datasets, f"{args.dataset_name}_roi")))
     out_raw = _prompt_input(
-        f"Выходной каталог (--output-path) [default: {default_out}]: ",
+        "Выходной каталог (--output-path)",
         default=default_out,
     ).strip()
     args.output_path = out_raw or default_out
     mode_comp = WordCompleter(list(MODES), ignore_case=True)
-    mode_default = str(args.mode or "(из roi_auto)")
     mode_val = _prompt_input(
-        f"Mode (--mode) [default: {mode_default}]: ",
+        "Mode (--mode)",
         default=str(args.mode or ""),
         completer=mode_comp,
     ).strip()
     args.mode = mode_val or None
     rp_comp = WordCompleter(list(ROI_POLICIES), ignore_case=True)
-    rp_default = str(args.roi_policy or "(из roi_auto/largest)")
     rp_val = _prompt_input(
-        f"ROI policy (--roi-policy) [default: {rp_default}]: ",
+        "ROI policy (--roi-policy)",
         default=str(args.roi_policy or ""),
         completer=rp_comp,
     ).strip()
     args.roi_policy = rp_val or None
     oe_comp = WordCompleter(list(ON_EMPTY_MODES), ignore_case=True)
-    oe_default = str(args.on_empty or "full_image")
     oe_val = _prompt_input(
-        f"On empty (--on-empty) [default: {oe_default}]: ",
+        "On empty (--on-empty)",
         default=str(args.on_empty or "full_image"),
         completer=oe_comp,
     ).strip()
     args.on_empty = oe_val or "full_image"
-    w_default = str(args.weights or "(из roi_auto)")
     models = _list_workspace_detector_models(layout.root)
     if models:
         print("[INFO] ROI-детекторы в корне workspace:")
@@ -504,26 +515,24 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
             print(f"  - {m}")
     weights_completer = WordCompleter(models, ignore_case=True) if models else None
     w_raw = _prompt_input(
-        f"Weights (--weights) [default: {w_default}]: ",
+        "Weights (--weights)",
         default=str(args.weights or ""),
         completer=weights_completer,
     ).strip()
     args.weights = w_raw or None
-    c_default = "(из roi_auto/0.25)" if args.conf is None else str(args.conf)
     c_raw = _prompt_input(
-        f"Confidence (--conf) [default: {c_default}]: ",
+        "Confidence (--conf)",
         default="" if args.conf is None else str(args.conf),
     ).strip()
     args.conf = float(c_raw) if c_raw else args.conf
-    p_default = "(из roi_auto/0)" if args.pad_px is None else str(args.pad_px)
     p_raw = _prompt_input(
-        f"Pad px (--pad-px) [default: {p_default}]: ",
+        "Pad px (--pad-px)",
         default="" if args.pad_px is None else str(args.pad_px),
     ).strip()
     args.pad_px = int(p_raw) if p_raw else args.pad_px
     req_default = bool(getattr(args, "require_roi_auto", False))
     args.require_roi_auto = _prompt_yes_no(
-        f"Требовать roi_auto (--require-roi-auto, default: {'yes' if req_default else 'no'})",
+        "Требовать roi_auto (--require-roi-auto)",
         default=req_default,
     )
     return True
@@ -625,14 +634,21 @@ def _load_roi_config(args: argparse.Namespace, entry: Dict[str, Any]) -> Dict[st
 def main(argv=None) -> None:
     if argv is None:
         argv = sys.argv[1:]
-    args = parse_args(argv)
+    parser = build_roi_arg_parser()
+    args = parser.parse_args(argv)
+    interactive_used = False
     selected_dataset_names = _parse_selected_datasets(args)
     if not selected_dataset_names:
         if not sys.stdin.isatty():
             sys.exit("[ERROR] Укажите --dataset-name/--dataset/--datasets или запустите команду в интерактивном режиме (TTY).")
         if not _run_interactive_roi_setup(args):
             return
+        interactive_used = True
         selected_dataset_names = _parse_selected_datasets(args)
+    replay_cmd = None
+    if interactive_used:
+        replay_cmd = build_non_interactive_command("roi", parser, args)
+        print_replay_command("перед запуском", replay_cmd)
     legacy_source = (args.source_path or "").strip()
     workspace_root: Optional[str] = None
     layout: Optional[WorkspaceLayout] = None
@@ -838,6 +854,8 @@ def main(argv=None) -> None:
             f"[OK] Готово для {dataset_key!r}: {stats['images']} выходных кадров, "
             f"пропущено {stats['skipped']}, каталог: {output_root}"
         )
+    if replay_cmd:
+        print_replay_command("после выполнения", replay_cmd)
 
 
 if __name__ == "__main__":

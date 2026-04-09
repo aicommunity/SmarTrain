@@ -13,6 +13,7 @@ import yaml
 from ultralytics import YOLO
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.train_profile import (
     apply_cli_smartrain_overrides,
@@ -81,6 +82,12 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Внешний Ultralytics args.yaml; несовместимые ключи (data/project/name/exist_ok/...) игнорируются с предупреждением",
+    )
+    parser.add_argument(
+        "--base-run-args-yaml",
+        type=str,
+        default=None,
+        help="Путь к args.yaml базового прогона (используется как источник дефолтов в интерактивном режиме)",
     )
 
     parser.add_argument(
@@ -215,16 +222,30 @@ def parse_args(argv=None):
     return build_train_arg_parser().parse_args(argv)
 
 
-def _prompt_input(label: str, default: str = "", completer=None) -> str:
+def _prompt_input(label: str, default: str = "", completer=None, show_default_hint: bool = True) -> str:
     from prompt_toolkit import prompt
 
-    return str(prompt(label, default=default, completer=completer, complete_while_typing=True))
+    prompt_label = f"{label} [default: {default}]: " if (default != "" and show_default_hint) else label
+    value = str(prompt(prompt_label, default="", completer=completer, complete_while_typing=True)).strip()
+    if value:
+        return value
+    if default != "":
+        if sys.stdin.isatty():
+            try:
+                sys.stdout.write("\x1b[1A\r")
+                sys.stdout.write(f"{prompt_label}{default}\n")
+                sys.stdout.flush()
+            except Exception:
+                print(default)
+        else:
+            print(default)
+    return str(default)
 
 
 def _prompt_yes_no(label: str, default: bool = False) -> bool:
     suffix = "Y/n" if default else "y/N"
     default_text = "y" if default else "n"
-    raw = _prompt_input(f"{label} [{suffix}]: ", default=default_text).strip().lower()
+    raw = _prompt_input(f"{label} [{suffix}]: ", default=default_text, show_default_hint=False).strip().lower()
     if not raw:
         return default
     return raw in ("y", "yes", "1", "true", "да", "д")
@@ -336,17 +357,22 @@ def _print_available_base_runs(selected_dataset: str, runs: list[dict[str, str]]
         print(f"  {i:>3}. {r['dataset']} :: {r['run_dir']}{mark}")
 
 
-def _prompt_base_run_args_yaml(runs: list[dict[str, str]]) -> str | None:
+def _prompt_base_run_args_yaml(runs: list[dict[str, str]], default_path: str | None = None) -> str | None:
     if not runs:
-        return None
+        return default_path
     while True:
-        raw = _prompt_input("Базовый прогон (номер, пусто=без базового): ", default="").strip()
+        raw = _prompt_input(
+            "Базовый прогон (номер или путь к args.yaml, пусто=без базового): ",
+            default=str(default_path or ""),
+        ).strip()
         if not raw:
-            return None
+            return default_path
+        if os.path.isfile(raw):
+            return raw
         try:
             idx = int(raw)
         except ValueError:
-            print(f"[ERROR] Ожидается номер прогона, получено: {raw!r}")
+            print(f"[ERROR] Ожидается номер прогона или путь к args.yaml, получено: {raw!r}")
             continue
         if 1 <= idx <= len(runs):
             return runs[idx - 1]["args_yaml"]
@@ -394,7 +420,11 @@ def _run_interactive_train_setup(args) -> bool:
     baseline_sm_opts: dict[str, Any] = {}
     available_runs = _collect_available_base_runs(layout, args.data)
     _print_available_base_runs(args.data, available_runs)
-    baseline_args_yaml = _prompt_base_run_args_yaml(available_runs)
+    baseline_args_yaml = _prompt_base_run_args_yaml(
+        available_runs,
+        default_path=str(getattr(args, "base_run_args_yaml", "") or "") or None,
+    )
+    args.base_run_args_yaml = baseline_args_yaml
     if baseline_args_yaml:
         try:
             baseline_profile = _load_ultralytics_yaml(baseline_args_yaml)
@@ -491,7 +521,7 @@ def _run_interactive_train_setup(args) -> bool:
     args.target_path = (_prompt_input("Каталог прогонов (--target-path): ", default=default_target).strip()
                         or default_target)
 
-    args.test_only = _prompt_yes_no("Только тест без обучения (--test-only)", default=bool(getattr(args, "test_only", False)))
+    args.test_only = _prompt_yes_no("Только тест без обучения (--test-only)?", default=bool(getattr(args, "test_only", False)))
     if args.test_only:
         model_dir_default = str(getattr(args, "model_dir", "") or "")
         while True:
@@ -520,14 +550,14 @@ def _run_interactive_train_setup(args) -> bool:
         args.weighted_sampling = bool(ultra_sm_opts["weighted_sampling"])
     else:
         args.weighted_sampling = _prompt_yes_no(
-            "Включить weighted sampling (--weighted-sampling)",
+            "Включить weighted sampling (--weighted-sampling)?",
             default=bool(_get_interactive_default(args, "weighted_sampling", False, baseline_sm_opts, "weighted_sampling")),
         )
     if "export_onnx" in ultra_sm_opts:
         args.export_onnx = bool(ultra_sm_opts["export_onnx"])
     else:
         args.export_onnx = _prompt_yes_no(
-            "Экспортировать ONNX после обучения (--export-onnx)",
+            "Экспортировать ONNX после обучения (--export-onnx)?",
             default=bool(_get_interactive_default(args, "export_onnx", False, baseline_sm_opts, "export_onnx")),
         )
     if "export_onnx_half" in ultra_sm_opts:
@@ -537,14 +567,14 @@ def _run_interactive_train_setup(args) -> bool:
         if "export_onnx_half" in baseline_sm_opts:
             default_fp32 = not bool(baseline_sm_opts["export_onnx_half"])
         args.export_onnx_fp32 = _prompt_yes_no(
-            "Использовать FP32 для ONNX (--export-onnx-fp32)",
+            "Использовать FP32 для ONNX (--export-onnx-fp32)?",
             default=default_fp32,
         )
     if "clearml" in ultra_sm_opts:
         args.clearml = bool(ultra_sm_opts["clearml"])
     else:
         args.clearml = _prompt_yes_no(
-            "Логировать в ClearML (--clearml)",
+            "Логировать в ClearML (--clearml)?",
             default=bool(_get_interactive_default(args, "clearml", False, baseline_sm_opts, "clearml")),
         )
     if args.clearml:
@@ -562,7 +592,7 @@ def _run_interactive_train_setup(args) -> bool:
                 or None
             )
     args.non_interactive = _prompt_yes_no(
-        "Не спрашивать подтверждения при существующей папке (--yes)",
+        "Не спрашивать подтверждения при существующей папке (--yes)?",
         default=bool(getattr(args, "non_interactive", False)),
     )
     return True
@@ -1207,7 +1237,9 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
     args = parse_args(argv)
+    parser = build_train_arg_parser()
     interactive_mode = len(argv) == 0
+    replay_cmd = None
     if interactive_mode:
         if not sys.stdin.isatty():
             print(
@@ -1222,6 +1254,8 @@ def main(argv=None):
             return
         if not ok:
             return
+        replay_cmd = build_non_interactive_command("train", parser, args)
+        print_replay_command("перед запуском", replay_cmd)
 
     profile = load_train_profile(args.config) if args.config else {}
     ultra_profile = _load_ultralytics_yaml(getattr(args, "ultralytics_yaml", None))
@@ -1409,6 +1443,8 @@ def main(argv=None):
             )
         else:
             print("[ERROR] Не указан путь к модели")
+    if replay_cmd:
+        print_replay_command("после выполнения", replay_cmd)
 
 
 if __name__ == "__main__":

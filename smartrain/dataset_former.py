@@ -10,6 +10,7 @@ from datetime import datetime
 from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.cvat11_converter import YOLO_IMAGE_EXTS
 from smartrain.dataset_access import (
     find_dataset_paths,
@@ -224,20 +225,13 @@ def _parse_selected_datasets(args) -> list[str]:
 
 
 def _prompt_dataset_selection(available: list[str]) -> list[str]:
-    from prompt_toolkit import prompt
-    from prompt_toolkit.completion import WordCompleter
+    from smartrain.cli_prompts import prompt_multi_choice_csv
 
     print("[INFO] Не указаны --dataset/--datasets: интерактивный выбор входных датасетов.")
     print("[INFO] Доступные датасеты:")
     for name in available:
         print(f"  - {name}")
-    completer = WordCompleter(available, ignore_case=True)
-    value = prompt(
-        "Введите датасеты через запятую: ",
-        completer=completer,
-        complete_while_typing=True,
-    )
-    parsed = [x.strip() for x in str(value).split(",") if x.strip()]
+    parsed = prompt_multi_choice_csv("Входные датасеты", available, default_values=[])
     uniq: list[str] = []
     seen: set[str] = set()
     for name in parsed:
@@ -248,15 +242,9 @@ def _prompt_dataset_selection(available: list[str]) -> list[str]:
 
 
 def _prompt_yes_no(label: str, default: bool = False) -> bool:
-    from prompt_toolkit import prompt
+    from smartrain.cli_prompts import prompt_yes_no
 
-    suffix = "Y/n" if default else "y/N"
-    default_text = "y" if default else "n"
-    raw = prompt(f"{label} [{suffix}]: ", default=default_text)
-    val = str(raw).strip().lower()
-    if not val:
-        return default
-    return val in ("y", "yes", "1", "true", "да", "д")
+    return prompt_yes_no(label, default=default)
 
 
 def _prompt_interactive_options(
@@ -265,8 +253,7 @@ def _prompt_interactive_options(
     default_output_name: str,
     class_candidates: list[str],
 ) -> None:
-    from prompt_toolkit import prompt
-    from prompt_toolkit.completion import WordCompleter
+    from smartrain.cli_prompts import prompt_text
 
     print("[INFO] Интерактивная настройка параметров fusion (Enter = значение по умолчанию).")
     if class_candidates:
@@ -276,21 +263,19 @@ def _prompt_interactive_options(
         )
     else:
         print("[WARN] В выбранных датасетах не найдено классов в метаданных.")
-    out_name = prompt("Имя выходного датасета: ", default=default_output_name).strip()
+    out_name = prompt_text("Имя выходного датасета", default=default_output_name).strip()
     args.output_name = out_name or default_output_name
 
-    class_completer = WordCompleter(class_candidates, ignore_case=True)
-    classes_raw = prompt(
-        "Классы через запятую (пусто = авто-объединение): ",
+    classes_raw = prompt_text(
+        "Классы через запятую (пусто = авто-объединение)",
         default=(args.classes or ""),
-        completer=class_completer,
-        complete_while_typing=True,
+        choices=class_candidates,
     ).strip()
     args.classes = classes_raw or None
 
     split_default = args.fusion_split or f"{TRAIN_PART},{VAL_PART},{TEST_PART}"
-    args.fusion_split = prompt(
-        "Fusion split train,val,test (сумма=1.0): ",
+    args.fusion_split = prompt_text(
+        "Fusion split train,val,test (сумма=1.0)",
         default=split_default,
     ).strip()
 
@@ -312,7 +297,7 @@ def _prompt_interactive_options(
     )
 
     tmp_default = args.tmp_dir or ""
-    tmp_value = prompt("Каталог tmp (пусто = по умолчанию): ", default=tmp_default).strip()
+    tmp_value = prompt_text("Каталог tmp (пусто = по умолчанию)", default=tmp_default).strip()
     args.tmp_dir = tmp_value or None
 
 
@@ -780,7 +765,8 @@ def _update_datasets_sidecar(
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
-    args = parse_args(argv)
+    parser = build_dataset_former_arg_parser()
+    args = parser.parse_args(argv)
 
     legacy = (
         args.source_path is not None
@@ -852,6 +838,10 @@ def main(argv=None):
         except Exception as e:
             print(f"[ERROR] Не удалось запустить интерактивный выбор датасетов: {e}")
             return
+        # Сохраняем интерактивный выбор в args, чтобы replay-команда
+        # отражала явный список входных датасетов.
+        args.dataset = list(selected_dataset_names)
+        args.datasets = None
 
     if not selected_dataset_names:
         print("[ERROR] Не выбран ни один датасет для слияния.")
@@ -885,6 +875,10 @@ def main(argv=None):
             out_key = (args.output_name or "").strip() or output_dataset_name
             target_dir = os.path.join(layout.datasets, out_key)
             output_dataset_name = out_key
+    replay_cmd = None
+    if interactive_mode:
+        replay_cmd = build_non_interactive_command("fusion", parser, args)
+        print_replay_command("перед запуском", replay_cmd)
 
     try:
         train_part, val_part, test_part = parse_fusion_split_arg(args.fusion_split)
@@ -1251,6 +1245,8 @@ def main(argv=None):
             print(f"[OK] Passport: {passport_path}")
         except Exception as e:
             print(f"[WARNING] Не удалось записать dataset_passport.json: {e}")
+    if replay_cmd:
+        print_replay_command("после выполнения", replay_cmd)
 
 
 if __name__ == "__main__":

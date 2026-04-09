@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.table import Table
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -911,122 +912,78 @@ def _render_datasets_table(
 
 
 def _prompt_yes_no(label: str, default: bool = False) -> bool:
-    from prompt_toolkit import prompt
+    from smartrain.cli_prompts import prompt_yes_no
 
-    suffix = "Y/n" if default else "y/N"
-    default_text = "y" if default else "n"
-    val = prompt(f"{label} [{suffix}]: ", default=default_text).strip().lower()
-    if not val:
-        return default
-    return val in ("y", "yes", "1", "true", "да", "д")
+    return prompt_yes_no(label, default=default)
 
 
 def _prompt_interactive_classes(
     args, available_names: list[str], available_classes: list[str]
 ) -> None:
-    from prompt_toolkit import prompt
-    from prompt_toolkit.completion import WordCompleter
+    from smartrain.cli_prompts import prompt_choice, prompt_multi_choice_csv, prompt_text
 
-    names_comp = WordCompleter(available_names, ignore_case=True)
-    classes_comp = WordCompleter(available_classes, ignore_case=True)
-    sort_comp = WordCompleter(["total", "train", "val", "test"], ignore_case=True)
-    raw_ds = prompt(
-        "Датасеты через запятую (пусто=все): ",
-        default="",
-        completer=names_comp,
-        complete_while_typing=True,
-    ).strip()
-    args.dataset = [x.strip() for x in raw_ds.split(",") if x.strip()] or None
-    args.classes = (
-        prompt(
-            "Классы через запятую (пусто=все): ",
-            default="",
-            completer=classes_comp,
-            complete_while_typing=True,
-        ).strip()
-        or None
-    )
-    args.sort = (
-        prompt(
-            "Сортировка (total/train/val/test): ",
-            default=args.sort,
-            completer=sort_comp,
-            complete_while_typing=True,
-        ).strip()
-        or args.sort
-    )
-    args.desc = _prompt_yes_no("Сортировка по убыванию", default=bool(args.desc))
-    lim_raw = prompt("Лимит строк (пусто=без лимита): ", default="").strip()
+    selected_ds = prompt_multi_choice_csv("Датасеты", available_names, default_values=[])
+    args.dataset = selected_ds or None
+    selected_classes = prompt_multi_choice_csv("Классы", available_classes, default_values=[])
+    args.classes = ",".join(selected_classes) if selected_classes else None
+    args.sort = prompt_choice("Сортировка", ["total", "train", "val", "test"], default=args.sort)
+    args.desc = _prompt_yes_no("Сортировка по убыванию?", default=bool(args.desc))
+    lim_raw = prompt_text("Лимит строк (пусто=без лимита)", default="").strip()
     args.limit = int(lim_raw) if lim_raw else None
 
 
 def _prompt_interactive_datasets(args, available_names: list[str]) -> None:
-    from prompt_toolkit import prompt
-    from prompt_toolkit.completion import WordCompleter
-
-    names_comp = WordCompleter(available_names, ignore_case=True)
-    sort_comp = WordCompleter(
-        ["images", "instances", "empty_pct", "gini", "imbalance"], ignore_case=True
+    from smartrain.cli_prompts import prompt_choice, prompt_multi_choice_csv
+    selected = prompt_multi_choice_csv("Датасеты", available_names, default_values=[])
+    args.dataset = selected or None
+    args.sort = prompt_choice(
+        "Сортировка",
+        ["images", "instances", "empty_pct", "gini", "imbalance"],
+        default=args.sort,
     )
-    raw_ds = prompt(
-        "Датасеты через запятую (пусто=все): ",
-        default="",
-        completer=names_comp,
-        complete_while_typing=True,
-    ).strip()
-    args.dataset = [x.strip() for x in raw_ds.split(",") if x.strip()] or None
-    args.sort = (
-        prompt(
-            "Сортировка (images/instances/empty_pct/gini/imbalance): ",
-            default=args.sort,
-            completer=sort_comp,
-            complete_while_typing=True,
-        ).strip()
-        or args.sort
-    )
-    args.desc = _prompt_yes_no("Сортировка по убыванию", default=bool(args.desc))
+    args.desc = _prompt_yes_no("Сортировка по убыванию?", default=bool(args.desc))
     args.check_duplicates = _prompt_yes_no(
-        "Проверять exact duplicates (--check-duplicates)",
+        "Проверять exact duplicates (--check-duplicates)?",
         default=bool(args.check_duplicates),
     )
     args.check_near_duplicates = _prompt_yes_no(
-        "Проверять near-duplicates (--check-near-duplicates)",
+        "Проверять near-duplicates (--check-near-duplicates)?",
         default=bool(args.check_near_duplicates),
     )
     args.export_issues = _prompt_yes_no(
-        "Экспортировать issues в analytics (--export-issues)",
+        "Экспортировать issues в analytics (--export-issues)?",
         default=bool(args.export_issues),
     )
 
 
 def prompt_interactive_compare_args(args, available_names: list[str]) -> None:
-    from prompt_toolkit import prompt
-    from prompt_toolkit.completion import WordCompleter
-
-    names_comp = WordCompleter(available_names, ignore_case=True)
-    details_comp = WordCompleter(["summary", "classes", "all"], ignore_case=True)
+    from smartrain.cli_prompts import prompt_choice, prompt_text
     while True:
-        left = prompt("Left dataset: ", default=str(getattr(args, "left", "") or ""), completer=names_comp, complete_while_typing=True).strip()
-        right = prompt("Right dataset: ", default=str(getattr(args, "right", "") or ""), completer=names_comp, complete_while_typing=True).strip()
+        left = prompt_text(
+            "Left dataset",
+            default=str(getattr(args, "left", "") or ""),
+            choices=available_names,
+        ).strip()
+        right = prompt_text(
+            "Right dataset",
+            default=str(getattr(args, "right", "") or ""),
+            choices=available_names,
+        ).strip()
         if left and right and left != right:
             args.left = left
             args.right = right
             break
         console.print("[ERROR] Нужно задать разные left/right датасеты.")
-    args.details = (
-        prompt(
-            "Details (summary/classes/all): ",
-            default=str(getattr(args, "details", "summary")),
-            completer=details_comp,
-            complete_while_typing=True,
-        ).strip()
-        or "summary"
+    args.details = prompt_choice(
+        "Details",
+        ["summary", "classes", "all"],
+        default=str(getattr(args, "details", "summary")),
     )
-    raw_top = prompt("Top-N классов (пусто=без лимита): ", default="").strip()
+    raw_top = prompt_text("Top-N классов (пусто=без лимита)", default="").strip()
     args.top_n = int(raw_top) if raw_top else None
-    args.abs = _prompt_yes_no("Показывать абсолютные дельты (--abs)", default=bool(getattr(args, "abs", False)))
-    args.export_json = _prompt_yes_no("Экспорт JSON (--export-json)", default=bool(getattr(args, "export_json", False)))
-    args.export_csv = _prompt_yes_no("Экспорт CSV (--export-csv)", default=bool(getattr(args, "export_csv", False)))
+    args.abs = _prompt_yes_no("Показывать абсолютные дельты (--abs)?", default=bool(getattr(args, "abs", False)))
+    args.export_json = _prompt_yes_no("Экспорт JSON (--export-json)?", default=bool(getattr(args, "export_json", False)))
+    args.export_csv = _prompt_yes_no("Экспорт CSV (--export-csv)?", default=bool(getattr(args, "export_csv", False)))
 
 
 def build_stats_arg_parser() -> argparse.ArgumentParser:
@@ -1097,6 +1054,10 @@ def _run_stats(args, layout: WorkspaceLayout) -> int:
         console.print("[INFO] Интерактивный режим stats")
         _print_interactive_catalog(available)
         _prompt_interactive_datasets(args, sorted(available.keys()))
+        replay_cmd = build_non_interactive_command("stats", build_stats_arg_parser(), args)
+        print_replay_command("перед запуском", replay_cmd)
+    else:
+        replay_cmd = None
     selected = _filter_dataset_names(available, args.dataset)
     scanned: dict[str, DatasetStats] = {}
     for name in selected:
@@ -1123,6 +1084,8 @@ def _run_stats(args, layout: WorkspaceLayout) -> int:
         args.class_limit,
         show_legend=not bool(getattr(args, "no_legend", False)),
     )
+    if replay_cmd:
+        print_replay_command("после выполнения", replay_cmd)
     return 0
 
 
@@ -1135,6 +1098,10 @@ def _run_stats_compare(args, layout: WorkspaceLayout) -> int:
         console.print("[INFO] Интерактивный режим stats compare")
         _print_interactive_catalog(available)
         prompt_interactive_compare_args(args, sorted(available.keys()))
+        replay_cmd = build_non_interactive_command("stats compare", build_stats_compare_arg_parser(), args)
+        print_replay_command("перед запуском", replay_cmd)
+    else:
+        replay_cmd = None
     if not args.left or not args.right:
         console.print("[ERROR] Для compare нужны --left и --right.")
         return 2
@@ -1156,6 +1123,8 @@ def _run_stats_compare(args, layout: WorkspaceLayout) -> int:
     )
     for p in out_paths:
         console.print(f"[OK] Экспорт: {p}")
+    if replay_cmd:
+        print_replay_command("после выполнения", replay_cmd)
     return 0
 
 
