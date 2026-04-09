@@ -1,4 +1,4 @@
-"""Общие фикстуры: корень репозитория и окружение для subprocess."""
+"""Common fixtures: repository root and environment for subprocess."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def repo_root() -> Path:
 
 @pytest.fixture
 def subprocess_env(repo_root: Path) -> dict[str, str]:
-    """PYTHONPATH для импорта smartrain из исходников. HOME не трогаем — иначе пропадает user-site (typer)."""
+    """PYTHONPATH for importing smartrain from sources. Do not touch HOME - otherwise the user-site (typer) disappears."""
     env = os.environ.copy()
     prev = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = str(repo_root) if not prev else f"{repo_root}{os.pathsep}{prev}"
@@ -26,7 +26,7 @@ def subprocess_env(repo_root: Path) -> dict[str, str]:
 
 @pytest.fixture
 def subprocess_env_isolated_home(repo_root: Path, tmp_path: Path) -> dict[str, str]:
-    """Для тестов, где Ultralytics не должна писать в реальный ~/.config."""
+    """For tests where Ultralytics does not need to write to the real ~/.config."""
     env = os.environ.copy()
     prev = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = str(repo_root) if not prev else f"{repo_root}{os.pathsep}{prev}"

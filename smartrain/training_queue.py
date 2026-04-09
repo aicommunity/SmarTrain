@@ -17,10 +17,10 @@ STATUS_FILE = os.path.join(BASE_DIR, "tmp/status.txt")
 
 def resolve_queue_status_paths(queue_file_cli, workspace_cli, status_file_cli):
     """
-    Очередь и файл статусов.
-    Приоритет: явный --queue-file; иначе при успешном resolve workspace — queue.txt в корне workspace;
-    иначе QUEUE_TXT рядом со скриптом.
-    Статус: явный --status-file; иначе tmp/status.txt рядом с файлом очереди (для workspace — workspace/tmp/status.txt).
+    Queue and status file.
+    Precedence: explicit --queue-file; otherwise, if resolve workspace is successful - queue.txt in the workspace root;
+    otherwise QUEUE_TXT next to the script.
+    Status: explicit --status-file; otherwise tmp/status.txt next to the queue file (for workspace - workspace/tmp/status.txt).
     """
     if status_file_cli is not None and status_file_cli.strip():
         status_path = os.path.abspath(os.path.expanduser(status_file_cli.strip()))
@@ -48,7 +48,7 @@ def resolve_queue_status_paths(queue_file_cli, workspace_cli, status_file_cli):
 
 
 def get_queue_tasks(queue_path=None):
-    """Строки очереди без \\n, без пустых и без комментариев."""
+    """Queue lines without \\n, without empty and without comments."""
     path = queue_path or QUEUE_TXT
     lines = read_txt(path)
     out = []
@@ -68,7 +68,7 @@ def main_window(status_file: str) -> None:
 
 
 def update_status(index, status, tasks):
-    """Обновить статус задачи по индексу (порядок как в очереди)."""
+    """Update task status by index (order as in queue)."""
     if index < 0 or index >= len(tasks):
         return
     statuses = load_statuses()
@@ -91,7 +91,7 @@ def read_txt(txt_file):
         with open(txt_file, "r", encoding="utf-8") as f:
             content = f.readlines()
     except Exception as e:
-        print(f"[ERROR] Не удалось открыть txt-файл: {e}")
+        print(f"[ERROR] Failed to open txt file: {e}")
         content = []
     return content
 
@@ -113,7 +113,7 @@ def process_line(line):
             arguments[1] += ".py"
         return " ".join(arguments)
     except Exception as e:
-        print(f"[ERROR] Ошибка при обработке команды: {e}")
+        print(f"[ERROR] Error processing command: {e}")
         return None
 
 
@@ -132,11 +132,11 @@ def load_statuses():
 
 
 def save_statuses(tasks, statuses, status_file=None):
-    """Пишет status.txt в порядке строк очереди."""
+    """Writes status.txt in queue line order."""
     path = status_file or STATUS_FILE
     with open(path, "w", encoding="utf-8") as f:
         for t in tasks:
-            st = statuses.get(t, "Ждет выполнения")
+            st = statuses.get(t, "Waiting to be completed")
             if isinstance(st, str):
                 st = st.strip()
             f.write(f"{t} | {st}\n")
@@ -144,9 +144,9 @@ def save_statuses(tasks, statuses, status_file=None):
 
 def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
     """
-    Последовательно выполняет задачи из очереди.
-    no_terminal: не открывать gnome-terminal.
-    cwd: рабочая директория для subprocess (по умолчанию текущий каталог).
+    Sequentially executes tasks from the queue.
+    no_terminal: Don't open gnome-terminal.
+    cwd: working directory for subprocess (current directory by default).
     """
     qpath = queue_path or QUEUE_TXT
     st_file = status_file or STATUS_FILE
@@ -177,12 +177,12 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
     try:
         while True:
             tasks = get_queue_tasks(qpath)
-            statuses = {t: statuses.get(t, "Ждет выполнения") for t in tasks}
+            statuses = {t: statuses.get(t, "Waiting to be completed") for t in tasks}
             save_statuses(tasks, statuses, status_file=st_file)
 
             next_task = None
             for t in tasks:
-                if statuses.get(t) == "Ждет выполнения":
+                if statuses.get(t) == "Waiting to be completed":
                     next_task = t
                     break
 
@@ -190,17 +190,17 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
                 time.sleep(5)
                 continue
 
-            statuses[next_task] = "Выполняется"
+            statuses[next_task] = "Running"
             save_statuses(tasks, statuses, status_file=st_file)
 
             cmd = process_line(next_task)
             if cmd is None:
-                statuses[next_task] = "Ошибка"
+                statuses[next_task] = "Error"
                 save_statuses(tasks, statuses, status_file=st_file)
                 continue
 
             result = start_new_process(cmd, cwd=work_cwd)
-            statuses[next_task] = "Выполнено" if result == 0 else "Ошибка"
+            statuses[next_task] = "Done" if result == 0 else "Error"
             save_statuses(tasks, statuses, status_file=st_file)
     finally:
         if os.path.exists(st_file):
@@ -209,36 +209,36 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
 
 def build_queue_run_arg_parser() -> argparse.ArgumentParser:
     parser = CliArgumentParser(
-        description="Очередь обучения: последовательный запуск команд из training_queue.txt"
+        description="Training queue: sequentially running commands from training_queue.txt"
     )
     parser.add_argument(
         "--no-gui",
         action="store_true",
-        help="Не открывать gnome-terminal (статус только в tmp/status.txt)",
+        help="Do not open gnome-terminal (status only in tmp/status.txt)",
     )
     parser.add_argument(
         "--cwd",
         type=str,
         default=None,
-        help="Рабочая директория для запуска команд (по умолчанию текущий каталог)",
+        help="Working directory to run commands (current directory by default)",
     )
     parser.add_argument(
         "--workspace",
         type=str,
         default=None,
-        help="Корень workspace: очередь workspace/queue.txt (иначе SMART_TRAIN_WORKSPACE)",
+        help="Workspace root: queue workspace/queue.txt (aka SMART_TRAIN_WORKSPACE)",
     )
     parser.add_argument(
         "--queue-file",
         type=str,
         default=None,
-        help="Явный путь к файлу очереди (перекрывает --workspace)",
+        help="Explicit path to queue file (overrides --workspace)",
     )
     parser.add_argument(
         "--status-file",
         type=str,
         default=None,
-        help="Явный путь к status.txt исполнителя",
+        help="Explicit path to status.txt of the artist",
     )
     return parser
 

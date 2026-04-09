@@ -1,6 +1,6 @@
 """
-Взвешенная выборка изображений по обратной частоте классов (баланс при дисбалансе).
-Monkey-patch ultralytics.data.build.YOLODataset — хрупко при смене версии ultralytics.
+Weighted image sampling by inverse class frequency (balance when unbalanced).
+Monkey-patch ultralytics.data.build.YOLODataset - fragile when changing ultralytics version.
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ def warn_ultralytics_version() -> None:
     except importlib.metadata.PackageNotFoundError:
         v = "unknown"
     warnings.warn(
-        f"Взвешенный даталоадер патчит внутренности ultralytics (версия {v}). "
-        "После обновления ultralytics проверьте совместимость.",
+        f"Weighted dataloader patches the internals of ultralytics (version {v}). "
+        "After updating ultralytics, check compatibility.",
         UserWarning,
         stacklevel=2,
     )
@@ -73,7 +73,7 @@ def _reassert_build_dataset(trainer) -> None:
 
 
 def setup_weighted_sampling_env() -> None:
-    """Вызывать до YOLO(), чтобы сборка датасета подхватила YOLOWeightedDataset."""
+    """Call before YOLO() so that the dataset assembly picks up YOLOWeightedDataset."""
     warn_ultralytics_version()
     import ultralytics.data.build as build
 
@@ -81,5 +81,5 @@ def setup_weighted_sampling_env() -> None:
 
 
 def register_weighted_sampling_callback(model) -> None:
-    """После создания YOLO — на случай если ultralytics сбросит класс датасета."""
+    """After creating YOLO - in case ultralytics resets the dataset class."""
     model.add_callback("on_pretrain_routine_start", _reassert_build_dataset)

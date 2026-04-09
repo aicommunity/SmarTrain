@@ -1,4 +1,4 @@
-"""Тесты merge профиля обучения YAML + CLI."""
+"""YAML + CLI training profile merge tests."""
 import argparse
 
 from smartrain import model_training_module as mtm
@@ -97,7 +97,7 @@ def test_merge_sources_ignores_forced_keys_from_ultralytics_yaml(capsys):
         args=args,
     )
     out = capsys.readouterr().out
-    assert "проигнорированы ключи" in out
+    assert "keys ignored" in out.lower()
     assert "data" in out and "project" in out
     assert "epochs" in u_cfg
     assert "data" not in u_cfg

@@ -24,17 +24,17 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 
 def build_balance_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(description="Балансировка датасета в новый datasets/<name>")
-    p.add_argument("--workspace", type=str, default=None, help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR})")
-    p.add_argument("--dataset", type=str, default=None, help="Имя исходного датасета")
+    p = CliArgumentParser(description="Balancing the dataset into a new datasets/<name>")
+    p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
+    p.add_argument("--dataset", type=str, default=None, help="Source dataset name")
     p.add_argument("--strategy", choices=("oversample", "undersample", "class-aware", "weights"), default="oversample")
-    p.add_argument("--target", type=float, default=1.0, help="Множитель размера train после балансировки")
-    p.add_argument("--max-ratio", type=float, default=3.0, help="Ограничение max/min для oversample/class-aware")
-    p.add_argument("--min-count", type=int, default=1, help="Минимальный count класса для учета")
-    p.add_argument("--class", dest="single_class", type=str, default=None, help="Балансировать только один класс")
-    p.add_argument("--classes", type=str, default=None, help="Балансировать список классов CSV")
-    p.add_argument("--output-name", type=str, default=None, help="Имя выходного датасета (по умолчанию <dataset>_balanced)")
-    p.add_argument("--emit-train-config", action="store_true", help="Сохранить balance_manifest.json для train")
+    p.add_argument("--target", type=float, default=1.0, help="Train size multiplier after balancing")
+    p.add_argument("--max-ratio", type=float, default=3.0, help="max/min limit for oversample/class-aware")
+    p.add_argument("--min-count", type=int, default=1, help="Minimum class count for accounting")
+    p.add_argument("--class", dest="single_class", type=str, default=None, help="Balance only one class")
+    p.add_argument("--classes", type=str, default=None, help="Balance CSV class list")
+    p.add_argument("--output-name", type=str, default=None, help="Name of output dataset (default <dataset>_balanced)")
+    p.add_argument("--emit-train-config", action="store_true", help="Save balance_manifest.json for train")
     p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--dry-run", action="store_true")
     return p
@@ -77,38 +77,38 @@ def _read_label_classes(label_path: str) -> list[int]:
 
 
 def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) -> None:
-    print("[INFO] Интерактивный режим balance")
-    print("[INFO] Доступные датасеты:")
+    print("[INFO] Interactive balance mode")
+    print("[INFO] Available datasets:")
     for n in dataset_names:
         print(f"  - {n}")
-    print("[INFO] Доступные классы:")
+    print("[INFO] Available classes:")
     for c in class_names:
         print(f"  - {c}")
-    args.dataset = prompt("Датасет: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
+    args.dataset = prompt("Dataset: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
     args.strategy = prompt_choice(
         "Strategy",
         ["oversample", "undersample", "class-aware", "weights"],
         default=args.strategy,
     )
-    args.output_name = prompt_text("Имя выходного датасета (пусто=авто)", default=(args.output_name or "")).strip() or None
+    args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
     args.target = float(
-        prompt_text("Множитель размера train (--target)", default=str(args.target)).strip() or str(args.target)
+        prompt_text("train size multiplier (--target)", default=str(args.target)).strip() or str(args.target)
     )
     args.max_ratio = float(
-        prompt_text("Ограничение max/min (--max-ratio)", default=str(args.max_ratio)).strip() or str(args.max_ratio)
+        prompt_text("Limit max/min (--max-ratio)", default=str(args.max_ratio)).strip() or str(args.max_ratio)
     )
-    mode = prompt_choice("Классы", ["all", "single", "list"], default="all").lower()
+    mode = prompt_choice("Classes", ["all", "single", "list"], default="all").lower()
     if mode == "single":
-        args.single_class = prompt("Класс: ", completer=WordCompleter(class_names, ignore_case=True)).strip()
+        args.single_class = prompt("Class: ", completer=WordCompleter(class_names, ignore_case=True)).strip()
         args.classes = None
     elif mode == "list":
-        selected = prompt_multi_choice_csv("Классы", class_names, default_values=[])
+        selected = prompt_multi_choice_csv("Classes", class_names, default_values=[])
         args.classes = ",".join(selected) if selected else None
         args.single_class = None
     else:
         args.single_class = None
         args.classes = None
-    args.dry_run = prompt_yes_no("Выполнить dry-run (--dry-run)?", default=bool(args.dry_run))
+    args.dry_run = prompt_yes_no("Do dry-run (--dry-run)?", default=bool(args.dry_run))
 
 
 def main(argv=None):
@@ -120,7 +120,7 @@ def main(argv=None):
     layout = WorkspaceLayout(root)
     catalog = _load_catalog(layout)
     if not catalog:
-        print("[ERROR] Не найдено datasets_info.json или он пуст.")
+        print("[ERROR] datasets_info.json was not found or is empty.")
         return
 
     if args.dataset is None and sys.stdin.isatty():
@@ -128,15 +128,15 @@ def main(argv=None):
         _interactive_fill(args, sorted(catalog.keys()), all_classes)
         interactive_used = True
     if not args.dataset:
-        print("[ERROR] Укажите --dataset или используйте интерактивный режим.")
+        print("[ERROR] Specify --dataset or use interactive mode.")
         return
     if args.dataset not in catalog:
-        print(f"[ERROR] Неизвестный датасет: {args.dataset}")
+        print(f"[ERROR] Unknown dataset: {args.dataset}")
         return
     replay_cmd = None
     if interactive_used:
         replay_cmd = build_non_interactive_command("balance", parser, args)
-        print_replay_command("перед запуском", replay_cmd)
+        print_replay_command("before launch", replay_cmd)
 
     random.seed(args.seed)
     entry = catalog[args.dataset]
@@ -150,7 +150,7 @@ def main(argv=None):
     if selected_classes:
         unknown = [c for c in selected_classes if c not in class_map]
         if unknown:
-            print(f"[ERROR] Неизвестные классы в фильтре: {', '.join(unknown)}")
+            print(f"[ERROR] Unknown classes in the filter: {', '.join(unknown)}")
             return
 
     src_root = resolve_dataset_root_for_entry(
@@ -188,7 +188,7 @@ def main(argv=None):
                 passthrough_items.append(item)
 
     if not train_items:
-        print("[ERROR] В исходном датасете нет train-данных для балансировки.")
+        print("[ERROR] There is no train data for balancing in the source dataset.")
         return
 
     selected_pool = []
@@ -216,7 +216,7 @@ def main(argv=None):
     if args.dry_run:
         print(f"[OK] dry-run: strategy={args.strategy}, train_in={len(train_items)}, train_out={len(balanced_train)}, output={out_name}")
         if replay_cmd:
-            print_replay_command("после выполнения", replay_cmd)
+            print_replay_command("after execution", replay_cmd)
         return
 
     for split in ("train", "val", "test"):
@@ -280,10 +280,10 @@ def main(argv=None):
         stats_before={"train_images": len(train_items)},
         stats_after={"train_images_balanced": len(balanced_train), "output_hash": out_hash},
     )
-    print(f"[OK] Создан датасет: {out_dir}")
+    print(f"[OK] Dataset created: {out_dir}")
     print(f"[OK] Passport: {passport_path}")
     if replay_cmd:
-        print_replay_command("после выполнения", replay_cmd)
+        print_replay_command("after execution", replay_cmd)
 
 
 if __name__ == "__main__":

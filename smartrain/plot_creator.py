@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Устаревший скрипт. Используйте smartrain analyze для сравнения прогонов и графиков.
+Outdated script. Use smartrain analyze to compare runs and graphs.
 
-Пример:
+Example:
   smartrain analyze compare --baseline /path/to/run1 --others /path/to/run2 \\
       -o delta.csv --out-png curves.png
 """

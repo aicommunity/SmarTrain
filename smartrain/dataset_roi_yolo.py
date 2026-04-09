@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Обрезка датасета YOLO по ROI из предобученной модели Ultralytics (detect/segment).
-Пересчитывает нормализованные метки детекции и сегментации под новый кадр.
+Trimming the YOLO dataset by ROI from a pre-trained Ultralytics model (detect/segment).
+Recalculates normalized detection and segmentation marks for a new frame.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def _parse_class_ids(raw: Any) -> Optional[List[int]]:
         return None
     if isinstance(raw, list):
         return [int(x) for x in raw]
-    raise ValueError("class_ids в roi_auto должен быть null или списком int")
+    raise ValueError("class_ids in roi_auto must be null or a list of ints")
 
 
 def _bbox_pixels_from_yolo_norm(
@@ -271,8 +271,8 @@ def _copy_and_patch_yaml(dataset_root: str, output_root: str) -> None:
 
 def _ensure_data_yaml_after_roi(output_root: str, entry: Dict[str, Any]) -> None:
     """
-    Если в источнике не было data.yaml (часто cvat11 / zip), scan пропускает выход ROI.
-    Пишем минимальный flat-YOLO yaml из поля classes записи datasets_info.
+    If the source didn't have data.yaml (often cvat11/zip), scan skips the ROI output.
+    We write a minimal flat-YOLO yaml from the classes field of the datasets_info record.
     """
     if find_yaml_file(output_root):
         return
@@ -298,66 +298,66 @@ def _ensure_data_yaml_after_roi(output_root: str, entry: Dict[str, Any]) -> None
 
 def build_roi_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(
-        description="Кроп датасета YOLO по ROI (Ultralytics YOLO detect/segment)"
+        description="Cropping the YOLO dataset by ROI (Ultralytics YOLO detect/segment)"
     )
-    p.add_argument("--dataset-name", required=False, default=None, help="Ключ датасета в datasets_info.json")
+    p.add_argument("--dataset-name", required=False, default=None, help="Dataset key in datasets_info.json")
     p.add_argument(
         "--dataset",
         action="append",
         default=None,
-        help="Имя входного датасета (можно повторять).",
+        help="Input dataset name (can be repeated).",
     )
     p.add_argument(
         "--datasets",
         type=str,
         default=None,
-        help="CSV-список входных датасетов (например ds1,ds2).",
+        help="CSV list of input datasets (for example ds1,ds2).",
     )
     p.add_argument(
         "--workspace",
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); основной режим без --source-path",
+        help=f"Workspace root (aka {WORKSPACE_ENV_VAR}); main mode without --source-path",
     )
     p.add_argument(
         "--source-path",
         default=None,
-        help="Legacy: родительский каталог, датасет в {source-path}/{dataset-name}/",
+        help="Legacy: parent directory, dataset in {source-path}/{dataset-name}/",
     )
     p.add_argument(
         "--output-path",
         default=None,
-        help="Корень нового датасета (по умолчанию в workspace: datasets/<dataset-name>_roi)",
+        help="The root of the new dataset (by default in workspace: datasets/<dataset-name>_roi)",
     )
     p.add_argument(
         "--datasets-info-path",
         default=None,
-        help="Файл datasets_info.json или каталог с ним (по умолчанию: datasets/ в workspace или --source-path)",
+        help="The file datasets_info.json or the directory with it (default: datasets/ in workspace or --source-path)",
     )
     p.add_argument(
         "--tmp-dir",
         default=None,
-        help="Каталог для временных cvat11-меток (по умолчанию: <workspace>/tmp)",
+        help="Directory for temporary cvat11 tags (default: <workspace>/tmp)",
     )
-    p.add_argument("--weights", default=None, help="Переопределить weights из roi_auto")
-    p.add_argument("--conf", type=float, default=None, help="Порог confidence")
-    p.add_argument("--pad-px", type=int, default=None, help="Отступ кропа с каждой стороны")
+    p.add_argument("--weights", default=None, help="Override weights from roi_auto")
+    p.add_argument("--conf", type=float, default=None, help="Confidence threshold")
+    p.add_argument("--pad-px", type=int, default=None, help="Crop indentation on each side")
     p.add_argument(
         "--roi-policy",
         choices=ROI_POLICIES,
         default=None,
-        help="Политика ROI (по умолчанию largest, если не задано в roi_auto): union | largest | best_conf | per_box",
+        help="ROI policy (default largest, if not set in roi_auto): union | largest | best_conf | per_box",
     )
     p.add_argument("--mode", choices=MODES, default=None, help="yolo_detect | yolo_segment")
     p.add_argument(
         "--on-empty",
         choices=ON_EMPTY_MODES,
         default="full_image",
-        help="Поведение при отсутствии детекций для ROI",
+        help="Behavior in the absence of detections for ROI",
     )
     p.add_argument(
         "--require-roi-auto",
         action="store_true",
-        help="Требовать блок roi_auto в datasets_info (иначе достаточно --weights и т.д.)",
+        help="Require roi_auto block in datasets_info (otherwise --weights, etc. is sufficient)",
     )
     return p
 
@@ -416,7 +416,7 @@ def _prompt_yes_no(label: str, default: bool = False) -> bool:
     raw = _prompt_input(f"{label} [{suffix}]: ", default=default_text, show_default_hint=False).strip().lower()
     if not raw:
         return default
-    return raw in ("y", "yes", "1", "true", "да", "д")
+    return raw in ("y", "yes", "1", "true", "yes", "d")
 
 
 def _list_workspace_detector_models(workspace_root: str) -> list[str]:
@@ -434,36 +434,36 @@ def _list_workspace_detector_models(workspace_root: str) -> list[str]:
 def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
     from prompt_toolkit.completion import WordCompleter
 
-    print("[INFO] Интерактивный режим roi (Enter = значение по умолчанию).")
+    print("[INFO] Interactive roi mode (Enter = default).")
     ws = (args.workspace or "").strip() or (os.environ.get(WORKSPACE_ENV_VAR) or "").strip()
     if not ws:
-        ws = _prompt_input("Путь workspace: ", default=os.getcwd()).strip()
+        ws = _prompt_input("Workspace path: ", default=os.getcwd()).strip()
         if not ws:
-            print("[ERROR] Workspace не задан.")
+            print("[ERROR] Workspace not set.")
             return False
         args.workspace = ws
     layout = WorkspaceLayout(os.path.abspath(os.path.expanduser(ws)))
     info_path = layout.work_datasets_info_path()
     if not os.path.isfile(info_path):
-        print(f"[ERROR] Не найден {info_path}")
+        print(f"[ERROR] {info_path} not found")
         return False
     try:
         with open(info_path, "r", encoding="utf-8") as f:
             catalog = json.load(f)
     except Exception as e:
-        print(f"[ERROR] Не удалось прочитать {info_path}: {e}")
+        print(f"[ERROR] Failed to read {info_path}: {e}")
         return False
     if not isinstance(catalog, dict) or not catalog:
-        print("[ERROR] В datasets_info.json нет доступных датасетов.")
+        print("[ERROR] There are no available datasets in datasets_info.json.")
         return False
     names = sorted(str(k) for k in catalog.keys())
-    print("[INFO] Доступные датасеты:")
+    print("[INFO] Available datasets:")
     for n in names:
         print(f"  - {n}")
     ds_comp = WordCompleter(names, ignore_case=True)
     while True:
         raw = _prompt_input(
-            "Датасеты (--dataset/--datasets) через запятую (пусто = первый в списке)",
+            "Datasets (--dataset/--datasets) separated by commas (empty = first in list)",
             default=str(args.datasets or args.dataset_name or ""),
             completer=ds_comp,
         ).strip()
@@ -472,18 +472,18 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
         else:
             picked = [x.strip() for x in raw.split(",") if x.strip()]
         if not picked:
-            print("[ERROR] Нужно выбрать хотя бы один датасет.")
+            print("[ERROR] At least one dataset must be selected.")
             continue
         unknown = [x for x in picked if x not in catalog]
         if unknown:
-            print(f"[ERROR] Неизвестные датасеты: {', '.join(unknown)}")
+            print(f"[ERROR] Unknown datasets: {', '.join(unknown)}")
             continue
         args.dataset = picked
         args.dataset_name = picked[0]
         break
     default_out = str(args.output_path or (layout.datasets if len(args.dataset) > 1 else os.path.join(layout.datasets, f"{args.dataset_name}_roi")))
     out_raw = _prompt_input(
-        "Выходной каталог (--output-path)",
+        "Output directory (--output-path)",
         default=default_out,
     ).strip()
     args.output_path = out_raw or default_out
@@ -510,7 +510,7 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
     args.on_empty = oe_val or "full_image"
     models = _list_workspace_detector_models(layout.root)
     if models:
-        print("[INFO] ROI-детекторы в корне workspace:")
+        print("[INFO] ROI detectors in the workspace root:")
         for m in models:
             print(f"  - {m}")
     weights_completer = WordCompleter(models, ignore_case=True) if models else None
@@ -532,7 +532,7 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
     args.pad_px = int(p_raw) if p_raw else args.pad_px
     req_default = bool(getattr(args, "require_roi_auto", False))
     args.require_roi_auto = _prompt_yes_no(
-        "Требовать roi_auto (--require-roi-auto)",
+        "Require roi_auto (--require-roi-auto)",
         default=req_default,
     )
     return True
@@ -540,8 +540,8 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
 
 def _resolve_catalog_dataset_key(catalog: Dict[str, Any], requested: str) -> str:
     """
-    Ключ в datasets_info для zip в datasets задаётся без суффикса .zip
-    (как в scan). Принимаем и полное имя файла архива.
+    The key in datasets_info for zip in datasets is set without the .zip suffix
+    (as in scan). We also accept the full name of the archive file.
     """
     if requested in catalog:
         return requested
@@ -550,9 +550,9 @@ def _resolve_catalog_dataset_key(catalog: Dict[str, Any], requested: str) -> str
         if stem in catalog:
             return stem
     sys.exit(
-        f"[ERROR] Ключ {requested!r} отсутствует в каталоге. "
-        "Обычно в datasets_info имя совпадает с именем архива без «.zip», "
-        "например «job_2512_dataset_2026_03_27_15_31_43_cvat for images 1.1»."
+        f"[ERROR] The key {requested!r} is not in the directory."
+        " Usually in datasets_info the name matches the archive name without '.zip', "
+        "for example 'job_2512_dataset_2026_03_27_15_31_43_cvat_for_images_1_1'."
     )
 
 
@@ -566,7 +566,7 @@ def _resolve_datasets_info_file(datasets_info_path_arg: Optional[str], default_j
 
 
 def _relpath_under_dataset(path: str, dataset_root: str, fallback: str) -> str:
-    """Относительный путь для зеркалирования структуры в output; если вне dataset_root — fallback."""
+    """Relative path for mirroring the structure to output; if outside dataset_root - fallback."""
     ap = os.path.abspath(path)
     ar = os.path.abspath(dataset_root)
     try:
@@ -583,14 +583,14 @@ def _validate_layout_legacy(
 ) -> str:
     dr = os.path.join(source_path, dataset_name)
     if not os.path.isdir(dr):
-        sys.exit(f"[ERROR] Нет каталога датасета: {dr}")
+        sys.exit(f"[ERROR] No dataset directory: {dr}")
     if datasets_info_path_override is not None:
         alt = os.path.join(datasets_info_path_override, dataset_name)
         if not os.path.isdir(alt):
-            sys.exit(f"[ERROR] При --datasets-info-path ожидается каталог {alt}")
+            sys.exit(f"[ERROR] If --datasets-info-path is expected, directory {alt}")
         if os.path.realpath(dr) != os.path.realpath(alt):
             sys.exit(
-                "[ERROR] --source-path и --datasets-info-path должны указывать на один и тот же датасет "
+                "[ERROR] --source-path and --datasets-info-path must point to the same dataset"
                 f"({dr} vs {alt})"
             )
     return dr
@@ -599,12 +599,12 @@ def _validate_layout_legacy(
 def _load_roi_config(args: argparse.Namespace, entry: Dict[str, Any]) -> Dict[str, Any]:
     ra = entry.get("roi_auto")
     if args.require_roi_auto and not isinstance(ra, dict):
-        sys.exit("[ERROR] В записи датасета нет объекта roi_auto (--require-roi-auto).")
+        sys.exit("[ERROR] There is no roi_auto object in the dataset record (--require-roi-auto).")
 
     ra = ra if isinstance(ra, dict) else {}
     weights = args.weights or ra.get("weights")
     if not weights:
-        sys.exit("[ERROR] Укажите weights в roi_auto или через --weights.")
+        sys.exit("[ERROR] Specify weights in roi_auto or via --weights.")
 
     conf = args.conf if args.conf is not None else float(ra.get("conf", 0.25))
     pad_px = args.pad_px if args.pad_px is not None else int(ra.get("pad_px", 0))
@@ -612,9 +612,9 @@ def _load_roi_config(args: argparse.Namespace, entry: Dict[str, Any]) -> Dict[st
     mode = args.mode or ra.get("mode", "yolo_detect")
 
     if roi_policy not in ROI_POLICIES:
-        sys.exit(f"[ERROR] Недопустимый roi_policy: {roi_policy}")
+        sys.exit(f"[ERROR] Invalid roi_policy: {roi_policy}")
     if mode not in MODES:
-        sys.exit(f"[ERROR] Недопустимый mode: {mode}")
+        sys.exit(f"[ERROR] Invalid mode: {mode}")
 
     try:
         class_ids = _parse_class_ids(ra.get("class_ids"))
@@ -640,7 +640,7 @@ def main(argv=None) -> None:
     selected_dataset_names = _parse_selected_datasets(args)
     if not selected_dataset_names:
         if not sys.stdin.isatty():
-            sys.exit("[ERROR] Укажите --dataset-name/--dataset/--datasets или запустите команду в интерактивном режиме (TTY).")
+            sys.exit("[ERROR] Specify --dataset-name/--dataset/--datasets or run the command interactively (TTY).")
         if not _run_interactive_roi_setup(args):
             return
         interactive_used = True
@@ -648,7 +648,7 @@ def main(argv=None) -> None:
     replay_cmd = None
     if interactive_used:
         replay_cmd = build_non_interactive_command("roi", parser, args)
-        print_replay_command("перед запуском", replay_cmd)
+        print_replay_command("before launch", replay_cmd)
     legacy_source = (args.source_path or "").strip()
     workspace_root: Optional[str] = None
     layout: Optional[WorkspaceLayout] = None
@@ -656,9 +656,9 @@ def main(argv=None) -> None:
     need_default_roi_output = False
     if legacy_source:
         if len(selected_dataset_names) > 1:
-            sys.exit("[ERROR] Legacy-режим не поддерживает обработку нескольких датасетов за один запуск.")
+            sys.exit("[ERROR] Legacy mode does not support processing multiple datasets in one run.")
         if not args.output_path or not str(args.output_path).strip():
-            sys.exit("[ERROR] В legacy-режиме (--source-path) укажите --output-path")
+            sys.exit("[ERROR] In legacy mode (--source-path), specify --output-path")
         source_path_abs = os.path.abspath(os.path.expanduser(legacy_source))
         info_path = _resolve_datasets_info_file(
             args.datasets_info_path, os.path.join(source_path_abs, DATASETS_INFO_FILE)
@@ -669,7 +669,7 @@ def main(argv=None) -> None:
         ws = (args.workspace or "").strip() or (os.environ.get(WORKSPACE_ENV_VAR) or "").strip()
         if not ws:
             sys.exit(
-                f"[ERROR] Укажите --source-path (legacy) или --workspace / переменную {WORKSPACE_ENV_VAR}"
+                f"[ERROR] Specify --source-path (legacy) or --workspace / variable {WORKSPACE_ENV_VAR}"
             )
         workspace_root = os.path.abspath(os.path.expanduser(ws))
         layout = WorkspaceLayout(workspace_root)
@@ -685,7 +685,7 @@ def main(argv=None) -> None:
             need_default_roi_output = True
 
     if not os.path.isfile(info_path):
-        sys.exit(f"[ERROR] Не найден {info_path}")
+        sys.exit(f"[ERROR] {info_path} not found")
 
     with open(info_path, "r", encoding="utf-8") as f:
         datasets_info = json.load(f)
@@ -696,14 +696,14 @@ def main(argv=None) -> None:
         if key not in resolved_keys:
             resolved_keys.append(key)
         if key != req_name:
-            print(f"[INFO] Используется ключ датасета в каталоге: {key!r}")
+            print(f"[INFO] The dataset key in the directory is used: {key!r}")
 
     output_base = os.path.abspath(os.path.expanduser(str(args.output_path).strip())) if (args.output_path or "").strip() else None
     for dataset_key in resolved_keys:
         entry = datasets_info[dataset_key]
         structure = entry.get("structure")
         if not structure:
-            sys.exit(f"[ERROR] В записи датасета {dataset_key!r} нет поля structure")
+            sys.exit(f"[ERROR] There is no structure field in the dataset record {dataset_key!r}")
         if legacy_source:
             source_path_abs = os.path.abspath(os.path.expanduser(legacy_source))
             dataset_root = _validate_layout_legacy(
@@ -730,8 +730,8 @@ def main(argv=None) -> None:
         model = YOLO(cfg["weights"])
         if cfg["mode"] == "yolo_segment" and getattr(model, "task", None) != "segment":
             print(
-                f"[WARNING] mode=yolo_segment, но модель task={getattr(model, 'task', None)}; "
-                "используются ограничивающие прямоугольники детекций/масок."
+                f"[WARNING] mode=yolo_segment, but model task={getattr(model, 'task', None)}; "
+                "detect/mask bounding boxes are used."
             )
 
         buckets = iter_image_label_buckets(
@@ -743,7 +743,7 @@ def main(argv=None) -> None:
             exclude_test=False,
         )
         if not buckets:
-            sys.exit(f"[ERROR] Нет пар images/labels для structure={structure}")
+            sys.exit(f"[ERROR] No images/labels pairs for structure={structure}")
 
         stats = {"images": 0, "skipped": 0}
 
@@ -783,7 +783,7 @@ def main(argv=None) -> None:
 
                 if not roi_list:
                     if args.on_empty == "fail":
-                        sys.exit(f"[ERROR] Нет детекций для ROI: {src_img}")
+                        sys.exit(f"[ERROR] No detections for ROI: {src_img}")
                     if args.on_empty == "skip":
                         stats["skipped"] += 1
                         continue
@@ -849,13 +849,13 @@ def main(argv=None) -> None:
             )
             print(f"[OK] Passport: {passport_path}")
         except Exception as e:
-            print(f"[WARNING] Не удалось записать dataset_passport.json: {e}")
+            print(f"[WARNING] Failed to write dataset_passport.json: {e}")
         print(
-            f"[OK] Готово для {dataset_key!r}: {stats['images']} выходных кадров, "
-            f"пропущено {stats['skipped']}, каталог: {output_root}"
+            f"[OK] Done for {dataset_key!r}: {stats['images']} output frames, "
+            f"skipped {stats['skipped']}, directory: {output_root}"
         )
     if replay_cmd:
-        print_replay_command("после выполнения", replay_cmd)
+        print_replay_command("after execution", replay_cmd)
 
 
 if __name__ == "__main__":

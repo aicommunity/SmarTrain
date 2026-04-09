@@ -37,71 +37,71 @@ class _RefSig:
 
 
 def build_orient_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(description="Исправление поворотов 0/90/180/270 в датасете YOLO (в новый datasets/<name>)")
-    p.add_argument("--workspace", type=str, default=None, help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR})")
-    p.add_argument("--dataset", type=str, default=None, help="Имя исходного датасета из datasets_info.json")
+    p = CliArgumentParser(description="Fix rotations 0/90/180/270 in the YOLO dataset (to new datasets/<name>)")
+    p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
+    p.add_argument("--dataset", type=str, default=None, help="Name of source dataset from datasets_info.json")
     p.add_argument(
         "--method",
         choices=METHODS,
         default="reference",
-        help="Метод определения ориентации: reference (эталоны) или rotnet (обучаемый классификатор).",
+        help="Orientation determination method: reference (standards) or rotnet (trained classifier).",
     )
     p.add_argument(
         "--output-name",
         type=str,
         default=None,
-        help="Имя выходного датасета (по умолчанию <dataset>_oriented)",
+        help="Name of output dataset (default <dataset>_oriented)",
     )
     p.add_argument(
         "--reference",
         action="append",
         default=None,
-        help="Путь к эталонному изображению в правильной ориентации (можно повторять).",
+        help="Path to reference image in correct orientation (can be repeated).",
     )
     p.add_argument(
         "--min-score",
         type=int,
         default=8,
-        help="Минимальный score уверенности (после объединения ORB+градиентного fallback).",
+        help="Minimum confidence score (after combining ORB+gradient fallback).",
     )
     p.add_argument(
         "--on-uncertain",
         choices=ON_UNCERTAIN,
         default="keep",
-        help="Что делать, если уверенность ниже --min-score: keep|skip|fail.",
+        help="What to do if confidence is lower --min-score: keep|skip|fail.",
     )
-    p.add_argument("--report-only", action="store_true", help="Только отчёт по распределению углов, без записи датасета.")
-    p.add_argument("--dry-run", action="store_true", help="Не писать файлы, но выполнять расчёт и печатать итог.")
-    p.add_argument("--no-legend", action="store_true", help="Отключить прогресс-бар.")
-    p.add_argument("--rotnet-model-path", type=str, default=None, help="Путь к .pt модели RotNet (по умолчанию внутри датасета).")
-    p.add_argument("--rotnet-epochs", type=int, default=4, help="Число эпох обучения/дообучения RotNet.")
-    p.add_argument("--rotnet-batch-size", type=int, default=64, help="Batch size для RotNet.")
-    p.add_argument("--rotnet-lr", type=float, default=1e-3, help="Learning rate для RotNet.")
-    p.add_argument("--rotnet-image-size", type=int, default=96, help="Размер входа RotNet (квадрат).")
+    p.add_argument("--report-only", action="store_true", help="Only a report on the distribution of angles, without recording a dataset.")
+    p.add_argument("--dry-run", action="store_true", help="Not write files, but perform the calculation and print the result.")
+    p.add_argument("--no-legend", action="store_true", help="Disable progress bar.")
+    p.add_argument("--rotnet-model-path", type=str, default=None, help="Path to the .pt RotNet model (inside the dataset by default).")
+    p.add_argument("--rotnet-epochs", type=int, default=4, help="Number of RotNet training/retraining epochs.")
+    p.add_argument("--rotnet-batch-size", type=int, default=64, help="Batch size for RotNet.")
+    p.add_argument("--rotnet-lr", type=float, default=1e-3, help="Learning rate for RotNet.")
+    p.add_argument("--rotnet-image-size", type=int, default=96, help="RotNet input size (square).")
     p.add_argument(
         "--rotnet-device",
         type=str,
         default="auto",
-        help="Устройство для RotNet: auto|cpu|cuda",
+        help="Device for RotNet: auto|cpu|cuda",
     )
-    p.add_argument("--rotnet-finetune", action="store_true", help="Дообучить существующую RotNet-модель из датасета.")
+    p.add_argument("--rotnet-finetune", action="store_true", help="Retrain an existing RotNet model from the dataset.")
     p.add_argument(
         "--rotnet-anchor-mode",
         choices=("reference", "majority"),
         default="majority",
-        help="Калибровка абсолютного угла для RotNet: reference (по --reference) или majority (по моде датасета).",
+        help="Absolute angle calibration for RotNet: reference (by --reference) or majority (by dataset mode).",
     )
     p.add_argument(
         "--rotnet-anchor-samples",
         type=int,
         default=256,
-        help="Сколько изображений использовать для majority-калибровки RotNet.",
+        help="How many images to use for majority-calibration of RotNet.",
     )
     p.add_argument(
         "--rotnet-pretrained",
         type=str,
         default=None,
-        help="Путь к внешнему checkpoint для инициализации/дообучения RotNet.",
+        help="Path to external checkpoint for initialization/additional training of RotNet.",
     )
     return p
 
@@ -120,38 +120,38 @@ def _interactive_fill(args, *, dataset_names: list[str]) -> None:
     from prompt_toolkit.completion import WordCompleter
     from smartrain.cli_prompts import prompt_choice, prompt_text
 
-    print("[INFO] Интерактивный режим orient")
-    print("[INFO] Доступные датасеты:")
+    print("[INFO] Interactive mode orient")
+    print("[INFO] Available datasets:")
     for n in dataset_names:
         print(f"  - {n}")
-    args.dataset = prompt("Датасет: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
-    args.output_name = prompt_text("Имя выходного датасета (пусто=авто)", default=(args.output_name or "")) or None
-    args.method = prompt_choice("Метод", list(METHODS), default=str(getattr(args, "method", "reference")))
+    args.dataset = prompt("Dataset: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
+    args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")) or None
+    args.method = prompt_choice("Method", list(METHODS), default=str(getattr(args, "method", "reference")))
 
     if args.method == "reference":
         refs: list[str] = []
-        print("[INFO] Эталоны (правильная ориентация). Введите пути, пустая строка = конец.")
+        print("[INFO] References (correct orientation). Enter paths, empty line = end.")
         while True:
-            r = prompt("Путь к reference-изображению (пусто=закончить): ", default="").strip()
+            r = prompt("Path to reference image (empty=finish): ", default="").strip()
             if not r:
                 break
             refs.append(r)
         if refs:
             args.reference = refs
     else:
-        raw_epochs = prompt_text("Число эпох RotNet (--rotnet-epochs)", default=str(getattr(args, "rotnet_epochs", 4))).strip()
+        raw_epochs = prompt_text("Number of RotNet epochs (--rotnet-epochs)", default=str(getattr(args, "rotnet_epochs", 4))).strip()
         if raw_epochs:
             try:
                 args.rotnet_epochs = int(raw_epochs)
             except ValueError:
                 pass
-        raw_size = prompt_text("Размер входа RotNet (--rotnet-image-size)", default=str(getattr(args, "rotnet_image_size", 96))).strip()
+        raw_size = prompt_text("RotNet input size (--rotnet-image-size)", default=str(getattr(args, "rotnet_image_size", 96))).strip()
         if raw_size:
             try:
                 args.rotnet_image_size = int(raw_size)
             except ValueError:
                 pass
-        raw_bs = prompt_text("Размер batch RotNet (--rotnet-batch-size)", default=str(getattr(args, "rotnet_batch_size", 64))).strip()
+        raw_bs = prompt_text("RotNet batch size (--rotnet-batch-size)", default=str(getattr(args, "rotnet_batch_size", 64))).strip()
         if raw_bs:
             try:
                 args.rotnet_batch_size = int(raw_bs)
@@ -164,25 +164,25 @@ def _interactive_fill(args, *, dataset_names: list[str]) -> None:
             except ValueError:
                 pass
         args.rotnet_device = prompt_choice(
-            "Устройство RotNet (--rotnet-device)",
+            "RotNet device (--rotnet-device)",
             ["auto", "cpu", "cuda"],
             default=str(getattr(args, "rotnet_device", "auto")),
         )
         args.rotnet_model_path = prompt_text(
-            "Путь к модели RotNet (--rotnet-model-path, пусто=внутри датасета)",
+            "Path to the RotNet model (--rotnet-model-path, empty=inside the dataset)",
             default=str(getattr(args, "rotnet_model_path", "") or ""),
         ).strip() or None
         args.rotnet_pretrained = prompt_text(
-            "Путь к pretrained RotNet (--rotnet-pretrained, пусто=нет)",
+            "Path to pretrained RotNet (--rotnet-pretrained, empty=no)",
             default=str(getattr(args, "rotnet_pretrained", "") or ""),
         ).strip() or None
         args.rotnet_anchor_mode = prompt_choice(
-            "Режим якоря RotNet (--rotnet-anchor-mode)",
+            "RotNet Anchor Mode (--rotnet-anchor-mode)",
             ["reference", "majority"],
             default=str(getattr(args, "rotnet_anchor_mode", "majority")),
         )
         raw_anchor_samples = prompt_text(
-            "Число anchor-samples RotNet (--rotnet-anchor-samples)",
+            "Number of RotNet anchor samples (--rotnet-anchor-samples)",
             default=str(getattr(args, "rotnet_anchor_samples", 256)),
         ).strip()
         if raw_anchor_samples:
@@ -190,27 +190,27 @@ def _interactive_fill(args, *, dataset_names: list[str]) -> None:
                 args.rotnet_anchor_samples = int(raw_anchor_samples)
             except ValueError:
                 pass
-        args.rotnet_finetune = prompt_yes_no("Включить дообучение RotNet (--rotnet-finetune)?", default=bool(args.rotnet_finetune))
+        args.rotnet_finetune = prompt_yes_no("Enable RotNet retraining (--rotnet-finetune)?", default=bool(args.rotnet_finetune))
 
-    raw = prompt_text("Минимальный score (--min-score)", default=str(getattr(args, "min_score", 8))).strip()
+    raw = prompt_text("Minimum score (--min-score)", default=str(getattr(args, "min_score", 8))).strip()
     if raw:
         try:
             args.min_score = int(raw)
         except ValueError:
             pass
     args.on_uncertain = prompt_choice(
-        "Поведение при uncertainty (--on-uncertain)",
+        "Behavior during uncertainty (--on-uncertain)",
         list(ON_UNCERTAIN),
         default=str(getattr(args, "on_uncertain", "keep")),
     )
-    args.report_only = prompt_yes_no("Только отчёт без записи датасета (--report-only)?", default=bool(args.report_only))
-    args.dry_run = prompt_yes_no("Выполнить dry-run (--dry-run)?", default=bool(args.dry_run))
+    args.report_only = prompt_yes_no("Only a report without recording a dataset (--report-only)?", default=bool(args.report_only))
+    args.dry_run = prompt_yes_no("Do dry-run (--dry-run)?", default=bool(args.dry_run))
 
 
 def _read_gray(path: str) -> np.ndarray:
     img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
     if img is None:
-        raise ValueError(f"Не удалось прочитать изображение: {path}")
+        raise ValueError(f"Unable to read image: {path}")
     return img
 
 
@@ -226,7 +226,7 @@ def _rot_img_k(img: np.ndarray, k: int) -> np.ndarray:
 
 
 def _orb() -> cv2.ORB:
-    # nfeatures повышаем: сцены с сеткой/шумом могут давать мало ключевых точек при дефолтах
+    # nfeatures improved: scenes with mesh/noise may produce few key points at defaults
     return cv2.ORB_create(nfeatures=1200, fastThreshold=7)
 
 
@@ -418,7 +418,7 @@ def _train_or_load_rotnet(args, *, src_root: str, image_paths: list[str]):
     epochs = max(0, int(args.rotnet_epochs))
     if need_train and epochs > 0:
         print(
-            f"[INFO] RotNet: обучение, epochs={epochs}, images={len(image_paths)}, "
+            f"[INFO] RotNet: training, epochs={epochs}, images={len(image_paths)}, "
             f"batch={max(4, int(args.rotnet_batch_size))}, device={device}"
         )
         ds = _RotDataset(image_paths, image_size)
@@ -472,7 +472,7 @@ def _train_or_load_rotnet(args, *, src_root: str, image_paths: list[str]):
                 indent=2,
             )
     elif os.path.isfile(model_path):
-        print(f"[INFO] RotNet: загрузка сохранённой модели {model_path}")
+        print(f"[INFO] RotNet: loading saved model {model_path}")
         ckpt = torch.load(model_path, map_location=device)
         state = ckpt.get("model_state", ckpt) if isinstance(ckpt, dict) else ckpt
         model.load_state_dict(state, strict=False)
@@ -494,7 +494,7 @@ def _choose_rotation_rotnet(gray: np.ndarray, model, device, image_size: int) ->
             g = cv2.resize(g, (image_size, image_size), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
             x = torch.from_numpy(g).unsqueeze(0).unsqueeze(0).to(device)
             probs = F.softmax(model(x), dim=1).squeeze(0).detach().cpu().numpy()
-            # score = "насколько после поворота k кадр выглядит как 0°"
+            # score = "how much does the frame look like 0° after rotation k"
             scores[k] = int(float(probs[0]) * 1000.0)
     best_k = max(scores.items(), key=lambda kv: kv[1])[0]
     return int(best_k), {int(k): int(v) for k, v in scores.items()}
@@ -509,26 +509,26 @@ def _calibrate_rotnet_offset(
     dataset_image_paths: list[str],
 ) -> int:
     """
-    Возвращает offset c в формуле corrected_k = (raw_k - c) mod 4.
+    Returns offset c in the formula corrected_k = (raw_k - c) mod 4.
     """
     preds: list[int] = []
     if args.rotnet_anchor_mode == "reference" and args.reference:
-        print(f"[INFO] RotNet: калибровка по reference ({len(args.reference)} шт.)")
+        print(f"[INFO] RotNet: calibration by reference ({len(args.reference)} pcs.)")
         for rp in args.reference:
             try:
                 gray = _read_gray(str(rp))
             except Exception as e:
-                print(f"[WARNING] Reference недоступен: {rp} ({e})")
+                print(f"[WARNING] Reference not available: {rp} ({e})")
                 continue
             raw_k, _scores = _choose_rotation_rotnet(gray, model, device, image_size)
             preds.append(int(raw_k))
     if not preds:
-        # majority fallback: предполагаем, что в датасете большинство кадров в канонической ориентации
+        # majority fallback: assume that the majority of frames in the dataset are in canonical orientation
         sample_n = max(8, int(getattr(args, "rotnet_anchor_samples", 256)))
         pool = list(dataset_image_paths)
         random.shuffle(pool)
         pool = pool[: min(sample_n, len(pool))]
-        print(f"[INFO] RotNet: калибровка по majority ({len(pool)} изображений)")
+        print(f"[INFO] RotNet: calibration by majority ({len(pool)} images)")
         for p in pool:
             try:
                 gray = _read_gray(p)
@@ -537,7 +537,7 @@ def _calibrate_rotnet_offset(
             raw_k, _scores = _choose_rotation_rotnet(gray, model, device, image_size)
             preds.append(int(raw_k))
     if not preds:
-        print("[WARNING] RotNet: не удалось откалибровать смещение, используется offset=0")
+        print("[WARNING] RotNet: failed to calibrate offset, using offset=0")
         return 0
     # mode by counts
     counts = {0: 0, 1: 0, 2: 0, 3: 0}
@@ -618,30 +618,30 @@ def main(argv=None) -> None:
     layout = WorkspaceLayout(root)
     catalog = _load_catalog(layout)
     if not catalog:
-        print("[ERROR] Не найдено datasets_info.json или он пуст.")
+        print("[ERROR] datasets_info.json was not found or is empty.")
         return
 
     if args.dataset is None and sys.stdin.isatty():
         _interactive_fill(args, dataset_names=sorted(catalog.keys()))
         interactive_used = True
     if not args.dataset:
-        print("[ERROR] Укажите --dataset или используйте интерактивный режим.")
+        print("[ERROR] Specify --dataset or use interactive mode.")
         return
     if args.dataset not in catalog:
-        print(f"[ERROR] Неизвестный датасет: {args.dataset}")
+        print(f"[ERROR] Unknown dataset: {args.dataset}")
         return
     if args.method == "reference" and not args.reference:
-        print("[ERROR] Нужен хотя бы один --reference (эталон правильной ориентации).")
+        print("[ERROR] At least one --reference is needed.")
         return
     replay_cmd = None
     if interactive_used:
         replay_cmd = build_non_interactive_command("orient", parser, args)
-        print_replay_command("перед запуском", replay_cmd)
+        print_replay_command("before launch", replay_cmd)
 
     entry = catalog[args.dataset]
     structure = str(entry.get("structure", "split"))
     if structure == "cvat11":
-        print("[ERROR] structure=cvat11 не поддерживается для orient (по договорённости работаем только с datasets/ без cvat11).")
+        print("[ERROR] structure=cvat11 is not supported for orient (by agreement we only work with datasets/without cvat11).")
         return
 
     src_root = resolve_dataset_root_for_entry(
@@ -660,7 +660,7 @@ def main(argv=None) -> None:
         exclude_test=False,
     )
     if not buckets:
-        print("[ERROR] Не найдено ни одной пары images/labels в датасете.")
+        print("[ERROR] No images/labels pairs were found in the dataset.")
         return
     refs = _load_references([str(p) for p in args.reference]) if args.method == "reference" else []
     rotnet_model = None
@@ -671,7 +671,7 @@ def main(argv=None) -> None:
     if args.method == "rotnet":
         all_images = _iter_dataset_images(buckets)
         if not all_images:
-            print("[ERROR] В датасете нет изображений для обучения/инференса RotNet.")
+            print("[ERROR] There are no images in the dataset for RotNet training/inference.")
             return
         rotnet_model, rotnet_device, rotnet_image_size, rotnet_model_path = _train_or_load_rotnet(
             args,
@@ -691,7 +691,7 @@ def main(argv=None) -> None:
     out_dir = os.path.join(layout.datasets, out_name)
 
     all_images_total = len(_iter_dataset_images(buckets))
-    print(f"[INFO] orient: обработка изображений: {all_images_total}")
+    print(f"[INFO] orient: image processing: {all_images_total}")
 
     counts = {0: 0, 1: 0, 2: 0, 3: 0}
     uncertain = 0
@@ -718,7 +718,7 @@ def main(argv=None) -> None:
             try:
                 gray = _read_gray(img_path)
             except Exception as e:
-                print(f"[WARNING] Пропуск изображения: {img_path} ({e})")
+                print(f"[WARNING] Skip image: {img_path} ({e})")
                 progress.update(1)
                 continue
 
@@ -765,7 +765,7 @@ def main(argv=None) -> None:
                     progress.update(1)
                     continue
                 if args.on_uncertain == "fail":
-                    raise RuntimeError(f"Неуверенный поворот для {img_path}: scores={scores}, chosen={k}")
+                    raise RuntimeError(f"Unsure turn for {img_path}: scores={scores}, chosen={k}")
 
             if args.report_only or args.dry_run:
                 action = "report_only" if args.report_only else "dry_run"
@@ -793,7 +793,7 @@ def main(argv=None) -> None:
             # rotate image and labels
             bgr = cv2.imread(img_path, cv2.IMREAD_COLOR)
             if bgr is None:
-                print(f"[WARNING] Не удалось прочитать изображение (color): {img_path}")
+                print(f"[WARNING] Failed to read image (color): {img_path}")
                 progress.update(1)
                 continue
             rbgr = _rot_img_k(bgr, k)
@@ -855,7 +855,7 @@ def main(argv=None) -> None:
 
     if args.report_only or args.dry_run:
         if replay_cmd:
-            print_replay_command("после выполнения", replay_cmd)
+            print_replay_command("after execution", replay_cmd)
         return
 
     _copy_tree_structure_if_exists(src_root, out_dir)
@@ -888,5 +888,5 @@ def main(argv=None) -> None:
         random_seed=None,
     )
     if replay_cmd:
-        print_replay_command("после выполнения", replay_cmd)
+        print_replay_command("after execution", replay_cmd)
 

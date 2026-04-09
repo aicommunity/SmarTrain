@@ -15,9 +15,9 @@ def test_parse_fusion_split_custom() -> None:
 
 
 def test_parse_fusion_split_errors() -> None:
-    with pytest.raises(ValueError, match="ровно три"):
+    with pytest.raises(ValueError, match="Exactly three|exactly three"):
         parse_fusion_split_arg("0.5,0.5")
-    with pytest.raises(ValueError, match="Сумма"):
+    with pytest.raises(ValueError, match="Sum"):
         parse_fusion_split_arg("0.5,0.5,0.5")
-    with pytest.raises(ValueError, match="отрицательными"):
+    with pytest.raises(ValueError, match="negative"):
         parse_fusion_split_arg("1.0,-0.1,0.1")

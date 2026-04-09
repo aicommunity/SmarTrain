@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI для управления файлом очереди обучения (training_queue.txt).
+CLI for managing the training queue file (training_queue.txt).
 """
 import argparse
 import os
@@ -34,7 +34,7 @@ def _with_file_lock(queue_path, fn):
         fd = os.open(_lock_path(queue_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.close(fd)
     except FileExistsError:
-        print("[ERROR] Очередь заблокирована (.lock). Повторите позже.", file=sys.stderr)
+        print("[ERROR] The queue is locked (.lock). Please try again later.", file=sys.stderr)
         sys.exit(1)
     try:
         return fn()
@@ -46,7 +46,7 @@ def _with_file_lock(queue_path, fn):
 
 
 def _rebuild_queue_file(queue_path, new_tasks):
-    """Сохраняет комментарии и пустые строки между блоками задач нельзя надёжно; сохраняем префикс комментариев до первой задачи."""
+    """Does not reliably store comments and empty lines between task blocks; store the comment prefix before the first task."""
     raw_lines = tq.read_txt(queue_path)
     prefix = []
     i = 0
@@ -71,7 +71,7 @@ def _rebuild_queue_file(queue_path, new_tasks):
 def cmd_list(args):
     path, st_file = _queue_and_status(args)
     if not os.path.exists(path):
-        print("(файл очереди отсутствует)")
+        print("(queue file missing)")
         return
     tasks = tq.get_queue_tasks(path)
     statuses = {}
@@ -91,7 +91,7 @@ def cmd_add(args):
     path = _queue_path(args)
     line = " ".join(args.command).strip() if isinstance(args.command, list) else args.command.strip()
     if not line or line.startswith("#"):
-        print("[ERROR] Пустая строка или комментарий.", file=sys.stderr)
+        print("[ERROR] Empty line or comment.", file=sys.stderr)
         sys.exit(1)
 
     def do_add():
@@ -100,7 +100,7 @@ def cmd_add(args):
             os.makedirs(d, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
-        print(f"[OK] Добавлено: {line}")
+        print(f"[OK] Added: {line}")
 
     _with_file_lock(path, do_add)
 
@@ -110,13 +110,13 @@ def cmd_remove(args):
 
     def do_remove():
         if not os.path.exists(path):
-            print("[ERROR] Файл очереди не найден.", file=sys.stderr)
+            print("[ERROR] Queue file not found.", file=sys.stderr)
             sys.exit(1)
         tasks = tq.get_queue_tasks(path)
         if args.index is not None:
             idx = args.index - 1
             if idx < 0 or idx >= len(tasks):
-                print(f"[ERROR] Нет строки с номером {args.index}.", file=sys.stderr)
+                print(f"[ERROR] There is no line number {args.index}.", file=sys.stderr)
                 sys.exit(1)
             new_tasks = tasks[:idx] + tasks[idx + 1 :]
             removed = tasks[idx]
@@ -124,10 +124,10 @@ def cmd_remove(args):
             sub = args.substring
             matching = [t for t in tasks if sub in t]
             if not matching:
-                print(f"[ERROR] Ни одна строка не содержит: {sub!r}", file=sys.stderr)
+                print(f"[ERROR] No line contains: {sub!r}", file=sys.stderr)
                 sys.exit(1)
             if len(matching) > 1 and not args.all:
-                print(f"[ERROR] Совпало строк: {len(matching)}. Уточните или используйте --all.", file=sys.stderr)
+                print(f"[ERROR] Lines matched: {len(matching)}. Please clarify or use --all.", file=sys.stderr)
                 sys.exit(1)
             new_tasks = [t for t in tasks if sub not in t]
             removed = sub
@@ -155,9 +155,9 @@ def cmd_remove(args):
             tmp_path = tmp.name
         shutil.move(tmp_path, path)
         if args.index is not None:
-            print(f"[OK] Удалено: {removed}")
+            print(f"[OK] Removed: {removed}")
         else:
-            print(f"[OK] Удалено строк с подстрокой {args.substring!r}: {len(matching)}")
+            print(f"[OK] Removed lines with substring {args.substring!r}: {len(matching)}")
 
     _with_file_lock(path, do_remove)
 
@@ -177,7 +177,7 @@ def cmd_clear(args):
                     break
             with open(path, "w", encoding="utf-8") as f:
                 f.writelines(prefix)
-        print("[OK] Очередь задач очищена (комментарии в начале файла сохранены).")
+        print("[OK] The task queue has been cleared (the comments at the beginning of the file have been saved).")
 
     _with_file_lock(path, do_clear)
 
@@ -198,44 +198,44 @@ def build_queue_cli_arg_parser() -> argparse.ArgumentParser:
         "--workspace",
         type=str,
         default=None,
-        help="Корень workspace: очередь queue.txt, статусы tmp/status.txt (иначе SMART_TRAIN_WORKSPACE)",
+        help="Workspace root: queue queue.txt, statuses tmp/status.txt (aka SMART_TRAIN_WORKSPACE)",
     )
     common.add_argument(
         "--queue-file",
         type=str,
         default=None,
-        help="Явный путь к файлу очереди (перекрывает --workspace)",
+        help="Explicit path to queue file (overrides --workspace)",
     )
     common.add_argument(
         "--status-file",
         type=str,
         default=None,
-        help="Явный путь к status.txt исполнителя",
+        help="Explicit path to status.txt of the artist",
     )
 
-    parser = CliArgumentParser(description="Управление очередью обучения")
+    parser = CliArgumentParser(description="Learning Queue Management")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_list = sub.add_parser("list", parents=[common], help="Показать задачи и статусы")
+    p_list = sub.add_parser("list", parents=[common], help="Show tasks and statuses")
     p_list.set_defaults(func=cmd_list)
 
-    p_add = sub.add_parser("add", parents=[common], help="Добавить команду в конец очереди")
-    p_add.add_argument("command", nargs=argparse.REMAINDER, help="Строка команды (как в training_queue.txt)")
+    p_add = sub.add_parser("add", parents=[common], help="Add command to end of queue")
+    p_add.add_argument("command", nargs=argparse.REMAINDER, help="Command string (as in training_queue.txt)")
     p_add.set_defaults(func=cmd_add)
 
-    p_rem = sub.add_parser("remove", parents=[common], help="Удалить задачу")
+    p_rem = sub.add_parser("remove", parents=[common], help="Delete task")
     g = p_rem.add_mutually_exclusive_group(required=True)
-    g.add_argument("--index", type=int, metavar="N", help="Номер строки (как в list, с 1)")
-    g.add_argument("--substring", type=str, help="Удалить строки, содержащие подстроку")
-    p_rem.add_argument("--all", action="store_true", help="С --substring: удалить все совпадения")
+    g.add_argument("--index", type=int, metavar="N", help="Line number (as in list, starting with 1)")
+    g.add_argument("--substring", type=str, help="Remove lines containing substring")
+    p_rem.add_argument("--all", action="store_true", help="With --substring: remove all matches")
     p_rem.set_defaults(func=cmd_remove)
 
-    p_clear = sub.add_parser("clear", parents=[common], help="Удалить все задачи")
+    p_clear = sub.add_parser("clear", parents=[common], help="Delete all tasks")
     p_clear.set_defaults(func=cmd_clear)
 
-    p_run = sub.add_parser("run", parents=[common], help="Запустить исполнитель очереди")
-    p_run.add_argument("--no-gui", action="store_true", help="Без gnome-terminal")
-    p_run.add_argument("--cwd", type=str, default=None, help="Рабочая каталог для subprocess")
+    p_run = sub.add_parser("run", parents=[common], help="Start queue executor")
+    p_run.add_argument("--no-gui", action="store_true", help="No gnome-terminal")
+    p_run.add_argument("--cwd", type=str, default=None, help="Working directory for subprocess")
     p_run.set_defaults(func=cmd_run)
 
     return parser
@@ -247,7 +247,7 @@ def main(argv=None):
     parser = build_queue_cli_arg_parser()
     args = parser.parse_args(argv)
     if args.cmd == "add" and not args.command:
-        parser.error("add: укажите команду после add")
+        parser.error("add: specify the command after add")
     args.func(args)
 
 

@@ -11,35 +11,35 @@ from smartrain.dataset_passport import write_dataset_passport
 
 
 def build_cvat_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(description="CVAT 1.1 конвертация (Images + bbox): import/export.")
+    p = CliArgumentParser(description="CVAT 1.1 conversion (Images + bbox): import/export.")
     p.add_argument(
         "command",
         choices=("import", "export"),
-        help="Подкоманда: import (CVAT zip -> YOLO) или export (YOLO -> CVAT zip)",
+        help="Subcommand: import (CVAT zip -> YOLO) or export (YOLO -> CVAT zip)",
     )
 
     # Common-ish
-    p.add_argument("--force", action="store_true", help="Перезаписать выход при наличии.")
+    p.add_argument("--force", action="store_true", help="Overwrite output if available.")
     p.add_argument(
         "--tmp-dir",
         type=str,
         default=None,
-        help="Каталог для временных файлов (по умолчанию: ./tmp относительно текущего каталога)",
+        help="Directory for temporary files (default: ./tmp relative to current directory)",
     )
 
     # import
-    p.add_argument("--cvat-zip", type=str, default=None, help="Путь к CVAT 1.1 zip export.")
-    p.add_argument("--output-dir", type=str, default=None, help="Куда записать YOLO-датасет (папка).")
-    p.add_argument("--task-name", type=str, default=None, help="Имя task (для export zip root и meta).")
+    p.add_argument("--cvat-zip", type=str, default=None, help="Path to CVAT 1.1 zip export.")
+    p.add_argument("--output-dir", type=str, default=None, help="Where to write the YOLO dataset (folder).")
+    p.add_argument("--task-name", type=str, default=None, help="Task name (for export zip root and meta).")
 
     # export
-    p.add_argument("--dataset-dir", type=str, default=None, help="Корень YOLO-датасета (папка с images/labels/data.yaml).")
-    p.add_argument("--zip-path", type=str, default=None, help="Путь к выходному zip (по умолчанию: <dataset-dir>.cvat11.zip).")
+    p.add_argument("--dataset-dir", type=str, default=None, help="The root of the YOLO dataset (folder with images/labels/data.yaml).")
+    p.add_argument("--zip-path", type=str, default=None, help="Path to output zip (default: <dataset-dir>.cvat11.zip).")
     p.add_argument(
         "--names",
         type=str,
         default=None,
-        help="Список имён классов через запятую (если нет data.yaml или нужно переопределить).",
+        help="List of class names separated by commas (if there is no data.yaml or needs to be overridden).",
     )
 
     return p
@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if cmd == "import":
         if not args.cvat_zip or not args.output_dir:
-            raise SystemExit("import требует --cvat-zip и --output-dir")
+            raise SystemExit("import requires --cvat-zip and --output-dir")
         info = import_cvat11_zip_to_yolo(
             cvat_zip_path=Path(args.cvat_zip),
             output_dir=Path(args.output_dir),
@@ -115,14 +115,14 @@ def main(argv: list[str] | None = None) -> None:
                 },
             )
         except Exception as e:
-            print(f"[WARNING] Не удалось записать dataset_passport.json: {e}")
+            print(f"[WARNING] Failed to write dataset_passport.json: {e}")
         print(f"[OK] CVAT import -> YOLO: {info['output_dir']}")
         print(f"[OK] classes={info['nc']} images={info['images_count']} labels={info['labels_count']}")
         return
 
     if cmd == "export":
         if not args.dataset_dir:
-            raise SystemExit("export требует --dataset-dir")
+            raise SystemExit("export requires --dataset-dir")
         dataset_dir = Path(args.dataset_dir)
         zip_path = Path(args.zip_path) if args.zip_path else Path(str(dataset_dir) + ".cvat11.zip")
 
@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> None:
         if not names:
             names = _load_names_from_data_yaml(dataset_dir)
         if not names:
-            raise SystemExit("Не удалось определить names: задайте --names или положите data.yaml с полем names.")
+            raise SystemExit("Could not determine names: specify --names or put data.yaml with the names field.")
 
         info = export_yolo_to_cvat11_zip(
             dataset_dir=dataset_dir,

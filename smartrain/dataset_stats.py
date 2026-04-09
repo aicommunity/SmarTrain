@@ -216,7 +216,7 @@ def _scan_one_dataset(dataset_dir: str, name: str) -> DatasetStats:
     elif os.path.isdir(os.path.join(dataset_dir, "images")) and os.path.isdir(
         os.path.join(dataset_dir, "labels")
     ):
-        # flat dataset -> считаем как train bucket.
+        # flat dataset -> count like a train bucket.
         _scan_pair(
             os.path.join(dataset_dir, "images"),
             os.path.join(dataset_dir, "labels"),
@@ -225,7 +225,7 @@ def _scan_one_dataset(dataset_dir: str, name: str) -> DatasetStats:
     elif os.path.isfile(os.path.join(dataset_dir, "annotations.xml")) and os.path.isdir(
         os.path.join(dataset_dir, "images")
     ):
-        # cvat11 dataset -> считаем объекты из annotations.xml, split=train.
+        # cvat11 dataset -> count objects from annotations.xml, split=train.
         images_dir = os.path.join(dataset_dir, "images")
         image_files = [
             n
@@ -390,7 +390,7 @@ def _filter_dataset_names(available: dict[str, str], selected: list[str] | None)
     unknown = [x for x in selected if x not in available]
     if unknown:
         raise ValueError(
-            f"Неизвестные датасеты: {', '.join(unknown)}. Доступные: {', '.join(sorted(available.keys()))}"
+            f"Unknown datasets: {', '.join(unknown)}. Available: {', '.join(sorted(available.keys()))}"
         )
     return sorted(dict.fromkeys(selected).keys())
 
@@ -406,15 +406,15 @@ def _collect_available_classes(available: dict[str, str]) -> list[str]:
 def _print_interactive_catalog(available: dict[str, str]) -> None:
     names = sorted(available.keys())
     class_names = _collect_available_classes(available)
-    console.print("[INFO] Доступные датасеты:")
+    console.print("[INFO] Available datasets:")
     for name in names:
         console.print(f"  - {name}")
-    console.print("[INFO] Доступные классы:")
+    console.print("[INFO] Available classes:")
     if class_names:
         for cls in class_names:
             console.print(f"  - {cls}")
     else:
-        console.print("  - (не найдены в data.yaml)")
+        console.print(" - (not found in data.yaml)")
 
 
 def _collect_class_ids_by_name(
@@ -459,7 +459,7 @@ def _render_datasets_class_catalog(
                 continue
             class_id = "/".join(str(x) for x in ids_here)
             rows.append((class_id, cls, coverage, str(total_instances), ds_name))
-    table = Table(title="Каталог классов по датасетам")
+    table = Table(title="Catalog of classes by datasets")
     table.add_column("ClassID", justify="right")
     table.add_column("ClassName")
     table.add_column("Coverage", justify="right")
@@ -472,12 +472,12 @@ def _render_datasets_class_catalog(
         last_class_name = class_name
     console.print(table)
     if show_legend:
-        console.print("[dim]Колонки каталога классов по датасетам:[/dim]")
-        console.print("[dim]- ClassID: индекс класса в конкретном датасете[/dim]")
-        console.print("[dim]- ClassName: имя класса (показывается в первой строке группы)[/dim]")
-        console.print("[dim]- Coverage: в скольких выбранных датасетах класс имеет объекты (present/total)[/dim]")
-        console.print("[dim]- Total: общее число объектов класса по выбранным датасетам[/dim]")
-        console.print("[dim]- Dataset: имя датасета для строки[/dim]")
+        console.print("[dim]Columns of the class catalog by dataset:[/dim]")
+        console.print("[dim]- ClassID: class index in a specific dataset[/dim]")
+        console.print("[dim]- ClassName: class name (shown in the first line of the group)[/dim]")
+        console.print("[dim]- Coverage: in how many selected datasets does the class have objects (present/total)[/dim]")
+        console.print("[dim]- Total: total number of class objects for the selected datasets[/dim]")
+        console.print("[dim]- Dataset: dataset name for the string[/dim]")
 
 
 def _render_classes_table(
@@ -529,7 +529,7 @@ def _render_classes_table(
     if limit is not None and limit > 0:
         rows = rows[:limit]
 
-    table = Table(title="Статистика по классам")
+    table = Table(title="Statistics by class")
     table.add_column("ClassID", justify="right")
     table.add_column("Class")
     table.add_column("Train", justify="right")
@@ -551,23 +551,23 @@ def _render_classes_table(
         )
     console.print(table)
     if show_legend:
-        console.print("[dim]Колонки classes:[/dim]")
-        console.print("[dim]- ClassID: индекс класса (или mixed(...), если индексы отличаются между датасетами)[/dim]")
-        console.print("[dim]- Class: имя класса[/dim]")
-        console.print("[dim]- Train: число объектов класса в train[/dim]")
-        console.print("[dim]- Val: число объектов класса в val[/dim]")
-        console.print("[dim]- Test: число объектов класса в test[/dim]")
-        console.print("[dim]- Total: суммарно по всем split[/dim]")
-        console.print("[dim]- Images: число изображений, где класс встречается[/dim]")
+        console.print("[dim]Columns classes:[/dim]")
+        console.print("[dim]- ClassID: class index (or mixed(...) if indexes differ between datasets)[/dim]")
+        console.print("[dim]- Class: class name[/dim]")
+        console.print("[dim]- Train: number of class objects in train[/dim]")
+        console.print("[dim]- Val: number of class objects in val[/dim]")
+        console.print("[dim]- Test: number of class objects in test[/dim]")
+        console.print("[dim]- Total: total for all splits[/dim]")
+        console.print("[dim]- Images: number of images where the class occurs[/dim]")
         console.print(
-            "[dim]- Avg/Img: среднее число объектов класса на изображение с этим классом[/dim]"
+            "[dim]- Avg/Img: average number of class objects per image with this class[/dim]"
         )
 
     summary_total = _imbalance_summary({k: sum(v.values()) for k, v in class_rows.items()})
     summary_train = _imbalance_summary({k: v["train"] for k, v in class_rows.items()})
     summary_val = _imbalance_summary({k: v["val"] for k, v in class_rows.items()})
     summary_test = _imbalance_summary({k: v["test"] for k, v in class_rows.items()})
-    console.print("[bold]Итог по дисбалансу[/bold]")
+    console.print("[bold]Imbalance summary[/bold]")
     for label, m in (
         ("train", summary_train),
         ("val", summary_val),
@@ -675,7 +675,7 @@ def compare_dataset_stats(left: DatasetStats, right: DatasetStats) -> dict:
 
 def _render_compare_summary(report: dict, *, abs_values: bool = False) -> None:
     s = report["summary"]
-    table = Table(title=f"Сравнение датасетов: {s['left']['name']} vs {s['right']['name']}")
+    table = Table(title=f"Dataset comparison: {s['left']['name']} vs {s['right']['name']}")
     table.add_column("Metric")
     table.add_column("Left", justify="right")
     table.add_column("Right", justify="right")
@@ -705,13 +705,13 @@ def _render_compare_classes(report: dict, *, top_n: int | None = None, abs_value
     left_only = report["classes"]["left_only"]
     right_only = report["classes"]["right_only"]
     if left_only:
-        console.print(f"[bold]Только в left:[/bold] {', '.join(left_only)}")
+        console.print(f"[bold]Only in left:[/bold] {', '.join(left_only)}")
     if right_only:
-        console.print(f"[bold]Только в right:[/bold] {', '.join(right_only)}")
+        console.print(f"[bold]Only in right:[/bold] {', '.join(right_only)}")
     rows = list(report["classes"]["common"])
     if top_n is not None and top_n > 0:
         rows = rows[:top_n]
-    table = Table(title="Diff по общим классам")
+    table = Table(title="Diff by common classes")
     table.add_column("Class")
     table.add_column("L_total", justify="right")
     table.add_column("R_total", justify="right")
@@ -863,7 +863,7 @@ def _render_datasets_table(
     key = args.sort
     rows.sort(key=lambda r: r.get(key, 0), reverse=bool(args.desc))
 
-    table = Table(title="Статистика по датасетам")
+    table = Table(title="Dataset statistics")
     for col in ("Dataset", "Classes", "Images", "Labeled", "Empty", "Empty%", "Instances", "Imbalance", "Gini", "Quality"):
         table.add_column(col, justify="right" if col != "Dataset" else "left")
     for r in rows:
@@ -881,17 +881,17 @@ def _render_datasets_table(
         )
     console.print(table)
     if not getattr(args, "no_legend", False):
-        console.print("[dim]Колонки datasets:[/dim]")
-        console.print("[dim]- Dataset: имя датасета[/dim]")
-        console.print("[dim]- Classes: число классов с объектами[/dim]")
-        console.print("[dim]- Images: число изображений[/dim]")
-        console.print("[dim]- Labeled: изображения с >=1 объектом[/dim]")
-        console.print("[dim]- Empty: изображения без объектов[/dim]")
-        console.print("[dim]- Empty%: доля Empty от Images[/dim]")
-        console.print("[dim]- Instances: число всех объектов[/dim]")
-        console.print("[dim]- Imbalance: max/min по числу объектов на класс[/dim]")
-        console.print("[dim]- Gini: коэффициент Джини по распределению классов[/dim]")
-        console.print("[dim]- Quality: OK/WARN по базовым проверкам разметки[/dim]")
+        console.print("[dim]Columns datasets:[/dim]")
+        console.print("[dim]- Dataset: dataset name[/dim]")
+        console.print("[dim]- Classes: number of classes with objects[/dim]")
+        console.print("[dim]- Images: number of images[/dim]")
+        console.print("[dim]- Labeled: images with >=1 object[/dim]")
+        console.print("[dim]- Empty: images without objects[/dim]")
+        console.print("[dim]- Empty%: Empty share from Images[/dim]")
+        console.print("[dim]- Instances: number of all objects[/dim]")
+        console.print("[dim]- Imbalance: max/min by number of objects per class[/dim]")
+        console.print("[dim]- Gini: Gini coefficient by class distribution[/dim]")
+        console.print("[dim]- Quality: OK/WARN on basic markup checks[/dim]")
     _render_datasets_class_catalog(
         selected_names,
         scanned,
@@ -908,7 +908,7 @@ def _render_datasets_table(
 
     if args.export_issues:
         out_path = _export_issues(layout, issues_rows)
-        console.print(f"[OK] Экспорт проблемных файлов: {out_path}")
+        console.print(f"[OK] Export problematic files: {out_path}")
 
 
 def _prompt_yes_no(label: str, default: bool = False) -> bool:
@@ -922,36 +922,36 @@ def _prompt_interactive_classes(
 ) -> None:
     from smartrain.cli_prompts import prompt_choice, prompt_multi_choice_csv, prompt_text
 
-    selected_ds = prompt_multi_choice_csv("Датасеты", available_names, default_values=[])
+    selected_ds = prompt_multi_choice_csv("Datasets", available_names, default_values=[])
     args.dataset = selected_ds or None
-    selected_classes = prompt_multi_choice_csv("Классы", available_classes, default_values=[])
+    selected_classes = prompt_multi_choice_csv("Classes", available_classes, default_values=[])
     args.classes = ",".join(selected_classes) if selected_classes else None
-    args.sort = prompt_choice("Сортировка", ["total", "train", "val", "test"], default=args.sort)
-    args.desc = _prompt_yes_no("Сортировка по убыванию?", default=bool(args.desc))
-    lim_raw = prompt_text("Лимит строк (пусто=без лимита)", default="").strip()
+    args.sort = prompt_choice("Sorting", ["total", "train", "val", "test"], default=args.sort)
+    args.desc = _prompt_yes_no("Sort in descending order?", default=bool(args.desc))
+    lim_raw = prompt_text("Line limit (empty=no limit)", default="").strip()
     args.limit = int(lim_raw) if lim_raw else None
 
 
 def _prompt_interactive_datasets(args, available_names: list[str]) -> None:
     from smartrain.cli_prompts import prompt_choice, prompt_multi_choice_csv
-    selected = prompt_multi_choice_csv("Датасеты", available_names, default_values=[])
+    selected = prompt_multi_choice_csv("Datasets", available_names, default_values=[])
     args.dataset = selected or None
     args.sort = prompt_choice(
-        "Сортировка",
+        "Sorting",
         ["images", "instances", "empty_pct", "gini", "imbalance"],
         default=args.sort,
     )
-    args.desc = _prompt_yes_no("Сортировка по убыванию?", default=bool(args.desc))
+    args.desc = _prompt_yes_no("Sort in descending order?", default=bool(args.desc))
     args.check_duplicates = _prompt_yes_no(
-        "Проверять exact duplicates (--check-duplicates)?",
+        "Check exact duplicates (--check-duplicates)?",
         default=bool(args.check_duplicates),
     )
     args.check_near_duplicates = _prompt_yes_no(
-        "Проверять near-duplicates (--check-near-duplicates)?",
+        "Check near-duplicates (--check-near-duplicates)?",
         default=bool(args.check_near_duplicates),
     )
     args.export_issues = _prompt_yes_no(
-        "Экспортировать issues в analytics (--export-issues)?",
+        "Export issues to analytics (--export-issues)?",
         default=bool(args.export_issues),
     )
 
@@ -973,74 +973,74 @@ def prompt_interactive_compare_args(args, available_names: list[str]) -> None:
             args.left = left
             args.right = right
             break
-        console.print("[ERROR] Нужно задать разные left/right датасеты.")
+        console.print("[ERROR] You need to specify different left/right datasets.")
     args.details = prompt_choice(
         "Details",
         ["summary", "classes", "all"],
         default=str(getattr(args, "details", "summary")),
     )
-    raw_top = prompt_text("Top-N классов (пусто=без лимита)", default="").strip()
+    raw_top = prompt_text("Top-N classes (empty=no limit)", default="").strip()
     args.top_n = int(raw_top) if raw_top else None
-    args.abs = _prompt_yes_no("Показывать абсолютные дельты (--abs)?", default=bool(getattr(args, "abs", False)))
-    args.export_json = _prompt_yes_no("Экспорт JSON (--export-json)?", default=bool(getattr(args, "export_json", False)))
-    args.export_csv = _prompt_yes_no("Экспорт CSV (--export-csv)?", default=bool(getattr(args, "export_csv", False)))
+    args.abs = _prompt_yes_no("Show absolute deltas (--abs)?", default=bool(getattr(args, "abs", False)))
+    args.export_json = _prompt_yes_no("Export JSON (--export-json)?", default=bool(getattr(args, "export_json", False)))
+    args.export_csv = _prompt_yes_no("Export CSV (--export-csv)?", default=bool(getattr(args, "export_csv", False)))
 
 
 def build_stats_arg_parser() -> argparse.ArgumentParser:
-    parser = CliArgumentParser(description="Единая статистика датасетов и классов (только datasets/)")
+    parser = CliArgumentParser(description="Unified statistics of datasets and classes (datasets/ only)")
     parser.add_argument(
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); анализируется только datasets/",
+        help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR}); only datasets/ are analyzed",
     )
-    parser.add_argument("--dataset", action="append", default=None, help="Имя датасета в datasets/ (повторяемый)")
-    parser.add_argument("--classes", type=str, default=None, help="Фильтр классов через запятую (для таблиц классов)")
+    parser.add_argument("--dataset", action="append", default=None, help="Dataset name in datasets/ (repeatable)")
+    parser.add_argument("--classes", type=str, default=None, help="Class filter separated by commas (for class tables)")
     parser.add_argument(
         "--sort",
         choices=("images", "instances", "empty_pct", "gini", "imbalance"),
         default="images",
-        help="Сортировка основной таблицы датасетов",
+        help="Sorting the main dataset table",
     )
-    parser.add_argument("--desc", action="store_true", help="Сортировка основной таблицы по убыванию")
+    parser.add_argument("--desc", action="store_true", help="Sort main table in descending order")
     parser.add_argument("--check-duplicates", action="store_true")
     parser.add_argument("--check-near-duplicates", action="store_true")
     parser.add_argument("--export-issues", action="store_true")
-    parser.add_argument("--no-legend", action="store_true", help="Не выводить расшифровку колонок")
+    parser.add_argument("--no-legend", action="store_true", help="Do not display column transcripts")
     parser.add_argument(
         "--class-sort",
         choices=("total", "train", "val", "test"),
         default="total",
-        help="Сортировка таблицы классов",
+        help="Sort the class table",
     )
-    parser.add_argument("--class-desc", action="store_true", help="Сортировка таблицы классов по убыванию")
-    parser.add_argument("--class-limit", type=int, default=None, help="Лимит строк в таблицах классов")
+    parser.add_argument("--class-desc", action="store_true", help="Sort the class table in descending order")
+    parser.add_argument("--class-limit", type=int, default=None, help="Row limit in class tables")
     return parser
 
 
 def build_stats_compare_arg_parser() -> argparse.ArgumentParser:
-    parser = CliArgumentParser(description="Сравнение двух датасетов из datasets/")
+    parser = CliArgumentParser(description="Comparing two datasets from datasets/")
     parser.add_argument(
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); анализируется только datasets/",
+        help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR}); only datasets/ are analyzed",
     )
-    parser.add_argument("--left", type=str, default=None, help="Левый датасет (baseline)")
-    parser.add_argument("--right", type=str, default=None, help="Правый датасет (candidate)")
+    parser.add_argument("--left", type=str, default=None, help="Left dataset (baseline)")
+    parser.add_argument("--right", type=str, default=None, help="Right dataset (candidate)")
     parser.add_argument("--details", choices=("summary", "classes", "all"), default="summary")
-    parser.add_argument("--top-n", type=int, default=None, help="Лимит строк для class diff")
-    parser.add_argument("--abs", action="store_true", help="Показывать абсолютные дельты")
-    parser.add_argument("--export-json", action="store_true", help="Экспорт отчёта compare в JSON")
-    parser.add_argument("--export-csv", action="store_true", help="Экспорт class diff в CSV")
-    parser.add_argument("--no-legend", action="store_true", help="Не выводить расшифровку колонок")
+    parser.add_argument("--top-n", type=int, default=None, help="Term limit for class diff")
+    parser.add_argument("--abs", action="store_true", help="Show absolute deltas")
+    parser.add_argument("--export-json", action="store_true", help="Export compare report to JSON")
+    parser.add_argument("--export-csv", action="store_true", help="Export class diff to CSV")
+    parser.add_argument("--no-legend", action="store_true", help="Do not display column transcripts")
     return parser
 
 
 def _run_stats(args, layout: WorkspaceLayout) -> int:
     available = _available_dataset_dirs(layout)
     if not available:
-        console.print("[ERROR] В datasets/ не найдено ни одного датасета.")
+        console.print("[ERROR] No datasets found in datasets/.")
         return 2
     interactive = (
         not args.dataset
@@ -1051,11 +1051,11 @@ def _run_stats(args, layout: WorkspaceLayout) -> int:
         and not args.export_issues
     )
     if interactive and sys.stdin.isatty():
-        console.print("[INFO] Интерактивный режим stats")
+        console.print("[INFO] Interactive stats mode")
         _print_interactive_catalog(available)
         _prompt_interactive_datasets(args, sorted(available.keys()))
         replay_cmd = build_non_interactive_command("stats", build_stats_arg_parser(), args)
-        print_replay_command("перед запуском", replay_cmd)
+        print_replay_command("before launch", replay_cmd)
     else:
         replay_cmd = None
     selected = _filter_dataset_names(available, args.dataset)
@@ -1085,28 +1085,28 @@ def _run_stats(args, layout: WorkspaceLayout) -> int:
         show_legend=not bool(getattr(args, "no_legend", False)),
     )
     if replay_cmd:
-        print_replay_command("после выполнения", replay_cmd)
+        print_replay_command("after execution", replay_cmd)
     return 0
 
 
 def _run_stats_compare(args, layout: WorkspaceLayout) -> int:
     available = _available_dataset_dirs(layout)
     if not available:
-        console.print("[ERROR] В datasets/ не найдено ни одного датасета.")
+        console.print("[ERROR] No datasets found in datasets/.")
         return 2
     if (not args.left or not args.right) and sys.stdin.isatty():
-        console.print("[INFO] Интерактивный режим stats compare")
+        console.print("[INFO] Interactive mode stats compare")
         _print_interactive_catalog(available)
         prompt_interactive_compare_args(args, sorted(available.keys()))
         replay_cmd = build_non_interactive_command("stats compare", build_stats_compare_arg_parser(), args)
-        print_replay_command("перед запуском", replay_cmd)
+        print_replay_command("before launch", replay_cmd)
     else:
         replay_cmd = None
     if not args.left or not args.right:
-        console.print("[ERROR] Для compare нужны --left и --right.")
+        console.print("[ERROR] Compare requires --left and --right.")
         return 2
     if args.left == args.right:
-        console.print("[ERROR] --left и --right должны быть разными.")
+        console.print("[ERROR] --left and --right must be different.")
         return 2
     _ = _filter_dataset_names(available, [args.left, args.right])
     left = _scan_one_dataset(available[args.left], args.left)
@@ -1122,9 +1122,9 @@ def _run_stats_compare(args, layout: WorkspaceLayout) -> int:
         export_csv=bool(args.export_csv),
     )
     for p in out_paths:
-        console.print(f"[OK] Экспорт: {p}")
+        console.print(f"[OK] Export: {p}")
     if replay_cmd:
-        print_replay_command("после выполнения", replay_cmd)
+        print_replay_command("after execution", replay_cmd)
     return 0
 
 
@@ -1148,7 +1148,7 @@ def main(argv=None):
         console.print(f"[ERROR] {e}")
         code = 2
     except Exception as e:
-        console.print(f"[ERROR] Неожиданная ошибка: {e}")
+        console.print(f"[ERROR] Unexpected error: {e}")
         code = 2
     raise SystemExit(code)
 

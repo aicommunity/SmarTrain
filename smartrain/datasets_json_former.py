@@ -64,22 +64,22 @@ def find_obj_data_file(folder_path):
 
 
 def load_obj_names(file_path):
-    """Чтение obj.names файла (по одному классу на строку)"""
+    """Reading obj.names file (one class per line)"""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             names = [line.strip() for line in f.readlines() if line.strip()]
         return names
     except Exception as e:
-        print(f"[ERROR] Не удалось прочитать {file_path}: {e}")
+        print(f"[ERROR] Failed to read {file_path}: {e}")
         return None
 
 
 def load_obj_data(file_path):
-    """Парсинг obj.data файла для получения количества классов"""
+    """Parsing obj.data file to get the number of classes"""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        # Ищем строку classes = X
+        # Looking for the line classes = X
         for line in content.split('\n'):
             line = line.strip()
             if line.startswith('classes'):
@@ -88,7 +88,7 @@ def load_obj_data(file_path):
                     return int(parts[1].strip())
         return None
     except Exception as e:
-        print(f"[ERROR] Не удалось прочитать {file_path}: {e}")
+        print(f"[ERROR] Failed to read {file_path}: {e}")
         return None
 
 
@@ -110,11 +110,11 @@ def _cvat_has_images_dir_near_xml(xml_path: str) -> bool:
 
 def _is_cvat11_images_xml(xml_path: str) -> bool:
     """
-    Минимальная валидация, что annotations.xml похож на CVAT for images 1.1:
+    Minimal validation that annotations.xml is similar to CVAT for images 1.1:
     - root == <annotations>
-    - есть хотя бы один <image>
-    - для images-task обычно есть <box> внутри <image> (но допускаем пустую разметку)
-    - если есть <version>, то она должна быть 1.1 (иначе считаем неподходящим)
+    - there is at least one <image>
+    - for images-task there is usually a <box> inside an <image> (but empty markup is allowed)
+    - if there is a <version>, then it must be 1.1 (otherwise we consider it inappropriate)
     """
     try:
         tree = ET.parse(xml_path)
@@ -134,8 +134,8 @@ def _is_cvat11_images_xml(xml_path: str) -> bool:
     if not images:
         return False
 
-    # Если совсем нет box, это может быть пустая разметка; считаем валидной.
-    # Но если есть box, проверим наличие обязательных атрибутов.
+    # If there is no box at all, it may be empty markup; We consider it valid.
+    # But if there is a box, let's check for the presence of required attributes.
     boxes = root.findall("./image/box")
     if boxes:
         for b in boxes[:5]:
@@ -195,12 +195,12 @@ def _is_split_name(dir_name):
 
 def yolo_flat_image_label_buckets(folder_path):
     """
-    Пары каталогов (images…, labels…) для плоских датасетов YOLO:
-    — классический flat: одна пара (images, labels), если есть файлы в корне;
-    — экспорт CVAT «Ultralytics YOLO Detection 1.0»: images/<подпапка>/ и labels/<та же подпапка>/
-      (имя подпапки произвольное, не только train/val/test).
-    Если встречаются и корневые файлы, и общие подпапки — возвращаются оба варианта.
-    Для вложенного split (images/train/…) возвращает пустой список — используйте nested_split.
+    Pairs of directories (images..., labels...) for flat YOLO datasets:
+    — classic flat: one pair (images, labels), if there are files in the root;
+    — CVAT export “Ultralytics YOLO Detection 1.0”: images/<subfolder>/ and labels/<same subfolder>/
+      (subfolder name is arbitrary, not just train/val/test).
+    If both root files and shared subfolders are found, both options are returned.
+    For nested split (images/train/…) returns an empty list - use nested_split.
     """
     images_path = os.path.join(folder_path, "images")
     labels_path = os.path.join(folder_path, "labels")
@@ -244,7 +244,7 @@ def yolo_flat_image_label_buckets(folder_path):
 def detect_structure(folder_path):
     subfolders = [d.lower() for d in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, d))]
 
-    # Проверка на формат Darknet YOLO
+    # Darknet YOLO format checker
     obj_train_data_path = os.path.join(folder_path, "obj_train_data")
     obj_names_path = find_obj_names_file(folder_path)
     obj_data_path = find_obj_data_file(folder_path)
@@ -286,7 +286,7 @@ def load_yaml(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
     except Exception as e:
-        print(f"[ERROR] Не удалось прочитать {file_path}: {e}")
+        print(f"[ERROR] Failed to read {file_path}: {e}")
         return None
 
 
@@ -395,8 +395,8 @@ def count_elements(folder_path, structure):
     if images_count == labels_count:
         return images_count
     else:
-        print(f"[WARNING] В папке {folder_path} число изображений ({images_count}) "
-              f"не совпадает с числом аннотаций ({labels_count})")
+        print(f"[WARNING] The folder {folder_path} contains the number of images ({images_count})"
+              f"does not match the number of annotations ({labels_count})")
         return images_count, labels_count
 
 
@@ -407,7 +407,7 @@ def process_dataset(folder_path, folder_name):
     names = None
     structure = detect_structure(folder_path)
 
-    # Попытка загрузить из YAML (формат YOLOv8)
+    # Trying to load from YAML (YOLOv8 format)
     if yaml_path:
         data = load_yaml(yaml_path)
         if data and "names" in data:
@@ -417,36 +417,36 @@ def process_dataset(folder_path, folder_name):
             elif isinstance(names, dict):
                 names = [v for k, v in sorted(names.items())]
             else:
-                print(f"[ERROR] Поле 'names' в {yaml_path} имеет неверный формат")
+                print(f"[ERROR] The 'names' field in {yaml_path} is not in the correct format")
                 return None
 
-    # Если не нашли YAML, пробуем формат Darknet
+    # If you don't find YAML, try the Darknet format
     if not names and structure == "darknet":
         obj_names_path = find_obj_names_file(folder_path)
         if obj_names_path:
             names = load_obj_names(obj_names_path)
             if not names:
-                print(f"[WARNING] Не удалось загрузить классы из {obj_names_path} — пропуск")
+                print(f"[WARNING] Failed to load classes from {obj_names_path} - skipping")
                 return None
         else:
-            print(f"[WARNING] В папке {folder_name} не найден obj.names — пропуск")
+            print(f"[WARNING] obj.names not found in folder {folder_name} - skip")
             return None
 
-    # Если CVAT 1.1 extracted dataset
+    # If CVAT 1.1 extracted dataset
     if not names and structure == "cvat11":
         xml_path = _find_cvat_annotations_xml(folder_path)
         if xml_path:
             names = _load_cvat11_label_names(xml_path)
             if not names:
-                print(f"[WARNING] CVAT 1.1: не удалось извлечь labels из {xml_path} — пропуск")
+                print(f"[WARNING] CVAT 1.1: failed to extract labels from {xml_path} - skipping")
                 return None
         else:
-            print(f"[WARNING] CVAT 1.1: не найден annotations.xml — пропуск")
+            print(f"[WARNING] CVAT 1.1: annotations.xml not found - skipping")
             return None
 
-    # Если ничего не нашли
+    # If nothing is found
     if not names:
-        print(f"[WARNING] В папке {folder_name} не найден data.yaml или obj.names — пропуск")
+        print(f"[WARNING] Data.yaml or obj.names not found in folder {folder_name} - skip")
         return None
 
     elements_count = count_elements(folder_path, structure)
@@ -460,28 +460,28 @@ def process_dataset(folder_path, folder_name):
 
 def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
     parser = CliArgumentParser(
-        description="Обработка датасетов и создание JSON файлов с информацией о классах и структуре"
+        description="Processing datasets and creating JSON files with information about classes and structure"
     )
 
     parser.add_argument(
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); scan читает raw_data/ и пишет datasets/",
+        help=f"Root workspace (otherwise {WORKSPACE_ENV_VAR}); scan reads raw_data/ and writes datasets/",
     )
 
     parser.add_argument(
         "--datasets-path",
         type=str,
         default=None,
-        help="Режим без workspace: корень каталогов датасетов для сканирования",
+        help="Mode without workspace: root of dataset directories for scanning",
     )
 
     parser.add_argument(
         "--output-path",
         type=str,
         default=None,
-        help="Режим без workspace: каталог для datasets_info.json и class_names.json",
+        help="Mode without workspace: directory for datasets_info.json and class_names.json",
     )
 
     parser.add_argument(
@@ -489,25 +489,25 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
         type=str,
         choices=("scan", "refresh"),
         default="scan",
-        help="scan: обход подкаталогов raw_data (или --datasets-path); "
-        "refresh: пересканировать только data_path из существующего datasets_info.json",
+        help="scan: crawl raw_data subdirectories (or --datasets-path); "
+        "refresh: Rescan only data_path from existing datasets_info.json",
     )
     parser.add_argument(
         "--datasets-list",
         type=str,
         default=None,
-        help="TXT-файл со списком путей к датасетам (по одному на строку): директории или .zip",
+        help="TXT file with a list of paths to datasets (one per line): directories or .zip",
     )
     parser.add_argument(
         "--dataset",
         action="append",
         default=None,
-        help="Явно указать датасет (имя из raw_data или путь). Флаг можно повторять.",
+        help="Explicitly specify the dataset (name from raw_data or path). The flag can be repeated.",
     )
     parser.add_argument(
         "--purge-processed-raw",
         action="store_true",
-        help="Только workspace/scan: после подтверждения удалить из raw_data источники, обработанные в текущем запуске.",
+        help="Workspace/scan only: after confirmation, remove from raw_data the sources processed in the current run.",
     )
 
     return parser
@@ -517,7 +517,7 @@ def parse_args(argv=None):
     return build_datasets_json_arg_parser().parse_args(argv)
 
 
-# Поля записи датасета, сохраняемые при пересканировании (вручную в JSON)
+# Dataset record fields saved during rescanning (manually in JSON)
 _PRESERVED_DATASET_INFO_KEYS = (
     "roi_auto",
     "tags",
@@ -546,7 +546,7 @@ def _write_scan_summary(
     class_names_added: List[str],
     class_names_removed: List[str],
 ) -> str:
-    """Пишет datasets_scan_summary.json; возвращает путь к файлу."""
+    """Writes datasets_scan_summary.json; returns the file path."""
     path = os.path.join(output_dir, DATASETS_SCAN_SUMMARY_FILE)
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -580,25 +580,25 @@ def _print_scan_report(
     had_previous_datasets: bool,
     had_previous_class_names: bool,
 ) -> None:
-    print(f"[INFO] Итоговых датасетов в {OUTPUT_FILE}: {datasets_final_count}")
+    print(f"[INFO] Final datasets in {OUTPUT_FILE}: {datasets_final_count}")
     if datasets_added:
-        print(f"[INFO] Добавлены датасеты ({len(datasets_added)}): {', '.join(datasets_added)}")
+        print(f"[INFO] Added datasets ({len(datasets_added)}): {', '.join(datasets_added)}")
     if datasets_removed:
-        print(f"[INFO] Исключены из каталога ({len(datasets_removed)}): {', '.join(datasets_removed)}")
+        print(f"[INFO] Removed from catalog ({len(datasets_removed)}): {', '.join(datasets_removed)}")
     if not datasets_added and not datasets_removed and had_previous_datasets:
-        print("[INFO] Состав датасетов относительно прошлого файла не изменился.")
-    print(f"[INFO] Итоговых имён классов в {OUTPUT_CLASS_NAMES_FILE}: {class_names_final_count}")
+        print("[INFO] The composition of the datasets relative to the previous file has not changed.")
+    print(f"[INFO] Final class names in {OUTPUT_CLASS_NAMES_FILE}: {class_names_final_count}")
     if class_names_added:
-        print(f"[INFO] Новые имена классов ({len(class_names_added)}): {', '.join(class_names_added)}")
+        print(f"[INFO] New class names ({len(class_names_added)}): {', '.join(class_names_added)}")
     if class_names_removed:
-        print(f"[INFO] Удалённые имена классов ({len(class_names_removed)}): {', '.join(class_names_removed)}")
+        print(f"[INFO] Removed class names ({len(class_names_removed)}): {', '.join(class_names_removed)}")
     if not class_names_added and not class_names_removed and had_previous_class_names:
-        print("[INFO] Состав class_names относительно прошлого файла не изменился.")
-    print(f"[OK] Сводка сохранена: {summary_path}")
+        print("[INFO] The composition of class_names relative to the previous file has not changed.")
+    print(f"[OK] Summary saved: {summary_path}")
 
 
 def _merge_preserved_dataset_fields(fresh: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Дополняет свежую запись из скана полями roi_auto/tags из старого datasets_info.json."""
+    """Adds a fresh record from a scan with the roi_auto/tags fields from the old datasets_info.json."""
     if not previous:
         return fresh
     out = dict(fresh)
@@ -609,13 +609,13 @@ def _merge_preserved_dataset_fields(fresh: Dict[str, Any], previous: Optional[Di
 
 
 def _run_scan_folder_roots(folder_roots: list[tuple[str, str, dict]]) -> tuple[dict, dict]:
-    """folder_roots: список (logical_name, folder_path на диске, overrides для datasets_info)."""
+    """folder_roots: list (logical_name, folder_path on disk, overrides for datasets_info)."""
     datasets_info: dict = {}
     class_names: dict = {}
 
     for logical_name, folder_path, overrides in folder_roots:
         if not os.path.isdir(folder_path):
-            print(f"[WARNING] Пропуск {logical_name!r}: нет каталога {folder_path}")
+            print(f"[WARNING] Skipping {logical_name!r}: no directory {folder_path}")
             continue
         info = process_dataset(folder_path, logical_name)
         if info:
@@ -637,7 +637,7 @@ def _dir_has_content(path: str) -> bool:
 
 
 def _normalize_path_for_data_path(path: str, workspace_root: Optional[str]) -> str:
-    """Возвращает path для data_path: относительный к workspace, если возможно."""
+    """Returns the path for data_path: relative to workspace, if possible."""
     abs_path = os.path.abspath(os.path.expanduser(path))
     if workspace_root:
         try:
@@ -717,7 +717,7 @@ def _append_roots_from_datasets_list(
     workspace_root = layout.root if layout else None
     for src_path in entries:
         if not os.path.exists(src_path):
-            print(f"[WARNING] Пропуск из datasets-list: путь не найден: {src_path}")
+            print(f"[WARNING] Skipping from datasets-list: path not found: {src_path}")
             continue
 
         base_name = (
@@ -747,14 +747,14 @@ def _append_roots_from_datasets_list(
                         os.path.join(output_dir, "tmp", "datasets_list_extract"),
                     )
             except Exception as e:
-                print(f"[WARNING] Пропуск архива из datasets-list {src_path!r}: {e}")
+                print(f"[WARNING] Skipping archives from datasets-list {src_path!r}: {e}")
                 continue
             folder_roots.append((logical_name, extracted, {"data_path": data_path_value}))
             continue
 
         print(
-            f"[WARNING] Пропуск из datasets-list: поддерживаются только директории и .zip, "
-            f"получено: {src_path}"
+            f"[WARNING] Skipping from datasets-list: only directories and .zip are supported,"
+            f"received: {src_path}"
         )
 
 
@@ -792,8 +792,8 @@ def _copy_source_to_training(src_root: str, dst_root: str) -> None:
 
 def _ensure_training_ready_after_copy(dataset_root: str) -> bool:
     """
-    Нормализует скопированный датасет к виду, пригодному для обучения.
-    Сейчас критичный кейс: cvat11 (annotations.xml + images/) -> YOLO labels + data.yaml.
+    Normalizes the copied dataset to a form suitable for training.
+    Now the critical case: cvat11 (annotations.xml + images/) -> YOLO labels + data.yaml.
     """
     structure = detect_structure(dataset_root)
     if structure != "cvat11":
@@ -804,7 +804,7 @@ def _ensure_training_ready_after_copy(dataset_root: str) -> bool:
         return False
     names = _load_cvat11_label_names(xml_path)
     if not names:
-        print(f"[WARNING] CVAT 1.1: не удалось определить список классов для {dataset_root}")
+        print(f"[WARNING] CVAT 1.1: could not determine class list for {dataset_root}")
         return False
 
     labels_dir = os.path.join(dataset_root, "labels")
@@ -821,12 +821,12 @@ def _ensure_training_ready_after_copy(dataset_root: str) -> bool:
             class_name_to_id=class_name_to_id,
         )
     except Exception as e:
-        print(f"[WARNING] CVAT 1.1: не удалось сгенерировать YOLO labels для {dataset_root}: {e}")
+        print(f"[WARNING] CVAT 1.1: failed to generate YOLO labels for {dataset_root}: {e}")
         return False
 
     data_yaml = os.path.join(dataset_root, "data.yaml")
     with open(data_yaml, "w", encoding="utf-8") as f:
-        # Для flat-представления train/val/test указываем на images.
+        # For the flat representation train/val/test we point to images.
         f.write("train: ./images\n")
         f.write("val: ./images\n")
         f.write("test: ./images\n\n")
@@ -839,7 +839,7 @@ def _dataset_content_hash(path: str) -> Optional[str]:
     try:
         return str(calculate_dataset_hash(path))
     except Exception as e:
-        print(f"[WARNING] Не удалось вычислить dataset_hash для {path!r}: {e}")
+        print(f"[WARNING] Failed to calculate dataset_hash for {path!r}: {e}")
         return None
 
 
@@ -871,15 +871,15 @@ def _append_to_datasets_list(list_path: str, value: str) -> None:
 def _confirm_purge_processed_raw(paths: list[str]) -> bool:
     if not paths:
         return False
-    print("[WARNING] Запрошено удаление обработанных источников из raw_data.")
-    print("[WARNING] Будут удалены:")
+    print("[WARNING] Requested to remove processed sources from raw_data.")
+    print("[WARNING] Will be removed:")
     for p in paths:
         print(f"  - {p}")
     if not sys.stdin.isatty():
-        print("[WARNING] Нет интерактивного TTY: удаление отменено.")
+        print("[WARNING] No interactive TTY: deletion cancelled.")
         return False
-    ans = input("Продолжить удаление? [Y/n]: ").strip().lower()
-    return ans in ("", "y", "yes", "1", "true", "да", "д")
+    ans = input("Continue deletion? [Y/n]: ").strip().lower()
+    return ans in ("", "y", "yes", "1", "true", "yes", "d")
 
 
 def _purge_raw_sources(paths: list[str]) -> tuple[int, int]:
@@ -895,7 +895,7 @@ def _purge_raw_sources(paths: list[str]) -> tuple[int, int]:
                 removed += 1
         except Exception as e:
             failed += 1
-            print(f"[WARNING] Не удалось удалить {p}: {e}")
+            print(f"[WARNING] Failed to delete {p}: {e}")
     return removed, failed
 
 
@@ -971,7 +971,7 @@ def _append_explicit_dataset(
             base_name = name
             list_value = f"{name}.zip"
         else:
-            print(f"[WARNING] --dataset {raw!r}: путь/имя не найдено")
+            print(f"[WARNING] --dataset {raw!r}: path/name not found")
             return
     logical_name = _unique_dataset_key(base_name, used_names)
     sig = _compute_source_signature(src_path)
@@ -994,7 +994,7 @@ def _append_explicit_dataset(
                 layout.raw_data,
             )
         except Exception as e:
-            print(f"[WARNING] --dataset {raw!r}: не удалось распаковать zip ({e})")
+            print(f"[WARNING] --dataset {raw!r}: failed to unpack zip ({e})")
             return
         source_for_copy = extracted
     else:
@@ -1002,7 +1002,7 @@ def _append_explicit_dataset(
     if not (prev_sig == sig and _dir_has_content(dst)):
         _copy_source_to_training(source_for_copy, dst)
     else:
-        print(f"[INFO] Пропуск {logical_name!r}: источник не изменился.")
+        print(f"[INFO] Skipping {logical_name!r}: source has not changed.")
     folder_roots.append(
         (
             logical_name,
@@ -1033,8 +1033,8 @@ def main(argv=None):
         os.makedirs(layout.datasets, exist_ok=True)
 
     if use_workspace:
-        # Источник истины для индекса — каталог datasets (готовые датасеты).
-        # raw_data используется только как источник новых/обновлённых данных.
+        # The source of truth for the index is the datasets directory (ready-made datasets).
+        # raw_data is used only as a source of new/updated data.
         output_dir = layout.datasets
         output_file = os.path.join(output_dir, OUTPUT_FILE)
         output_class_names_file = os.path.join(output_dir, OUTPUT_CLASS_NAMES_FILE)
@@ -1055,20 +1055,20 @@ def main(argv=None):
     processed_raw_sources: set[str] = set()
 
     if args.mode == "refresh" and not use_workspace:
-        print("[ERROR] Режим --mode refresh поддерживается только без --datasets-path (через workspace).")
+        print("[ERROR] --mode refresh is only supported without --datasets-path (via workspace).")
         return
     if args.purge_processed_raw and (not use_workspace or args.mode != "scan"):
-        print("[ERROR] --purge-processed-raw доступен только в workspace при --mode scan.")
+        print("[ERROR] --purge-processed-raw is only available in workspace with --mode scan.")
         return
 
     if use_workspace and args.mode == "refresh":
         if not os.path.isfile(output_file):
-            print(f"[ERROR] Режим refresh: не найден {output_file}")
+            print(f"[ERROR] Refresh mode: {output_file} not found")
             return
         with open(output_file, "r", encoding="utf-8") as f:
             previous_full = json.load(f)
         if not isinstance(previous_full, dict):
-            print(f"[ERROR] {output_file}: ожидается объект JSON с датасетами.")
+            print(f"[ERROR] {output_file}: JSON object with datasets expected.")
             return
         folder_roots = []
         for name, prev_entry in previous_full.items():
@@ -1079,7 +1079,7 @@ def main(argv=None):
             else:
                 dp = prev_entry["data_path"]
                 if not isinstance(dp, str):
-                    print(f"[WARNING] Пропуск {name!r}: data_path не строка")
+                    print(f"[WARNING] Skipping {name!r}: data_path is not a string")
                     continue
                 root_path = resolve_or_extract_dataset_root(layout.root, name, prev_entry, datasets_dir)
                 folder_roots.append((name, root_path, {"data_path": dp}))
@@ -1087,7 +1087,7 @@ def main(argv=None):
         previous_info = previous_full
     else:
         if not os.path.exists(datasets_dir):
-            print(f"[ERROR] Папка '{datasets_dir}' не найдена.")
+            print(f"[ERROR] Folder '{datasets_dir}' not found.")
             return
         previous_info = {}
         if os.path.isfile(output_file):
@@ -1097,7 +1097,7 @@ def main(argv=None):
                 if isinstance(loaded_prev, dict):
                     previous_info = loaded_prev
             except Exception as e:
-                print(f"[WARNING] Не удалось прочитать существующий {output_file}: {e}")
+                print(f"[WARNING] Failed to read existing {output_file}: {e}")
         previous_info_for_diff = copy.deepcopy(previous_info)
         folder_roots = []
         used_names: set[str] = set()
@@ -1107,7 +1107,7 @@ def main(argv=None):
             prev_entry = previous_info.get(logical_name)
             normalized_on_skip = False
             if isinstance(prev_entry, dict) and bool(prev_entry.get(MODIFIED_KEY)):
-                print(f"[WARNING] Пропуск синхронизации {logical_name!r}: modified=true.")
+                print(f"[WARNING] Skipping synchronization {logical_name!r}: modified=true.")
                 return False
 
             source_hash = _dataset_content_hash(source_for_copy)
@@ -1125,14 +1125,14 @@ def main(argv=None):
                         ds_hash = _dataset_content_hash(ds_path)
                     if ds_hash and ds_hash == source_hash:
                         print(
-                            f"[WARNING] Пропуск источника {logical_name!r}: данные совпадают с datasets/{ds_name!r}."
+                            f"[WARNING] Skipping source {logical_name!r}: data matches datasets/{ds_name!r}."
                         )
                         return False
 
             prev_sig = prev_entry.get(SOURCE_SIGNATURE_KEY) if isinstance(prev_entry, dict) else None
             if prev_sig == source_signature and _dir_has_content(dst_dir):
-                print(f"[INFO] Пропуск {logical_name!r}: источник не изменился.")
-                # Даже при skip поддерживаем совместимость: донастраиваем training-ready layout.
+                print(f"[INFO] Skipping {logical_name!r}: source has not changed.")
+                # Even with skip we maintain compatibility: we configure the training-ready layout.
                 normalized_on_skip = _ensure_training_ready_after_copy(dst_dir)
             else:
                 _copy_source_to_training(source_for_copy, dst_dir)
@@ -1143,10 +1143,10 @@ def main(argv=None):
             entry[MODIFIED_KEY] = bool(entry.get(MODIFIED_KEY, False))
             if source_hash:
                 entry[SOURCE_HASH_KEY] = source_hash
-            # dataset_hash должен отражать фактическое содержимое datasets/<name>
-            # после возможной нормализации в training-ready layout.
-            # Не перетираем dataset_hash при обычном skip (иначе потеряем детекцию ручных правок).
-            # Обновляем его только после фактической синхронизации либо нормализации cvat11.
+            # dataset_hash should reflect the actual contents of datasets/<name>
+            # after possible normalization in training-ready layout.
+            # Do not overwrite dataset_hash with normal skip (otherwise we will lose detection of manual edits).
+            # We update it only after actual synchronization or normalization of cvat11.
             if not (prev_sig == source_signature and _dir_has_content(dst_dir)) or normalized_on_skip:
                 current_dst_hash = _dataset_content_hash(dst_dir)
                 if current_dst_hash:
@@ -1170,7 +1170,7 @@ def main(argv=None):
                                 raw_source_dir,
                             )
                         except Exception as e:
-                            print(f"[WARNING] Пропуск архива {src_name!r} из raw_data: {e}")
+                            print(f"[WARNING] Skipping archive {src_name!r} from raw_data: {e}")
                             continue
                         synced = _sync_one_source(
                             logical_name=logical_name,
@@ -1220,7 +1220,7 @@ def main(argv=None):
                         base_name = name
                         list_value = f"{name}.zip"
                     else:
-                        print(f"[WARNING] --dataset {raw_item!r}: путь/имя не найдено")
+                        print(f"[WARNING] --dataset {raw_item!r}: path/name not found")
                         continue
                 logical_name = _unique_dataset_key(base_name, used_names_for_explicit)
                 if src_path.lower().endswith(".zip"):
@@ -1233,7 +1233,7 @@ def main(argv=None):
                             layout.raw_data,
                         )
                     except Exception as e:
-                        print(f"[WARNING] --dataset {raw_item!r}: не удалось распаковать zip ({e})")
+                        print(f"[WARNING] --dataset {raw_item!r}: failed to unpack zip ({e})")
                         continue
                     _sync_one_source(
                         logical_name=logical_name,
@@ -1254,7 +1254,7 @@ def main(argv=None):
         if args.datasets_list:
             list_path = os.path.abspath(os.path.expanduser(args.datasets_list))
             if not os.path.isfile(list_path):
-                print(f"[ERROR] Не найден файл --datasets-list: {list_path}")
+                print(f"[ERROR] File not found --datasets-list: {list_path}")
                 return
         elif use_workspace:
             auto_list = os.path.join(raw_source_dir, DEFAULT_DATASETS_LIST_FILE)
@@ -1262,13 +1262,13 @@ def main(argv=None):
         else:
             list_path = None
         if list_path:
-            # В workspace-режиме datasets_list.txt описывает внешние источники,
-            # из которых нужно подготовить копии в datasets и включить их в индекс.
+            # In workspace mode, datasets_list.txt describes external sources,
+            # of which you need to prepare copies in datasets and include them in the index.
             if use_workspace:
                 entries = _load_datasets_list_file(list_path)
                 for src_path in entries:
                     if not os.path.exists(src_path):
-                        print(f"[WARNING] Пропуск из datasets-list: путь не найден: {src_path}")
+                        print(f"[WARNING] Skipping from datasets-list: path not found: {src_path}")
                         continue
                     base_name = (
                         os.path.splitext(os.path.basename(src_path))[0]
@@ -1294,7 +1294,7 @@ def main(argv=None):
                                 os.path.join(output_dir, "tmp", "datasets_list_extract"),
                             )
                         except Exception as e:
-                            print(f"[WARNING] Пропуск архива из datasets-list {src_path!r}: {e}")
+                            print(f"[WARNING] Skipping archives from datasets-list {src_path!r}: {e}")
                             continue
                         source_for_copy = extracted
                     else:
@@ -1338,9 +1338,9 @@ def main(argv=None):
         )
         if _confirm_purge_processed_raw(purge_candidates):
             removed, failed = _purge_raw_sources(purge_candidates)
-            print(f"[INFO] Удалено из raw_data: {removed}, ошибок: {failed}")
+            print(f"[INFO] Removed from raw_data: {removed}, errors: {failed}")
         else:
-            print("[INFO] Удаление обработанных источников из raw_data отменено.")
+            print("[INFO] Removal of processed sources from raw_data cancelled.")
 
     for name in list(datasets_info.keys()):
         if name in previous_info and isinstance(previous_info[name], dict):
@@ -1355,8 +1355,8 @@ def main(argv=None):
                 was_modified = bool(datasets_info[name].get(MODIFIED_KEY, False))
                 if prev_hash and prev_hash != current_hash and not was_modified:
                     print(
-                        f"[WARNING] Датасет {name!r} изменён вручную в datasets; "
-                        "установлен modified=true, синхронизация из raw_data отключена."
+                        f"[WARNING] Dataset {name!r} was manually changed in datasets; "
+                        "set modified=true, synchronization from raw_data is disabled."
                     )
                     datasets_info[name][MODIFIED_KEY] = True
                 elif not was_modified:
@@ -1385,7 +1385,7 @@ def main(argv=None):
                     workspace_root=layout.root,
                 )
             except Exception as e:
-                print(f"[WARNING] Не удалось записать initial passport для {name!r}: {e}")
+                print(f"[WARNING] Failed to write initial passport for {name!r}: {e}")
 
     old_ds_keys: Set[str] = set()
     if 'previous_info_for_diff' in locals() and isinstance(previous_info_for_diff, dict):
@@ -1403,7 +1403,7 @@ def main(argv=None):
             if isinstance(prev_cn, dict):
                 previous_cn_keys = set(prev_cn.keys())
         except Exception as e:
-            print(f"[WARNING] Не удалось прочитать прежний {OUTPUT_CLASS_NAMES_FILE} для сводки: {e}")
+            print(f"[WARNING] Failed to read previous {OUTPUT_CLASS_NAMES_FILE} for summary: {e}")
 
     new_cn_keys = set(class_names.keys())
     cn_added, cn_removed = _sorted_diff(previous_cn_keys, new_cn_keys)
@@ -1411,17 +1411,17 @@ def main(argv=None):
     try:
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(datasets_info, f, ensure_ascii=False, indent=4)
-        print(f"[OK] Информация успешно сохранена в {output_file}")
+        print(f"[OK] Information saved successfully in {output_file}")
     except Exception as e:
-        print(f"[ERROR] Не удалось записать JSON: {e}")
+        print(f"[ERROR] Failed to write JSON: {e}")
         return
 
     try:
         with open(output_class_names_file, "w", encoding="utf-8") as f:
             json.dump(class_names, f, ensure_ascii=False, indent=4)
-        print(f"[OK] Информация успешно сохранена в {output_class_names_file}")
+        print(f"[OK] Information saved successfully in {output_class_names_file}")
     except Exception as e:
-        print(f"[ERROR] Не удалось записать JSON: {e}")
+        print(f"[ERROR] Failed to write JSON: {e}")
         return
 
     summary_path = _write_scan_summary(

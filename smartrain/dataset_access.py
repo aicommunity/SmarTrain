@@ -1,6 +1,6 @@
 """
-Единый резолв корня датасета (включая zip) и пары каталогов images/labels для всех structure.
-Используется dataset_former, dataset_roi_yolo и др.
+A single resolution of the dataset root (including zip) and a pair of images/labels directories for all structures.
+Use dataset_former, dataset_roi_yolo, etc.
 """
 from __future__ import annotations
 
@@ -23,15 +23,15 @@ def resolve_dataset_root_for_entry(
     legacy_source_parent: str,
 ) -> str:
     """
-    Абсолютный корень данных датасета: zip распаковывается в кэш workspace при workspace_root;
-    в legacy-режиме zip в data_path не распаковывается (как раньше в dataset_former).
+    The absolute root of the dataset data: zip is unpacked into the workspace cache at workspace_root;
+    in legacy mode, zip in data_path is not unpacked (as before in dataset_former).
     """
     if workspace_root is not None:
         return resolve_or_extract_dataset_root(workspace_root, dataset_name, info, source_catalog_dir)
     if "data_path" in info:
         raw = info["data_path"]
         if not isinstance(raw, str):
-            raise TypeError(f"data_path для {dataset_name!r} должен быть строкой.")
+            raise TypeError(f"data_path for {dataset_name!r} must be a string.")
         if os.path.isabs(raw):
             return os.path.abspath(raw)
         return os.path.abspath(os.path.join(legacy_source_parent, os.path.normpath(raw)))
@@ -39,7 +39,7 @@ def resolve_dataset_root_for_entry(
 
 
 def find_dataset_paths(dataset_path: str, structure: str, arg: bool = False) -> list[tuple[str, str]]:
-    """Пары (images_dir, labels_dir) для YOLO-раскладок; без cvat11."""
+    """Pairs (images_dir, labels_dir) for YOLO layouts; without cvat11."""
     paths: list[tuple[str, str]] = []
     dataset_splitting = ["train", "val", "valid"] if arg else ["train", "val", "valid", "test"]
     if structure == "split":
@@ -80,11 +80,11 @@ def iter_image_label_buckets(
     exclude_test: bool = False,
 ) -> list[tuple[str, str]]:
     """
-    Список пар (images_dir, labels_dir). Для cvat11 генерирует временные YOLO .txt в temp_root.
+    List of pairs (images_dir, labels_dir). For cvat11, generate temporary YOLO .txt in temp_root.
     """
     if structure == "cvat11":
         if "classes" not in info or not isinstance(info["classes"], dict):
-            raise ValueError(f"{dataset_name!r}: нет classes для cvat11 в datasets_info.json")
+            raise ValueError(f"{dataset_name!r}: no classes for cvat11 in datasets_info.json")
         class_map: dict = info["classes"]
         labels_out = Path(temp_root) / "cvat11_labels" / dataset_name
         if labels_out.exists():

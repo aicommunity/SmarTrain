@@ -6,8 +6,8 @@ from typing import Sequence
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 
-YES_TOKENS = {"y", "yes", "1", "true", "да", "д"}
-NO_TOKENS = {"n", "no", "0", "false", "нет", "н"}
+YES_TOKENS = {"y", "yes", "1", "true", "yes", "d"}
+NO_TOKENS = {"n", "no", "0", "false", "No", "n"}
 
 
 def is_interactive_tty() -> bool:
@@ -25,7 +25,7 @@ def _echo_default_if_used(default_value: str | None, prompt_label: str) -> None:
         return
     if default_value == "":
         return
-    # Пытаемся показать default "в строке ввода", будто пользователь его набрал.
+    # We are trying to show default "in the input line" as if the user typed it.
     if is_interactive_tty():
         try:
             sys.stdout.write("\x1b[1A\r")
@@ -73,7 +73,7 @@ def prompt_int(label: str, default: int) -> int:
         try:
             return int(raw)
         except ValueError:
-            print(f"[ERROR] Ожидается целое число, получено: {raw!r}")
+            print(f"[ERROR] Expected integer, received: {raw!r}")
 
 
 def prompt_optional_int(label: str, default: int | None = None) -> int | None:
@@ -86,7 +86,7 @@ def prompt_optional_int(label: str, default: int | None = None) -> int | None:
         try:
             return int(raw)
         except ValueError:
-            print(f"[ERROR] Ожидается целое число или пустое значение, получено: {raw!r}")
+            print(f"[ERROR] Expecting an integer or empty value, received: {raw!r}")
 
 
 def prompt_optional_float(label: str, default: float | None = None) -> float | None:
@@ -99,25 +99,25 @@ def prompt_optional_float(label: str, default: float | None = None) -> float | N
         try:
             return float(raw)
         except ValueError:
-            print(f"[ERROR] Ожидается число или пустое значение, получено: {raw!r}")
+            print(f"[ERROR] Expecting a number or empty value, received: {raw!r}")
 
 
 def prompt_choice(label: str, options: Sequence[str], default: str | None = None) -> str:
     if not options:
         raise ValueError("options is empty")
-    print(f"[INFO] Варианты для {label}:")
+    print(f"[INFO] Options for {label}:")
     for i, opt in enumerate(options, start=1):
         print(f"  {i}. {opt}")
     choice_default = default if default in options else options[0]
     while True:
         raw = prompt(
-            _prompt_label(f"{label} (номер или значение)", choice_default),
+            _prompt_label(f"{label} (number or value)", choice_default),
             default="",
             completer=WordCompleter(list(options), ignore_case=True),
             complete_while_typing=True,
         ).strip()
         if not raw:
-            _echo_default_if_used(choice_default, _prompt_label(f"{label} (номер или значение)", choice_default))
+            _echo_default_if_used(choice_default, _prompt_label(f"{label} (number or value)", choice_default))
             return choice_default
         if raw.isdigit():
             idx = int(raw)
@@ -125,7 +125,7 @@ def prompt_choice(label: str, options: Sequence[str], default: str | None = None
                 return options[idx - 1]
         if raw in options:
             return raw
-        print(f"[ERROR] Некорректный выбор: {raw!r}")
+        print(f"[ERROR] Incorrect selection: {raw!r}")
 
 
 def prompt_multi_choice_csv(
@@ -135,13 +135,13 @@ def prompt_multi_choice_csv(
 ) -> list[str]:
     if not options:
         return []
-    print(f"[INFO] Варианты для {label}:")
+    print(f"[INFO] Options for {label}:")
     for i, opt in enumerate(options, start=1):
         print(f"  {i}. {opt}")
     default_csv = ",".join(default_values or [])
     while True:
         raw = prompt(
-            _prompt_label(f"{label} (CSV из номеров или значений)", default_csv),
+            _prompt_label(f"{label} (CSV of numbers or values)", default_csv),
             default="",
             completer=WordCompleter(list(options), ignore_case=True),
             complete_while_typing=True,
@@ -150,7 +150,7 @@ def prompt_multi_choice_csv(
             defaults = list(default_values or [])
             _echo_default_if_used(
                 ",".join(defaults),
-                _prompt_label(f"{label} (CSV из номеров или значений)", default_csv),
+                _prompt_label(f"{label} (CSV of numbers or values)", default_csv),
             )
             return defaults
         out: list[str] = []
@@ -174,4 +174,4 @@ def prompt_multi_choice_csv(
                 out.append(val)
         if ok:
             return out
-        print(f"[ERROR] Некорректный список: {raw!r}")
+        print(f"[ERROR] Invalid list: {raw!r}")

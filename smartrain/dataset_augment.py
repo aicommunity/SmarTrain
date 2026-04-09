@@ -33,83 +33,83 @@ _ROI_MODEL_CACHE: dict[str, YOLO] = {}
 
 
 def build_augment_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(description="Офлайн-аугментация датасета в новый datasets/<name>")
-    p.add_argument("--workspace", type=str, default=None, help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR})")
-    p.add_argument("--dataset", type=str, default=None, help="Имя исходного датасета из datasets_info.json")
-    p.add_argument("--output-name", type=str, default=None, help="Имя выходного датасета (по умолчанию <dataset>_aug)")
-    p.add_argument("--enable-flip", action="store_true", help="Включить flip-аугментацию")
-    p.add_argument("--flip-prob", type=float, default=0.5, help="Вероятность создания flip-варианта на кадр [0..1]")
-    p.add_argument("--enable-photometric", action="store_true", help="Включить brightness/contrast")
-    p.add_argument("--enable-conveyor", action="store_true", help="Включить конвейерные шум/blur/shift/rotate")
-    p.add_argument("--enable-center-rotate", action="store_true", dest="enable_center_rotate", help="Включить поворот кадра вокруг центра")
-    p.add_argument("--disable-center-rotate", action="store_false", dest="enable_center_rotate", help="Выключить поворот кадра вокруг центра")
+    p = CliArgumentParser(description="Offline augmentation of a dataset into a new datasets/<name>")
+    p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
+    p.add_argument("--dataset", type=str, default=None, help="Name of source dataset from datasets_info.json")
+    p.add_argument("--output-name", type=str, default=None, help="Name of output dataset (default <dataset>_aug)")
+    p.add_argument("--enable-flip", action="store_true", help="Enable flip augmentation")
+    p.add_argument("--flip-prob", type=float, default=0.5, help="Probability of creating a flip variant per frame [0..1]")
+    p.add_argument("--enable-photometric", action="store_true", help="Enable brightness/contrast")
+    p.add_argument("--enable-conveyor", action="store_true", help="Enable pipeline noise/blur/shift/rotate")
+    p.add_argument("--enable-center-rotate", action="store_true", dest="enable_center_rotate", help="Enable frame rotation around the center")
+    p.add_argument("--disable-center-rotate", action="store_false", dest="enable_center_rotate", help="Disable frame rotation around center")
     p.set_defaults(enable_center_rotate=True)
-    p.add_argument("--center-rotate-deg", type=float, default=5.0, help="Максимальный угол поворота в обе стороны")
-    p.add_argument("--rotate-copies", type=int, default=1, help="Число rotate-вариантов на кадр")
+    p.add_argument("--center-rotate-deg", type=float, default=5.0, help="Maximum rotation angle in both directions")
+    p.add_argument("--rotate-copies", type=int, default=1, help="Number of rotate options per frame")
     p.add_argument(
         "--center-rotate-anchor",
         choices=("center", "bbox", "detector"),
         default="center",
-        help="Источник центра поворота: центр кадра, bbox-разметка или ROI-детектор",
+        help="Rotation center source: frame center, bbox markup or ROI detector",
     )
-    p.add_argument("--enable-bbox-copy", action="store_true", help="Включить bbox-copy аугментацию")
-    p.add_argument("--bbox-copy-copies", type=int, default=1, help="Число bbox_copy-вариантов на кадр")
+    p.add_argument("--enable-bbox-copy", action="store_true", help="Enable bbox-copy augmentation")
+    p.add_argument("--bbox-copy-copies", type=int, default=1, help="Number of bbox_copy options per frame")
     p.add_argument("--flip", choices=("horizontal", "vertical", "both", "none"), default="horizontal")
-    p.add_argument("--brightness-limit", type=float, default=0.1, help="Для policy=basic: диапазон brightness")
-    p.add_argument("--contrast-limit", type=float, default=0.1, help="Для policy=basic: диапазон contrast")
-    p.add_argument("--copy-paste-count", type=int, default=1, help="Для policy=bbox_copy: число вставок на изображение")
-    p.add_argument("--copy-paste-rotation", type=float, default=0.0, help="Для policy=bbox_copy: max |угол| для поворота вставки")
-    p.add_argument("--copy-paste-scale-min", type=float, default=1.0, help="Для policy=bbox_copy: min scale (inner)")
-    p.add_argument("--copy-paste-scale-max", type=float, default=1.0, help="Для policy=bbox_copy: max scale (inner)")
-    p.add_argument("--copy-paste-max-iou", type=float, default=0.0, help="Макс. IoU вставки с существующими bbox")
-    p.add_argument("--copy-paste-tries", type=int, default=25, help="Число попыток подобрать валидное размещение")
+    p.add_argument("--brightness-limit", type=float, default=0.1, help="For policy=basic: brightness range")
+    p.add_argument("--contrast-limit", type=float, default=0.1, help="For policy=basic: range contrast")
+    p.add_argument("--copy-paste-count", type=int, default=1, help="For policy=bbox_copy: number of inserts per image")
+    p.add_argument("--copy-paste-rotation", type=float, default=0.0, help="For policy=bbox_copy: max |angle| to rotate the insert")
+    p.add_argument("--copy-paste-scale-min", type=float, default=1.0, help="For policy=bbox_copy: min scale (inner)")
+    p.add_argument("--copy-paste-scale-max", type=float, default=1.0, help="For policy=bbox_copy: max scale (inner)")
+    p.add_argument("--copy-paste-max-iou", type=float, default=0.0, help="Max IoU insertions with existing bboxes")
+    p.add_argument("--copy-paste-tries", type=int, default=25, help="Number of attempts to find a valid placement")
     p.add_argument(
         "--copy-paste-min-center-dist",
         type=float,
         default=0.15,
-        help="Минимальная дистанция между центрами новых вставок (доля диагонали кадра)",
+        help="Minimum distance between the centers of new inserts (fraction of the frame diagonal)",
     )
     p.add_argument(
         "--copy-paste-placement-style",
         choices=("random", "uniform-grid"),
         default="random",
-        help="Стиль выбора позиции вставки bbox_copy",
+        help="Insertion position selection style bbox_copy",
     )
     p.add_argument(
         "--class-balance",
         choices=("on", "off"),
         default="on",
-        help="Для bbox_copy: балансировать выбор доноров по классам",
+        help="For bbox_copy: balance the selection of donors by class",
     )
     p.add_argument(
         "--color-match",
         choices=("meanstd", "off"),
         default="meanstd",
-        help="Для bbox_copy: выравнивание яркости/контраста патча относительно целевой области",
+        help="For bbox_copy: align the brightness/contrast of the patch relative to the target area",
     )
     p.add_argument(
         "--blend-feather",
         type=float,
         default=0.16,
-        help="Для bbox_copy: сила сглаживания шва [0..0.5], 0=без feather",
+        help="For bbox_copy: seam smoothing strength [0..0.5], 0=no feather",
     )
     p.add_argument(
         "--placement-mode",
         choices=("none", "bbox", "detector"),
         default="detector",
-        help="Режим ROI-размещения для bbox_copy: none|bbox|detector (по умолчанию detector)",
+        help="ROI placement mode for bbox_copy: none|bbox|detector (default detector)",
     )
-    p.add_argument("--placement-roi", action="store_true", help="Legacy: то же, что --placement-mode bbox")
-    p.add_argument("--roi-model", type=str, default="yolo11n.pt", help="Модель детектора ROI для --placement-mode detector")
-    p.add_argument("--roi-conf", type=float, default=0.25, help="Порог confidence для ROI-детектора")
-    p.add_argument("--roi-class-ids", type=str, default=None, help="CSV class ids для ROI-детектора (пусто=все)")
-    p.add_argument("--side-tolerance-px", type=float, default=3.0, help="Допуск в px для классификации стороны ROI")
-    p.add_argument("--imbalance-mode", choices=("off", "soft"), default="soft", help="Балансировка по дефицитным классам")
-    p.add_argument("--imbalance-strength", type=float, default=1.0, help="Сила балансировки >=0")
-    p.add_argument("--min-diversity-iou", type=float, default=0.97, help="Порог схожести bbox (выше -> почти дубликат)")
-    p.add_argument("--min-angle-delta", type=float, default=1.0, help="Минимальная разница углов между rotate-вариантами")
+    p.add_argument("--placement-roi", action="store_true", help="Legacy: same as --placement-mode bbox")
+    p.add_argument("--roi-model", type=str, default="yolo11n.pt", help="ROI detector model for --placement-mode detector")
+    p.add_argument("--roi-conf", type=float, default=0.25, help="Confidence threshold for ROI detector")
+    p.add_argument("--roi-class-ids", type=str, default=None, help="CSV class ids for ROI detector (empty=all)")
+    p.add_argument("--side-tolerance-px", type=float, default=3.0, help="Tolerance in px for ROI side classification")
+    p.add_argument("--imbalance-mode", choices=("off", "soft"), default="soft", help="Balancing according to scarce classes")
+    p.add_argument("--imbalance-strength", type=float, default=1.0, help="Balancing strength >=0")
+    p.add_argument("--min-diversity-iou", type=float, default=0.97, help="bbox similarity threshold (higher -> almost duplicate)")
+    p.add_argument("--min-angle-delta", type=float, default=1.0, help="Minimum angle difference between rotate options")
     p.add_argument("--splits", type=str, default="train", help="CSV: train,val,test")
-    p.add_argument("--classes", type=str, default=None, help="Ограничить аугментацию классами CSV")
+    p.add_argument("--classes", type=str, default=None, help="Limit augmentation to CSV classes")
     p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-legend", action="store_true")
@@ -374,7 +374,7 @@ def _pick_uniform_grid_position(
             else:
                 d = min(np.hypot(cx - _center(ob)[0], cy - _center(ob)[1]) for ob in occupied)
                 score = float(d)
-            # Небольшой шум, чтобы не залипать в один и тот же паттерн.
+            # A little noise so as not to get stuck in the same pattern.
             score += rng.random() * 0.01
             candidates.append((score, gx, gy))
     candidates.sort(key=lambda t: t[0], reverse=True)
@@ -491,7 +491,7 @@ def _apply_geom_aug(
     labels = [x for x in (_sanitize_yolo_box(lb) for lb in raw_labels) if x is not None]
     bboxes = [(x, y, w, h) for _, x, y, w, h in labels]
     class_labels = [cls for cls, *_ in labels]
-    # Локально отключаем/включаем отдельные блоки, не мутируя основной args.
+    # Locally disable/enable individual blocks without mutating the main args.
     class _LocalArgs:
         pass
 
@@ -788,7 +788,7 @@ def _apply_copy_paste(
                 continue
             if any(_iou(cand, ex) > float(args.copy_paste_max_iou) for ex in existing):
                 continue
-            # Анти-скопление: избегаем слишком близких центров новых вставок в одном кадре.
+            # Anti-clustering: avoid too close centers of new inserts in the same frame.
             min_center_dist = max(0.0, float(getattr(args, "copy_paste_min_center_dist", 0.15)))
             if min_center_dist > 0.0 and placed_boxes:
                 cx, cy = _center(cand)
@@ -895,58 +895,58 @@ def _list_workspace_detector_models(workspace_root: str) -> list[str]:
 
 
 def _interactive_fill(args, dataset_names: list[str], classes: list[str], workspace_root: str) -> None:
-    print("[INFO] Интерактивный режим augment")
-    print("[INFO] Доступные датасеты:")
+    print("[INFO] Interactive augment mode")
+    print("[INFO] Available datasets:")
     for n in dataset_names:
         print(f"  - {n}")
-    print("[INFO] Доступные классы:")
+    print("[INFO] Available classes:")
     for c in classes:
         print(f"  - {c}")
-    args.dataset = prompt("Датасет: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
+    args.dataset = prompt("Dataset: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
     args.classes = (
         prompt(
-            "Классы через запятую (пусто=все): ",
+            "Classes separated by commas (empty=all): ",
             default="",
             completer=WordCompleter(classes, ignore_case=True),
             complete_while_typing=True,
         ).strip()
         or None
     )
-    args.output_name = prompt_text("Имя выходного датасета (пусто=авто)", default=(args.output_name or "")).strip() or None
-    print("[INFO] Блок: flip")
-    args.enable_flip = prompt_yes_no("Включить flip?", default=bool(args.enable_flip))
+    args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
+    print("[INFO] Block: flip")
+    args.enable_flip = prompt_yes_no("Turn on flip?", default=bool(args.enable_flip))
     if args.enable_flip:
         args.flip = prompt_choice(
-            "Режим flip (--flip)",
+            "Flip mode (--flip)",
             ["horizontal", "vertical", "both", "none"],
             default=args.flip,
         )
         args.flip_prob = float(
-            prompt_text("Вероятность flip [0..1] (--flip-prob)", default=str(getattr(args, "flip_prob", 0.5))).strip()
+            prompt_text("Probability of flip [0..1] (--flip-prob)", default=str(getattr(args, "flip_prob", 0.5))).strip()
             or str(getattr(args, "flip_prob", 0.5))
         )
-    print("[INFO] Блок: photometric/conveyor")
-    args.enable_photometric = prompt_yes_no("Включить brightness/contrast?", default=bool(args.enable_photometric))
-    args.enable_conveyor = prompt_yes_no("Включить conveyor шум/blur/shift/rotate?", default=bool(args.enable_conveyor))
-    args.enable_center_rotate = prompt_yes_no("Включить поворот кадра вокруг центра?", default=bool(args.enable_center_rotate))
+    print("[INFO] Block: photometric/conveyor")
+    args.enable_photometric = prompt_yes_no("Enable brightness/contrast?", default=bool(args.enable_photometric))
+    args.enable_conveyor = prompt_yes_no("Enable conveyor noise/blur/shift/rotate?", default=bool(args.enable_conveyor))
+    args.enable_center_rotate = prompt_yes_no("Enable frame rotation around the center?", default=bool(args.enable_center_rotate))
     if args.enable_center_rotate:
-        print("[INFO] Блок: center-rotate")
+        print("[INFO] Block: center-rotate")
         args.center_rotate_deg = float(
-            prompt_text("Предел угла поворота (градусы, +-) (--center-rotate-deg)", default=str(getattr(args, "center_rotate_deg", 5.0))).strip()
+            prompt_text("Rotation angle limit (degrees, +-) (--center-rotate-deg)", default=str(getattr(args, "center_rotate_deg", 5.0))).strip()
             or str(getattr(args, "center_rotate_deg", 5.0))
         )
         args.rotate_copies = int(
-            prompt_text("Число rotate-вариантов на кадр (--rotate-copies)", default=str(getattr(args, "rotate_copies", 1))).strip()
+            prompt_text("Number of rotate-options per frame (--rotate-copies)", default=str(getattr(args, "rotate_copies", 1))).strip()
             or str(getattr(args, "rotate_copies", 1))
         )
-    args.enable_bbox_copy = prompt_yes_no("Включить bbox_copy?", default=bool(args.enable_bbox_copy))
+    args.enable_bbox_copy = prompt_yes_no("Enable bbox_copy?", default=bool(args.enable_bbox_copy))
     if args.enable_center_rotate or args.enable_bbox_copy:
-        print("[INFO] Блок: ROI-источник (общий)")
+        print("[INFO] Block: ROI source (general)")
         roi_mode_default = "detector" if str(getattr(args, "placement_mode", "detector")) == "detector" else (
             "bbox" if str(getattr(args, "placement_mode", "detector")) == "bbox" else "none"
         )
         roi_mode = prompt_choice(
-            "ROI mode для rotate/bbox_copy (--placement-mode)",
+            "ROI mode to rotate/bbox_copy (--placement-mode)",
             ["none", "bbox", "detector"],
             default=roi_mode_default,
         )
@@ -955,7 +955,7 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
         if roi_mode == "detector":
             models = _list_workspace_detector_models(workspace_root)
             if models:
-                print("[INFO] ROI-детекторы в корне workspace:")
+                print("[INFO] ROI detectors in the workspace root:")
                 for m in models:
                     print(f"  - {m}")
             args.roi_model = prompt_text(
@@ -964,36 +964,36 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
                 choices=models if models else None,
             ).strip() or str(getattr(args, "roi_model", "yolo11n.pt"))
             args.roi_conf = float(
-                prompt_text("Порог ROI conf (--roi-conf)", default=str(getattr(args, "roi_conf", 0.25))).strip()
+                prompt_text("ROI threshold conf (--roi-conf)", default=str(getattr(args, "roi_conf", 0.25))).strip()
                 or str(getattr(args, "roi_conf", 0.25))
             )
             args.roi_class_ids = (
-                prompt_text("ROI class ids CSV (--roi-class-ids, пусто=все)", default=str(getattr(args, "roi_class_ids", "") or "")).strip()
+                prompt_text("ROI class ids CSV (--roi-class-ids, empty=all)", default=str(getattr(args, "roi_class_ids", "") or "")).strip()
                 or None
             )
-    # Параметры soft-balance и разнообразия релевантны только rotate/bbox_copy.
+    # The soft-balance and diversity options are only relevant to rotate/bbox_copy.
     if args.enable_center_rotate or args.enable_bbox_copy:
-        print("[INFO] Блок: балансировка/разнообразие")
+        print("[INFO] Block: Balancing/Variety")
         args.imbalance_mode = prompt_choice(
-            "Балансировка классов (--imbalance-mode)",
+            "Class balancing (--imbalance-mode)",
             ["off", "soft"],
             default=str(getattr(args, "imbalance_mode", "soft")),
         )
         args.imbalance_strength = float(
-            prompt_text("Сила балансировки (>=0) (--imbalance-strength)", default=str(getattr(args, "imbalance_strength", 1.0))).strip()
+            prompt_text("Balancing strength (>=0) (--imbalance-strength)", default=str(getattr(args, "imbalance_strength", 1.0))).strip()
             or str(getattr(args, "imbalance_strength", 1.0))
         )
         args.min_diversity_iou = float(
-            prompt_text("Порог дубликата по IoU [0..1] (--min-diversity-iou)", default=str(getattr(args, "min_diversity_iou", 0.97))).strip()
+            prompt_text("IoU duplicate threshold [0..1] (--min-diversity-iou)", default=str(getattr(args, "min_diversity_iou", 0.97))).strip()
             or str(getattr(args, "min_diversity_iou", 0.97))
         )
     if args.enable_center_rotate:
         args.min_angle_delta = float(
-            prompt_text("Мин. разница углов (градусы) (--min-angle-delta)", default=str(getattr(args, "min_angle_delta", 1.0))).strip()
+            prompt_text("Min. angle difference (degrees) (--min-angle-delta)", default=str(getattr(args, "min_angle_delta", 1.0))).strip()
             or str(getattr(args, "min_angle_delta", 1.0))
         )
     if args.enable_bbox_copy:
-        print("[INFO] Блок: bbox_copy")
+        print("[INFO] Block: bbox_copy")
         args.class_balance = prompt_choice(
             "Class balance (--class-balance)",
             ["on", "off"],
@@ -1005,31 +1005,31 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             default=str(getattr(args, "color_match", "meanstd")),
         )
         args.blend_feather = float(
-            prompt_text("Параметр feather [0..0.5] (--blend-feather)", default=str(getattr(args, "blend_feather", 0.16))).strip()
+            prompt_text("Parameter feather [0..0.5] (--blend-feather)", default=str(getattr(args, "blend_feather", 0.16))).strip()
             or str(getattr(args, "blend_feather", 0.16))
         )
         args.copy_paste_count = int(
-            prompt_text("Число вставок copy-paste (--copy-paste-count)", default=str(args.copy_paste_count)).strip()
+            prompt_text("Copy-paste count (--copy-paste-count)", default=str(args.copy_paste_count)).strip()
             or str(args.copy_paste_count)
         )
         args.copy_paste_min_center_dist = float(
             prompt_text(
-                "Мин. дистанция между вставками [0..1] (--copy-paste-min-center-dist)",
+                "Min. distance between pastes [0..1] (--copy-paste-min-center-dist)",
                 default=str(getattr(args, "copy_paste_min_center_dist", 0.15)),
             ).strip()
             or str(getattr(args, "copy_paste_min_center_dist", 0.15))
         )
         args.copy_paste_placement_style = prompt_choice(
-            "Стиль размещения вставок (--copy-paste-placement-style)",
+            "Paste placement style (--copy-paste-placement-style)",
             ["random", "uniform-grid"],
             default=str(getattr(args, "copy_paste_placement_style", "random")),
         )
         args.bbox_copy_copies = int(
-            prompt_text("Число bbox_copy-вариантов на кадр (--bbox-copy-copies)", default=str(getattr(args, "bbox_copy_copies", 1))).strip()
+            prompt_text("Number of bbox_copy-options per frame (--bbox-copy-copies)", default=str(getattr(args, "bbox_copy_copies", 1))).strip()
             or str(getattr(args, "bbox_copy_copies", 1))
         )
-    args.splits = prompt_text("Сплиты через запятую (train,val,test)", default=args.splits).strip() or args.splits
-    args.dry_run = prompt_yes_no("Выполнить dry-run (--dry-run)?", default=bool(args.dry_run))
+    args.splits = prompt_text("Splits separated by commas (train,val,test)", default=args.splits).strip() or args.splits
+    args.dry_run = prompt_yes_no("Do dry-run (--dry-run)?", default=bool(args.dry_run))
 
 
 def main(argv=None):
@@ -1041,11 +1041,11 @@ def main(argv=None):
     layout = WorkspaceLayout(root)
     catalog = _load_catalog(layout)
     if not catalog:
-        print("[ERROR] Не найдено datasets_info.json или он пуст.")
+        print("[ERROR] datasets_info.json was not found or is empty.")
         return
 
     if args.dataset is None and not argv:
-        # на всякий случай, но у нас подкоманда вызывается с аргументами от cli
+        # just in case, but our subcommand is called with arguments from the cli
         pass
     if args.dataset is None and sys.stdin.isatty():
         all_classes = sorted({k for v in catalog.values() if isinstance(v, dict) for k in (v.get("classes") or {}).keys()})
@@ -1053,15 +1053,15 @@ def main(argv=None):
         interactive_used = True
 
     if not args.dataset:
-        print("[ERROR] Укажите --dataset или используйте интерактивный режим.")
+        print("[ERROR] Specify --dataset or use interactive mode.")
         return
     if args.dataset not in catalog:
-        print(f"[ERROR] Неизвестный датасет: {args.dataset}")
+        print(f"[ERROR] Unknown dataset: {args.dataset}")
         return
     replay_cmd = None
     if interactive_used:
         replay_cmd = build_non_interactive_command("augment", parser, args)
-        print_replay_command("перед запуском", replay_cmd)
+        print_replay_command("before launch", replay_cmd)
     if bool(getattr(args, "placement_roi", False)):
         args.placement_mode = "bbox"
 
@@ -1312,7 +1312,7 @@ def main(argv=None):
     if args.dry_run:
         print(f"[OK] dry-run: copied={copied}, augmented={augmented}, output={out_name}")
         if replay_cmd:
-            print_replay_command("после выполнения", replay_cmd)
+            print_replay_command("after execution", replay_cmd)
         return
 
     all_names = [str(x) for _, x in sorted(names_by_id.items())]
@@ -1360,10 +1360,10 @@ def main(argv=None):
             "output_hash": out_hash,
         },
     )
-    print(f"[OK] Создан датасет: {out_dir}")
+    print(f"[OK] Dataset created: {out_dir}")
     print(f"[OK] Passport: {passport_path}")
     if replay_cmd:
-        print_replay_command("после выполнения", replay_cmd)
+        print_replay_command("after execution", replay_cmd)
 
 
 if __name__ == "__main__":

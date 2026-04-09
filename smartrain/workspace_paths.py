@@ -1,5 +1,5 @@
 """
-Единый корень workspace: подкаталоги и резолв путей к датасетам (data_path / каталог по ключу).
+Single root workspace: subdirectories and resolution of paths to datasets (data_path / directory by key).
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ WORKSPACE_QUEUE_BASENAME = "queue.txt"
 
 
 class WorkspaceLayout:
-    """Все стандартные пути внутри workspace; root — абсолютный нормализованный путь."""
+    """All standard paths inside the workspace; root is the absolute normalized path."""
 
     def __init__(self, root: str):
         self.root = os.path.abspath(os.path.expanduser(root))
@@ -48,8 +48,8 @@ class WorkspaceLayout:
 
 def resolve_workspace_root(cli_workspace: str | None) -> str:
     """
-    Источник корня: аргумент CLI (непустой) перекрывает переменную окружения SMART_TRAIN_WORKSPACE.
-    Иначе — явная ошибка.
+    Root source: CLI argument (non-empty) overrides the SMART_TRAIN_WORKSPACE environment variable.
+    Otherwise, it’s a clear mistake.
     """
     if cli_workspace is not None:
         w = cli_workspace.strip()
@@ -61,16 +61,16 @@ def resolve_workspace_root(cli_workspace: str | None) -> str:
         if e:
             return os.path.abspath(os.path.expanduser(e))
     raise ValueError(
-        "Не задан корень workspace: укажите --workspace или переменную окружения "
+        "The workspace root is not set: specify --workspace or an environment variable"
         f"{WORKSPACE_ENV_VAR}."
     )
 
 
 def resolve_path_under_workspace(workspace_root: str, relative_or_absolute: str) -> str:
-    """Абсолютный путь как есть; иначе путь относительно workspace_root."""
+    """Absolute path as is; otherwise the path is relative to workspace_root."""
     p = relative_or_absolute.strip()
     if not p:
-        raise ValueError("Пустой data_path.")
+        raise ValueError("Empty data_path.")
     if os.path.isabs(p):
         return os.path.abspath(p)
     return os.path.abspath(os.path.join(workspace_root, os.path.normpath(p)))
@@ -83,20 +83,20 @@ def resolve_dataset_root(
     catalog_dir: str,
 ) -> str:
     """
-    Если в записи есть ключ data_path — резолвим от workspace или абсолют.
-    Иначе корень данных: catalog_dir / entry_key.
+    If the record contains the data_path key, resolve from workspace or absolute.
+    Otherwise, data root: catalog_dir/entry_key.
     """
     if "data_path" in entry_dict:
         raw = entry_dict["data_path"]
         if not isinstance(raw, str):
-            raise TypeError(f"data_path для {entry_key!r} должен быть строкой.")
+            raise TypeError(f"data_path for {entry_key!r} must be a string.")
         return resolve_path_under_workspace(workspace_root, raw)
     return os.path.join(catalog_dir, entry_key)
 
 
 def _safe_extract_zip(zip_path: str, target_dir: str) -> None:
     """
-    Безопасная распаковка zip в target_dir с защитой от path traversal.
+    Secure zip unpacking to target_dir with path traversal protection.
     """
     abs_target = os.path.abspath(target_dir)
     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -104,14 +104,14 @@ def _safe_extract_zip(zip_path: str, target_dir: str) -> None:
             member_name = member.filename
             out_path = os.path.abspath(os.path.join(abs_target, member_name))
             if not out_path.startswith(abs_target + os.sep) and out_path != abs_target:
-                raise ValueError(f"Архив содержит небезопасный путь: {member_name!r}")
+                raise ValueError(f"The archive contains an unsafe path: {member_name!r}")
         zf.extractall(abs_target)
 
 
 def _choose_extracted_dataset_root(extract_dir: str) -> str:
     """
-    Если в архиве один верхнеуровневый каталог — используем его как корень датасета.
-    Иначе используем сам каталог распаковки.
+    If there is one top-level directory in the archive, we use it as the root of the dataset.
+    Otherwise, we use the unpacking directory itself.
     """
     try:
         entries = [name for name in os.listdir(extract_dir) if name != "__meta__.json"]
@@ -126,12 +126,12 @@ def _choose_extracted_dataset_root(extract_dir: str) -> str:
 
 def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
     """
-    Распаковывает zip датасет в кэш workspace/tmp/extracted_datasets с инвалидацией
-    по размеру и mtime архива. Возвращает путь к корню распакованного датасета.
+    Unpacks a zip dataset into the workspace/tmp/extracted_datasets cache with invalidation
+    by size and mtime of the archive. Returns the path to the root of the unpacked dataset.
     """
     abs_zip = os.path.abspath(os.path.expanduser(zip_path))
     if not os.path.isfile(abs_zip):
-        raise FileNotFoundError(f"Zip-архив не найден: {abs_zip}")
+        raise FileNotFoundError(f"Zip archive not found: {abs_zip}")
     stat = os.stat(abs_zip)
     key_src = f"{abs_zip}|{stat.st_size}|{stat.st_mtime_ns}"
     cache_key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:16]
@@ -187,8 +187,8 @@ def resolve_or_extract_dataset_root(
     catalog_dir: str,
 ) -> str:
     """
-    Как resolve_dataset_root, но если путь указывает на zip-архив, возвращает
-    корень распакованного датасета из workspace-кэша.
+    Like resolve_dataset_root, but if the path points to a zip archive, returns
+    the root of the unpacked dataset from the workspace cache.
     """
     root = resolve_dataset_root(workspace_root, entry_key, entry_dict, catalog_dir)
     if root.lower().endswith(".zip"):
@@ -197,21 +197,21 @@ def resolve_or_extract_dataset_root(
 
 
 def workspace_queue_path(workspace_root: str) -> str:
-    """Файл очереди обучения в корне workspace (`queue.txt`)."""
+    """Learning queue file in workspace root (`queue.txt`)."""
     root = os.path.abspath(os.path.expanduser(workspace_root))
     return os.path.join(root, WORKSPACE_QUEUE_BASENAME)
 
 
 def workspace_queue_status_path(workspace_root: str) -> str:
-    """Статусы исполнителя очереди: `workspace/tmp/status.txt`."""
+    """Queue worker statuses: `workspace/tmp/status.txt`."""
     root = os.path.abspath(os.path.expanduser(workspace_root))
     return os.path.join(root, "tmp", "status.txt")
 
 
 def deploy_workspace(target_root: str | None = None) -> dict[str, Any]:
     """
-    Создаёт каталоги workspace и пустые datasets_info.json при отсутствии.
-    target_root по умолчанию — текущий каталог (как у пользовательского workspace).
+    Creates workspace directories and empty datasets_info.json if missing.
+    target_root by default is the current directory (same as a custom workspace).
     """
     root = os.path.abspath(os.path.expanduser(target_root or os.getcwd()))
     layout = WorkspaceLayout(root)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Прогоны в workspace/runs и каталог workspace/models: список, информация, промоут весов.
+Runs in workspace/runs and the workspace/models directory: list, information, promotion of scales.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ MANIFEST_NAME = "model_manifest.json"
 
 
 class RegistryCliContext:
-    """Контекст workspace для подкоманд registry."""
+    """Workspace context for registry subcommands."""
 
     def __init__(self, layout: WorkspaceLayout):
         self.layout = layout
@@ -41,7 +41,7 @@ def _resolve_run_ref(ctx: RegistryCliContext, ref: str) -> str:
         i = int(s)
         if i < 1 or i > len(runs):
             print(
-                f"[ERROR] Нет прогона с номером {i} (в списке {len(runs)}).",
+                f"[ERROR] There is no run with number {i} (in the list {len(runs)}).",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -52,7 +52,7 @@ def _resolve_run_ref(ctx: RegistryCliContext, ref: str) -> str:
 def _cmd_runs_list(ctx: RegistryCliContext) -> None:
     runs = find_run_directories(ctx.runs_dir)
     if not runs:
-        print("(прогоны с training_metadata.json не найдены)")
+        print("(runs with training_metadata.json not found)")
         return
     print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'run_dir'}")
     print("-" * 100)
@@ -64,7 +64,7 @@ def _cmd_runs_list(ctx: RegistryCliContext) -> None:
             ds = ti["dataset"]["name"]
             print(f"{i:4d}  {str(m)[:14]:<14}  {str(ds)[:24]:<24}  {rd}")
         except (OSError, KeyError, TypeError) as e:
-            print(f"{i:4d}  {'?':<14}  {'?':<24}  {rd}  [ошибка: {e}]")
+            print(f"{i:4d} {'?':<14} {'?':<24} {rd} [error: {e}]")
 
 
 def _cmd_runs_info(ctx: RegistryCliContext, run_path: str) -> None:
@@ -82,7 +82,7 @@ def _cmd_runs_metrics(ctx: RegistryCliContext, run_path: str) -> None:
     run_path = _resolve_run_ref(ctx, run_path)
     tm = latest_test_metrics_path(run_path)
     if not tm:
-        print(f"[ERROR] Нет test_metrics*.csv в {run_path}", file=sys.stderr)
+        print(f"[ERROR] No test_metrics*.csv in {run_path}", file=sys.stderr)
         sys.exit(1)
     print(tm)
     with open(tm, "r", encoding="utf-8") as f:
@@ -136,11 +136,11 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
     run_path = _resolve_run_ref(ctx, run_path)
     meta_path = os.path.join(run_path, "training_metadata.json")
     if not os.path.isfile(meta_path):
-        print(f"[ERROR] Нет training_metadata.json: {run_path}", file=sys.stderr)
+        print(f"[ERROR] No training_metadata.json: {run_path}", file=sys.stderr)
         sys.exit(1)
     best = os.path.join(run_path, "train", "weights", "best.pt")
     if not os.path.isfile(best):
-        print(f"[ERROR] Нет best.pt: {best}", file=sys.stderr)
+        print(f"[ERROR] No best.pt: {best}", file=sys.stderr)
         sys.exit(1)
     md = load_metadata(run_path)
     base = _friendly_name_base(md)
@@ -167,13 +167,13 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
     }
     with open(os.path.join(dest_dir, MANIFEST_NAME), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
-    print(f"[OK] Модель: {dest_pt}")
-    print(f"[OK] Манифест: {os.path.join(dest_dir, MANIFEST_NAME)}")
+    print(f"[OK] Model: {dest_pt}")
+    print(f"[OK] Manifest: {os.path.join(dest_dir, MANIFEST_NAME)}")
 
 
 def _cmd_models_list(ctx: RegistryCliContext) -> None:
     if not os.path.isdir(ctx.models_dir):
-        print("(каталог models пуст или не создан)")
+        print("(models directory is empty or not created)")
         return
     names = sorted(
         d for d in os.listdir(ctx.models_dir)
@@ -184,14 +184,14 @@ def _cmd_models_list(ctx: RegistryCliContext) -> None:
         if os.path.isfile(man):
             print(n)
         else:
-            print(f"{n}  (нет {MANIFEST_NAME})")
+            print(f"{n} (no {MANIFEST_NAME})")
 
 
 def _cmd_models_info(ctx: RegistryCliContext, name: str) -> None:
     d = os.path.join(ctx.models_dir, name)
     man = os.path.join(d, MANIFEST_NAME)
     if not os.path.isfile(man):
-        print(f"[ERROR] Нет каталога или манифеста: {d}", file=sys.stderr)
+        print(f"[ERROR] No directory or manifest: {d}", file=sys.stderr)
         sys.exit(1)
     with open(man, "r", encoding="utf-8") as f:
         print(f.read())
@@ -200,57 +200,57 @@ def _cmd_models_info(ctx: RegistryCliContext, name: str) -> None:
 def _cmd_models_remove(ctx: RegistryCliContext, name: str) -> None:
     d = os.path.join(ctx.models_dir, name)
     if not os.path.isdir(d):
-        print(f"[ERROR] Нет каталога: {d}", file=sys.stderr)
+        print(f"[ERROR] No directory: {d}", file=sys.stderr)
         sys.exit(1)
     shutil.rmtree(d)
-    print(f"[OK] Удалено: {d}")
+    print(f"[OK] Deleted: {d}")
 
 
 def build_registry_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(description="Реестр прогонов (runs) и промотированных моделей (models)")
+    p = CliArgumentParser(description="Register of runs and promoted models")
     p.add_argument(
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR})",
+        help=f"Workspace root (aka {WORKSPACE_ENV_VAR})",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    p_rl = sub.add_parser("runs-list", help="Список прогонов под runs/")
+    p_rl = sub.add_parser("runs-list", help="List of runs under runs/")
     p_rl.set_defaults(handler="runs_list")
 
-    p_ri = sub.add_parser("runs-info", help="JSON training_info + пути к весам")
+    p_ri = sub.add_parser("runs-info", help="JSON training_info + paths to weights")
     p_ri.add_argument(
         "run_path",
         type=str,
-        help="Каталог прогона или номер строки как в runs-list",
+        help="Run directory or line number as in runs-list",
     )
     p_ri.set_defaults(handler="runs_info")
 
-    p_rm = sub.add_parser("runs-metrics", help="Путь и содержимое test_metrics*.csv")
+    p_rm = sub.add_parser("runs-metrics", help="Path and contents of test_metrics*.csv")
     p_rm.add_argument(
         "run_path",
         type=str,
-        help="Каталог прогона или номер строки как в runs-list",
+        help="Run directory or line number as in runs-list",
     )
     p_rm.set_defaults(handler="runs_metrics")
 
-    p_ma = sub.add_parser("models-add", help="Копировать best.pt в models/<friendly>/")
+    p_ma = sub.add_parser("models-add", help="Copy best.pt to models/<friendly>/")
     p_ma.add_argument(
         "run_path",
         type=str,
-        help="Каталог прогона или номер строки как в runs-list",
+        help="Run directory or line number as in runs-list",
     )
     p_ma.set_defaults(handler="models_add")
 
-    p_ml = sub.add_parser("models-list", help="Список имён в models/")
+    p_ml = sub.add_parser("models-list", help="List of names in models/")
     p_ml.set_defaults(handler="models_list")
 
-    p_mi = sub.add_parser("models-info", help="Вывод model_manifest.json")
+    p_mi = sub.add_parser("models-info", help="Output of model_manifest.json")
     p_mi.add_argument("name", type=str)
     p_mi.set_defaults(handler="models_info")
 
-    p_mr = sub.add_parser("models-remove", help="Удалить каталог models/<name>/")
+    p_mr = sub.add_parser("models-remove", help="Delete directory models/<name>/")
     p_mr.add_argument("name", type=str)
     p_mr.set_defaults(handler="models_remove")
 
@@ -290,7 +290,7 @@ def main(argv=None) -> None:
     elif h == "models_remove":
         _cmd_models_remove(ctx, args.name)
     else:
-        print(f"[ERROR] Неизвестная команда: {h}", file=sys.stderr)
+        print(f"[ERROR] Unknown command: {h}", file=sys.stderr)
         sys.exit(1)
 
 

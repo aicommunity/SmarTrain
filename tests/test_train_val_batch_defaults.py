@@ -32,10 +32,10 @@ def test_load_batch_from_training_metadata_returns_none_when_missing(tmp_path: P
 
 def test_test_only_default_val_batch_uses_metadata_then_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """
-    main() в --test-only должен выбрать val_batch:
-    - args.val_batch если задан
-    - иначе training_metadata.json (batch_size)
-    - иначе batch из u_cfg (после merge_cli_into_ultralytics_cfg)
+    main() in --test-only should select val_batch:
+    - args.val_batch if specified
+    - otherwise training_metadata.json (batch_size)
+    - otherwise batch from u_cfg (after merge_cli_into_ultralytics_cfg)
     """
     md = tmp_path / "run3"
     md.mkdir()
@@ -44,7 +44,7 @@ def test_test_only_default_val_batch_uses_metadata_then_fallback(monkeypatch: py
         encoding="utf-8",
     )
 
-    # Минимальные заглушки, чтобы main дошёл до вызова test_yolo.
+    # Minimal stubs so that main gets to the test_yolo call.
     args = argparse.Namespace(
         workspace=str(tmp_path),
         config=None,
@@ -53,7 +53,7 @@ def test_test_only_default_val_batch_uses_metadata_then_fallback(monkeypatch: py
         task=None,
         model=None,
         epochs=None,
-        batch=7,  # попадёт в u_cfg как fallback
+        batch=7,  # will end up in u_cfg as fallback
         img_size=None,
         target_path=None,
         model_dir=str(md),

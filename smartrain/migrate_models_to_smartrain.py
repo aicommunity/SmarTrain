@@ -12,23 +12,23 @@ from smartrain.cli_argparse import CliArgumentParser
 
 def build_migrate_models_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(
-        description="Миграция legacy-артефактов в формат run-каталогов smartrain (добавляет training_metadata.json)."
+        description="Migration of legacy artifacts to the format of smartrain run directories (adds training_metadata.json)."
     )
     p.add_argument(
         "--models-root",
         type=str,
         required=True,
-        help="Корень каталога с legacy-моделями (поиск run-каталогов по train/results.csv).",
+        help="The root of the directory with legacy models (search for run directories using train/results.csv).",
     )
     p.add_argument(
         "--overwrite",
         action="store_true",
-        help="Перезаписывать существующие training_metadata.json.",
+        help="Overwrite existing training_metadata.json.",
     )
     p.add_argument(
         "--dry-run",
         action="store_true",
-        help="Только показать, что будет сделано, без записи файлов.",
+        help="Only show what will be done, without writing files.",
     )
     return p
 
@@ -119,11 +119,11 @@ def main(argv: list[str] | None = None) -> None:
     models_root = Path(args.models_root).expanduser().resolve()
 
     if not models_root.exists():
-        raise SystemExit(f"[ERROR] Папка не найдена: {models_root}")
+        raise SystemExit(f"[ERROR] Folder not found: {models_root}")
 
     run_dirs = infer_run_dirs(models_root)
     if not run_dirs:
-        raise SystemExit("[ERROR] Не найдено ни одного run-каталога с train/results.csv")
+        raise SystemExit("[ERROR] No run directory found with train/results.csv")
 
     created = 0
     skipped = 0
@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> None:
         existed_before = meta_path.exists()
         if existed_before and not args.overwrite:
             skipped += 1
-            print(f"[SKIP] Уже есть: {meta_path}")
+            print(f"[SKIP] Already exists: {meta_path}")
             continue
 
         args_data = load_args_yaml(run_dir)
@@ -150,13 +150,13 @@ def main(argv: list[str] | None = None) -> None:
 
         if existed_before and args.overwrite:
             updated += 1
-            print(f"[OK] Обновлен: {meta_path}")
+            print(f"[OK] Updated: {meta_path}")
         else:
             created += 1
-            print(f"[OK] Создан: {meta_path}")
+            print(f"[OK] Created by: {meta_path}")
 
     print(
-        f"\nГотово. created={created}, updated={updated}, skipped={skipped}, total={len(run_dirs)}"
+        f"\nDone. created={created}, updated={updated}, skipped={skipped}, total={len(run_dirs)}"
     )
 
 

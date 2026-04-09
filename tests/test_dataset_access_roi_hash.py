@@ -305,7 +305,7 @@ def test_roi_workspace_external_path_via_datasets_list(tmp_path: Path) -> None:
     info = json.loads((tmp_path / "datasets" / DATASETS_INFO_FILE).read_text(encoding="utf-8"))
     key = "ext_ds"
     assert key in info
-    # scan копирует внешние датасеты в datasets и индексирует копию (raw_data — только источник)
+    # scan copies external datasets to datasets and indexes the copy (raw_data - source only)
     assert resolve_path_under_workspace(str(tmp_path), info[key]["data_path"]) == str(
         (tmp_path / "datasets" / key).resolve()
     )

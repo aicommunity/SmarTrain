@@ -43,13 +43,13 @@ _ULTRALYTICS_YAML_IGNORED_KEYS = frozenset(
         "project",
         "name",
         "exist_ok",
-        # В Ultralytics `cfg` может указывать на внешний YAML с гиперпараметрами,
-        # но smart-train уже читает заданный пользователем `--ultralytics_yaml`,
-        # поэтому `cfg` часто бывает "остатком" и может ссылаться на файл,
-        # которого нет на текущей машине.
+        # In Ultralytics, `cfg` can point to external YAML with hyperparameters,
+        # but smart-train already reads the user-specified `--ultralytics_yaml`,
+        # so `cfg` is often a "remainder" and can refer to a file,
+        # which is not on the current machine.
         "cfg",
-        # device мы задаём через окружение/CLI; значения из сохранённых args.yaml
-        # (например '0,1,2') часто не соответствуют доступным GPU на машине.
+        # we set device through the environment/CLI; values ​​from saved args.yaml
+        # (eg '0,1,2') often do not correspond to the available GPUs on the machine.
         "device",
         "model_dir",
         "target_path",
@@ -60,14 +60,14 @@ _ULTRALYTICS_YAML_IGNORED_KEYS = frozenset(
 
 def build_train_arg_parser() -> argparse.ArgumentParser:
     parser = CliArgumentParser(
-        description="Обучение моделей (без аргументов запускается интерактивный режим)"
+        description="Training models (without arguments, interactive mode starts)"
     )
 
     parser.add_argument(
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); прогоны в runs/, разрешение --data по datasets",
+        help=f"Root workspace (otherwise {WORKSPACE_ENV_VAR}); runs in runs/, resolution --data by datasets",
     )
 
     parser.add_argument(
@@ -75,82 +75,82 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         "-c",
         type=str,
         default=None,
-        help="YAML-профиль smart-train (базовый конфиг). Можно смешивать с --ultralytics_yaml; приоритет CLI > --ultralytics_yaml > --config",
+        help="YAML profile smart-train (basic config). Can be mixed with --ultralytics_yaml; priority CLI > --ultralytics_yaml > --config",
     )
     parser.add_argument(
         "--ultralytics_yaml",
         type=str,
         default=None,
-        help="Внешний Ultralytics args.yaml; несовместимые ключи (data/project/name/exist_ok/...) игнорируются с предупреждением",
+        help="External Ultralytics args.yaml; incompatible keys (data/project/name/exist_ok/...) are ignored with a warning",
     )
     parser.add_argument(
         "--base-run-args-yaml",
         type=str,
         default=None,
-        help="Путь к args.yaml базового прогона (используется как источник дефолтов в интерактивном режиме)",
+        help="Path to args.yaml of the base run (used as a source of defaults in interactive mode)",
     )
 
     parser.add_argument(
         "--data",
         type=str,
         default=None,
-        help="Каталог с data.yaml (абсолютный/относительный) или имя записи из datasets/datasets_info.json; "
-        "при --workspace обычно задаётся явно (значение data из --ultralytics_yaml не используется)",
+        help="Directory with data.yaml (absolute/relative) or record name from datasets/datasets_info.json; "
+        "with --workspace it is usually set explicitly (the data value from --ultralytics_yaml is not used)",
     )
 
     parser.add_argument(
         "--task",
         type=str,
         default=argparse.SUPPRESS,
-        help="Задача Ultralytics: detect, segment, classify, pose, obb (по умолчанию из профиля или detect)",
+        help="Ultralytics task: detect, segment, classify, pose, obb (default from profile or detect)",
     )
 
     parser.add_argument(
         "--model",
         type=str,
         default=argparse.SUPPRESS,
-        help=f"Модель (по умолчанию {MODEL_VERSION} или из профиля --config)",
+        help=f"Model (default {MODEL_VERSION} or from profile --config)",
     )
 
     parser.add_argument(
         "--epochs",
         type=int,
         default=argparse.SUPPRESS,
-        help=f"Эпохи (по умолчанию {EPOCHS} или из профиля)",
+        help=f"Epoches (default {EPOCHS} or from profile)",
     )
 
     parser.add_argument(
         "--batch",
         type=int,
         default=argparse.SUPPRESS,
-        help=f"Batch (по умолчанию {BATCH} или из профиля)",
+        help=f"Batch (default {BATCH} or from profile)",
     )
 
     parser.add_argument(
         "--img-size",
         type=int,
         default=argparse.SUPPRESS,
-        help=f"imgsz (по умолчанию {IMG_SIZE} или из профиля)",
+        help=f"imgsz (default {IMG_SIZE} or from profile)",
     )
 
     parser.add_argument(
         "--target-path",
         type=str,
         default=None,
-        help="Базовый каталог для прогонов (по умолчанию workspace/runs при использовании workspace)",
+        help="Base directory for runs (defaults to workspace/runs when using workspace)",
     )
 
     parser.add_argument(
         "--model-dir",
         type=str,
         default=None,
-        help="Путь к папке с моделью",
+        help="Path to the folder with the model",
     )
 
     parser.add_argument(
         "--test-only",
         action="store_true",
-        help="Выполнить только тестирование без обучения",
+        help="Perform testing only without training",
     )
 
     parser.add_argument(
@@ -158,61 +158,61 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         "--yes",
         action="store_true",
         dest="non_interactive",
-        help="Не спрашивать подтверждение при существующей папке результатов (для очереди и CI)",
+        help="Do not ask for confirmation if there is an existing results folder (for queue and CI)",
     )
 
     parser.add_argument(
         "--val-imgsz",
         type=int,
         default=None,
-        help="Размер изображения для val/test (по умолчанию как --img-size при обучении)",
+        help="Image size for val/test (default as --img-size when training)",
     )
     parser.add_argument(
         "--val-conf",
         type=float,
         default=None,
-        help="Порог conf для val() (Ultralytics)",
+        help="conf threshold for val() (Ultralytics)",
     )
     parser.add_argument(
         "--val-iou",
         type=float,
         default=None,
-        help="Порог IoU для val() (Ultralytics)",
+        help="IoU threshold for val() (Ultralytics)",
     )
     parser.add_argument(
         "--val-batch",
         type=int,
         default=None,
-        help="Batch для val/test (по умолчанию: как batch обучения; для --test-only берётся из training_metadata.json при наличии)",
+        help="Batch for val/test (by default: as a training batch; for --test-only it is taken from training_metadata.json if available)",
     )
 
     parser.add_argument(
         "--weighted-sampling",
         action="store_true",
-        help="Взвешенная выборка изображений (классы с меньшим числом объектов чаще); патч ultralytics",
+        help="Weighted image sampling (classes with fewer objects more often); ultralytics patch",
     )
 
     parser.add_argument(
         "--export-onnx",
         action="store_true",
-        help="После успешного обучения экспорт best.pt в ONNX",
+        help="After successful training, export best.pt to ONNX",
     )
     parser.add_argument(
         "--export-onnx-fp32",
         action="store_true",
-        help="При --export-onnx не использовать half=True",
+        help="With --export-onnx, do not use half=True",
     )
 
     parser.add_argument(
         "--clearml",
         action="store_true",
-        help="Логирование гиперпараметров в ClearML (нужен pip install clearml)",
+        help="Logging hyperparameters in ClearML (need pip install clearml)",
     )
     parser.add_argument(
         "--clearml-project",
         type=str,
         default=None,
-        help="Имя проекта ClearML (иначе CLEARML_PROJECT или smartrain)",
+        help="ClearML project name (aka CLEARML_PROJECT or smartrain)",
     )
 
     return parser
@@ -248,7 +248,7 @@ def _prompt_yes_no(label: str, default: bool = False) -> bool:
     raw = _prompt_input(f"{label} [{suffix}]: ", default=default_text, show_default_hint=False).strip().lower()
     if not raw:
         return default
-    return raw in ("y", "yes", "1", "true", "да", "д")
+    return raw in ("y", "yes", "1", "true", "yes", "d")
 
 
 def _prompt_int(label: str, default: int) -> int:
@@ -259,7 +259,7 @@ def _prompt_int(label: str, default: int) -> int:
         try:
             return int(raw)
         except ValueError:
-            print(f"[ERROR] Ожидается целое число, получено: {raw!r}")
+            print(f"[ERROR] Expected integer, received: {raw!r}")
 
 
 def _prompt_optional_int(label: str, default: int | None = None) -> int | None:
@@ -271,7 +271,7 @@ def _prompt_optional_int(label: str, default: int | None = None) -> int | None:
         try:
             return int(raw)
         except ValueError:
-            print(f"[ERROR] Ожидается целое число или пустое значение, получено: {raw!r}")
+            print(f"[ERROR] Expecting an integer or empty value, received: {raw!r}")
 
 
 def _prompt_optional_float(label: str, default: float | None = None) -> float | None:
@@ -283,7 +283,7 @@ def _prompt_optional_float(label: str, default: float | None = None) -> float | 
         try:
             return float(raw)
         except ValueError:
-            print(f"[ERROR] Ожидается число или пустое значение, получено: {raw!r}")
+            print(f"[ERROR] Expecting a number or empty value, received: {raw!r}")
 
 
 def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
@@ -306,13 +306,13 @@ def _prompt_dataset_name(available: list[str]) -> str:
     completer = WordCompleter(available, ignore_case=True)
     while True:
         raw = _prompt_input(
-            "Датасет (имя из datasets/datasets_info.json): ",
+            "Dataset (name from datasets/datasets_info.json): ",
             default="",
             completer=completer,
         ).strip()
         if raw in available:
             return raw
-        print("[ERROR] Неизвестное имя датасета. Доступные:", ", ".join(available))
+        print("[ERROR] Unknown dataset name. Available:", ", ".join(available))
 
 
 def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str) -> list[dict[str, str]]:
@@ -349,9 +349,9 @@ def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str)
 
 def _print_available_base_runs(selected_dataset: str, runs: list[dict[str, str]]) -> None:
     if not runs:
-        print("[INFO] Базовые прогоны в runs/ не найдены.")
+        print("[INFO] No base runs found in runs/.")
         return
-    print("[INFO] Доступные базовые прогоны (сверху — для выбранного датасета):")
+    print("[INFO] Available base runs (top - for the selected dataset):")
     for i, r in enumerate(runs, start=1):
         mark = " [selected-dataset]" if r["dataset"] == selected_dataset else ""
         print(f"  {i:>3}. {r['dataset']} :: {r['run_dir']}{mark}")
@@ -362,7 +362,7 @@ def _prompt_base_run_args_yaml(runs: list[dict[str, str]], default_path: str | N
         return default_path
     while True:
         raw = _prompt_input(
-            "Базовый прогон (номер или путь к args.yaml, пусто=без базового): ",
+            "Base run (number or path to args.yaml, empty=no base): ",
             default=str(default_path or ""),
         ).strip()
         if not raw:
@@ -372,11 +372,11 @@ def _prompt_base_run_args_yaml(runs: list[dict[str, str]], default_path: str | N
         try:
             idx = int(raw)
         except ValueError:
-            print(f"[ERROR] Ожидается номер прогона или путь к args.yaml, получено: {raw!r}")
+            print(f"[ERROR] Expected run number or path to args.yaml, received: {raw!r}")
             continue
         if 1 <= idx <= len(runs):
             return runs[idx - 1]["args_yaml"]
-        print(f"[ERROR] Номер вне диапазона 1..{len(runs)}")
+        print(f"[ERROR] Number out of range 1..{len(runs)}")
 
 
 def _get_interactive_default(args, attr: str, fallback, baseline_cfg: dict[str, Any], baseline_key: str):
@@ -392,14 +392,14 @@ def _get_interactive_default(args, attr: str, fallback, baseline_cfg: dict[str, 
 def _run_interactive_train_setup(args) -> bool:
     from prompt_toolkit.completion import WordCompleter
 
-    print("[INFO] Интерактивный режим train (Enter = значение по умолчанию).")
+    print("[INFO] Interactive train mode (Enter = default).")
 
     try:
         ws = resolve_workspace_root(getattr(args, "workspace", None))
     except ValueError:
-        ws_raw = _prompt_input("Путь workspace: ", default=os.getcwd()).strip()
+        ws_raw = _prompt_input("Workspace path: ", default=os.getcwd()).strip()
         if not ws_raw:
-            print("[ERROR] Workspace не задан.")
+            print("[ERROR] Workspace not set.")
             return False
         ws = os.path.abspath(os.path.expanduser(ws_raw))
         args.workspace = ws
@@ -408,11 +408,11 @@ def _run_interactive_train_setup(args) -> bool:
     dataset_names = _load_available_datasets(layout)
     if not dataset_names:
         print(
-            "[ERROR] В datasets/datasets_info.json нет доступных датасетов. "
-            "Сначала выполните scan."
+            "[ERROR] There are no available datasets in datasets/datasets_info.json."
+            "Please scan first."
         )
         return False
-    print("[INFO] Доступные датасеты:")
+    print("[INFO] Available datasets:")
     for name in dataset_names:
         print(f"  - {name}")
     args.data = _prompt_dataset_name(dataset_names)
@@ -432,22 +432,22 @@ def _run_interactive_train_setup(args) -> bool:
                 k: v for k, v in baseline_profile.items() if k not in _ULTRALYTICS_YAML_IGNORED_KEYS
             }
             baseline_u_cfg, baseline_sm_opts = extract_smartrain_options(baseline_filtered)
-            print(f"[INFO] Используется базовый прогон: {baseline_args_yaml}")
+            print(f"[INFO] Baseline run used: {baseline_args_yaml}")
         except Exception as e:
-            print(f"[WARNING] Не удалось прочитать args.yaml базового прогона: {e}")
+            print(f"[WARNING] Failed to read args.yaml of base run: {e}")
             baseline_u_cfg, baseline_sm_opts = {}, {}
 
     args.ultralytics_yaml = (
         _prompt_input(
-            "Путь к внешнему Ultralytics args.yaml (--ultralytics_yaml, пусто=не использовать): ",
+            "Path to external Ultralytics args.yaml (--ultralytics_yaml, empty=do not use): ",
             default=str(getattr(args, "ultralytics_yaml", "") or ""),
         ).strip()
         or None
     )
     if args.ultralytics_yaml:
         print(
-            "[INFO] Для --ultralytics_yaml: data/project/name/exist_ok и служебные path-ключи "
-            "игнорируются; data всегда берётся из выбранного датасета."
+            "[INFO] For --ultralytics_yaml: data/project/name/exist_ok and service path keys "
+            "ignored; data is always taken from the selected dataset."
         )
     ultra_u_cfg: dict[str, Any] = {}
     ultra_sm_opts: dict[str, Any] = {}
@@ -455,7 +455,7 @@ def _run_interactive_train_setup(args) -> bool:
         try:
             ultra_profile = _load_ultralytics_yaml(args.ultralytics_yaml)
         except Exception as e:
-            print(f"[ERROR] Не удалось прочитать --ultralytics_yaml: {e}")
+            print(f"[ERROR] Failed to read --ultralytics_yaml: {e}")
             return False
         filtered = {
             k: v for k, v in ultra_profile.items() if k not in _ULTRALYTICS_YAML_IGNORED_KEYS
@@ -465,7 +465,7 @@ def _run_interactive_train_setup(args) -> bool:
     task_choices = ["detect", "segment", "classify", "pose", "obb"]
     if "task" in ultra_u_cfg:
         args.task = str(ultra_u_cfg["task"])
-        print(f"[INFO] Task взят из --ultralytics_yaml: {args.task}")
+        print(f"[INFO] Task taken from --ultralytics_yaml: {args.task}")
     else:
         task_default = str(
             _get_interactive_default(args, "task", "detect", baseline_u_cfg, "task")
@@ -482,27 +482,27 @@ def _run_interactive_train_setup(args) -> bool:
 
     if "model" in ultra_u_cfg:
         args.model = str(ultra_u_cfg["model"])
-        print(f"[INFO] Модель взята из --ultralytics_yaml: {args.model}")
+        print(f"[INFO] Model taken from --ultralytics_yaml: {args.model}")
     else:
         model_default = str(_get_interactive_default(args, "model", MODEL_VERSION, baseline_u_cfg, "model"))
         args.model = (
             _prompt_input(
-                "Модель (--model): ",
+                "Model (--model): ",
                 default=model_default,
             ).strip()
             or model_default
         )
     if "epochs" in ultra_u_cfg:
         args.epochs = int(ultra_u_cfg["epochs"])
-        print(f"[INFO] Эпохи взяты из --ultralytics_yaml: {args.epochs}")
+        print(f"[INFO] Epochs taken from --ultralytics_yaml: {args.epochs}")
     else:
         args.epochs = _prompt_int(
-            "Эпохи (--epochs)",
+            "Epoches (--epochs)",
             int(_get_interactive_default(args, "epochs", EPOCHS, baseline_u_cfg, "epochs")),
         )
     if "batch" in ultra_u_cfg:
         args.batch = int(ultra_u_cfg["batch"])
-        print(f"[INFO] Batch взят из --ultralytics_yaml: {args.batch}")
+        print(f"[INFO] Batch taken from --ultralytics_yaml: {args.batch}")
     else:
         args.batch = _prompt_int(
             "Batch (--batch)",
@@ -510,39 +510,39 @@ def _run_interactive_train_setup(args) -> bool:
         )
     if "imgsz" in ultra_u_cfg:
         args.img_size = int(ultra_u_cfg["imgsz"])
-        print(f"[INFO] Размер изображения взят из --ultralytics_yaml: {args.img_size}")
+        print(f"[INFO] Image size taken from --ultralytics_yaml: {args.img_size}")
     else:
         args.img_size = _prompt_int(
-            "Размер изображения (--img-size)",
+            "Images Size (--img-size)",
             int(_get_interactive_default(args, "img_size", IMG_SIZE, baseline_u_cfg, "imgsz")),
         )
 
     default_target = str(getattr(args, "target_path", None) or layout.runs)
-    args.target_path = (_prompt_input("Каталог прогонов (--target-path): ", default=default_target).strip()
+    args.target_path = (_prompt_input("Run directory (--target-path): ", default=default_target).strip()
                         or default_target)
 
-    args.test_only = _prompt_yes_no("Только тест без обучения (--test-only)?", default=bool(getattr(args, "test_only", False)))
+    args.test_only = _prompt_yes_no("Test only without training (--test-only)?", default=bool(getattr(args, "test_only", False)))
     if args.test_only:
         model_dir_default = str(getattr(args, "model_dir", "") or "")
         while True:
-            model_dir = _prompt_input("Путь к модели (--model-dir): ", default=model_dir_default).strip()
+            model_dir = _prompt_input("Path to model (--model-dir): ", default=model_dir_default).strip()
             if model_dir:
                 args.model_dir = model_dir
                 break
-            print("[ERROR] Для --test-only необходимо указать --model-dir.")
+            print("[ERROR] --test-only requires --model-dir.")
     else:
         args.model_dir = getattr(args, "model_dir", None)
 
     args.val_imgsz = _prompt_optional_int(
-        "Размер val/test (--val-imgsz, пусто=как train)",
+        "Size val/test (--val-imgsz, empty=how train)",
         _get_interactive_default(args, "val_imgsz", None, baseline_u_cfg, "imgsz"),
     )
     args.val_conf = _prompt_optional_float(
-        "Порог conf (--val-conf, пусто=по умолчанию Ultralytics)",
+        "conf threshold (--val-conf, empty=default Ultralytics)",
         _get_interactive_default(args, "val_conf", None, baseline_u_cfg, "conf"),
     )
     args.val_iou = _prompt_optional_float(
-        "Порог IoU (--val-iou, пусто=по умолчанию Ultralytics)",
+        "IoU threshold (--val-iou, empty=default Ultralytics)",
         _get_interactive_default(args, "val_iou", None, baseline_u_cfg, "iou"),
     )
 
@@ -550,14 +550,14 @@ def _run_interactive_train_setup(args) -> bool:
         args.weighted_sampling = bool(ultra_sm_opts["weighted_sampling"])
     else:
         args.weighted_sampling = _prompt_yes_no(
-            "Включить weighted sampling (--weighted-sampling)?",
+            "Enable weighted sampling (--weighted-sampling)?",
             default=bool(_get_interactive_default(args, "weighted_sampling", False, baseline_sm_opts, "weighted_sampling")),
         )
     if "export_onnx" in ultra_sm_opts:
         args.export_onnx = bool(ultra_sm_opts["export_onnx"])
     else:
         args.export_onnx = _prompt_yes_no(
-            "Экспортировать ONNX после обучения (--export-onnx)?",
+            "Export ONNX after training (--export-onnx)?",
             default=bool(_get_interactive_default(args, "export_onnx", False, baseline_sm_opts, "export_onnx")),
         )
     if "export_onnx_half" in ultra_sm_opts:
@@ -567,14 +567,14 @@ def _run_interactive_train_setup(args) -> bool:
         if "export_onnx_half" in baseline_sm_opts:
             default_fp32 = not bool(baseline_sm_opts["export_onnx_half"])
         args.export_onnx_fp32 = _prompt_yes_no(
-            "Использовать FP32 для ONNX (--export-onnx-fp32)?",
+            "Use FP32 for ONNX (--export-onnx-fp32)?",
             default=default_fp32,
         )
     if "clearml" in ultra_sm_opts:
         args.clearml = bool(ultra_sm_opts["clearml"])
     else:
         args.clearml = _prompt_yes_no(
-            "Логировать в ClearML (--clearml)?",
+            "Log to ClearML (--clearml)?",
             default=bool(_get_interactive_default(args, "clearml", False, baseline_sm_opts, "clearml")),
         )
     if args.clearml:
@@ -586,13 +586,13 @@ def _run_interactive_train_setup(args) -> bool:
                 default_cm_project = str(baseline_sm_opts["clearml_project"] or "")
             args.clearml_project = (
                 _prompt_input(
-                    "Проект ClearML (--clearml-project): ",
+                    "ClearML Project (--clearml-project): ",
                     default=default_cm_project,
                 ).strip()
                 or None
             )
     args.non_interactive = _prompt_yes_no(
-        "Не спрашивать подтверждения при существующей папке (--yes)?",
+        "Do not ask for confirmation if the folder exists (--yes)?",
         default=bool(getattr(args, "non_interactive", False)),
     )
     return True
@@ -606,36 +606,36 @@ def resolve_training_data_path(layout: WorkspaceLayout, data_arg: str) -> str:
     info_path = layout.work_datasets_info_path()
     if not os.path.isfile(info_path):
         raise FileNotFoundError(
-            f"Каталог с data.yaml для {data_arg!r} не найден и отсутствует {info_path}."
+            f"The directory with data.yaml for {data_arg!r} was not found and {info_path} is missing."
         )
     with open(info_path, "r", encoding="utf-8") as f:
         catalog = json.load(f)
     if not isinstance(catalog, dict):
-        raise ValueError(f"{info_path}: ожидается объект JSON.")
+        raise ValueError(f"{info_path}: JSON object expected.")
     if data_arg not in catalog:
         names = ", ".join(sorted(catalog.keys()))
-        hint = f" Известные имена: {names}." if names else ""
+        hint = f" Known names: {names}." if names else ""
         raise ValueError(
-            f"Имя датасета {data_arg!r} отсутствует в datasets/{DATASETS_INFO_FILE}.{hint}"
+            f"Dataset name {data_arg!r} is missing from datasets/{DATASETS_INFO_FILE}.{hint}"
         )
     entry = catalog[data_arg]
     if not isinstance(entry, dict):
-        raise ValueError(f"Запись {data_arg!r} должна быть объектом JSON.")
+        raise ValueError(f"The {data_arg!r} entry must be a JSON object.")
     return resolve_dataset_root(layout.root, data_arg, entry, layout.work_datasets)
 
 
 def _validate_dataset_dir(dataset_path: str) -> None:
     if not os.path.exists(dataset_path):
-        raise FileNotFoundError(f"Папка с датасетом не найдена: {dataset_path}")
+        raise FileNotFoundError(f"Dataset folder not found: {dataset_path}")
     data_yaml = os.path.join(dataset_path, "data.yaml")
     if not os.path.exists(data_yaml):
-        raise FileNotFoundError(f"Не найден yaml файл: {data_yaml}")
+        raise FileNotFoundError(f"Yaml file not found: {data_yaml}")
 
 
 def _pick_split_relative_dir(dataset_path: str, split_aliases: tuple[str, ...]) -> str | None:
     """
-    Ищет директорию split внутри выбранного dataset_path.
-    Возвращает относительный путь (предпочтительно с images/) или None.
+    Searches for the split directory within the selected dataset_path.
+    Returns a relative path (preferably with images/) or None.
     """
     candidates: list[str] = []
     for split in split_aliases:
@@ -649,21 +649,21 @@ def _pick_split_relative_dir(dataset_path: str, split_aliases: tuple[str, ...]) 
 
 def _build_runtime_data_yaml(dataset_path: str, run_dir: str, *, stage: str) -> str:
     """
-    Создаёт служебный data.yaml для Ultralytics с привязкой к текущему dataset_path.
-    Это защищает от старых абсолютных путей в исходном data.yaml (другая машина).
+    Creates a service data.yaml for Ultralytics with a link to the current dataset_path.
+    This protects against old absolute paths in the original data.yaml (different machine).
     """
     src_yaml = os.path.join(dataset_path, "data.yaml")
     with open(src_yaml, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     if not isinstance(raw, dict):
-        raise ValueError(f"Некорректный YAML формата data.yaml: {src_yaml}")
+        raise ValueError(f"Incorrect YAML format data.yaml: {src_yaml}")
 
     train_rel = _pick_split_relative_dir(dataset_path, ("train",))
     val_rel = _pick_split_relative_dir(dataset_path, ("val", "valid"))
     test_rel = _pick_split_relative_dir(dataset_path, ("test",))
     if train_rel is None or val_rel is None:
         raise FileNotFoundError(
-            f"Не найдены обязательные split-папки train/val внутри {dataset_path}."
+            f"Required train/val split folders not found inside {dataset_path}."
         )
 
     runtime_cfg = dict(raw)
@@ -677,14 +677,14 @@ def _build_runtime_data_yaml(dataset_path: str, run_dir: str, *, stage: str) -> 
     with open(out_yaml, "w", encoding="utf-8") as f:
         yaml.safe_dump(runtime_cfg, f, allow_unicode=True, sort_keys=False)
     print(
-        f"[INFO] Runtime data.yaml ({stage}) сформирован для выбранного датасета: {out_yaml}"
+        f"[INFO] Runtime data.yaml ({stage}) generated for the selected dataset: {out_yaml}"
     )
     return out_yaml
 
 
 def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str, str]:
     """
-    workspace, dataset_root (каталог с data.yaml), target_base.
+    workspace, dataset_root (directory with data.yaml), target_base.
     """
     try:
         ws = resolve_workspace_root(args.workspace)
@@ -701,7 +701,7 @@ def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str,
             dataset_path = dataset_root_from_data_yaml(yp)
         else:
             raise ValueError(
-                "При использовании workspace укажите --data или поле data: в профиле --config."
+                "When using workspace, specify --data or the data: field in the --config profile."
             )
         if args.target_path is not None:
             target_base = os.path.abspath(os.path.expanduser(args.target_path))
@@ -716,13 +716,13 @@ def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str,
         dataset_path = dataset_root_from_data_yaml(yp)
     else:
         raise ValueError(
-            f"Задайте --workspace (или {WORKSPACE_ENV_VAR}) и --data (или data в YAML), "
-            "либо без workspace — --data и --target-path."
+            f"Specify --workspace (or {WORKSPACE_ENV_VAR}) and --data (or data in YAML), "
+            "or without workspace - --data and --target-path."
         )
 
     if args.target_path is None:
         raise ValueError(
-            f"Без workspace укажите --target-path (базовый каталог прогонов) или задайте {WORKSPACE_ENV_VAR}."
+            f"Without workspace, specify --target-path (base run directory) or specify {WORKSPACE_ENV_VAR}."
         )
     target_base = os.path.abspath(os.path.expanduser(args.target_path))
     return None, dataset_path, target_base
@@ -747,7 +747,7 @@ def _finalize_train_kwargs(ultralytics_cfg: dict[str, Any], data_yaml: str, mode
     k.setdefault("mode", "train")
     if overwritten:
         print(
-            "[WARNING] Принудительно переопределены служебные ключи train: "
+            "[WARNING] Train service keys have been forced to be overridden: "
             + ", ".join(sorted(set(overwritten)))
         )
     return k
@@ -776,7 +776,7 @@ def _merge_sources_with_priority(
         ignored = sorted(k for k in ultralytics_profile.keys() if k in _ULTRALYTICS_YAML_IGNORED_KEYS)
         if ignored:
             print(
-                "[WARNING] --ultralytics_yaml: проигнорированы ключи: "
+                "[WARNING] --ultralytics_yaml: keys ignored: "
                 + ", ".join(ignored)
             )
         filtered = {k: v for k, v in ultralytics_profile.items() if k not in _ULTRALYTICS_YAML_IGNORED_KEYS}
@@ -794,7 +794,7 @@ def _merge_sources_with_priority(
                 overridden_by_cli.append(yaml_key)
         if overridden_by_cli:
             print(
-                "[WARNING] --ultralytics_yaml: следующие ключи будут переопределены CLI: "
+                "[WARNING] --ultralytics_yaml: The following keys will be overridden by the CLI: "
                 + ", ".join(sorted(overridden_by_cli))
             )
         u_cfg.update(u_from_ultra)
@@ -824,9 +824,9 @@ def train_yolo(
 
     try:
         dataset_hash = calculate_dataset_hash(dataset_path)
-        print(f"[INFO] Хеш датасета: {dataset_hash}")
+        print(f"[INFO] Dataset hash: {dataset_hash}")
     except Exception as e:
-        print(f"[WARNING] Не удалось вычислить хеш датасета: {e}")
+        print(f"[WARNING] Failed to calculate dataset hash: {e}")
         dataset_hash = None
 
     timestamp_str = training_start_time.strftime("%Y-%m-%d_%H-%M")
@@ -838,18 +838,18 @@ def train_yolo(
 
     if os.path.exists(model_dir):
         if non_interactive:
-            print(f"[INFO] Папка уже существует, продолжаем без запроса: {model_dir}")
+            print(f"[INFO] The folder already exists, continue without prompting: {model_dir}")
         else:
             while True:
                 answer = input(
-                    f"[WARNING] Папка с таким названием уже существует: {model_dir}. Продолжить обучение? (y/n): \n"
+                    f"[WARNING] A folder with the same name already exists: {model_dir}. Continue training? (y/n): \n"
                 ).strip().lower()
                 if answer == "y":
                     break
                 elif answer == "n":
                     sys.exit(1)
                 else:
-                    print("Пожалуйста, введите только 'y' или 'n'.\n")
+                    print("Please enter 'y' or 'n' only.\n")
     else:
         os.makedirs(model_dir, exist_ok=True)
 
@@ -861,7 +861,7 @@ def train_yolo(
             from clearml import Task
         except ImportError as e:
             raise ImportError(
-                "Для --clearml установите: pip install 'smartrain[clearml]' или pip install clearml"
+                "For --clearml, install: pip install 'smartrain[clearml]' or pip install clearml"
             ) from e
         cm_proj = (
             smartrain_opts.get("clearml_project")
@@ -881,11 +881,11 @@ def train_yolo(
         setup_weighted_sampling_env()
 
     print("\n" + "=" * 60)
-    print(f"[INFO] Обучение модели: {model_kw_model(train_kw)}")
-    print(f"[INFO] Датасет: {dataset_name}")
-    print(f"[INFO] Задача (task): {train_kw.get('task', 'detect')}")
-    print(f"[INFO] Конфигурация: {data_yaml}")
-    print(f"[INFO] Сохранение результатов в {model_dir}")
+    print(f"[INFO] Training models: {model_kw_model(train_kw)}")
+    print(f"[INFO] Dataset: {dataset_name}")
+    print(f"[INFO] Task: {train_kw.get('task', 'detect')}")
+    print(f"[INFO] Configuration: {data_yaml}")
+    print(f"[INFO] Saving results in {model_dir}")
     print("=" * 60 + "\n")
 
     _, model_ext = os.path.splitext(str(train_kw.get("model", "")))
@@ -909,8 +909,8 @@ def train_yolo(
         model_path = best_path
         print("\n" + "-" * 60)
         if os.path.exists(model_path):
-            print("[OK] Обучение завершено.")
-            print(f"[INFO] Модель сохранена по пути:\n{model_path}")
+            print("[OK] Training complete.")
+            print(f"[INFO] Model saved at path:\n{model_path}")
         if smartrain_opts.get("export_onnx") and os.path.exists(model_path):
             half = bool(smartrain_opts.get("export_onnx_half", True))
             simplify = bool(smartrain_opts.get("export_onnx_simplify", True))
@@ -932,14 +932,14 @@ def train_yolo(
                         cand = os.path.join(model_dir, "train", "weights", "best.onnx")
                         if os.path.isfile(cand):
                             onnx_rel = os.path.relpath(cand, model_dir)
-                print(f"[INFO] ONNX экспорт выполнен: {onnx_rel or '(см. каталог weights)'}")
+                print(f"[INFO] ONNX export completed: {onnx_rel or '(see weights directory)'}")
             except Exception as ex_err:
-                print(f"[WARNING] ONNX экспорт не удался: {ex_err}")
+                print(f"[WARNING] ONNX export failed: {ex_err}")
     except Exception as e:
         training_end_time = datetime.now()
         print(
-            f"[ERROR] Не удалось запустить обучение {model_version} на датасете {dataset_name} "
-            f"на {epochs} эпох: {e}"
+            f"[ERROR] Failed to start training {model_version} on dataset {dataset_name}"
+            f"on {epochs} eras: {e}"
         )
     finally:
         if clearml_task is not None:
@@ -1004,10 +1004,10 @@ def test_yolo(
         val_kwargs["batch"] = int(val_batch)
 
     print("\n" + "=" * 60)
-    print(f"[INFO] Тестирование модели: {model_dir}")
-    print(f"[INFO] Датасет: {dataset_path}")
-    print(f"[INFO] Конфигурация: {data_yaml}")
-    print(f"[INFO] Сохранение результатов в {model_dir}")
+    print(f"[INFO] Model testing: {model_dir}")
+    print(f"[INFO] Dataset: {dataset_path}")
+    print(f"[INFO] Configuration: {data_yaml}")
+    print(f"[INFO] Saving results in {model_dir}")
     if imgsz is not None:
         print(f"[INFO] val imgsz={imgsz}, batch={val_batch}, conf={val_conf}, iou={val_iou}")
     print("=" * 60 + "\n")
@@ -1021,14 +1021,14 @@ def test_yolo(
 
         print("\n" + "-" * 60)
         if os.path.exists(csv_file):
-            print("[OK] Тестирование завершено.")
-            print(f"[INFO] Результаты сохранены по пути:\n{csv_file}")
+            print("[OK] Testing complete.")
+            print(f"[INFO] Results saved at path:\n{csv_file}")
         else:
-            print("[ERROR] .csv файл не найден. Проверьте лог Ultralytics.")
+            print("[ERROR].csv file not found. Check Ultralytics log.")
         print("-" * 60 + "\n")
     except Exception as e:
         test_end_time = datetime.now()
-        print(f"[ERROR] Не удалось протестировать {model_dir} на датасете {dataset_path}: {e}")
+        print(f"[ERROR] Failed to test {model_dir} on dataset {dataset_path}: {e}")
 
     return test_start_time, test_end_time, inference_record
 
@@ -1152,9 +1152,9 @@ def save_training_metadata(
     try:
         with open(metadata_file, "w", encoding="utf-8") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
-        print(f"[INFO] Метаданные обучения сохранены: {metadata_file}")
+        print(f"[INFO] Training metadata saved: {metadata_file}")
     except Exception as e:
-        print(f"[WARNING] Не удалось сохранить метаданные: {e}")
+        print(f"[WARNING] Failed to save metadata: {e}")
 
 
 def _get_relative_path(target_path, base_path):
@@ -1188,8 +1188,8 @@ def _json_safe_train_summary(train_kw: dict[str, Any] | None) -> dict[str, Any] 
 
 def _load_batch_from_training_metadata(model_dir: str) -> int | None:
     """
-    В режиме --test-only хотим тестировать с тем же batch, что был при обучении.
-    Берём из training_metadata.json если файл есть и формат ожидаемый.
+    In --test-only mode we want to test with the same batch that was used during training.
+    We take it from training_metadata.json if the file exists and the format is expected.
     """
     try:
         meta_path = os.path.join(model_dir, "training_metadata.json")
@@ -1212,7 +1212,7 @@ def _load_batch_from_training_metadata(model_dir: str) -> int | None:
 
 def _maybe_free_cuda_memory() -> None:
     """
-    Смягчение OOM между train и val/test в одном процессе.
+    Mitigating OOM between train and val/test in one process.
     """
     try:
         gc.collect()
@@ -1223,13 +1223,13 @@ def _maybe_free_cuda_memory() -> None:
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-            # Иногда помогает собрать IPC кэш, но не обязателен.
+            # Sometimes it helps to collect the IPC cache, but is not required.
             try:
                 torch.cuda.ipc_collect()
             except Exception:
                 pass
     except Exception:
-        # torch может быть недоступен в окружениях без GPU/torch; это не критично.
+        # torch may not be available in non-GPU/torch environments; it's not critical.
         pass
 
 
@@ -1243,19 +1243,19 @@ def main(argv=None):
     if interactive_mode:
         if not sys.stdin.isatty():
             print(
-                "[ERROR] Интерактивный режим train требует терминал (TTY). "
-                "Либо запустите в терминале, либо передайте аргументы."
+                "[ERROR] Interactive train mode requires a terminal (TTY)."
+                "Either run in terminal or pass arguments."
             )
             return
         try:
             ok = _run_interactive_train_setup(args)
         except Exception as e:
-            print(f"[ERROR] Ошибка интерактивного режима train: {e}")
+            print(f"[ERROR] Train interactive mode error: {e}")
             return
         if not ok:
             return
         replay_cmd = build_non_interactive_command("train", parser, args)
-        print_replay_command("перед запуском", replay_cmd)
+        print_replay_command("before launch", replay_cmd)
 
     profile = load_train_profile(args.config) if args.config else {}
     ultra_profile = _load_ultralytics_yaml(getattr(args, "ultralytics_yaml", None))
@@ -1336,7 +1336,7 @@ def main(argv=None):
             training_success = False
             training_error = str(e)
             training_end_time = datetime.now()
-            print(f"[ERROR] Ошибка при обучении: {e}")
+            print(f"[ERROR] Error during training: {e}")
             training_error = f"{str(e)}\n{traceback.format_exc()}"
             try:
                 dataset_hash = calculate_dataset_hash(data)
@@ -1379,7 +1379,7 @@ def main(argv=None):
                 test_success = False
                 test_error = str(e)
                 test_end_time = datetime.now()
-                print(f"[ERROR] Ошибка при тестировании: {e}")
+                print(f"[ERROR] Error during testing: {e}")
                 test_error = f"{str(e)}\n{traceback.format_exc()}"
 
         if model_dir:
@@ -1427,7 +1427,7 @@ def main(argv=None):
                 test_success = False
                 test_error = str(e)
                 test_end_time = datetime.now()
-                print(f"[ERROR] Ошибка при тестировании: {e}")
+                print(f"[ERROR] Error during testing: {e}")
                 test_error = f"{str(e)}\n{traceback.format_exc()}"
 
             save_training_metadata(
@@ -1442,9 +1442,9 @@ def main(argv=None):
                 task_type=task_to_metadata_task_type(u_cfg.get("task")),
             )
         else:
-            print("[ERROR] Не указан путь к модели")
+            print("[ERROR] Model path not specified")
     if replay_cmd:
-        print_replay_command("после выполнения", replay_cmd)
+        print_replay_command("after execution", replay_cmd)
 
 
 if __name__ == "__main__":

@@ -21,12 +21,12 @@ def _prepare_two_images(tmp_path: Path) -> None:
     (raw / "train" / "labels").mkdir(parents=True, exist_ok=True)
     _write_jpg(raw / "train" / "images" / "a.jpg", (40, 40, 40))
     _write_jpg(raw / "train" / "images" / "b.jpg", (60, 60, 60))
-    # a: есть ROI-боксы (объект и дефект)
+    # a: there are ROI boxes (object and defect)
     (raw / "train" / "labels" / "a.txt").write_text(
         "0 0.5 0.5 0.6 0.6\n1 0.2 0.5 0.1 0.1\n",
         encoding="utf-8",
     )
-    # b: пустая разметка -> ROI отсутствует
+    #b: empty markup -> no ROI
     (raw / "train" / "labels" / "b.txt").write_text("", encoding="utf-8")
     (raw / "data.yaml").write_text("nc: 2\nnames: ['obj','defect']\n", encoding="utf-8")
     scan_main(["--workspace", str(tmp_path)])
@@ -48,6 +48,6 @@ def test_copy_paste_roi_mode_skips_images_without_roi(tmp_path: Path) -> None:
         ]
     )
     out_labels = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
-    # Для b.jpg ROI нет, значит аугментация для него пропускается
+    # There is no ROI for b.jpg, which means augmentation is skipped for it
     assert not any(p.name.startswith("b__a-") for p in out_labels.glob("*.txt"))
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Единая точка входа: команды из каталога workspace (SMART_TRAIN_WORKSPACE = cwd по умолчанию).
+Single entry point: commands from the workspace directory (SMART_TRAIN_WORKSPACE = cwd by default).
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 app = typer.Typer(
     name="smartrain",
     add_completion=True,
-    help="Датасеты YOLO, обучение, очередь, анализ прогонов. Работайте из корня workspace.",
+    help="YOLO datasets, training, queue, run analysis. Work from the workspace root.",
 )
 console = Console()
 
@@ -37,7 +37,7 @@ def _main_callback(
         typer.Option(
             "--workspace",
             envvar=WORKSPACE_ENV_VAR,
-            help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}, иначе текущий каталог)",
+            help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR}, otherwise current directory)",
         ),
     ] = None,
 ) -> None:
@@ -50,20 +50,20 @@ def _main_callback(
 def cmd_deploy(
     target: Annotated[
         Optional[str],
-        typer.Argument(help="Куда развернуть (по умолчанию текущий каталог)"),
+        typer.Argument(help="Where to expand (default current directory)"),
     ] = None,
 ) -> None:
-    """Создать каталоги workspace и пустые datasets_info.json при отсутствии."""
+    """Create workspace and empty datasets_info.json directories if missing."""
     root = os.path.abspath(os.path.expanduser(target or os.getcwd()))
     info = deploy_workspace(root)
-    console.print(f"[blue]Развёртывание:[/blue] {info['root']}")
+    console.print(f"[blue]Deployment:[/blue] {info['root']}")
     for name in info["created_dirs"]:
-        console.print(f"[green]+ каталог[/green] {name}")
+        console.print(f"[green]+ directory[/green] {name}")
     for name in info["created_files"]:
-        console.print(f"[green]+ файл[/green] {name}")
+        console.print(f"[green] + file[/green] {name}")
     for s in info["skipped"]:
-        console.print(f"[yellow]∟ уже есть:[/yellow] {s}")
-    console.print("[green]Готово.[/green]")
+        console.print(f"[yellow]∟ already exists:[/yellow] {s}")
+    console.print("[green]Done.[/green]")
 
 
 def _call(module: str, attr: str, ctx: typer.Context) -> None:
@@ -71,7 +71,7 @@ def _call(module: str, attr: str, ctx: typer.Context) -> None:
 
     m = importlib.import_module(module)
     fn = getattr(m, attr)
-    # Не передавать None: иначе argparse прочитает sys.argv (команда smartrain, а не подкоманда).
+    # Don't pass None: otherwise argparse will read sys.argv (a smartrain command, not a subcommand).
     fn(list(ctx.args))
 
 
@@ -92,7 +92,7 @@ def _dispatch_argparse_help(
     build_parser,
     prog: str,
 ) -> None:
-    """Отдать флаги подкоманды в argparse: полная справка и для подкоманд (queue list --help)."""
+    """Send subcommand flags to argparse: full help for subcommands (queue list --help)."""
     p = build_parser()
     p.prog = prog
     try:
@@ -110,7 +110,7 @@ def _dispatch_argparse_help(
     add_help_option=False,
 )
 def cmd_scan(ctx: typer.Context) -> None:
-    """Сканирование raw_data и подготовка datasets + JSON-индексов."""
+    """Scanning raw_data and preparing datasets + JSON indexes."""
     if _ctx_has_help_flag(ctx):
         from smartrain.datasets_json_former import build_datasets_json_arg_parser
 
@@ -124,7 +124,7 @@ def cmd_scan(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_fusion(ctx: typer.Context) -> None:
-    """Сборка объединённого датасета в datasets (с выбором входных датасетов)."""
+    """Assembling a combined dataset into datasets (with a selection of input datasets)."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_former import build_dataset_former_arg_parser
 
@@ -138,7 +138,7 @@ def cmd_fusion(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_train(ctx: typer.Context) -> None:
-    """Обучение YOLO (бывш. model_training_module). Справка: smartrain train --help."""
+    """YOLO training (formerly model_training_module). Help: smartrain train --help."""
     if _ctx_has_help_flag(ctx):
         from smartrain.model_training_module import build_train_arg_parser
 
@@ -152,7 +152,7 @@ def cmd_train(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_augment(ctx: typer.Context) -> None:
-    """Офлайн-аугментация датасета в новый datasets/<name>."""
+    """Offline augmentation of a dataset into a new datasets/<name>."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_augment import build_augment_arg_parser
 
@@ -166,7 +166,7 @@ def cmd_augment(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_balance(ctx: typer.Context) -> None:
-    """Балансировка датасета в новый datasets/<name>."""
+    """Balancing the dataset into a new datasets/<name>."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_balance import build_balance_arg_parser
 
@@ -180,7 +180,7 @@ def cmd_balance(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_hash(ctx: typer.Context) -> None:
-    """Хеш датасета (бывш. dataset_hash)."""
+    """Dataset hash (formerly dataset_hash)."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_hash import build_hash_arg_parser
 
@@ -194,7 +194,7 @@ def cmd_hash(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_stats(ctx: typer.Context) -> None:
-    """Статистика датасетов в datasets/: classes и datasets."""
+    """Dataset statistics in datasets/: classes and datasets."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
 
@@ -211,7 +211,7 @@ def cmd_stats(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_roi(ctx: typer.Context) -> None:
-    """ROI-кроп датасета (бывш. dataset_roi_yolo)."""
+    """ROI-crop of the dataset (formerly dataset_roi_yolo)."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_roi_yolo import build_roi_arg_parser
 
@@ -219,7 +219,7 @@ def cmd_roi(ctx: typer.Context) -> None:
     _call("smartrain.dataset_roi_yolo", "main", ctx)
 
 
-queue_app = typer.Typer(help="Очередь: list | add | remove | clear | run.")
+queue_app = typer.Typer(help="Queue: list | add | remove | clear | run.")
 
 
 @queue_app.command("list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -256,7 +256,7 @@ app.add_typer(queue_app, name="queue")
     add_help_option=False,
 )
 def cmd_queue_run(ctx: typer.Context) -> None:
-    """Исполнитель очереди (бывш. training_queue)."""
+    """Queue executor (formerly training_queue)."""
     if _ctx_has_help_flag(ctx):
         from smartrain.training_queue import build_queue_run_arg_parser
 
@@ -264,7 +264,7 @@ def cmd_queue_run(ctx: typer.Context) -> None:
     _call("smartrain.training_queue", "main", ctx)
 
 
-registry_app = typer.Typer(help="Реестр runs / models.")
+registry_app = typer.Typer(help="Registry runs / models.")
 
 
 @registry_app.command("runs-list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -305,7 +305,7 @@ def cmd_registry_models_remove(ctx: typer.Context) -> None:
 app.add_typer(registry_app, name="registry")
 
 
-analyze_app = typer.Typer(help="Анализ прогонов: scan, export-table, compare, interactive.")
+analyze_app = typer.Typer(help="Analysis of runs: scan, export-table, compare, interactive.")
 
 
 @analyze_app.command("scan", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -337,7 +337,7 @@ app.add_typer(analyze_app, name="analyze")
     add_help_option=False,
 )
 def cmd_plot(ctx: typer.Context) -> None:
-    """Устаревшая обёртка → analyze."""
+    """Outdated wrapper → analyze."""
     if _ctx_has_help_flag(ctx):
         from smartrain.results_analyzer import build_analyze_arg_parser
 
@@ -351,7 +351,7 @@ def cmd_plot(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_migrate_models(ctx: typer.Context) -> None:
-    """Миграция legacy моделей: добавление training_metadata.json для analyze."""
+    """Migration of legacy models: adding training_metadata.json for analyze."""
     if _ctx_has_help_flag(ctx):
         from smartrain.migrate_models_to_smartrain import build_migrate_models_arg_parser
 
@@ -365,7 +365,7 @@ def cmd_migrate_models(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_cvat(ctx: typer.Context) -> None:
-    """Конвертация CVAT 1.1 (Images+bbox): import/export."""
+    """CVAT 1.1 conversion (Images+bbox): import/export."""
     if _ctx_has_help_flag(ctx):
         from smartrain.cvat_cli import build_cvat_arg_parser
 
@@ -379,7 +379,7 @@ def cmd_cvat(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_clearml_upload(ctx: typer.Context) -> None:
-    """Загрузка готового прогона в ClearML (extras: pip install 'smartrain[clearml]')."""
+    """Loading the finished run into ClearML (extras: pip install 'smartrain[clearml]')."""
     if _ctx_has_help_flag(ctx):
         from smartrain.clearml_upload import build_clearml_upload_arg_parser
 
@@ -393,7 +393,7 @@ def cmd_clearml_upload(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_sahi(ctx: typer.Context) -> None:
-    """Тайловый инференс SAHI (extras: pip install 'smartrain[sahi]')."""
+    """Tile inference SAHI (extras: pip install 'smartrain[sahi]')."""
     if _ctx_has_help_flag(ctx):
         from smartrain.sahi_cli import build_sahi_arg_parser
 
@@ -407,7 +407,7 @@ def cmd_sahi(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_heatmap(ctx: typer.Context) -> None:
-    """Визуализация heatmap (Ultralytics solutions)."""
+    """Heatmap visualization (Ultralytics solutions)."""
     if _ctx_has_help_flag(ctx):
         from smartrain.heatmap_cli import build_heatmap_arg_parser
 
@@ -421,7 +421,7 @@ def cmd_heatmap(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_orient(ctx: typer.Context) -> None:
-    """Исправление поворотов 0/90/180/270 по эталонам (в новый датасет)."""
+    """Correction of rotations 0/90/180/270 according to standards (in the new dataset)."""
     if _ctx_has_help_flag(ctx):
         from smartrain.dataset_orient import build_orient_arg_parser
 

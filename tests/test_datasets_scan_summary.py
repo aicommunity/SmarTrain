@@ -74,7 +74,7 @@ def test_datasets_json_writes_scan_summary_and_diff(tmp_path: Path) -> None:
     shutil.rmtree(sd / "ds_b")
     datasets_json_main(["--workspace", str(tmp_path)])
     j3 = json.loads(sum1.read_text(encoding="utf-8"))
-    # raw_data — только источник обновлений; удаление в raw_data НЕ удаляет датасеты из datasets.
+    # raw_data - update source only; deleting in raw_data does NOT remove datasets from datasets.
     assert set(j3["datasets"]["final"]) == {"ds_a", "ds_b"}
     assert j3["datasets"]["removed"] == []
 
@@ -92,7 +92,7 @@ def test_scan_skips_duplicate_content_with_other_name(tmp_path: Path, capsys) ->
     info = json.loads((tmp_path / "datasets" / DATASETS_INFO_FILE).read_text(encoding="utf-8"))
     assert len(info) == 1
     assert set(info.keys()) in ({"ds_a"}, {"ds_b"})
-    assert "совпадают с datasets" in out
+    assert "matches datasets" in out
 
 
 def test_scan_marks_modified_and_stops_sync_for_dataset(tmp_path: Path) -> None:
@@ -148,7 +148,7 @@ def test_scan_purge_processed_raw_yes_deletes_processed_source(
     monkeypatch.setattr("builtins.input", lambda _prompt: "")
     datasets_json_main(["--workspace", str(tmp_path), "--purge-processed-raw"])
     out = capsys.readouterr().out
-    assert "Запрошено удаление обработанных источников" in out
+    assert "Requested to remove processed sources" in out
     assert not (rd / "ds_a").exists()
     assert (tmp_path / "datasets" / "ds_a").is_dir()
 
@@ -162,5 +162,5 @@ def test_scan_purge_processed_raw_no_keeps_sources(tmp_path: Path, monkeypatch, 
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")
     datasets_json_main(["--workspace", str(tmp_path), "--purge-processed-raw"])
     out = capsys.readouterr().out
-    assert "удаление обработанных источников из raw_data отменено".lower() in out.lower()
+    assert "removal of processed sources from raw_data cancelled".lower() in out.lower()
     assert (rd / "ds_a").is_dir()

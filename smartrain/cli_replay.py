@@ -69,5 +69,5 @@ def build_non_interactive_command(
 
 def print_replay_command(stage: str, command: str) -> None:
     _ = stage
-    print("[INFO] Команда для не-интерактивного повтора:")
+    print("[INFO] Command for non-interactive retry:")
     print(command)

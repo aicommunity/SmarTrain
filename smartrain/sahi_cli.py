@@ -1,6 +1,6 @@
 """
-Тайловый инференс через SAHI (крупные изображения / кадры).
-Зависимость: pip install 'smartrain[sahi]'
+Tile inference via SAHI (large images/frames).
+Dependency: pip install 'smartrain[sahi]'
 """
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from smartrain.cli_argparse import CliArgumentParser
 
 
 def build_sahi_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(description="SAHI: нарезка + YOLO (Ultralytics)")
-    p.add_argument("--model", type=str, required=True, help="Путь к .pt модели")
-    p.add_argument("--source", type=str, required=True, help="Изображение или каталог изображений")
+    p = CliArgumentParser(description="SAHI: slicing + YOLO (Ultralytics)")
+    p.add_argument("--model", type=str, required=True, help="Path to .pt model")
+    p.add_argument("--source", type=str, required=True, help="Image or image directory")
     p.add_argument(
         "--output",
         type=str,
         default="sahi_out",
-        help="Каталог для визуализаций (export_visuals)",
+        help="Directory for visualizations (export_visuals)",
     )
     p.add_argument("--slice-h", type=int, default=640)
     p.add_argument("--slice-w", type=int, default=640)
@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> None:
         from sahi.predict import get_sliced_prediction
     except ImportError:
         print(
-            "[ERROR] SAHI не установлен: pip install 'smartrain[sahi]' или pip install sahi",
+            "[ERROR] SAHI not installed: pip install 'smartrain[sahi]' or pip install sahi",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
 
         frame = cv2.imread(str(image_path))
         if frame is None:
-            print(f"[WARN] Не удалось прочитать {image_path}", file=sys.stderr)
+            print(f"[WARN] Failed to read {image_path}", file=sys.stderr)
             return
         result = get_sliced_prediction(
             frame,
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> None:
             if f.suffix.lower() in exts:
                 run_one(f)
     else:
-        print(f"[ERROR] Нет такого пути: {src}", file=sys.stderr)
+        print(f"[ERROR] There is no such path: {src}", file=sys.stderr)
         sys.exit(1)
 
 

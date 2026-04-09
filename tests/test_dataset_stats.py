@@ -38,11 +38,11 @@ def test_stats_classes_counts_and_summary(tmp_path: Path, capsys: pytest.Capture
         stats_main(["--workspace", str(tmp_path), "--dataset", "ds_a"])
     assert e.value.code == 0
     out = capsys.readouterr().out
-    assert "Статистика по классам" in out
+    assert "Statistics by class" in out
     assert "ClassID" in out
     assert "cat" in out
     assert "dog" in out
-    assert "Итог по дисбалансу" in out
+    assert "Imbalance summary" in out
 
 
 def test_stats_datasets_quality_flags(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -57,8 +57,8 @@ def test_stats_datasets_quality_flags(tmp_path: Path, capsys: pytest.CaptureFixt
         stats_main(["--workspace", str(tmp_path), "--dataset", "ds_warn"])
     assert e.value.code == 0
     out = capsys.readouterr().out
-    assert "Статистика по датасетам" in out
-    assert "Каталог классов по датасетам" in out
+    assert "Dataset statistics" in out
+    assert "Catalog of classes by datasets" in out
     assert "WARN" in out
 
 
@@ -106,13 +106,13 @@ def test_stats_no_legend_flag_hides_column_explanations(
         stats_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--no-legend"])
     assert e.value.code == 0
     out = capsys.readouterr().out
-    assert "Колонки classes:" not in out
+    assert "Columns classes:" not in out
 
     with pytest.raises(SystemExit) as e:
         stats_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--no-legend"])
     assert e.value.code == 0
     out = capsys.readouterr().out
-    assert "Колонки datasets:" not in out
+    assert "Datasets columns:" not in out
 
 
 def test_stats_datasets_flat_and_cvat11_non_zero(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -195,9 +195,9 @@ def test_stats_interactive_prints_datasets_and_classes_list(
         stats_main(["--workspace", str(tmp_path)])
     assert e.value.code == 0
     out = capsys.readouterr().out
-    assert "Доступные датасеты:" in out
+    assert "Available datasets:" in out
     assert "ds_i_print" in out
-    assert "Доступные классы:" in out
+    assert "Available classes:" in out
     assert "cat" in out
 
 

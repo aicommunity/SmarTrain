@@ -112,7 +112,7 @@ def test_train_interactive_prints_available_datasets_like_fusion(
     assert mtm._run_interactive_train_setup(args) is True
 
     out = capsys.readouterr().out
-    assert "[INFO] Доступные датасеты:" in out
+    assert "[INFO] Available datasets:" in out
     assert "  - ds_a" in out
     assert "  - ds_b" in out
 

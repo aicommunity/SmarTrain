@@ -26,7 +26,7 @@ from smartrain.workspace_paths import (
     CLASS_NAMES_FILE,
 )
 
-# Суффикс имени каталога по умолчанию в workspace (префикс — дата-время см. main).
+# Default directory name suffix in workspace (prefix is ​​date-time, see main).
 FUSION_DEFAULT_DIR_SUFFIX = "merged"
 TRAIN_PART = 0.8  # 80%
 VAL_PART = 0.1    # 10%
@@ -38,26 +38,26 @@ _SPLIT_SUM_EPS = 1e-5
 
 def parse_fusion_split_arg(value: str | None) -> tuple[float, float, float]:
     """
-    Три доли train, val, test для переразбиения кадров внутри каждого bucket при fusion.
-    Сумма должна быть 1.0 (с допуском). При value is None — константы модуля.
+    Three parts train, val, test for repartitioning frames within each bucket during fusion.
+    The sum must be 1.0 (with tolerance). If value is None - module constants.
     """
     if value is None or not str(value).strip():
         return TRAIN_PART, VAL_PART, TEST_PART
     raw = [x.strip() for x in str(value).split(",")]
     if len(raw) != 3:
         raise ValueError(
-            "Ожидается ровно три числа через запятую: train,val,test (например 0.8,0.1,0.1)."
+            "Exactly three numbers separated by commas are expected: train,val,test (for example 0.8,0.1,0.1)."
         )
     try:
         tr, va, te = (float(x) for x in raw)
     except ValueError as e:
-        raise ValueError(f"Некорректные числа в --fusion-split: {value!r}") from e
+        raise ValueError(f"Invalid numbers in --fusion-split: {value!r}") from e
     if tr < 0 or va < 0 or te < 0:
-        raise ValueError("Доли в --fusion-split не могут быть отрицательными.")
+        raise ValueError("Shares in --fusion-split cannot be negative.")
     s = tr + va + te
     if abs(s - 1.0) > _SPLIT_SUM_EPS:
         raise ValueError(
-            f"Сумма долей --fusion-split должна быть 1.0 (сейчас {s:.6f}): {value!r}"
+            f"Sum of --fusion-split should be 1.0 (currently {s:.6f}): {value!r}"
         )
     return tr, va, te
 
@@ -68,8 +68,8 @@ def safe_mkdir(path):
 
 def _unique_merge_stem(dataset_name, src_image_path, used_stems):
     """
-    Имя без расширения для пары image/label: «имя_датасета-исходный_файл».
-    used_stems — множество уже занятых имён в целевом split (коллизии: суффиксы __2, __3, …).
+    Name without extension for the image/label pair: “dataset_name-source_file”.
+    used_stems — set of already used names in the target split (collisions: suffixes __2, __3, ...).
     """
     base = os.path.splitext(os.path.basename(src_image_path))[0]
     safe_ds = dataset_name.replace(os.sep, "_").replace("/", "_")
@@ -89,68 +89,68 @@ def _unique_merge_stem(dataset_name, src_image_path, used_stems):
 
 def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
     parser = CliArgumentParser(
-        description="Объединение и фильтрация датасетов по выбранным классам"
+        description="Combining and filtering datasets by selected classes"
     )
 
     parser.add_argument(
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}); работа только с datasets/",
+        help=f"Root workspace (otherwise {WORKSPACE_ENV_VAR}); work only with datasets/",
     )
 
     parser.add_argument(
         "--output-name",
         type=str,
         default=None,
-        help="Имя выходного датасета (подкаталог datasets/) в workspace; "
-        "если не задано — YYYY-MM-DD_HH-MM-SS-merged",
+        help="The name of the output dataset (subdirectory datasets/) in workspace; "
+        "if not specified - YYYY-MM-DD_HH-MM-SS-merged",
     )
     parser.add_argument(
         "--dataset",
         action="append",
         default=None,
-        help="Имя входного датасета для объединения (можно повторять).",
+        help="Name of input dataset to merge (can be repeated).",
     )
     parser.add_argument(
         "--datasets",
         type=str,
         default=None,
-        help="CSV-список входных датасетов для объединения (например ds1,ds2).",
+        help="CSV list of input datasets to merge (for example ds1,ds2).",
     )
 
     parser.add_argument(
         "--source-path",
         type=str,
         default=None,
-        help="Legacy: родительский каталог датасетов (вместе с --target-path и --datasets-info-path)",
+        help="Legacy: parent dataset directory (together with --target-path and --datasets-info-path)",
     )
 
     parser.add_argument(
         "--target-path",
         type=str,
         default=None,
-        help="Legacy: полный путь к выходному датасету; в workspace — переопределяет datasets/<output-name>",
+        help="Legacy: full path to the output dataset; in workspace - overrides datasets/<output-name>",
     )
 
     parser.add_argument(
         "--classes",
         type=str,
         default=None,
-        help="Имена классов через запятую; если не задано — объединение всех классов из всех датасетов в datasets_info.json (кроме выходного)",
+        help="Class names separated by commas; if not specified, combine all classes from all datasets in datasets_info.json (except the output one)",
     )
 
     parser.add_argument(
         "--datasets-info-path",
         type=str,
         default=None,
-        help="Legacy: каталог с datasets_info.json; в workspace не нужен (всегда datasets/)",
+        help="Legacy: directory with datasets_info.json; not needed in workspace (always datasets/)",
     )
 
     parser.add_argument(
         "--exclude-test",
         action="store_true",
-        help="Исключить тестовые данные из выбранных датасетов",
+        help="Exclude test data from selected datasets",
     )
 
     parser.add_argument(
@@ -159,41 +159,41 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         metavar=("SOURCES", "TARGET"),
         action="append",
         default=None,
-        help="Слияние классов: строка имён через запятую и целевое имя в --classes. Повторяйте флаг для нескольких групп.",
+        help="Merge classes: comma-separated name string and target name in --classes. Repeat flag for multiple groups.",
     )
 
     parser.add_argument(
         "--common-classes-only",
         action="store_true",
-        help="Оставить только классы из набора (--classes или авто-объединение), присутствующие в каждом датасете группы пересечения; остальные отбрасываются с предупреждением",
+        help="Keep only the classes from the set (--classes or auto-union) present in each intersection group dataset; the rest are discarded with a warning",
     )
     parser.add_argument(
         "--include-partial-datasets",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Брать в слияние датасеты, в которых есть хотя бы один из выбранных классов "
-        "(по умолчанию включено); используйте --no-include-partial-datasets, "
-        "чтобы требовать наличие всех выбранных классов в каждом датасете",
+        help="Merge datasets that contain at least one of the selected classes"
+        "(enabled by default); use --no-include-partial-datasets,"
+        "to require all selected classes to be present in each dataset",
     )
     parser.add_argument(
         "--drop-empty-images",
         action="store_true",
-        help="После слияния удалить в выходном каталоге пары image+label без ни одной валидной строки YOLO в .txt",
+        help="After merging, remove image+label pairs in the output directory without a single valid YOLO line in .txt",
     )
     parser.add_argument(
         "--tmp-dir",
         type=str,
         default=None,
-        help="Каталог для временных файлов (по умолчанию: <workspace>/tmp или <source-path>/tmp в legacy-режиме)",
+        help="Directory for temporary files (default: <workspace>/tmp or <source-path>/tmp in legacy mode)",
     )
 
     parser.add_argument(
         "--fusion-split",
         type=str,
         default=None,
-        help="Только fusion: доли train,val,test при случайном переразбиении кадров внутри каждого "
-        "bucket исходного датасета (три числа через запятую, сумма 1.0). По умолчанию "
-        f"{TRAIN_PART},{VAL_PART},{TEST_PART}. Не влияет на scan, train, roi и др.",
+        help="Fusion only: shares train,val,test with random repartition of frames within each "
+        "bucket of the original dataset (three numbers separated by commas, sum 1.0). Default "
+        f"{TRAIN_PART},{VAL_PART},{TEST_PART}. Does not affect scan, train, roi, etc.",
     )
 
     return parser
@@ -227,11 +227,11 @@ def _parse_selected_datasets(args) -> list[str]:
 def _prompt_dataset_selection(available: list[str]) -> list[str]:
     from smartrain.cli_prompts import prompt_multi_choice_csv
 
-    print("[INFO] Не указаны --dataset/--datasets: интерактивный выбор входных датасетов.")
-    print("[INFO] Доступные датасеты:")
+    print("[INFO] --dataset/--datasets not specified: interactive selection of input datasets.")
+    print("[INFO] Available datasets:")
     for name in available:
         print(f"  - {name}")
-    parsed = prompt_multi_choice_csv("Входные датасеты", available, default_values=[])
+    parsed = prompt_multi_choice_csv("Input datasets", available, default_values=[])
     uniq: list[str] = []
     seen: set[str] = set()
     for name in parsed:
@@ -255,19 +255,19 @@ def _prompt_interactive_options(
 ) -> None:
     from smartrain.cli_prompts import prompt_text
 
-    print("[INFO] Интерактивная настройка параметров fusion (Enter = значение по умолчанию).")
+    print("[INFO] Interactively configure fusion parameters (Enter = default value).")
     if class_candidates:
         print(
-            "[INFO] Доступные классы выбранных датасетов: "
+            "[INFO] Available classes of selected datasets: "
             + ", ".join(class_candidates)
         )
     else:
-        print("[WARN] В выбранных датасетах не найдено классов в метаданных.")
-    out_name = prompt_text("Имя выходного датасета", default=default_output_name).strip()
+        print("[WARN] No classes were found in the metadata for the selected datasets.")
+    out_name = prompt_text("Output dataset name", default=default_output_name).strip()
     args.output_name = out_name or default_output_name
 
     classes_raw = prompt_text(
-        "Классы через запятую (пусто = авто-объединение)",
+        "Comma separated classes (empty = auto-union)",
         default=(args.classes or ""),
         choices=class_candidates,
     ).strip()
@@ -275,29 +275,29 @@ def _prompt_interactive_options(
 
     split_default = args.fusion_split or f"{TRAIN_PART},{VAL_PART},{TEST_PART}"
     args.fusion_split = prompt_text(
-        "Fusion split train,val,test (сумма=1.0)",
+        "Fusion split train,val,test (summa=1.0)",
         default=split_default,
     ).strip()
 
     args.include_partial_datasets = _prompt_yes_no(
-        "Включать частичные датасеты (--include-partial-datasets)",
+        "Include partial datasets (--include-partial-datasets)",
         default=bool(args.include_partial_datasets),
     )
     args.common_classes_only = _prompt_yes_no(
-        "Оставить только общие классы (--common-classes-only)",
+        "Keep only common classes (--common-classes-only)",
         default=bool(args.common_classes_only),
     )
     args.exclude_test = _prompt_yes_no(
-        "Исключить test части источников (--exclude-test)",
+        "Exclude test parts of sources (--exclude-test)",
         default=bool(args.exclude_test),
     )
     args.drop_empty_images = _prompt_yes_no(
-        "Удалять пары без валидных объектов (--drop-empty-images)",
+        "Delete pairs without valid objects (--drop-empty-images)",
         default=bool(args.drop_empty_images),
     )
 
     tmp_default = args.tmp_dir or ""
-    tmp_value = prompt_text("Каталог tmp (пусто = по умолчанию)", default=tmp_default).strip()
+    tmp_value = prompt_text("Tmp directory (empty = default)", default=tmp_default).strip()
     args.tmp_dir = tmp_value or None
 
 
@@ -307,8 +307,8 @@ def _validate_requested_classes(
     class_names_map: dict,
 ) -> tuple[bool, list[str]]:
     """
-    Проверка, что пользовательские классы доступны среди выбранных датасетов
-    с учетом нормализации class_names.
+    Checking that custom classes are available among the selected datasets
+    taking into account the normalization of class_names.
     """
     if not selected_classes:
         return True, []
@@ -333,8 +333,8 @@ def dataset_normalized_keys(info, class_names_map):
 
 def all_classes_union_from_datasets(datasets_info, output_dataset_name, class_names_map):
     """
-    Объединение нормализованных имён классов по всем датасетам из datasets_info,
-    кроме выходного. Порядок — лексикографический по нормализованным именам.
+    Combining normalized class names across all datasets from datasets_info,
+    except for the day off. The order is lexicographic based on normalized names.
     """
     normalized = set()
     for name, info in datasets_info.items():
@@ -348,7 +348,7 @@ def all_classes_union_from_datasets(datasets_info, output_dataset_name, class_na
 
 
 def request_normalized_tokens(selected_classes, merge_args, class_names_map):
-    """Нормализованные имена из --classes и из всех --merge-classes."""
+    """Normalized names from --classes and from all --merge-classes."""
     tokens = {_normalize_name(c, class_names_map) for c in selected_classes}
     if merge_args:
         for sources_csv, target in merge_args:
@@ -361,7 +361,7 @@ def request_normalized_tokens(selected_classes, merge_args, class_names_map):
 
 
 def candidate_datasets_for_common_mode(datasets_info, output_dataset_name, request_tokens, class_names_map):
-    """Датасеты (кроме выходного), у которых есть хотя бы один класс из запроса."""
+    """Datasets (except output) that have at least one class from the request."""
     out = []
     for name, info in datasets_info.items():
         if name == output_dataset_name:
@@ -375,8 +375,8 @@ def reduce_selected_to_common_in_candidates(
     selected_classes, class_names_map, candidates, merge_targets_to_sources
 ):
     """
-    Оставляет классы из selected_classes по порядку, которые удовлетворяют
-    dataset_matches_selection(..., [cls], ...) для каждого датасета из candidates.
+    Leaves the classes from selected_classes in order that satisfy
+    dataset_matches_selection(..., [cls], ...) for each dataset from candidates.
     """
     effective = []
     for out in selected_classes:
@@ -389,7 +389,7 @@ def reduce_selected_to_common_in_candidates(
 
 
 def _canonical_class_label(name_n, selected_classes, class_names_map):
-    """Имя из --classes`, совпадающее с name_n после нормализации."""
+    """The name from --classes` that matches name_n after normalization."""
     for sc in selected_classes:
         if _normalize_name(sc, class_names_map) == name_n:
             return sc
@@ -398,9 +398,9 @@ def _canonical_class_label(name_n, selected_classes, class_names_map):
 
 def build_merge_config(merge_args, class_names_map, selected_classes):
     """
-    merge_args: список пар [sources_csv, target] или None.
-    Возвращает (normalized_to_output_name, merge_targets_to_sources).
-    Ключи merge_targets_to_sources — как в списке --classes.
+    merge_args: list of [sources_csv, target] pairs or None.
+    Returns (normalized_to_output_name, merge_targets_to_sources).
+    The merge_targets_to_sources keys are the same as in the --classes list.
     """
     if not merge_args:
         return None, {}
@@ -413,17 +413,17 @@ def build_merge_config(merge_args, class_names_map, selected_classes):
         canonical_target = _canonical_class_label(target_n, selected_classes, class_names_map)
         if canonical_target is None:
             raise ValueError(
-                f"Целевой класс слияния {target.strip()!r} не найден в --classes: {selected_classes}"
+                f"Merge target class {target.strip()!r} not found in --classes: {selected_classes}"
             )
         sources = [_normalize_name(s.strip(), class_names_map) for s in sources_csv.split(",") if s.strip()]
         if not sources:
-            raise ValueError(f"Пустой список исходных классов для цели {target!r}")
+            raise ValueError(f"Empty list of source classes for target {target!r}")
         if canonical_target in merge_targets_to_sources:
-            raise ValueError(f"Цель слияния {canonical_target!r} указана дважды")
+            raise ValueError(f"Merge target {canonical_target!r} specified twice")
         merge_targets_to_sources[canonical_target] = set(sources)
         for s in sources:
             if s in used_sources:
-                raise ValueError(f"Исходный класс {s!r} участвует в более чем одной группе --merge-classes")
+                raise ValueError(f"Source class {s!r} participates in more than one --merge-classes group")
             used_sources.add(s)
 
     normalized_to_output_name = {}
@@ -437,10 +437,10 @@ def build_merge_config(merge_args, class_names_map, selected_classes):
             continue
         if out_n in used_sources:
             raise ValueError(
-                f"Класс {out!r} только как источник слияния; уберите из --classes или задайте отдельную цель"
+                f"Class {out!r} as a merge source only; remove from --classes or set a separate target"
             )
         if out_n in normalized_to_output_name:
-            raise ValueError(f"Конфликт имён для {out!r}")
+            raise ValueError(f"Name conflict for {out!r}")
         normalized_to_output_name[out_n] = out
 
     return normalized_to_output_name, merge_targets_to_sources
@@ -455,9 +455,9 @@ def dataset_matches_selection(
     require_all_classes: bool = True,
 ):
     """
-    require_all_classes=True (по умолчанию): в датасете должны быть все выбранные классы
-    (для группы --merge-classes — хотя бы один источник из каждой группы).
-    require_all_classes=False: достаточно пересечения с любым из выбранных классов.
+    require_all_classes=True (default): the dataset must contain all selected classes
+    (for the --merge-classes group - at least one source from each group).
+    require_all_classes=False: intersection with any of the selected classes is sufficient.
     """
     if "classes" not in info:
         return False
@@ -488,7 +488,7 @@ def dataset_matches_selection(
 
 
 def _label_file_has_valid_yolo_annotation(path: str) -> bool:
-    """Есть ли в файле хотя бы одна строка с целочисленным class_id (как в filter_label_file)."""
+    """Does the file have at least one line with an integer class_id (as in filter_label_file)."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
@@ -507,8 +507,8 @@ def _label_file_has_valid_yolo_annotation(path: str) -> bool:
 
 def prune_output_empty_label_pairs(target_dir: str) -> int:
     """
-    Удаляет в train/valid/test пары label+image, где .txt пустой или без валидных аннотаций.
-    Возвращает число удалённых label-файлов.
+    Removes label+image pairs in train/valid/test, where .txt is empty or without valid annotations.
+    Returns the number of deleted label files.
     """
     removed = 0
     for split in ("train", "valid", "test"):
@@ -786,7 +786,7 @@ def main(argv=None):
         except ValueError as e:
             print(f"[ERROR] {e}")
             print(
-                "[ERROR] Либо задайте workspace, либо все три флага: "
+                "[ERROR] Either specify workspace or all three flags: "
                 "--source-path, --target-path, --datasets-info-path."
             )
             return
@@ -829,30 +829,30 @@ def main(argv=None):
     if not selected_dataset_names:
         if not sys.stdin.isatty():
             print(
-                "[ERROR] Не указаны входные датасеты. Используйте --dataset/--datasets "
-                "или запустите в интерактивном терминале."
+                "[ERROR] No input datasets specified. Use --dataset/--datasets "
+                "or run in an interactive terminal."
             )
             return
         try:
             selected_dataset_names = _prompt_dataset_selection(available_dataset_names)
         except Exception as e:
-            print(f"[ERROR] Не удалось запустить интерактивный выбор датасетов: {e}")
+            print(f"[ERROR] Failed to start interactive selection of datasets: {e}")
             return
-        # Сохраняем интерактивный выбор в args, чтобы replay-команда
-        # отражала явный список входных датасетов.
+        # Save the interactive selection in args so that the replay command
+        # reflected an explicit list of input datasets.
         args.dataset = list(selected_dataset_names)
         args.datasets = None
 
     if not selected_dataset_names:
-        print("[ERROR] Не выбран ни один датасет для слияния.")
+        print("[ERROR] No dataset has been selected for merging.")
         return
 
     unknown = [n for n in selected_dataset_names if n not in datasets_info]
     if unknown:
         known = ", ".join(available_dataset_names)
         print(
-            f"[ERROR] Неизвестные датасеты: {', '.join(unknown)}. "
-            f"Доступные: {known}"
+            f"[ERROR] Unknown datasets: {', '.join(unknown)}."
+            f"Available: {known}"
         )
         return
 
@@ -869,7 +869,7 @@ def main(argv=None):
                 class_candidates=class_candidates,
             )
         except Exception as e:
-            print(f"[ERROR] Ошибка интерактивного ввода параметров fusion: {e}")
+            print(f"[ERROR] Error interacting with fusion parameters: {e}")
             return
         if layout is not None and not args.target_path:
             out_key = (args.output_name or "").strip() or output_dataset_name
@@ -878,7 +878,7 @@ def main(argv=None):
     replay_cmd = None
     if interactive_mode:
         replay_cmd = build_non_interactive_command("fusion", parser, args)
-        print_replay_command("перед запуском", replay_cmd)
+        print_replay_command("before launch", replay_cmd)
 
     try:
         train_part, val_part, test_part = parse_fusion_split_arg(args.fusion_split)
@@ -888,7 +888,7 @@ def main(argv=None):
     if args.fusion_split and str(args.fusion_split).strip():
         print(
             f"[INFO] --fusion-split: train={train_part}, val={val_part}, test={test_part} "
-            "(переразбиение внутри каждого bucket исходного датасета)"
+            "(repartitioning within each bucket of the original dataset)"
         )
 
     class_candidates_for_selected = all_classes_union_from_datasets(
@@ -897,11 +897,11 @@ def main(argv=None):
         class_names_map,
     )
 
-    # Выбранные классы
+    # Selected classes
     if args.classes:
         selected_classes = [cls.strip() for cls in args.classes.split(",") if cls.strip()]
         if not selected_classes:
-            print("[ERROR] Параметр --classes задан, но список имён пуст.")
+            print("[ERROR] The --classes parameter is specified, but the name list is empty.")
             return
         is_valid, missing_classes = _validate_requested_classes(
             selected_classes,
@@ -910,12 +910,12 @@ def main(argv=None):
         )
         if not is_valid:
             print(
-                "[ERROR] В --classes указаны неизвестные для выбранных датасетов классы: "
+                "[ERROR] --classes contains unknown classes for the selected datasets: "
                 f"{', '.join(missing_classes)}"
             )
             if class_candidates_for_selected:
                 print(
-                    "[INFO] Доступные классы выбранных датасетов: "
+                    "[INFO] Available classes of selected datasets: "
                     f"{', '.join(class_candidates_for_selected)}"
                 )
             return
@@ -925,12 +925,12 @@ def main(argv=None):
         classes_auto = True
         if not selected_classes:
             print(
-                "[ERROR] --classes не задан: не найдено ни одного класса в датасетах "
-                "(проверьте datasets_info.json и секции classes)."
+                "[ERROR] --classes not specified: no classes found in datasets"
+                "(check datasets_info.json and classes sections)."
             )
             return
         print(
-            f"[INFO] --classes не задан: используется объединение классов из всех датасетов "
+            f"[INFO] --classes is not specified: a union of classes from all datasets is used"
             f"({len(selected_classes)}): {', '.join(selected_classes)}"
         )
 
@@ -952,10 +952,10 @@ def main(argv=None):
             datasets_info, output_dataset_name, request_tokens, class_names_map
         )
         if not candidates:
-            req_label = "классами из --classes" if not classes_auto else "автособранным набором классов"
+            req_label = "classes from --classes" if not classes_auto else "auto-assembled set of classes"
             print(
-                f"[ERROR] Ни один датасет не пересекается с {req_label} "
-                "(и при необходимости из --merge-classes). Проверьте имена и datasets_info.json."
+                f"[ERROR] No dataset intersects with {req_label} "
+                "(and from --merge-classes if necessary). Check names and datasets_info.json."
             )
             return
 
@@ -963,26 +963,26 @@ def main(argv=None):
             requested_classes, class_names_map, candidates, merge_targets_to_sources
         )
         if not effective_classes:
-            req_label = "классов из --classes" if not classes_auto else "автособранных классов"
+            req_label = "classes from --classes" if not classes_auto else "autoassembled classes"
             print(
-                f"[ERROR] Ни один из {req_label} не присутствует одновременно "
-                "во всех датасетах группы (есть пересечение с запросом)."
+                f"[ERROR] None of the {req_label} are present at the same time"
+                "in all datasets of the group (there is an intersection with the request)."
             )
             return
 
         if effective_classes != requested_classes:
             dropped = [c for c in requested_classes if c not in effective_classes]
-            print("[WARN] Режим --common-classes-only: итоговый набор классов сужен.")
-            src_label = "Запрошено в --classes" if not classes_auto else "Исходный набор (авто)"
+            print("[WARN] --common-classes-only mode: the resulting set of classes is narrowed.")
+            src_label = "Requested in --classes" if not classes_auto else "Initial set (auto)"
             print(f"[WARN] {src_label}: {', '.join(requested_classes)}")
-            print(f"[WARN] Будет использовано: {', '.join(effective_classes)}")
+            print(f"[WARN] Will be used: {', '.join(effective_classes)}")
             print(
-                f"[WARN] Исключено (нет покрытия хотя бы в одном датасете из группы пересечения): "
+                f"[WARN] Excluded (no coverage in at least one dataset from the intersection group): "
                 f"{', '.join(dropped)}"
             )
             print(
-                f"[INFO] Группа датасетов для проверки пересечения: "
-                f"{len(candidates)} шт. ({', '.join(n for n, _ in candidates)})"
+                f"[INFO] Group of datasets for checking intersection: "
+                f"{len(candidates)} items ({', '.join(n for n, _ in candidates)})"
             )
 
         selected_classes = effective_classes
@@ -992,7 +992,7 @@ def main(argv=None):
             )
         except ValueError as e:
             print(
-                f"[ERROR] После сокращения классов --merge-classes несогласован с итоговым списком: {e}"
+                f"[ERROR] After class reduction --merge-classes is inconsistent with the resulting list: {e}"
             )
             return
 
@@ -1003,8 +1003,8 @@ def main(argv=None):
     require_all_classes = not args.include_partial_datasets
     if args.include_partial_datasets:
         print(
-            "[INFO] --include-partial-datasets: в слияние входят датасеты, "
-            "у которых есть хотя бы один из выбранных классов."
+            "[INFO] --include-partial-datasets: merge includes datasets, "
+            "who have at least one of the selected classes."
         )
 
     matching_datasets = []
@@ -1024,16 +1024,16 @@ def main(argv=None):
 
     if not matching_datasets:
         if require_all_classes:
-            print("[ERROR] Ни один датасет не содержит все выбранные классы.")
+            print("[ERROR] No dataset contains all selected classes.")
             print(
-                "[INFO] Подсказка: --include-partial-datasets — брать датасеты с любым "
-                "подмножеством выбранных классов и объединять кадры со всех таких источников."
+                "[INFO] Hint: --include-partial-datasets — take datasets with any "
+                "a subset of selected classes and combine frames from all such sources."
             )
         else:
-            print("[ERROR] Ни один датасет не пересекается с выбранными классами.")
+            print("[ERROR] No dataset overlaps with the selected classes.")
         return
 
-    print(f"[INFO] Найдено {len(matching_datasets)} подходящих датасета:")
+    print(f"[INFO] Found {len(matching_datasets)} matching dataset:")
     for name, _ in matching_datasets:
         print(f"   - {name}")
 
@@ -1046,7 +1046,7 @@ def main(argv=None):
         temp_root = os.path.join(layout.root, "tmp")
         os.makedirs(temp_root, exist_ok=True)
     else:
-        # Legacy mode: временные файлы только рядом с рабочими данными, не в системном /tmp.
+        # Legacy mode: temporary files only next to work data, not in system /tmp.
         legacy_tmp_parent = os.path.join(source_dir, "tmp")
         os.makedirs(legacy_tmp_parent, exist_ok=True)
         temp_ctx = tempfile.TemporaryDirectory(prefix="smartrain_cvat11_", dir=legacy_tmp_parent)
@@ -1056,7 +1056,7 @@ def main(argv=None):
     try:
         for dataset_name, info in matching_datasets:
             if "structure" not in info:
-                print(f"[ERROR] В записи {dataset_name!r} нет поля structure.")
+                print(f"[ERROR] Record {dataset_name!r} does not have structure field.")
                 return
             dataset_path = resolve_dataset_root_for_entry(
                 dataset_name,
@@ -1085,7 +1085,7 @@ def main(argv=None):
         merged_annotations = 0
         iou_dedup_removed_boxes = 0
 
-        with tqdm(total=total_labels, desc="Обработка датасетов", unit="файл") as pbar:
+        with tqdm(total=total_labels, desc="Dataset Processing", unit="file") as pbar:
             for dataset_name, info in matching_datasets:
                 buckets = buckets_by_dataset[dataset_name]
                 for images_path, labels_path in buckets:
@@ -1170,20 +1170,20 @@ def main(argv=None):
     if args.drop_empty_images:
         pruned = prune_output_empty_label_pairs(target_dir)
         if pruned:
-            print(f"[INFO] --drop-empty-images: удалено пар без объектов: {pruned}")
+            print(f"[INFO] --drop-empty-images: pairs without objects removed: {pruned}")
             copied_count = max(0, copied_count - pruned)
 
-    print(f"\n[DEBUG] Всего label-файлов: {total_labels}")
-    print(f"[DEBUG] Обработано пар image+label: {processed_pairs}")
-    print(f"[DEBUG] Пропущено эквивалентных дублей: {skipped_equivalent}")
-    print(f"[DEBUG] Объединений разметки (same image, different labels): {merged_annotations}")
-    print(f"[DEBUG] Удалено боксов IoU-дедупом: {iou_dedup_removed_boxes}")
-    print(f"[DEBUG] Уникальных изображений после дедупа: {len(dedup_map)}")
-    print(f"[DEBUG] Отфильтровано и скопировано: {copied_count}")
+    print(f"\n[DEBUG] Total label files: {total_labels}")
+    print(f"[DEBUG] Image+label pair processed: {processed_pairs}")
+    print(f"[DEBUG] Skipped equivalent takes: {skipped_equivalent}")
+    print(f"[DEBUG] Markup merges (same image, different labels): {merged_annotations}")
+    print(f"[DEBUG] Removed boxes by IoU-dedup: {iou_dedup_removed_boxes}")
+    print(f"[DEBUG] Unique images after dedup: {len(dedup_map)}")
+    print(f"[DEBUG] Filtered and copied: {copied_count}")
     pct = (copied_count / total_labels * 100) if total_labels else 0.0
-    print(f"[DEBUG] Процент используемых файлов: {pct:.2f}%")
+    print(f"[DEBUG] Percentage of files used: {pct:.2f}%")
 
-    print(f"\n[OK] Скопировано {copied_count} изображений с фильтрованными аннотациями.")
+    print(f"\n[OK] {copied_count} images with filtered annotations copied.")
 
     yaml_path = os.path.join(target_dir, "data.yaml")
     with open(yaml_path, "w", encoding="utf-8") as f:
@@ -1193,12 +1193,12 @@ def main(argv=None):
         f.write(f"nc: {len(selected_classes)}\n")
         f.write(f"names: {selected_classes}\n")
 
-    print(f"[OK] Итоговый YAML создан: {yaml_path}")
+    print(f"[OK] Final YAML created: {yaml_path}")
 
     if layout is not None:
         out_key = os.path.basename(os.path.normpath(target_dir))
         _update_datasets_sidecar(layout, out_key, selected_classes, target_dir)
-        print(f"[OK] Обновлены {layout.work_datasets_info_path()} и class_names.json в datasets/")
+        print(f"[OK] Updated {layout.work_datasets_info_path()} and class_names.json in datasets/")
         try:
             source_datasets = []
             for ds_name, info in matching_datasets:
@@ -1244,9 +1244,9 @@ def main(argv=None):
             )
             print(f"[OK] Passport: {passport_path}")
         except Exception as e:
-            print(f"[WARNING] Не удалось записать dataset_passport.json: {e}")
+            print(f"[WARNING] Failed to write dataset_passport.json: {e}")
     if replay_cmd:
-        print_replay_command("после выполнения", replay_cmd)
+        print_replay_command("after execution", replay_cmd)
 
 
 if __name__ == "__main__":

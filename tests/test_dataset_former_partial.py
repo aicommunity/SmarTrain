@@ -68,7 +68,7 @@ def test_fusion_without_partial_requires_all_classes_in_each_dataset(
         ]
     )
     out = capsys.readouterr().out + capsys.readouterr().err
-    assert "Ни один датасет не содержит все выбранные классы" in out
+    assert "No dataset contains all selected classes" in out
     assert not (tmp_path / "datasets" / "merged" / "data.yaml").is_file()
 
 
@@ -170,7 +170,7 @@ def test_fusion_unknown_dataset_fails(tmp_path: Path, capsys: pytest.CaptureFixt
         ]
     )
     out = capsys.readouterr().out + capsys.readouterr().err
-    assert "Неизвестные датасеты" in out
+    assert "Unknown datasets" in out
 
 
 def test_fusion_unknown_classes_for_selected_datasets_fails(
@@ -201,7 +201,7 @@ def test_fusion_unknown_classes_for_selected_datasets_fails(
         ]
     )
     out = capsys.readouterr().out + capsys.readouterr().err
-    assert "неизвестные для выбранных датасетов классы" in out.lower()
+    assert "contains unknown classes for the selected datasets" in out.lower()
 
 
 def test_fusion_accepts_datasets_csv(tmp_path: Path) -> None:

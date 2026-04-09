@@ -1,5 +1,5 @@
 """
-Постфактум загрузка каталога прогона Ultralytics в ClearML.
+After the fact, loading the Ultralytics run catalog into ClearML.
 """
 from __future__ import annotations
 
@@ -11,34 +11,34 @@ from smartrain.cli_argparse import CliArgumentParser
 
 
 def build_clearml_upload_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(description="Загрузка каталога прогона в ClearML")
+    p = CliArgumentParser(description="Loading run directory in ClearML")
     p.add_argument(
         "run_dir",
         type=str,
-        help="Каталог прогона (обычно .../runs/<dataset>/<timestamp_...>/ или с подкаталогом train)",
+        help="Run directory (usually .../runs/<dataset>/<timestamp_...>/ or with a train subdirectory)",
     )
     p.add_argument(
         "--project",
         type=str,
         default=None,
-        help="Имя проекта ClearML (иначе CLEARML_PROJECT или smartrain)",
+        help="ClearML project name (aka CLEARML_PROJECT or smartrain)",
     )
     p.add_argument(
         "--task-name",
         type=str,
         default=None,
-        help="Имя задачи (по умолчанию имя каталога прогона)",
+        help="Task name (default run directory name)",
     )
     p.add_argument(
         "--train-subdir",
         type=str,
         default="train",
-        help="Подкаталог с args.yaml и weights (по умолчанию train)",
+        help="Subdirectory with args.yaml and weights (default train)",
     )
     p.add_argument(
         "--no-images",
         action="store_true",
-        help="Не загружать изображения из дерева прогона",
+        help="Do not load images from the run tree",
     )
     return p
 
@@ -51,7 +51,7 @@ def _find_train_dir(run_dir: Path, train_subdir: str) -> Path:
     if (run_dir / "args.yaml").is_file():
         return run_dir
     raise FileNotFoundError(
-        f"Не найден args.yaml в {t} или {run_dir}. Укажите корень прогона или --train-subdir."
+        f"Args.yaml not found in {t} or {run_dir}. Please specify run root or --train-subdir."
     )
 
 
@@ -67,7 +67,7 @@ def upload_run(
         from clearml import Task
     except ImportError as e:
         raise ImportError(
-            "Установите clearml: pip install 'smartrain[clearml]' или pip install clearml"
+            "Install clearml: pip install 'smartrain[clearml]' or pip install clearml"
         ) from e
 
     import yaml
@@ -130,7 +130,7 @@ def upload_run(
         task.upload_artifact("best_model", artifact_object=str(best_pt))
 
     task.close()
-    print(f"[OK] ClearML: проект={proj!r}, задача={tname!r}")
+    print(f"[OK] ClearML: project={proj!r}, task={tname!r}")
 
 
 def main(argv: list[str] | None = None) -> None:

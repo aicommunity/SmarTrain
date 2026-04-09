@@ -1,4 +1,4 @@
-"""deploy_workspace и WorkspaceLayout."""
+"""deploy_workspace and WorkspaceLayout."""
 
 from __future__ import annotations
 

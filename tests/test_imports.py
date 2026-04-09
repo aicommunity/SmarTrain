@@ -1,4 +1,4 @@
-"""Импорт подмодулей пакета."""
+"""Importing package submodules."""
 
 from __future__ import annotations
 

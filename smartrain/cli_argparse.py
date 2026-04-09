@@ -1,4 +1,4 @@
-"""Общий ArgumentParser: в help показываются значения по умолчанию."""
+"""General ArgumentParser: help shows default values."""
 
 from __future__ import annotations
 

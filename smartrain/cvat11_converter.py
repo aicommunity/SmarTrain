@@ -192,7 +192,7 @@ def _ensure_dir(p: Path) -> None:
 
 def _default_tmp_dir(base_dir: Optional[Path] = None) -> Path:
     """
-    Единое место для временных файлов: <base>/tmp (или ./tmp), а не системный /tmp.
+    A single place for temporary files: <base>/tmp (or ./tmp), not the system /tmp.
     """
     root = Path(base_dir) if base_dir is not None else Path.cwd()
     p = (root / "tmp").resolve()

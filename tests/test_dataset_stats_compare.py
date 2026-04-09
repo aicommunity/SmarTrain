@@ -58,10 +58,10 @@ def test_stats_compare_summary_and_classes(tmp_path: Path, capsys: pytest.Captur
         )
     assert e.value.code == 0
     out = capsys.readouterr().out
-    assert "Сравнение датасетов" in out
-    assert "Diff по общим классам" in out
-    assert "Только в left" in out
-    assert "Только в right" in out
+    assert "Dataset comparison" in out
+    assert "Diff by common classes" in out
+    assert "Only in left" in out
+    assert "Only in right" in out
 
 
 def test_stats_compare_export_json_csv(tmp_path: Path) -> None:
