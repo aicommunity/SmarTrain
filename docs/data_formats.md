@@ -1,6 +1,8 @@
-# Устаревшая страница форматов данных
+> Russian version: [ru/data_formats.md](ru/data_formats.md)
 
-Актуальная спецификация перенесена:
+# Deprecated data formats page
 
-- [Справочник: форматы данных](reference/data-formats.md)
-- [Справочник: `training_metadata.json`](reference/training-metadata.md)
+The current specification has been transferred:
+
+- [Directory: data formats](reference/data-formats.md)
+- [`training_metadata.json` format](reference/training-metadata.md)

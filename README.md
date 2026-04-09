@@ -1,10 +1,12 @@
+> Russian version: [docs/ru/README.md](docs/ru/README.md)
+
 # Smart Train (`smartrain`)
 
-CLI-набор для подготовки YOLO-датасетов, обучения моделей, исполнения очередей и анализа прогонов.
+A CLI toolkit for preparing YOLO datasets, training models, running queues, and analyzing runs.
 
-## Быстрый старт
+## Quick start
 
-Требования: Python `3.10+`.
+Requirements: Python `3.10+`.
 
 ```bash
 git clone <repo-url>
@@ -12,86 +14,94 @@ cd smart-train
 pip install -e .
 ```
 
-Работа с рабочим каталогом (workspace):
+Working with the workspace:
+
+`SMART_TRAIN_WORKSPACE` is optional. If it is not set, `smartrain` uses the current directory as the workspace root.
 
 ```bash
-export SMART_TRAIN_WORKSPACE=/path/to/workspace
 smartrain deploy
 smartrain scan
 smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
 smartrain train --data 2026-01-01_12-00-00-merged -y
 ```
 
-## Что внутри
+Optional explicit workspace root:
 
-- Единая точка входа: `smartrain` (модуль `smartrain.cli`).
-- Модель единого рабочего каталога: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `tmp/`.
-- Поддержка конвейера: `scan -> fusion -> train -> analyze`.
-- Отдельные инструменты: `queue`, `registry`, `cvat`, `sahi`, `heatmap`, `orient`.
+```bash
+export SMART_TRAIN_WORKSPACE=/path/to/workspace
+smartrain deploy
+```
 
-## Принцип работы
+## What's included
 
-`smartrain` использует единый корень workspace и строит процесс вокруг файловых контрактов:
+- Single entry point: `smartrain` (module `smartrain.cli`).
+- Single-workspace model: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `tmp/`.
+- Pipeline support: `scan -> fusion -> train -> analyze`.
+- Additional tools: `queue`, `registry`, `cvat`, `sahi`, `heatmap`, `orient`.
 
-- `scan` синхронизирует источники и обновляет каталог датасетов;
-- `fusion` формирует итоговый датасет под обучение;
-- `train` создаёт run-каталог с метриками и метаданными;
-- `analyze` и `registry` работают по артефактам в `runs/`.
+## How it works
 
-## Ключевые команды
+`smartrain` uses a single workspace root and builds a process around file contracts:
 
-| Команда | Назначение |
+- `scan` synchronizes sources and updates the dataset catalog;
+- `fusion` generates the final dataset for training;
+- `train` creates a run directory with metrics and metadata;
+- `analyze` and `registry` work on artifacts in `runs/`.
+
+## Key commands
+
+| Command | Purpose |
 |---|---|
-| `smartrain deploy` | Инициализация структуры workspace |
-| `smartrain scan` | Синхронизация источников и обновление каталога датасетов |
-| `smartrain fusion` | Сборка итогового датасета для обучения |
-| `smartrain train` | Обучение/валидация модели YOLO |
-| `smartrain queue` / `smartrain queue-run` | Управление и запуск очереди команд |
-| `smartrain analyze` | Сводки, сравнение запусков, PR-кривые, бенчмарк инференса |
-| `smartrain registry` | Каталогизация артефактов запусков и промо моделей |
+| `smartrain deploy` | Initialize the workspace structure |
+| `smartrain scan` | Synchronize sources and update the dataset catalog |
+| `smartrain fusion` | Build the final training dataset |
+| `smartrain train` | Train and validate YOLO models |
+| `smartrain queue` / `smartrain queue-run` | Manage and run the command queue |
+| `smartrain analyze` | Summaries, run comparison, PR curves, and inference benchmarks |
+| `smartrain registry` | Catalog run artifacts and promoted models |
 
-## Документация
+## Documentation
 
-Актуальная документация организована по разделам в `docs/`:
+Current documentation is organized into sections in `docs/`:
 
-- [Навигация по документации](docs/index.md)
-- [Старт и базовые сценарии](docs/getting-started/quickstart.md)
-- [CLI-руководство](docs/cli/overview.md)
-- [Справочник форматов и API](docs/reference/api.md)
-- [Архитектура и диаграммы](docs/development/architecture.md)
+- [Documentation navigation](docs/index.md)
+- [Getting started and core workflows](docs/getting-started/quickstart.md)
+- [CLI guide](docs/cli/overview.md)
+- [API and format reference](docs/reference/api.md)
+- [Architecture and diagrams](docs/development/architecture.md)
 
-## Важные детали
+## Important details
 
-- Для команд с argparse всегда используйте `smartrain <команда> --help`.
-- Для `hash --validate`: `0` при совпадении, `1` при несовпадении, `2` при ошибке.
-- По умолчанию очередь workspace использует `queue.txt` и `tmp/status.txt`.
-- Расширения зависимостей:
-  - `pip install -e ".[dev]"` для разработки и тестов
-  - `pip install -e ".[clearml]"` для ClearML
-  - `pip install -e ".[sahi]"` для SAHI
+- For commands with argparse, always use `smartrain <command> --help`.
+- For `hash --validate`: `0` for a match, `1` for a mismatch, `2` for an error.
+- By default, the workspace queue uses `queue.txt` and `tmp/status.txt`.
+- Dependency extras:
+  - `pip install -e ".[dev]"` for development and testing
+  - `pip install -e ".[clearml]"` for ClearML
+  - `pip install -e ".[sahi]"` for SAHI
 
-## Частые сценарии
+## Common workflows
 
-Сканирование с явным списком источников:
+Scanning with an explicit source list:
 
 ```bash
 smartrain scan --datasets-list /path/to/workspace/raw_data/datasets_list.txt
 ```
 
-Проверка хеша датасета:
+Check dataset hash:
 
 ```bash
 smartrain hash --dataset my_dataset
 smartrain hash /path/to/dataset --validate a1b2c3d4
 ```
 
-Запуск очереди без открытия GUI-терминала:
+Starting a queue without opening a GUI terminal:
 
 ```bash
 smartrain queue run --no-gui
 ```
 
-Быстрый просмотр запусков:
+Quick run overview:
 
 ```bash
 smartrain analyze scan

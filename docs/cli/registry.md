@@ -1,8 +1,10 @@
-# CLI: реестр
+> Russian version: [../ru/cli/registry.md](../ru/cli/registry.md)
 
-`smartrain registry` управляет артефактами запусков и каталогом моделей в рабочем каталоге.
+# CLI: registry
 
-## Подкоманды
+`smartrain registry` manages run artifacts and the `models/` catalog in the workspace.
+
+## Subcommands
 
 - `runs-list`
 - `runs-info`
@@ -12,7 +14,7 @@
 - `models-info`
 - `models-remove`
 
-## Примеры
+## Examples
 
 ```bash
 smartrain registry runs-list

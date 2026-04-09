@@ -1,12 +1,14 @@
-# Устаревшие режимы и совместимость
+> Russian version: [../ru/migration/legacy-commands.md](../ru/migration/legacy-commands.md)
 
-## Устаревшие или переходные сценарии
+# Legacy modes and compatibility
 
-- `smartrain plot` — устаревшая обёртка над `smartrain analyze`.
-- Устаревшие режимы `fusion`/`roi` без рабочего каталога по-прежнему поддерживаются.
-- Внутри исполнителя очереди есть резервный путь `training_queue.txt`, но в режиме рабочего каталога основной файл — `queue.txt`.
+## Legacy and transitional commands
 
-## Рекомендации
+- `smartrain plot` is an outdated wrapper for `smartrain analyze`.
+- Legacy modes `fusion`/`roi` without workspace are still supported.
+- Inside the queue executor there is a backup path `training_queue.txt`, but in workspace mode the main file is `queue.txt`.
 
-- Для новых сценариев всегда использовать подход с рабочим каталогом.
-- Для аналитики использовать `smartrain analyze ...`, а не `plot`.
+## Recommendations
+
+- For new automation and operational usage, always use the workspace-based approach.
+- For analytics, use `smartrain analyze ...`, not `plot`.

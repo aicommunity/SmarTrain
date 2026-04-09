@@ -1,21 +1,23 @@
-# Справочник: форматы данных
+> Russian version: [../ru/reference/data-formats.md](../ru/reference/data-formats.md)
 
-## Основные артефакты
+# Reference: data formats
 
-- `datasets/datasets_info.json` — каталог датасетов.
-- `datasets/class_names.json` — нормализация имён классов.
-- `datasets/datasets_scan_summary.json` — сводка изменений после `scan`.
-- `datasets/<dataset>/dataset_passport.json` — паспорт преобразований.
-- `runs/.../training_metadata.json` — метаданные обучения.
-- `queue.txt` и `tmp/status.txt` — очередь и её статусы.
+## Basic artifacts
 
-## Ключевые поля каталогов
+- `datasets/datasets_info.json` — dataset directory.
+- `datasets/class_names.json` — normalization of class names.
+- `datasets/datasets_scan_summary.json` - summary of changes since `scan`.
+- `datasets/<dataset>/dataset_passport.json` — passport of transformations.
+- `runs/.../training_metadata.json` — training metadata.
+- `queue.txt` and `tmp/status.txt` — queue and its statuses.
+
+## Directory key fields
 
 - `datasets_info.json`: `classes`, `structure`, `elements_count`.
-- Служебные поля синхронизации: `dataset_hash`, `source_hash`, `source_ref`, `source_signature`, `modified`.
-- Опциональные поля: `data_path`, `tags`, `roi_auto`.
+- Synchronization service fields: `dataset_hash`, `source_hash`, `source_ref`, `source_signature`, `modified`.
+- Optional fields: `data_path`, `tags`, `roi_auto`.
 
-## Поддерживаемые структуры датасетов
+## Supported dataset structures
 
 - `split`
 - `flat`
@@ -24,16 +26,16 @@
 - `darknet`
 - `cvat11`
 
-## Аннотации
+## Annotations
 
-Базовый формат YOLO bbox:
+Basic YOLO bbox format:
 
 `class_id center_x center_y width height`
 
-Также поддерживаются сегментационные полигоны в формате `class_id x1 y1 x2 y2 ...`.
+Segmentation polygons in `class_id x1 y1 x2 y2 ...` format are also supported.
 
-## Очередь и статусы
+## Queue and statuses
 
-- Файл очереди в рабочем каталоге: `queue.txt` (одна команда на строку).
-- Файл статусов: `tmp/status.txt`.
-- Базовые статусы исполнителя: `Waiting to be completed`, `Running`, `Done`, `Error`.
+- Queue file in workspace: `queue.txt` (one command per line).
+- Status file: `tmp/status.txt`.
+- Basic performer statuses: `Waiting to be completed`, `Running`, `Done`, `Error`.

@@ -1,5 +1,7 @@
-# Устаревшая страница `training_metadata.json`
+> Russian version: [ru/training_metadata.md](ru/training_metadata.md)
 
-Новая версия документа:
+# Deprecated page `training_metadata.json`
 
-- [Справочник: `training_metadata.json`](reference/training-metadata.md)
+New version of the document:
+
+- [`training_metadata.json` format](reference/training-metadata.md)

@@ -1,24 +1,26 @@
-# Рабочий каталог (workspace)
+> Russian version: [../ru/getting-started/workspace.md](../ru/getting-started/workspace.md)
 
-`smartrain` ориентирован на единый корень рабочего каталога:
+# Workspace
 
-- через переменную `SMART_TRAIN_WORKSPACE`;
-- или через глобальный флаг `smartrain --workspace /path/to/ws ...`.
+`smartrain` uses a single workspace root:
 
-`--workspace` имеет приоритет над переменной окружения.
+- via the `SMART_TRAIN_WORKSPACE` environment variable;
+- or via the global flag `smartrain --workspace /path/to/ws ...`.
 
-## Структура каталогов
+`--workspace` takes precedence over the environment variable.
 
-- `raw_data/` — внешние источники датасетов;
-- `datasets/` — рабочие датасеты и индекс (`datasets_info.json`, `class_names.json`);
-- `runs/` — результаты обучения;
-- `analytics/` — артефакты аналитики (`analyze export-table` и др.);
-- `models/` — промоутированные модели (`registry models-add`);
-- `tmp/` — служебные файлы, включая `tmp/status.txt`.
+## Directory structure
 
-Файл очереди по умолчанию: `queue.txt` в корне рабочего каталога.
+- `raw_data/` — external sources of datasets;
+- `datasets/` — processed datasets and indexes (`datasets_info.json`, `class_names.json`);
+- `runs/` — training outputs;
+- `analytics/` — analytics artifacts (`analyze export-table`, etc.);
+- `models/` — promoted models (`registry models-add`);
+- `tmp/` — system files, including `tmp/status.txt`.
 
-## Инициализация
+The default queue file is `queue.txt` in the workspace root.
+
+## Initialization
 
 ```bash
 export SMART_TRAIN_WORKSPACE=/path/to/workspace

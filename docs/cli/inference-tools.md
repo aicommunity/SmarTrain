@@ -1,18 +1,20 @@
-# CLI: инструменты инференса
+> Russian version: [../ru/cli/inference-tools.md](../ru/cli/inference-tools.md)
+
+# CLI: inference tools
 
 ## `sahi`
 
-Тайловый инференс для больших изображений.
+Tile inference for large images.
 
 ```bash
 smartrain sahi --model /path/to/best.pt --source /path/to/image_or_dir --output sahi_out
 ```
 
-Требует дополнительной зависимости: `pip install -e ".[sahi]"`.
+Requires additional dependency: `pip install -e ".[sahi]"`.
 
 ## `heatmap`
 
-Генерация тепловой карты по изображению:
+Generating a heat map from an image:
 
 ```bash
 smartrain heatmap --model /path/to/best.pt --source /path/to/image.jpg --output heatmap.png

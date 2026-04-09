@@ -1,13 +1,15 @@
-# CLI: очередь
+> Russian version: [../ru/cli/queue.md](../ru/cli/queue.md)
 
-## Файлы очереди
+# CLI: queue
 
-- Основной файл в рабочем каталоге: `queue.txt`
-- Файл статусов: `tmp/status.txt`
+## Queue files
 
-Резервный режим без рабочего каталога использует устаревшие пути рядом с модулем (`training_queue.txt` и `tmp/status.txt`).
+- Main file in the workspace: `queue.txt`
+- Status file: `tmp/status.txt`
 
-## Команды
+Fallback mode without a workspace uses legacy paths near the module (`training_queue.txt` and `tmp/status.txt`).
+
+## Commands
 
 ```bash
 smartrain queue list
@@ -16,7 +18,7 @@ smartrain queue run --no-gui
 smartrain queue-run --no-gui
 ```
 
-## Статусы задач
+## Task statuses
 
 - `Waiting to be completed`
 - `Running`

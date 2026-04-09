@@ -1,9 +1,11 @@
-# Устаревшая страница примеров
+> Russian version: [ru/examples.md](ru/examples.md)
 
-Примеры разнесены по профильным разделам CLI:
+# Deprecated examples page
 
-- [Обзор CLI](cli/overview.md)
-- [Датасеты](cli/datasets.md)
-- [Обучение](cli/training.md)
-- [Очередь](cli/queue.md)
-- [Аналитика](cli/analyze.md)
+Examples are divided into specialized sections of the CLI:
+
+- [Overview CLI](cli/overview.md)
+- [DataSet](cli/datasets.md)
+- [Training](cli/training.md)
+- [Queue](cli/queue.md)
+- [Analytics](cli/analyze.md)

@@ -1,28 +1,30 @@
-# Архитектура и диаграммы
+> Russian version: [../ru/development/architecture.md](../ru/development/architecture.md)
 
-Документ фиксирует фактические потоки в коде и помогает быстро локализовать изменения.
+# Architecture and diagrams
 
-Источники правды для этого раздела: `smartrain/cli.py`, `smartrain/model_training_module.py`, `smartrain/results_analyzer.py`, `smartrain/training_queue.py`, `smartrain/workspace_paths.py`.
+This document captures real code flows and helps you quickly locate where to make changes.
 
-## 1) Верхнеуровневая архитектура
+Sources of truth for this section: `smartrain/cli.py`, `smartrain/model_training_module.py`, `smartrain/results_analyzer.py`, `smartrain/training_queue.py`, `smartrain/workspace_paths.py`.
+
+## 1) Top-level architecture
 
 ```mermaid
 flowchart TD
-  cli[smartrain CLI] --> datasetPipeline[Пайплайн_датасетов]
-  cli --> trainingFlow[Пайплайн_обучения]
-  cli --> queueFlow[Пайплайн_очереди]
-  cli --> analyticsFlow[Аналитика_и_реестр]
-  datasetPipeline --> workspaceFs[Файловый_workspace]
+  cli[smartrain CLI] --> datasetPipeline[Dataset_pipeline]
+  cli --> trainingFlow[Training_pipeline]
+  cli --> queueFlow[Queue_pipeline]
+  cli --> analyticsFlow[Analytics_and_registry]
+  datasetPipeline --> workspaceFs[File_workspace]
   trainingFlow --> workspaceFs
   queueFlow --> workspaceFs
   analyticsFlow --> workspaceFs
 ```
 
-Что показывает: четыре ключевых контура системы, связанные через файловый workspace.
-Как читать: от `smartrain CLI` к подсистемам, затем к общему состоянию в FS.
-Практический вывод: изменения контрактов файлов влияют сразу на несколько команд.
+What it shows: four core system flows connected through the file-based workspace.
+How to read: start at `smartrain CLI`, then follow subsystem links to filesystem state.
+Practical takeaway: changes to file contracts affect multiple commands at once.
 
-## 2) Последовательность `smartrain train`
+## 2) Sequence `smartrain train`
 
 ```mermaid
 sequenceDiagram
@@ -33,18 +35,18 @@ sequenceDiagram
   participant YOLO as ultralytics.YOLO
   User->>CLI: smartrain train ...
   CLI->>Train: main(argv)
-  Train->>Profile: merge параметров
+  Train->>Profile: merge parameters
   Train->>Train: resolve dataset and runtime data.yaml
   Train->>YOLO: train()
   Train->>YOLO: val()
   Train->>Train: write metrics and training_metadata.json
 ```
 
-Что показывает: полный путь от CLI-вызова до артефактов обучения.
-Как читать: сверху вниз по временной оси, где каждый вызов уточняет контекст.
-Практический вывод: при проблемах с параметрами нужно проверять этап merge-профиля до старта `YOLO.train()`.
+What it shows: the complete path from the CLI call to the learning artifacts.
+How to read: from top to bottom along the time axis, with each call clarifying the context.
+Practical takeaway: if parameters are wrong, check the profile-merge stage before `YOLO.train()` starts.
 
-## 3) Жизненный цикл данных в рабочем каталоге
+## 3) Life cycle of data in the workspace
 
 ```mermaid
 flowchart TD
@@ -54,16 +56,16 @@ flowchart TD
   fusion --> train[train]
   train --> runs[runs]
   runs --> analyze[analyze]
-  runs --> registry[registry models-add]
+  runs --> registry[registry `models-add`]
   analyze --> analytics[analytics]
   registry --> models[models]
 ```
 
-Что показывает: как данные двигаются между основными каталогами.
-Как читать: слева направо от источника к финальным артефактам.
-Практический вывод: если ломается следующий этап конвейера, первым делом проверяется целостность `datasets_info.json` и выходы `fusion`.
+What it shows: how data moves between major directories.
+How to read: follow the flow left to right, from sources to final artifacts.
+Practical takeaway: if the next pipeline stage fails, first verify `datasets_info.json` integrity and `fusion` outputs.
 
-## 4) Состояния задачи очереди
+## 4) Queue task states
 
 ```mermaid
 stateDiagram-v2
@@ -75,13 +77,13 @@ stateDiagram-v2
   Error --> [*]
 ```
 
-Что показывает: статусы строки из `queue.txt`.
-Как читать: переходы определяются результатом запуска команды.
-Практический вывод: обработка ретраев не автоматизирована, повторный запуск выполняется вручную.
+What it shows: row statuses from `queue.txt`.
+How to read: transitions are driven by command execution results.
+Practical takeaway: retry handling is not automated; restarts are manual.
 
-Примечание по терминам: статусы на диаграмме (`Waiting`, `Running`, `Done`, `Error`) соответствуют фактическим строкам в `status.txt`.
+Note on terms: The statuses in the diagram (`Waiting`, `Running`, `Done`, `Error`) correspond to the actual rows in `status.txt`.
 
-## 5) Контракты артефактов
+## 5) Artifact Contracts
 
 ```mermaid
 flowchart TD
@@ -94,11 +96,11 @@ flowchart TD
   trainRun --> analyzeTable[analyze export-table csv]
 ```
 
-Что показывает: зависимости между файлами-контрактами.
-Как читать: стрелка означает, что один артефакт является входом для следующего шага.
-Практический вывод: любые изменения схемы `training_metadata.json` требуют проверки `analyze` и `registry`.
+What it shows: dependencies between contract files.
+How to read: each arrow means one artifact becomes input to the next step.
+Bottom line: any changes to the `training_metadata.json` flow require re-validating `analyze` and `registry`.
 
-## 6) Путь `scan/fusion` для zip и CVAT 1.1
+## 6) `scan/fusion` path for ZIP and CVAT 1.1 sources
 
 ```mermaid
 sequenceDiagram
@@ -117,6 +119,6 @@ sequenceDiagram
   Fusion-->>User: merged dataset
 ```
 
-Что показывает: как CVAT/zip-источники приводятся к единому потоку для merge.
-Как читать: временные метки генерируются на этапе доступа к данным, а не как отдельный обязательный импорт.
-Практический вывод: `cvat import` нужен не всегда, так как `fusion` умеет нативно работать с `cvat11`.
+What it shows: how CVAT/zip sources are reduced to a single stream for merge.
+How to read: conversion happens during data access; no separate import step is required.
+Practical takeaway: `cvat import` is not always needed, because `fusion` can work natively with `cvat11`.

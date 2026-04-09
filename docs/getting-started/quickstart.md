@@ -1,8 +1,10 @@
-# Быстрый старт
+> Russian version: [../ru/getting-started/quickstart.md](../ru/getting-started/quickstart.md)
 
-Ниже приведён минимальный рабочий сценарий от инициализации до первого анализа запусков.
+# Quick start
 
-## Базовый сценарий
+Below is a minimal working scenario from initialization to the first analysis of runs.
+
+## Basic scenario
 
 ```bash
 export SMART_TRAIN_WORKSPACE=/path/to/workspace
@@ -13,16 +15,16 @@ smartrain train --data 2026-01-01_12-00-00-merged -y
 smartrain analyze scan
 ```
 
-## Что важно помнить
+## What is important to remember
 
-- `scan` синхронизирует источники и обновляет `datasets/datasets_info.json`.
-- `fusion` создаёт итоговый датасет, обычно в `datasets/<name>`.
-- `train` использует `--data` как имя набора из `datasets_info.json` или путь к каталогу с `data.yaml`.
-- `analyze` дополнительно поддерживает `pr-curves`, `inference-benchmark`, `inference-plot`.
+- `scan` synchronizes sources and updates `datasets/datasets_info.json`.
+- `fusion` creates the final dataset, usually in `datasets/<name>`.
+- `train` uses `--data` as the name of the set of `datasets_info.json` or the path to the directory with `data.yaml`.
+- `analyze` additionally supports `pr-curves`, `inference-benchmark`, `inference-plot`.
 
-## Следующий шаг
+## Next step
 
-После базового сценария переходите в:
+After the basic scenario, go to:
 
-- `docs/cli/overview.md` — полное дерево CLI-команд;
-- `docs/development/architecture.md` — схемы и диаграммы потоков.
+- `docs/cli/overview.md` — complete tree of CLI commands;
+- `docs/development/architecture.md` - diagrams and flow diagrams.

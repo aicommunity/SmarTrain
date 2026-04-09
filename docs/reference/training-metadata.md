@@ -1,17 +1,19 @@
-# Справочник: `training_metadata.json`
+> Russian version: [../ru/reference/training-metadata.md](../ru/reference/training-metadata.md)
 
-Файл сохраняется в каталоге прогона рядом с `test_metrics.csv`.
+# `training_metadata.json` format
 
-## Ключевые секции
+The file is saved in the run directory next to `test_metrics.csv`.
 
-- `training_info` — модель, датасет, гиперпараметры.
-- `timestamps` — интервалы обучения и тестирования.
-- `status` — успех или ошибка с трассировкой.
-- `paths` — относительные пути к артефактам.
-- `inference` — параметры `val()` при наличии.
+## Key sections
 
-## Назначение
+- `training_info` — model, dataset, hyperparameters.
+- `timestamps` — training and testing intervals.
+- `status` — success or error with the trace.
+- `paths` - relative paths to artifacts.
+- `inference` — `val()` parameters, if available.
 
-- воспроизводимость запусков;
-- прозрачный аудит параметров и ошибок;
-- вход для `analyze` и `registry`.
+## Purpose
+
+- run reproducibility;
+- transparent audit of parameters and errors;
+- input for `analyze` and `registry`.

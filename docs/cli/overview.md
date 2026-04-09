@@ -1,24 +1,26 @@
-# CLI: обзор
+> Russian version: [../ru/cli/overview.md](../ru/cli/overview.md)
 
-Точка входа: `smartrain` (Typer-роутер + делегирование в argparse-модули).
+# CLI: overview
 
-## Группы команд
+Entry point: `smartrain` (Typer router + delegation to argparse modules).
 
-- Датасеты: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`
-- Обучение: `train`, `clearml-upload`
-- Очередь: `queue`, `queue-run`
-- Аналитика: `analyze`, `plot` (устаревшая обёртка)
-- Реестр: `registry`
-- Инструменты форматов: `cvat`, `sahi`, `heatmap`
+## Command groups
 
-## Справка
+- Datasets: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`
+- Training: `train`, `clearml-upload`
+- Queue: `queue`, `queue-run`
+- Analytics: `analyze`, `plot` (outdated wrapper)
+- Register: `registry`
+- Format tools: `cvat`, `sahi`, `heatmap`
+
+## Reference
 
 ```bash
 smartrain --help
-smartrain <команда> --help
+smartrain <command> --help
 ```
 
-Для вложенных команд:
+For nested commands:
 
 ```bash
 smartrain queue list --help

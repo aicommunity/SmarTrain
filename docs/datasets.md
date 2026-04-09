@@ -1,7 +1,9 @@
-# Устаревшая страница датасетов
+> Russian version: [ru/datasets.md](ru/datasets.md)
 
-Новые разделы:
+# Outdated datasets page
 
-- [CLI: датасеты](cli/datasets.md)
-- [Справочник: форматы данных](reference/data-formats.md)
-- [Рабочий каталог](getting-started/workspace.md)
+New sections:
+
+- [CLI: datasets](cli/datasets.md)
+- [Directory: data formats](reference/data-formats.md)
+- [Working directory](getting-started/workspace.md)

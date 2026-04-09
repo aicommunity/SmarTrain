@@ -1,44 +1,46 @@
-# CLI: датасеты
+> Russian version: [../ru/cli/datasets.md](../ru/cli/datasets.md)
+
+# CLI: datasets
 
 ## `scan`
 
-Обновляет индекс датасетов и синхронизирует источники в рабочем каталоге.
+Updates the dataset index and synchronizes sources in the workspace.
 
-- Выходные файлы: `datasets_info.json`, `class_names.json`, `datasets_scan_summary.json`.
-- Поддерживает источники из `raw_data/`, `--dataset`, `--datasets-list`.
-- Полезные режимы: `--mode refresh`, `--purge-processed-raw`.
+- Output files: `datasets_info.json`, `class_names.json`, `datasets_scan_summary.json`.
+- Supports sources from `raw_data/`, `--dataset`, `--datasets-list`.
+- Useful modes: `--mode refresh`, `--purge-processed-raw`.
 
 ## `fusion`
 
-Собирает новый датасет из нескольких источников:
+Collects a new dataset from several sources:
 
-- выбор входов: `--dataset` (повторяемый) или `--datasets` (CSV);
-- управление классами: `--classes`, `--merge-classes`, `--common-classes-only`;
-- разбиение: `--fusion-split train,val,test`.
+- selection of inputs: `--dataset` (repeatable) or `--datasets` (CSV);
+- class management: `--classes`, `--merge-classes`, `--common-classes-only`;
+- crash: `--fusion-split train,val,test`.
 
 ## `augment`, `balance`, `orient`, `roi`
 
-- `augment` — автономные аугментации с записью нового датасета;
-- `balance` — балансировка классов;
-- `orient` — коррекция поворота кадров;
-- `roi` — кроп по ROI-модели.
+- `augment` — autonomous augmentations with recording of a new dataset;
+- `balance` — class balancing;
+- `orient` — frame rotation correction;
+- `roi` — crop according to the ROI-model.
 
-Все перечисленные команды формируют `dataset_passport.json` в новом каталоге датасета.
+All of the above commands form `dataset_passport.json` in the new dataset directory.
 
 ## `hash`
 
-Проверка и вычисление хеша структуры датасета:
+Checking and calculating the hash of the dataset structure:
 
 ```bash
 smartrain hash --dataset my_dataset
 smartrain hash /abs/path/to/dataset --validate a1b2c3d4
 ```
 
-Коды выхода `--validate`: `0` совпадение, `1` несовпадение, `2` ошибка.
+`--validate` exit codes: `0` match, `1` mismatch, `2` error.
 
 ## `stats`
 
-Подкоманды:
+Subcommand:
 
 - `classes`
 - `datasets`

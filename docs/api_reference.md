@@ -1,8 +1,10 @@
-# Устаревшая страница API
+> Russian version: [ru/api_reference.md](ru/api_reference.md)
 
-Документ перенесён и разделён на более компактные разделы:
+# Deprecated API page
 
-- [API и модули](reference/api.md)
-- [CLI-обзор](cli/overview.md)
-- [Архитектура и диаграммы](development/architecture.md)
+The document has been moved and divided into more compact sections:
+
+- [API and Modules](reference/api.md)
+- [CLI-Overview](cli/overview.md)
+- [Architecture and diagrams](development/architecture.md)
 

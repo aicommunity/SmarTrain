@@ -1,18 +1,20 @@
-# Расширение проекта
+> Russian version: [../ru/development/extension-guide.md](../ru/development/extension-guide.md)
 
-## Добавление новой CLI-команды
+# Project extensibility
 
-1. Добавить роутинг в `smartrain/cli.py`.
-2. Реализовать argparse-модуль с `build_*_arg_parser()` и `main(argv)`.
-3. Обновить разделы:
+## Adding a new CLI command
+
+1. Add routing to `smartrain/cli.py`.
+2. Implement an argparse module with `build_*_arg_parser()` and `main(argv)`.
+3. Update sections:
    - `docs/cli/overview.md`
-   - профильный файл в `docs/cli/`
-   - при необходимости `docs/development/architecture.md`.
+   - a profile page in `docs/cli/`
+   - `docs/development/architecture.md`, if needed.
 
-## Изменение контрактов данных
+## Changing data contracts
 
-При изменениях `datasets_info.json`, `training_metadata.json`, `model_manifest.json` обязательно обновлять:
+When `datasets_info.json`, `training_metadata.json`, or `model_manifest.json` change, also update:
 
 - `docs/reference/data-formats.md`
 - `docs/reference/training-metadata.md`
-- диаграмму контрактов в `docs/development/architecture.md`.
+- the contracts diagram in `docs/development/architecture.md`.

@@ -1,10 +1,12 @@
-# CLI: анализ запусков
+> Russian version: [../ru/cli/analyze.md](../ru/cli/analyze.md)
 
-`smartrain analyze` работает по каталогам артефактов запусков.
+# CLI: run analysis
 
-Базовый корень поиска запусков: каталог `runs` внутри рабочего каталога (или путь из `--models-root`).
+`smartrain analyze` operates on run artifact catalogs.
 
-## Подкоманды
+Default search root: directory `runs` inside the workspace (or path from `--models-root`).
+
+## Subcommands
 
 - `scan`
 - `export-table`
@@ -14,7 +16,7 @@
 - `inference-benchmark`
 - `inference-plot`
 
-## Примеры
+## Examples
 
 ```bash
 smartrain analyze scan
@@ -25,11 +27,11 @@ smartrain analyze inference-benchmark --model /path/to/best.pt --source /path/to
 smartrain analyze inference-plot --csv benchmark.csv --out benchmark.png
 ```
 
-## Артефакты
+## Artifacts
 
-- `export-table` формирует сводный CSV по найденным прогонам.
-- `compare` может создавать таблицу сравнения и PNG-графики.
-- `inference-benchmark` формирует CSV с измерениями инференса.
-- `inference-plot` строит визуализацию на основе CSV из `inference-benchmark`.
+- `export-table` generates a summary CSV for the found runs.
+- `compare` can create a comparison table and PNG graphics.
+- `inference-benchmark` generates a CSV with inference measurements.
+- `inference-plot` builds a visualization based on the CSV from `inference-benchmark`.
 
-`smartrain plot` остаётся устаревшей обёрткой и делегирует в `analyze`.
+`smartrain plot` remains a legacy wrapper and delegates to `analyze`.

@@ -1,27 +1,29 @@
-# Установка
+> Russian version: [../ru/getting-started/installation.md](../ru/getting-started/installation.md)
 
-Документ описывает минимальные шаги, чтобы начать работу с `smartrain` из исходников.
+# Installation
 
-## Требования
+The document describes the minimal steps to get started with `smartrain` from source.
+
+## Requirements
 
 - Python `3.10+`
 
-## Установка из исходников
+## Installation from source
 
 ```bash
 cd /path/to/smart-train
 pip install -e .
 ```
 
-Команда `smartrain` регистрируется через `pyproject.toml`.
+The `smartrain` command is registered via `pyproject.toml`.
 
-## Дополнительные зависимости
+## Additional dependencies
 
-- Для разработки: `pip install -e ".[dev]"`
-- Для ClearML: `pip install -e ".[clearml]"`
-- Для SAHI: `pip install -e ".[sahi]"`
+- For development: `pip install -e ".[dev]"`
+- For ClearML: `pip install -e ".[clearml]"`
+- For SAHI: `pip install -e ".[sahi]"`
 
-## Проверка
+## Checking
 
 ```bash
 smartrain --help

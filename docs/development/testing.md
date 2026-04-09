@@ -1,13 +1,15 @@
-# Тестирование
+> Russian version: [../ru/development/testing.md](../ru/development/testing.md)
 
-## Запуск
+# Testing
+
+## Launch
 
 ```bash
 pip install -e ".[dev]"
 pytest
 ```
 
-## Рекомендованные срезы
+## Recommended cuts
 
 ```bash
 pytest tests/test_model_training_module.py
@@ -15,8 +17,8 @@ pytest tests/test_results_analyzer.py
 pytest tests/test_training_queue.py
 ```
 
-## Что проверять после изменений документации
+## What to check after documentation changes
 
-- команды и флаги в примерах соответствуют текущему `--help`;
-- коды выхода и резервные пути описаны корректно;
-- ссылки между разделами не битые.
+- commands and flags in the examples correspond to the current `--help`;
+- exit codes and backup paths are described correctly;
+- links between sections are not broken.

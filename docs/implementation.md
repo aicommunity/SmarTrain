@@ -1,7 +1,9 @@
-# Устаревшая страница реализации
+> Russian version: [ru/implementation.md](ru/implementation.md)
 
-Документ перенесён в новый раздел разработки:
+# Deprecated implementation page
 
-- [Архитектура и диаграммы](development/architecture.md)
-- [Тестирование](development/testing.md)
-- [Расширение проекта](development/extension-guide.md)
+The document has been moved to a new development section:
+
+- [Architecture and diagrams](development/architecture.md)
+- [Testing](development/testing.md)
+- [Project extensibility](development/extension-guide.md)
