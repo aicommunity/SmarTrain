@@ -404,6 +404,39 @@ smartrain balance
 
 ---
 
+## `smartrain orient`
+
+Исправляет поворот кадров на 0/90/180/270, когда часть изображений в датасете оказалась повернута на 90°.
+Работает **по эталонным изображениям** в правильной ориентации (`--reference ...`) и создаёт новый датасет в `datasets/`.
+
+```bash
+export SMART_TRAIN_WORKSPACE=/path/to/workspace
+
+# 1+ эталона правильной ориентации
+smartrain orient --dataset 2026-04-07_18-57-33-merged \
+  --reference /path/to/correct1.jpg \
+  --reference /path/to/correct2.jpg
+```
+
+Только отчёт (без записи нового датасета):
+
+```bash
+smartrain orient --dataset 2026-04-07_18-57-33-merged \
+  --reference /path/to/correct.jpg \
+  --report-only
+```
+
+Если уверенность низкая, можно выбрать политику:
+
+```bash
+smartrain orient --dataset 2026-04-07_18-57-33-merged \
+  --reference /path/to/correct.jpg \
+  --min-score 10 \
+  --on-uncertain skip
+```
+
+---
+
 ## `smartrain hash`
 
 Хеш датасета (как при именовании прогонов `train`). По пути к каталогу с `data.yaml`:

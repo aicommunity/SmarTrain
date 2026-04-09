@@ -337,6 +337,20 @@ def cmd_heatmap(ctx: typer.Context) -> None:
     _call("smartrain.heatmap_cli", "main", ctx)
 
 
+@app.command(
+    "orient",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_orient(ctx: typer.Context) -> None:
+    """Исправление поворотов 0/90/180/270 по эталонам (в новый датасет)."""
+    if _ctx_has_help_flag(ctx):
+        from smartrain.dataset_orient import build_orient_arg_parser
+
+        _dispatch_argparse_help(ctx, build_orient_arg_parser, "smartrain orient")
+    _call("smartrain.dataset_orient", "main", ctx)
+
+
 def main() -> None:
     app()
 

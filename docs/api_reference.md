@@ -11,6 +11,7 @@
 Добавлены подкоманды:
 - `smartrain augment` (модуль `smartrain.dataset_augment`)
 - `smartrain balance` (модуль `smartrain.dataset_balance`)
+- `smartrain orient` (модуль `smartrain.dataset_orient`)
 - `smartrain stats` (модуль `smartrain.dataset_stats`)
 
 Для `stats` режимы:
