@@ -219,7 +219,10 @@ def cmd_roi(ctx: typer.Context) -> None:
     _call("smartrain.dataset_roi_yolo", "main", ctx)
 
 
-queue_app = typer.Typer(help="Queue: list | add | remove | clear | run.")
+queue_app = typer.Typer(
+    help="Queue: list | add | remove | clear | run.",
+    invoke_without_command=True,
+)
 
 
 @queue_app.command("list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -247,7 +250,18 @@ def cmd_queue_run_sub(ctx: typer.Context) -> None:
     _call_with_args("smartrain.training_queue_cli", "main", ["run", *list(ctx.args)])
 
 
-app.add_typer(queue_app, name="queue")
+def _queue_group_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(0)
+
+
+app.add_typer(
+    queue_app,
+    name="queue",
+    invoke_without_command=True,
+    callback=_queue_group_callback,
+)
 
 
 @app.command(
@@ -264,7 +278,10 @@ def cmd_queue_run(ctx: typer.Context) -> None:
     _call("smartrain.training_queue", "main", ctx)
 
 
-registry_app = typer.Typer(help="Registry runs / models.")
+registry_app = typer.Typer(
+    help="Registry runs / models.",
+    invoke_without_command=True,
+)
 
 
 @registry_app.command("runs-list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -302,10 +319,27 @@ def cmd_registry_models_remove(ctx: typer.Context) -> None:
     _call_with_args("smartrain.registry_cli", "main", ["models-remove", *list(ctx.args)])
 
 
-app.add_typer(registry_app, name="registry")
+def _registry_group_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(0)
 
 
-analyze_app = typer.Typer(help="Analysis of runs: scan, export-table, compare, interactive.")
+app.add_typer(
+    registry_app,
+    name="registry",
+    invoke_without_command=True,
+    callback=_registry_group_callback,
+)
+
+
+analyze_app = typer.Typer(
+    help=(
+        "Analysis of runs: scan, export-table, compare, interactive, "
+        "pr-curves, inference-benchmark, inference-plot."
+    ),
+    invoke_without_command=True,
+)
 
 
 @analyze_app.command("scan", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -328,7 +362,39 @@ def cmd_analyze_interactive(ctx: typer.Context) -> None:
     _call_with_args("smartrain.results_analyzer", "main", ["interactive", *list(ctx.args)])
 
 
-app.add_typer(analyze_app, name="analyze")
+@analyze_app.command("pr-curves", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_analyze_pr_curves(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.results_analyzer", "main", ["pr-curves", *list(ctx.args)])
+
+
+@analyze_app.command(
+    "inference-benchmark",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def cmd_analyze_inference_benchmark(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.results_analyzer", "main", ["inference-benchmark", *list(ctx.args)])
+
+
+@analyze_app.command(
+    "inference-plot",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def cmd_analyze_inference_plot(ctx: typer.Context) -> None:
+    _call_with_args("smartrain.results_analyzer", "main", ["inference-plot", *list(ctx.args)])
+
+
+def _analyze_group_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit(0)
+
+
+app.add_typer(
+    analyze_app,
+    name="analyze",
+    invoke_without_command=True,
+    callback=_analyze_group_callback,
+)
 
 
 @app.command(

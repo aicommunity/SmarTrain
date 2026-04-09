@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from smartrain.cli import app
+from smartrain.results_analyzer import build_analyze_arg_parser
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 CLI_HELP_CASES: list[tuple[str, list[str]]] = [
@@ -78,3 +81,31 @@ def test_smartrain_deploy_twice(subprocess_env: dict[str, str], tmp_path: Path) 
     assert r2.returncode in (0, 2)
     o2 = (r2.stdout or "") + (r2.stderr or "")
     assert "already exists" in o2
+
+
+def test_analyze_typer_subcommands_match_argparse() -> None:
+    analyze_group = next(group for group in app.registered_groups if group.name == "analyze")
+    typer_subcommands = {cmd.name for cmd in analyze_group.typer_instance.registered_commands}
+
+    parser = build_analyze_arg_parser()
+    subparsers_action = next(
+        action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
+    )
+    argparse_subcommands = set(subparsers_action.choices.keys())
+
+    assert typer_subcommands == argparse_subcommands
+
+
+@pytest.mark.parametrize("group_name", ["queue", "registry", "analyze"])
+def test_group_without_subcommand_shows_help_and_exits_zero(
+    group_name: str,
+    subprocess_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run([group_name], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "Usage:" in out
