@@ -25,7 +25,7 @@ from smartrain.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-SPLIT_ALIASES = {"train": "train", "val": "val", "valid": "val", "test": "test"}
+SPLIT_ALIASES = {"train": "train", "val": "val", "valid": "valid", "test": "test"}
 _BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 _ROI_MODEL_CACHE: dict[str, YOLO] = {}
 
@@ -44,6 +44,12 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
     p.set_defaults(enable_center_rotate=True)
     p.add_argument("--center-rotate-deg", type=float, default=5.0, help="Максимальный угол поворота в обе стороны")
     p.add_argument("--rotate-copies", type=int, default=1, help="Число rotate-вариантов на кадр")
+    p.add_argument(
+        "--center-rotate-anchor",
+        choices=("center", "bbox", "detector"),
+        default="center",
+        help="Источник центра поворота: центр кадра, bbox-разметка или ROI-детектор",
+    )
     p.add_argument("--enable-bbox-copy", action="store_true", help="Включить bbox-copy аугментацию")
     p.add_argument("--bbox-copy-copies", type=int, default=1, help="Число bbox_copy-вариантов на кадр")
     p.add_argument("--flip", choices=("horizontal", "vertical", "both", "none"), default="horizontal")
@@ -121,7 +127,9 @@ def _detect_split(images_path: str) -> str:
     low = images_path.lower()
     if "/train/" in low:
         return "train"
-    if "/val/" in low or "/valid/" in low:
+    if "/valid/" in low:
+        return "valid"
+    if "/val/" in low:
         return "val"
     if "/test/" in low:
         return "test"
@@ -525,12 +533,12 @@ def _apply_exact_center_rotate(
     img = Image.open(image_path).convert("RGB")
     w, h = img.size
     labels = _parse_yolo_labels(label_path)
-    placement_mode = str(getattr(args, "placement_mode", "detector"))
-    rotate_use_roi = bool(getattr(args, "enable_bbox_copy", False)) and placement_mode in ("bbox", "detector")
+    rotate_anchor = str(getattr(args, "center_rotate_anchor", "detector"))
+    rotate_use_roi = rotate_anchor in ("bbox", "detector")
     roi: tuple[int, int, int, int] | None = None
-    if rotate_use_roi and placement_mode == "bbox":
+    if rotate_use_roi and rotate_anchor == "bbox":
         roi = _roi_from_labels(labels, w, h)
-    elif rotate_use_roi and placement_mode == "detector":
+    elif rotate_use_roi and rotate_anchor == "detector":
         roi = detector_roi
     if rotate_use_roi and roi is None:
         return None
@@ -822,8 +830,9 @@ def _apply_copy_paste(
 
 def _write_data_yaml(out_dir: str, names: list[str]) -> None:
     p = Path(out_dir) / "data.yaml"
+    val_rel = "./valid/images" if (Path(out_dir) / "valid" / "images").is_dir() else "./val/images"
     p.write_text(
-        "train: ./train/images\nval: ./val/images\ntest: ./test/images\n\n"
+        f"train: ./train/images\nval: {val_rel}\ntest: ./test/images\n\n"
         f"nc: {len(names)}\n"
         f"names: {names}\n",
         encoding="utf-8",
@@ -892,7 +901,17 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
     for c in classes:
         print(f"  - {c}")
     args.dataset = prompt("Датасет: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
+    args.classes = (
+        prompt(
+            "Классы через запятую (пусто=все): ",
+            default="",
+            completer=WordCompleter(classes, ignore_case=True),
+            complete_while_typing=True,
+        ).strip()
+        or None
+    )
     args.output_name = prompt("Имя выходного датасета (пусто=авто): ", default=(args.output_name or "")).strip() or None
+    print("[INFO] Блок: flip")
     args.enable_flip = (
         prompt("Включить flip? [Y/n]: ", default=("y" if args.enable_flip else "n")).strip().lower()
         in ("y", "yes", "1", "true")
@@ -910,6 +929,7 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             prompt("Flip probability [0..1]: ", default=str(getattr(args, "flip_prob", 0.5))).strip()
             or str(getattr(args, "flip_prob", 0.5))
         )
+    print("[INFO] Блок: photometric/conveyor")
     args.enable_photometric = (
         prompt("Включить brightness/contrast? [y/N]: ", default=("y" if args.enable_photometric else "n")).strip().lower()
         in ("y", "yes", "1", "true")
@@ -923,6 +943,7 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
         in ("y", "yes", "1", "true")
     )
     if args.enable_center_rotate:
+        print("[INFO] Блок: center-rotate")
         args.center_rotate_deg = float(
             prompt("Предел угла поворота (градусы, +-): ", default=str(getattr(args, "center_rotate_deg", 5.0))).strip()
             or str(getattr(args, "center_rotate_deg", 5.0))
@@ -935,8 +956,48 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
         prompt("Включить bbox_copy? [y/N]: ", default=("y" if args.enable_bbox_copy else "n")).strip().lower()
         in ("y", "yes", "1", "true")
     )
+    if args.enable_center_rotate or args.enable_bbox_copy:
+        print("[INFO] Блок: ROI-источник (общий)")
+        roi_mode_default = "detector" if str(getattr(args, "placement_mode", "detector")) == "detector" else (
+            "bbox" if str(getattr(args, "placement_mode", "detector")) == "bbox" else "none"
+        )
+        roi_mode = (
+            prompt(
+                "ROI mode для rotate/bbox_copy (none/bbox/detector): ",
+                default=roi_mode_default,
+                completer=WordCompleter(["none", "bbox", "detector"], ignore_case=True),
+            ).strip()
+            or roi_mode_default
+        )
+        args.placement_mode = roi_mode
+        args.center_rotate_anchor = {"none": "center", "bbox": "bbox", "detector": "detector"}[roi_mode]
+        if roi_mode == "detector":
+            models = _list_workspace_detector_models(workspace_root)
+            if models:
+                print("[INFO] ROI-детекторы в корне workspace:")
+                for m in models:
+                    print(f"  - {m}")
+            model_completer = WordCompleter(models, ignore_case=True) if models else None
+            args.roi_model = (
+                prompt(
+                    "ROI detector model (--roi-model): ",
+                    default=str(getattr(args, "roi_model", "yolo11n.pt")),
+                    completer=model_completer,
+                    complete_while_typing=True,
+                ).strip()
+                or str(getattr(args, "roi_model", "yolo11n.pt"))
+            )
+            args.roi_conf = float(
+                prompt("ROI conf (--roi-conf): ", default=str(getattr(args, "roi_conf", 0.25))).strip()
+                or str(getattr(args, "roi_conf", 0.25))
+            )
+            args.roi_class_ids = (
+                prompt("ROI class ids CSV (--roi-class-ids, пусто=все): ", default=str(getattr(args, "roi_class_ids", "") or "")).strip()
+                or None
+            )
     # Параметры soft-balance и разнообразия релевантны только rotate/bbox_copy.
     if args.enable_center_rotate or args.enable_bbox_copy:
+        print("[INFO] Блок: балансировка/разнообразие")
         args.imbalance_mode = (
             prompt(
                 "Балансировка классов (off/soft): ",
@@ -959,35 +1020,7 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             or str(getattr(args, "min_angle_delta", 1.0))
         )
     if args.enable_bbox_copy:
-        args.placement_mode = (
-            prompt(
-                "ROI mode (none/bbox/detector): ",
-                default=str(getattr(args, "placement_mode", "detector")),
-                completer=WordCompleter(["none", "bbox", "detector"], ignore_case=True),
-            ).strip()
-            or str(getattr(args, "placement_mode", "detector"))
-        )
-        if args.placement_mode == "detector":
-            models = _list_workspace_detector_models(workspace_root)
-            if models:
-                print("[INFO] ROI-детекторы в корне workspace:")
-                for m in models:
-                    print(f"  - {m}")
-            model_completer = WordCompleter(models, ignore_case=True) if models else None
-            args.roi_model = (
-                prompt(
-                    "ROI detector model (--roi-model): ",
-                    default=str(getattr(args, "roi_model", "yolo11n.pt")),
-                    completer=model_completer,
-                    complete_while_typing=True,
-                ).strip()
-                or str(getattr(args, "roi_model", "yolo11n.pt"))
-            )
-            args.roi_conf = float(prompt("ROI conf (--roi-conf): ", default=str(getattr(args, "roi_conf", 0.25))).strip() or str(getattr(args, "roi_conf", 0.25)))
-            args.roi_class_ids = (
-                prompt("ROI class ids CSV (--roi-class-ids, пусто=все): ", default=str(getattr(args, "roi_class_ids", "") or "")).strip()
-                or None
-            )
+        print("[INFO] Блок: bbox_copy")
         args.class_balance = (
             prompt(
                 "Class balance (on/off): ",
@@ -1030,16 +1063,7 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             prompt("Сколько bbox_copy-вариантов на кадр: ", default=str(getattr(args, "bbox_copy_copies", 1))).strip()
             or str(getattr(args, "bbox_copy_copies", 1))
         )
-    args.splits = prompt("Splits CSV (train,val,test): ", default=args.splits).strip() or args.splits
-    args.classes = (
-        prompt(
-            "Классы CSV (пусто=все): ",
-            default="",
-            completer=WordCompleter(classes, ignore_case=True),
-            complete_while_typing=True,
-        ).strip()
-        or None
-    )
+    args.splits = prompt("Сплиты через запятую (train,val,test): ", default=args.splits).strip() or args.splits
     args.dry_run = (prompt("Dry-run? [y/N]: ", default="n").strip().lower() in ("y", "yes", "1", "true"))
 
 
@@ -1083,6 +1107,10 @@ def main(argv=None):
     if args.classes:
         allowed_classes = {x.strip() for x in args.classes.split(",") if x.strip()}
     split_filter = {SPLIT_ALIASES.get(x.strip().lower(), x.strip().lower()) for x in args.splits.split(",") if x.strip()}
+    if "val" in split_filter:
+        split_filter.add("valid")
+    if "valid" in split_filter:
+        split_filter.add("val")
     out_base = args.output_name or f"{args.dataset}_aug"
     out_name = next_dataset_name(layout.datasets, out_base)
     out_dir = os.path.join(layout.datasets, out_name)
@@ -1115,14 +1143,17 @@ def main(argv=None):
                 }
             )
     if not args.dry_run:
-        for split in ("train", "val", "test"):
+        splits_present = sorted({str(it["split"]) for it in items}) or ["train", "val", "test"]
+        for split in splits_present:
             os.makedirs(os.path.join(out_dir, split, "images"), exist_ok=True)
             os.makedirs(os.path.join(out_dir, split, "labels"), exist_ok=True)
     donors = _build_donor_pool(items, args) if args.enable_bbox_copy else []
     detector_roi_cache: dict[str, tuple[int, int, int, int] | None] = {}
-    if str(getattr(args, "placement_mode", "detector")) == "detector" and (
-        bool(args.enable_bbox_copy) or bool(args.enable_center_rotate)
-    ):
+    need_detector_for_rotate = bool(args.enable_center_rotate) and str(
+        getattr(args, "center_rotate_anchor", "detector")
+    ) == "detector"
+    need_detector_for_copy = bool(args.enable_bbox_copy) and str(getattr(args, "placement_mode", "detector")) == "detector"
+    if need_detector_for_rotate or need_detector_for_copy:
         detector_roi_cache = _build_detector_roi_cache(items, args)
     class_usage: dict[int, int] = {}
     class_freq = _collect_class_freq(items)
@@ -1335,6 +1366,7 @@ def main(argv=None):
                 "enable_center_rotate": bool(args.enable_center_rotate),
                 "center_rotate_deg": float(getattr(args, "center_rotate_deg", 5.0)),
                 "rotate_copies": int(getattr(args, "rotate_copies", 1)),
+                "center_rotate_anchor": str(getattr(args, "center_rotate_anchor", "detector")),
                 "enable_bbox_copy": bool(args.enable_bbox_copy),
                 "bbox_copy_copies": int(getattr(args, "bbox_copy_copies", 1)),
                 "copy_paste_min_center_dist": float(getattr(args, "copy_paste_min_center_dist", 0.15)),

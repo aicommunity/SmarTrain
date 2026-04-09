@@ -39,6 +39,21 @@ def _prepare_workspace_two_images(tmp_path: Path) -> None:
     scan_main(["--workspace", str(tmp_path)])
 
 
+def _prepare_workspace_with_valid_split(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    raw = tmp_path / "raw_data" / "ds_v"
+    (raw / "train" / "images").mkdir(parents=True, exist_ok=True)
+    (raw / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (raw / "valid" / "images").mkdir(parents=True, exist_ok=True)
+    (raw / "valid" / "labels").mkdir(parents=True, exist_ok=True)
+    _write_jpg(raw / "train" / "images" / "a.jpg")
+    _write_jpg(raw / "valid" / "images" / "v.jpg")
+    (raw / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (raw / "valid" / "labels" / "v.txt").write_text("0 0.4 0.4 0.2 0.2\n", encoding="utf-8")
+    (raw / "data.yaml").write_text("nc: 1\nnames: ['cat']\n", encoding="utf-8")
+    scan_main(["--workspace", str(tmp_path)])
+
+
 def test_augment_creates_new_dataset_and_passport(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
     augment_main(["--workspace", str(tmp_path), "--dataset", "ds_a"])
@@ -143,4 +158,13 @@ def test_augment_keeps_all_original_images_without_overwrite(tmp_path: Path) -> 
     out_images = tmp_path / "datasets" / "ds_a_aug" / "train" / "images"
     originals = {p.name for p in out_images.glob("*.jpg") if "__a-" not in p.stem}
     assert originals == {"a.jpg", "b.jpg"}
+
+
+def test_augment_preserves_valid_split_and_data_yaml_points_to_valid(tmp_path: Path) -> None:
+    _prepare_workspace_with_valid_split(tmp_path)
+    augment_main(["--workspace", str(tmp_path), "--dataset", "ds_v"])
+    out = tmp_path / "datasets" / "ds_v_aug"
+    assert (out / "valid" / "images" / "v.jpg").is_file()
+    data_yaml = (out / "data.yaml").read_text(encoding="utf-8")
+    assert "val: ./valid/images" in data_yaml
 

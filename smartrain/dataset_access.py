@@ -41,7 +41,7 @@ def resolve_dataset_root_for_entry(
 def find_dataset_paths(dataset_path: str, structure: str, arg: bool = False) -> list[tuple[str, str]]:
     """Пары (images_dir, labels_dir) для YOLO-раскладок; без cvat11."""
     paths: list[tuple[str, str]] = []
-    dataset_splitting = ["train", "val"] if arg else ["train", "val", "test"]
+    dataset_splitting = ["train", "val", "valid"] if arg else ["train", "val", "valid", "test"]
     if structure == "split":
         for subset in dataset_splitting:
             subdir = os.path.join(dataset_path, subset)
