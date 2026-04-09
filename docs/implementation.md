@@ -15,9 +15,13 @@
 
 ## Архитектура системы
 
+### Точка входа для пользователя
+
+Пакет **`smartrain`** ([`smartrain/cli.py`](../smartrain/cli.py)): приложение **Typer** с глобальной опцией `--workspace` / `SMART_TRAIN_WORKSPACE`, подкоманда **`deploy`** и командами, которые передают остаток argv в **`main(argv)`** соответствующих модулей (`datasets_json_former`, `dataset_former`, `model_training_module`, …). Для справки по опциям argparse у подкоманд отключён стандартный `--help` Typer и вызывается парсер модуля (`build_*_arg_parser`, см. [`cli_argparse.py`](../smartrain/cli_argparse.py)).
+
 ### Общая структура
 
-Система состоит из четырех независимых модулей, работающих последовательно:
+Система состоит из модулей, вызываемых по цепочке (часто через CLI):
 
 ```
 ┌─────────────────────────┐
@@ -28,8 +32,14 @@
 ┌─────────────────────────┐
 │   dataset_former.py      │  → Объединение и фильтрация
 └───────────┬─────────────┘
-            │ Использует: datasets_info.json, class_names.json
+            │ Использует: datasets_info.json, class_names.json, dataset_access
             │ Создает: объединенный датасет + data.yaml
+            ↓
+┌─────────────────────────┐
+│   dataset_roi_yolo.py    │  → Кроп по ROI (YOLO/YOLO-Seg), опционально
+└───────────┬─────────────┘
+            │ Использует: datasets_info.json (roi_auto), dataset_access (резолв zip/cvat11)
+            │ Создает: новый датасет с тем же layout
             ↓
 ┌─────────────────────────┐
 │ model_training_module.py│  → Обучение моделей YOLO
@@ -49,6 +59,21 @@
 2. **Конфигурация через JSON**: Метаданные хранятся в JSON для гибкости
 3. **Обратная совместимость**: Поддержка различных форматов датасетов YOLO
 4. **Обработка ошибок**: Graceful degradation с информативными сообщениями
+
+### Матрица: `structure` × команды
+
+Единый резолв корня (включая `.zip` в `data_path`) и пары `images`/`labels` для нативных форматов реализованы в [`dataset_access.py`](../smartrain/dataset_access.py) (`resolve_dataset_root_for_entry`, `iter_image_label_buckets`). Команды ниже используют его там, где нужен обход кадров и меток.
+
+| `structure` | `scan` | `fusion` | `roi` (workspace) | `hash` (`--raw-dataset`) | `cvat import` / `export` |
+|-------------|-----------------|------------------|-------------------|----------------------------|---------------------------|
+| `split` | да | да | да | да (дерево / zip→кэш) | export из YOLO |
+| `flat` | да | да | да | да | export |
+| `subset_flat` | да | да | да | да | export |
+| `nested_split` | да | да | да | да | export |
+| `darknet` | да | да | да | да | — |
+| `cvat11` | да | да (временные `.txt`) | да (те же временные метки) | да | import в YOLO |
+
+Обучение (`train`) по контракту принимает уже готовый YOLO-каталог с `data.yaml` (обычно из `datasets` после `fusion`).
 
 ---
 
@@ -71,7 +96,9 @@ main()
 │   │   ├── load_yaml() или load_obj_names()
 │   │   └── count_elements()
 │   └── Добавление в datasets_info
-└── Сохранение JSON файлов
+├── Мерж из старого datasets_info.json: перенос roi_auto/tags/data_path по имени датасета
+├── Сравнение с предыдущими файлами: added/removed для датасетов и class_names
+└── Сохранение datasets_info.json, class_names.json и datasets_scan_summary.json (+ отчёт в stdout)
 ```
 
 #### Ключевые функции
@@ -148,10 +175,10 @@ main()
 ├── Поиск подходящих датасетов (содержат все выбранные классы)
 ├── Подсчет общего количества файлов для прогресс-бара
 ├── Для каждого датасета:
-│   ├── find_dataset_paths() → получение путей к изображениям/аннотациям
+│   ├── iter_image_label_buckets() (dataset_access) → пары images/labels, включая cvat11
 │   ├── Создание пар (изображение, аннотация)
 │   ├── Перемешивание пар
-│   ├── Разделение на train/val/test (80/10/10)
+│   ├── Разделение на train/val/test (доли из `--fusion-split` или константы по умолчанию)
 │   └── Для каждой пары:
 │       ├── filter_label_file() → фильтрация и переиндексация
 │       └── Копирование изображения (если аннотация не пустая)
@@ -160,14 +187,10 @@ main()
 
 #### Ключевые функции
 
-**`find_dataset_paths(dataset_path, structure, arg=False)`**
-- **Параметр `arg`**: Если `True`, исключает `test` из поиска (для `--exclude-test`)
-- **Логика для каждого типа структуры**:
-  - **Split**: `{split}/images`, `{split}/labels` для каждого split
-  - **Flat**: `images`, `labels` на верхнем уровне
-  - **Nested Split**: `images/{split}`, `labels/{split}`
-  - **Darknet**: `obj_train_data` (изображения и аннотации в одной папке)
-- **Возвращает**: Список кортежей `(images_path, labels_path)`
+**`dataset_access.iter_image_label_buckets` / `find_dataset_paths`**
+- Реализация в [`dataset_access.py`](../smartrain/dataset_access.py); `dataset_former` реэкспортирует `find_dataset_paths` для совместимости.
+- **Параметр `exclude_test` / `arg`**: Если `True`, исключает `test` из поиска (для `--exclude-test`).
+- **Структуры**: `split`, `flat`, `subset_flat`, `nested_split`, `darknet`; для **`cvat11`** — временные YOLO-метки из XML.
 
 **`filter_label_file(src_label_path, dst_label_path, class_map, class_names_map, selected_classes)`**
 - **Алгоритм фильтрации**:
@@ -186,15 +209,10 @@ main()
   - Сохраняет координаты bounding box без изменений
 
 **Разделение на train/val/test**
-- **Алгоритм**: Простое разделение массива по индексам
-- **Пропорции**: `TRAIN_PART = 0.8`, `VAL_PART = 0.1`, `TEST_PART = 0.1`
-- **Реализация**:
-  ```python
-  train_split = pairs[:int(n * TRAIN_PART)]
-  val_split = pairs[int(n * TRAIN_PART):int(n * (TRAIN_PART + VAL_PART))]
-  test_split = pairs[int(n * (VAL_PART + TRAIN_PART)):]
-  ```
-- **Особенность**: Разделение происходит для каждого датасета отдельно, затем объединение
+- **Алгоритм**: Простое разделение массива по индексам после `random.shuffle` внутри **каждой** пары каталогов (`bucket`), которую вернул `iter_image_label_buckets`.
+- **Пропорции**: по умолчанию `TRAIN_PART`, `VAL_PART`, `TEST_PART` (0.8 / 0.1 / 0.1); переопределяются CLI **`--fusion-split train,val,test`** (сумма 1.0).
+- **Реализация** (упрощённо): `train_split = pairs[:int(n * train_part)]`, затем val и test по накопленной доле.
+- **Особенность**: Для нескольких buckets (например исходный `nested_split`) каждый bucket переразбивается отдельно; исходные имена подпапок `train`/`val`/`test` у источника не задают напрямую выходные split’ы.
 
 #### Структура данных
 
@@ -237,6 +255,22 @@ pair = (image_path: str, label_path: str)
 5. **Создание data.yaml**: Простое текстовое создание файла
    - Относительные пути для портативности
    - Формат совместим с Ultralytics YOLO
+
+---
+
+### 2a. dataset_roi_yolo.py
+
+#### Назначение
+Построение **нового** датасета с тем же layout (`split`, `flat`, `subset_flat`, `nested_split`, `darknet`), где каждый кадр обрезан по ROI из инференса Ultralytics (детекция или сегментация). Метки в формате YOLO (bbox и полигоны) пересчитываются в нормализованные координаты относительно **кропа**.
+
+#### Зависимости
+- `dataset_access`: `resolve_dataset_root_for_entry`, `iter_image_label_buckets` (включая zip и `cvat11`)
+- Режим **workspace**: `datasets/datasets_info.json`, ключ `--dataset-name`; **legacy**: `--source-path` / `--output-path`
+- Поля `structure` и опционально `roi_auto` в записи датасета
+- `find_yaml_file` / `load_yaml` для копии `data.yaml` с обновлённым `path`
+
+#### Политики ROI
+См. [data_formats.md](data_formats.md#опциональные-поля-не-перезаписываются-сканером): по умолчанию `largest`; также `union`, `best_conf`, `per_box` (суффиксы `_split_N` в имени файла).
 
 ---
 
@@ -441,10 +475,10 @@ calculate_dataset_hash(dataset_path)
 - **Использование**:
   ```bash
   # Вычисление хеша
-  python3 dataset_hash.py /path/to/dataset
-  
+  smartrain hash /path/to/dataset
+
   # Валидация хеша
-  python3 dataset_hash.py /path/to/dataset --validate a1b2c3d4
+  smartrain hash /path/to/dataset --validate a1b2c3d4
   ```
 
 #### Структура данных
@@ -477,7 +511,7 @@ main()
 ├── Открытие окна мониторинга статуса
 ├── Загрузка существующих статусов
 └── Бесконечный цикл:
-    ├── Чтение training_queue.txt
+    ├── Чтение файла очереди (по умолчанию queue.txt в workspace или fallback training_queue.txt)
     ├── Добавление новых задач в статусы
     ├── Поиск следующей задачи со статусом "Ждет выполнения"
     ├── Если найдена:
@@ -499,11 +533,10 @@ main()
 
 **`process_line(line)`**
 - **Алгоритм обработки**:
-  1. Разделение строки на аргументы
-  2. Пропуск комментариев (строки начинающиеся с `#`)
-  3. Пропуск пустых строк
-  4. Добавление `python3` если отсутствует
-  5. Добавление `.py` если отсутствует расширение
+  1. Пропуск комментариев и пустых строк
+  2. Если команда начинается с `smartrain` (или пути к `smartrain`) — возврат строки как есть
+  3. Если начинается с `python3` / `python` — как есть
+  4. Иначе — префикс `python3` и при необходимости суффикс `.py` у второго токена (legacy)
 - **Возвращает**: Обработанную команду или `None`
 
 **`start_new_process(cmd)`**
@@ -521,16 +554,16 @@ main()
 **Статусы задач**:
 ```python
 statuses = {
-    "dataset_former.py --classes helmet": "Ждет выполнения",
-    "model_training_module.py --model yolov8n": "Выполняется",
+    "smartrain fusion --classes class_a": "Ждет выполнения",
+    "smartrain train --model yolov8n": "Выполняется",
     ...
 }
 ```
 
 **Формат файла статуса**:
 ```
-dataset_former.py --classes helmet | Ждет выполнения
-model_training_module.py --model yolov8n | Выполняется
+smartrain fusion --classes class_a | Ждет выполнения
+smartrain train --model yolov8n | Выполняется
 ```
 
 #### Особенности реализации
@@ -732,6 +765,8 @@ training_queue.py
 }
 ```
 
+**datasets_scan_summary.json** (выход datasets_json_former, рядом с двумя JSON выше): итоговые списки ключей, `added`/`removed` относительно предыдущего запуска, поле `generated_at` (UTC ISO).
+
 **data.yaml** (выход dataset_former, вход model_training_module):
 ```yaml
 train: ./train/images
@@ -781,6 +816,13 @@ names: ['class1', 'class2', 'class3']
 2. Добавить обработку в `find_dataset_paths()`
 3. Добавить подсчет в `count_elements()`
 4. Обновить документацию
+
+### CVAT 1.1 (Images + bbox)
+
+Поддержка CVAT 1.1 в `smart-train` разделена на два уровня:
+
+1. **Обнаружение распакованного датасета**: `datasets_json_former.detect_structure()` распознаёт `structure="cvat11"` при наличии `annotations.xml` и папки `images/` рядом с ним. Классы берутся из `meta/task/labels` (если есть), иначе из `box/@label`.
+2. **Нативная работа в fusion**: `dataset_former.py` умеет включать `cvat11` в merge напрямую, генерируя **временные** YOLO `.txt` из `annotations.xml` (без ручной предварительной конвертации пользователем). Конвертер `smartrain cvat import` остаётся полезен, когда нужен отдельный YOLO-датасет как артефакт.
 
 **Добавление новых метрик**:
 1. Расширить `save_metrics_csv()` для сохранения дополнительных метрик

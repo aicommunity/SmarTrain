@@ -45,7 +45,30 @@ dataset_name/
     └── ...
 ```
 
-**Определение**: Наличие папок `images` и `labels` на верхнем уровне, отсутствие папок train/val/test.
+**Определение**: Наличие папок `images` и `labels` на верхнем уровне; файлы лежат непосредственно в них; внутри `images/` нет подкаталогов `train` / `val` / `test` и нет общих пар подпапок с `labels/` (см. ниже).
+
+---
+
+### 2а. Subset flat (CVAT Ultralytics YOLO Detection 1.0)
+
+Экспорт из [CVAT](https://docs.cvat.ai/docs/dataset_management/formats/) в формате **Ultralytics YOLO Detection 1.0** часто даёт одну или несколько **произвольно именованных** подпапок внутри `images/` и с теми же именами в `labels/` (например, имя задачи или набора: `Pads`, `Batch1` и т.д.).
+
+```
+dataset_name/
+├── data.yaml
+├── images/
+│   └── Pads/                    # имя может быть любым
+│       ├── shot001.jpg
+│       └── ...
+└── labels/
+    └── Pads/
+        ├── shot001.txt
+        └── ...
+```
+
+**Определение**: есть `images/` и `labels/` на верхнем уровне; внутри `images/` **нет** подкаталогов с именами `train` / `val` / `test`; при этом существует хотя бы одна пара вложенных каталогов с **одинаковым именем** в `images/<name>/` и `labels/<name>/`. Допускается сочетание с файлами в корне `images/` и `labels/` (тогда учитываются и корень, и все такие пары).
+
+В `datasets_info.json` поле `structure` для такого датасета: **`subset_flat`**.
 
 ---
 
@@ -144,6 +167,10 @@ class_id center_x center_y width height
 - Вторая строка: класс 1, центр в (0.3, 0.7), размер 0.15×0.2
 - Третья строка: класс 0, центр в (0.8, 0.2), размер 0.1×0.15
 
+### Формат сегментации (YOLO segment)
+
+Строка: `class_id x1 y1 x2 y2 ...` — нормализованные координаты вершин полигона (парные `x`, `y` в долях ширины и высоты изображения). Минимум три вершины (шесть чисел после класса). Скрипт `dataset_roi_yolo.py` при кропе пересчитывает эти координаты в систему нового изображения и прижимает точки к границам кропа.
+
 ### Формула нормализации
 
 Если изображение имеет размеры `img_width × img_height`, а bounding box имеет координаты:
@@ -213,7 +240,72 @@ names:
 
 ## Формат datasets_info.json
 
-JSON файл с метаданными о всех доступных датасетах. Создается скриптом `datasets_json_former.py`.
+JSON файл с метаданными о всех доступных датасетах. Создаётся командой **`smartrain scan`** (модуль `datasets_json_former`).
+
+### Источники датасетов для `scan`
+
+По умолчанию команда берёт источники из `raw_data/`, синхронизирует их в `datasets/`, а индекс строит по текущему состоянию `datasets/` (или путь из `--datasets-path` в legacy-режиме).
+
+Дополнительно можно передать файл списка:
+
+```bash
+smartrain scan --datasets-list /abs/path/to/datasets_list.txt
+```
+
+Правила для `datasets_list.txt`:
+- одна строка = один путь к датасету;
+- поддерживаются пути к директории датасета и к архиву `.zip`;
+- пустые строки и строки-комментарии (`# ...`) игнорируются;
+- относительные пути интерпретируются относительно каталога, где лежит `datasets_list.txt`.
+
+В workspace-режиме (`smartrain scan` без `--datasets-path`) файл `raw_data/datasets_list.txt` используется автоматически, если он есть.
+
+Каждый успешный прогон перезаписывает `datasets_info.json` и `class_names.json` **по фактическому содержимому `datasets/`**. Рядом создаётся/обновляется **`datasets_scan_summary.json`**:
+
+```json
+{
+  "generated_at": "2026-04-04T12:00:00+00:00",
+  "datasets": {
+    "final": ["имя1", "имя2"],
+    "count": 2,
+    "added": ["имя2"],
+    "removed": []
+  },
+  "class_names": {
+    "final": ["cat", "dog"],
+    "count": 2,
+    "added": ["dog"],
+    "removed": []
+  }
+}
+```
+
+Поля `added` / `removed` сравнивают результат с содержимым **предыдущих** `datasets_info.json` и `class_names.json` на диске до записи.
+
+### `dataset_passport.json` (паспорт датасета)
+
+Все команды, которые создают новый датасет или выполняют первичную синхронизацию, создают
+`dataset_passport.json` в корне датасета.
+
+Общие поля:
+
+- `command` — команда-источник преобразования (`scan`, `fusion`, `roi`, `augment`, `balance`, `cvat import`).
+- `created_at` — UTC timestamp создания.
+- `source_dataset` — список входных датасетов/источников.
+- `created_dataset` — имя и абсолютный путь выходного датасета.
+- `parameters` — аргументы запуска команды.
+- `transformations` — список применённых преобразований.
+- `input_hash` / `output_hash` — входные и итоговый хеши содержимого.
+- `stats_before` / `stats_after` — метрики до/после преобразования.
+
+Типы паспортов:
+
+- `scan` — начальный паспорт (`parameters.kind=initial`), если у датасета ещё нет файла паспорта.
+- `fusion` — объединение нескольких входных датасетов.
+- `roi` — ROI-кроп по модели.
+- `augment` — офлайн-аугментация.
+- `balance` — балансировка классов.
+- `cvat import` — импорт CVAT zip в YOLO.
 
 ### Структура
 
@@ -223,7 +315,7 @@ JSON файл с метаданными о всех доступных дата�
         "classes": {
             "class_name": class_index
         },
-        "structure": "split|flat|nested_split|darknet",
+        "structure": "split|flat|subset_flat|nested_split|darknet",
         "elements_count": number_or_array
     },
     "dataset_name_2": {
@@ -250,14 +342,80 @@ JSON файл с метаданными о всех доступных дата�
 Тип структуры организации датасета:
 - `"split"` - разделение на train/val/test
 - `"flat"` - плоская структура
+- `"subset_flat"` - `images/<подпапка>/` и `labels/<подпапка>/` (см. выше)
 - `"nested_split"` - вложенное разделение
 - `"darknet"` - формат Darknet
+- `"cvat11"` - распакованный экспорт CVAT 1.1: `annotations.xml` рядом с папкой `images/` (формат Images + bbox). Поддерживается нативно в `scan` и `fusion` (в merge используются временные YOLO `.txt`, генерируемые из XML).
 
 #### `elements_count`
 Количество элементов (изображений/аннотаций) в датасете:
 - Для `split` и `flat`: число (int)
 - Для `nested_split`: массив чисел `[train_count, val_count, test_count]`
 - Для `darknet`: число (int)
+
+#### Опциональные поля (не перезаписываются сканером)
+
+При повторном запуске `datasets_json_former.py` существующий `datasets_info.json` читается и для каждого датасета, который снова найден на диске, в новую запись **переносятся** поля `roi_auto`, `tags` и **`data_path`** из старого файла. Остальные поля берутся из свежего скана.
+
+##### `data_path`
+
+Строка: **абсолютный** путь к корню датасета на диске или путь **относительно корня workspace** (`SMART_TRAIN_WORKSPACE`). Если ключа нет, корень данных считается равным `<каталог_каталога>/<ключ_записи>` (например `datasets/MyDataset` в режиме workspace).
+
+##### `tags`
+
+Список строк-пометок, например `["roi_yolo"]`. Можно использовать для своих соглашений; обязательным для `dataset_roi_yolo.py` является наличие параметров модели (см. `roi_auto` или CLI).
+
+##### `roi_auto`
+
+Параметры автоматического кропа по ROI (скрипт `dataset_roi_yolo.py`):
+
+```json
+"roi_auto": {
+    "mode": "yolo_detect",
+    "weights": "/abs/path/best.pt",
+    "conf": 0.25,
+    "pad_px": 32,
+    "class_ids": null,
+    "roi_policy": "largest"
+}
+```
+
+- `mode`: `yolo_detect` или `yolo_segment` (для сегмент-модели ROI строится по box из Ultralytics).
+- `weights`: путь к весам `.pt`.
+- `conf`: порог уверенности инференса.
+- `pad_px`: расширение прямоугольника ROI на столько пикселей с каждой стороны (перед зажатием в границы кадра).
+- `class_ids`: `null` — учитываются все классы модели; иначе массив целых id классов модели, по которым строится ROI.
+- `roi_policy` (если не задан ни в JSON, ни в CLI — по умолчанию **`largest`**):
+  - `largest` — кроп по боксу максимальной площади;
+  - `union` — один кроп по объединённому AABB всех отфильтрованных боксов;
+  - `best_conf` — кроп по боксу с максимальным `conf`;
+  - `per_box` — отдельное изображение и файл меток на каждый бокс; имена: `{stem}_split_1`, `{stem}_split_2`, …
+
+**Основной режим (workspace):** корень данных берётся из записи в `datasets/datasets_info.json` через `data_path`; физическая папка `datasets/<ключ>` используется по умолчанию.
+
+```bash
+export SMART_TRAIN_WORKSPACE=/path/to/workspace
+smartrain roi \
+  --dataset-name MyDataset \
+  --weights /path/to/model.onnx
+# --output-path по умолчанию: datasets/MyDataset_roi
+```
+
+Имя датасета — **ключ** из `datasets_info.json` (для архива в `raw_data` ключ обычно совпадает с именем файла **без** `.zip`). Допустимо передать и имя с `.zip`: команда сопоставит его с ключом без расширения.
+
+**Legacy:** каталог датасета лежит в `{source-path}/{dataset-name}/`, JSON рядом:
+
+```bash
+smartrain roi \
+  --dataset-name MyDataset \
+  --source-path /data/datasets_parent \
+  --output-path /data/MyDataset_cropped \
+  [--datasets-info-path /data/datasets_parent]
+```
+
+Если задан `--datasets-info-path` в legacy-режиме, он должен быть тем же родителем, что и `--source-path`, в котором лежит `{dataset_name}`. Файл метаданных: `{parent}/datasets_info.json` или явный путь к файлу.
+
+Поведение при отсутствии детекций: `--on-empty full_image` (по умолчанию — копия всего кадра и пересчёт меток), `skip` — не писать эту пару в выход, `fail` — завершение с ошибкой.
 
 ### Пример полного файла
 
@@ -321,46 +479,46 @@ JSON файл для нормализации имен классов между
 
 ### Использование
 
-Файл используется скриптом `dataset_former.py` при объединении датасетов для приведения имен классов к единому виду перед фильтрацией.
+Файл используется модулем `dataset_former` / командой **`smartrain fusion`** при объединении датасетов для приведения имён классов к единому виду перед фильтрацией.
 
 ---
 
-## Формат training_queue.txt
+## Формат queue.txt (файл очереди)
 
-Текстовый файл со списком задач для выполнения системой очереди.
+Текстовый файл со списком задач для **`smartrain queue-run`** (или `smartrain queue run`). По умолчанию путь: **`queue.txt`** в корне workspace (см. `workspace_queue_path` в [`smartrain/workspace_paths.py`](../smartrain/workspace_paths.py)); иначе см. `--queue-file` у исполнителя.
 
 ### Формат строки
 
+Рекомендуемый вид — полная shell-команда:
+
 ```
-[python3] script_name.py [аргументы]
+smartrain <подкоманда> [аргументы...]
 ```
 
-### Правила
+### Правила (как в [`process_line()`](../smartrain/training_queue.py))
 
-1. Одна задача на строку
-2. Команда может начинаться с `python3` или без него (добавляется автоматически)
-3. Расширение `.py` добавляется автоматически, если отсутствует
-4. Строки, начинающиеся с `#`, игнорируются (комментарии)
-5. Пустые строки игнорируются
+1. Одна задача на строку.
+2. Если строка начинается с **`smartrain`** (или пути к бинарнику `smartrain`) — выполняется как есть.
+3. Если начинается с **`python3`** / **`python`** — выполняется как есть.
+4. Иначе для обратной совместимости строка нормализуется к виду `python3 script.py ...` (к первому токену дописывается `.py`, если нужно). Предпочтительно писать явно **`smartrain ...`**.
+5. Строки с `#` в начале и пустые строки игнорируются.
 
 ### Пример
 
 ```
-# Создание объединенного датасета
-dataset_former.py --target-path /path/to/output --classes "helmet,vest"
+# Создание объединённого датасета
+smartrain fusion --target-path /path/to/output --classes "class_a,class_b"
 
-# Обучение модели yolov8n
-model_training_module.py --data /path/to/dataset --model yolov8n --epochs 50
-
-# Обучение модели yolov8s
-python3 model_training_module.py --data /path/to/dataset --model yolov8s --epochs 100
+# Обучение
+smartrain train --data /path/to/dataset --model yolov8n --epochs 50 -y
+smartrain train --data /path/to/dataset --model yolov8s --epochs 100 -y
 ```
 
 ---
 
 ## Формат tmp/status.txt
 
-Текстовый файл с текущим статусом выполнения задач. Создается и обновляется автоматически скриптом `training_queue.py`.
+Текстовый файл с текущим статусом выполнения задач. Создаётся и обновляется исполнителем очереди ([`smartrain/training_queue.py`](../smartrain/training_queue.py)); путь по умолчанию — **`tmp/status.txt`** внутри workspace.
 
 ### Формат строки
 
@@ -378,9 +536,9 @@ python3 model_training_module.py --data /path/to/dataset --model yolov8s --epoch
 ### Пример
 
 ```
-dataset_former.py --target-path /path/to/output --classes "helmet,vest" | Выполнено
-model_training_module.py --data /path/to/dataset --model yolov8n --epochs 50 | Выполняется
-model_training_module.py --data /path/to/dataset --model yolov8s --epochs 100 | Ждет выполнения
+smartrain fusion --target-path /path/to/output --classes "class_a,class_b" | Выполнено
+smartrain train --data /path/to/dataset --model yolov8n --epochs 50 | Выполняется
+smartrain train --data /path/to/dataset --model yolov8s --epochs 100 | Ждет выполнения
 ```
 
 ---

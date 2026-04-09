@@ -1,0 +1,306 @@
+import argparse
+import hashlib
+import json
+import os
+import sys
+
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.workspace_paths import (
+    DATASETS_INFO_FILE,
+    WorkspaceLayout,
+    resolve_dataset_root,
+    resolve_or_extract_dataset_root,
+    resolve_path_under_workspace,
+    resolve_workspace_root,
+)
+
+
+def calculate_dataset_hash(dataset_path):
+    """
+    Вычисляет хеш датасета на основе структуры папок, имен файлов и их размеров.
+    
+    Хеш не зависит от даты/времени изменения файлов, но зависит от:
+    - Структуры папок в датасете
+    - Имен файлов (изображения и разметка)
+    - Размеров файлов
+    
+    Args:
+        dataset_path: Путь к папке с датасетом
+        
+    Returns:
+        str: Первые 8 символов MD5 хеша (hex)
+    """
+    if not os.path.exists(dataset_path):
+        raise FileNotFoundError(f"Папка с датасетом не найдена: {dataset_path}")
+    
+    if not os.path.isdir(dataset_path):
+        raise ValueError(f"Указанный путь не является папкой: {dataset_path}")
+    
+    hasher = hashlib.md5()
+    
+    # Список служебных файлов, которые нужно игнорировать
+    ignored_files = {'.DS_Store', 'Thumbs.db', '.gitkeep', '.gitignore'}
+    
+    # Получаем абсолютный путь для нормализации
+    dataset_path = os.path.abspath(dataset_path)
+    dataset_path_len = len(dataset_path) + 1  # +1 для слеша после пути
+    
+    # Собираем информацию о всех файлах и папках в отсортированном порядке
+    items = []
+    
+    for root, dirs, files in os.walk(dataset_path):
+        # Сортируем для детерминированности
+        dirs.sort()
+        files.sort()
+        
+        # Получаем относительный путь от корня датасета
+        rel_root = root[dataset_path_len:] if len(root) > dataset_path_len else ""
+        
+        # Добавляем информацию о папках
+        for dir_name in dirs:
+            rel_path = os.path.join(rel_root, dir_name) if rel_root else dir_name
+            items.append(('dir', rel_path))
+        
+        # Добавляем информацию о файлах
+        for file_name in files:
+            # Пропускаем служебные файлы
+            if file_name in ignored_files:
+                continue
+            
+            rel_path = os.path.join(rel_root, file_name) if rel_root else file_name
+            file_path = os.path.join(root, file_name)
+            
+            try:
+                file_size = os.path.getsize(file_path)
+                items.append(('file', rel_path, file_size))
+            except (OSError, IOError):
+                # Пропускаем файлы, к которым нет доступа
+                continue
+    
+    # Сортируем все элементы для детерминированности
+    items.sort()
+    
+    # Вычисляем хеш на основе собранной информации
+    for item in items:
+        if item[0] == 'dir':
+            # Для папки: добавляем тип и относительный путь
+            hasher.update(b'dir:')
+            hasher.update(item[1].encode('utf-8'))
+            hasher.update(b'\n')
+        elif item[0] == 'file':
+            # Для файла: добавляем тип, относительный путь и размер
+            hasher.update(b'file:')
+            hasher.update(item[1].encode('utf-8'))
+            hasher.update(b':')
+            hasher.update(str(item[2]).encode('utf-8'))
+            hasher.update(b'\n')
+    
+    # Возвращаем первые 8 символов хеша
+    return hasher.hexdigest()[:8]
+
+
+def calculate_zip_metadata_hash(zip_path: str) -> str:
+    """Хеш по абсолютному пути, размеру и mtime_ns архива (без распаковки)."""
+    ap = os.path.abspath(zip_path)
+    st = os.stat(ap)
+    hasher = hashlib.md5()
+    hasher.update(ap.encode("utf-8"))
+    hasher.update(b":")
+    hasher.update(str(st.st_size).encode("utf-8"))
+    hasher.update(b":")
+    hasher.update(str(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))).encode("utf-8"))
+    return hasher.hexdigest()[:8]
+
+
+def resolve_hash_dataset_root(
+    workspace_cli: str | None,
+    dataset_path_pos: str | None,
+    dataset_name: str | None,
+    raw_dataset: str | None,
+    *,
+    hash_zip_metadata: bool,
+) -> tuple[str, bool]:
+    """
+    Возвращает (путь_к_корню_или_zip, metadata_only).
+    Если metadata_only, путь — к .zip, хеш считать через calculate_zip_metadata_hash.
+    """
+    if raw_dataset is not None and str(raw_dataset).strip():
+        name = str(raw_dataset).strip()
+        root_ws = resolve_workspace_root(workspace_cli)
+        layout = WorkspaceLayout(root_ws)
+        info_path = layout.work_datasets_info_path()
+        if not os.path.isfile(info_path):
+            raise FileNotFoundError(f"Не найден {info_path}.")
+        with open(info_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+        if not isinstance(catalog, dict):
+            raise ValueError(f"{info_path}: ожидается объект JSON.")
+        if name not in catalog:
+            raise KeyError(f"Имя {name!r} отсутствует в datasets/{DATASETS_INFO_FILE}.")
+        entry = catalog[name]
+        if not isinstance(entry, dict):
+            raise TypeError(f"Запись {name!r} должна быть объектом JSON.")
+        raw_dp = entry.get("data_path")
+        if isinstance(raw_dp, str) and raw_dp.strip():
+            resolved = resolve_path_under_workspace(root_ws, raw_dp)
+        else:
+            resolved = os.path.join(layout.datasets, name)
+        if hash_zip_metadata and resolved.lower().endswith(".zip") and os.path.isfile(resolved):
+            return resolved, True
+        extracted = resolve_or_extract_dataset_root(root_ws, name, entry, layout.datasets)
+        return extracted, False
+
+    if dataset_name is not None and str(dataset_name).strip():
+        name = str(dataset_name).strip()
+        root = resolve_workspace_root(workspace_cli)
+        layout = WorkspaceLayout(root)
+        expanded = os.path.abspath(os.path.expanduser(name))
+        yaml_here = os.path.join(expanded, "data.yaml")
+        if os.path.isdir(expanded) and os.path.isfile(yaml_here):
+            return expanded, False
+        info_path = layout.work_datasets_info_path()
+        if not os.path.isfile(info_path):
+            raise FileNotFoundError(
+                f"Каталог с data.yaml для {name!r} не найден и отсутствует {info_path}."
+            )
+        with open(info_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+        if not isinstance(catalog, dict):
+            raise ValueError(f"{info_path}: ожидается объект JSON.")
+        if name not in catalog:
+            raise KeyError(
+                f"Имя {name!r} отсутствует в datasets/{DATASETS_INFO_FILE}."
+            )
+        entry = catalog[name]
+        if not isinstance(entry, dict):
+            raise TypeError(f"Запись {name!r} должна быть объектом JSON.")
+        root = resolve_dataset_root(layout.root, name, entry, layout.datasets)
+        if hash_zip_metadata and root.lower().endswith(".zip") and os.path.isfile(root):
+            return root, True
+        if root.lower().endswith(".zip") and os.path.isfile(root):
+            extracted = resolve_or_extract_dataset_root(layout.root, name, entry, layout.datasets)
+            return extracted, False
+        return root, False
+
+    if dataset_path_pos is None or not str(dataset_path_pos).strip():
+        raise ValueError(
+            "Укажите путь к папке датасета, или --dataset, или --raw-dataset "
+            "с --workspace (или SMART_TRAIN_WORKSPACE)."
+        )
+    p = os.path.abspath(os.path.expanduser(str(dataset_path_pos).strip()))
+    if p.lower().endswith(".zip") and os.path.isfile(p):
+        if hash_zip_metadata:
+            return p, True
+        raise ValueError(
+            "Для .zip по позиционному пути укажите --hash-zip-metadata или используйте "
+            "--raw-dataset с workspace (распаковка в кэш)."
+        )
+    return p, False
+
+
+def build_hash_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(
+        description="Вычисление хеша датасета на основе структуры, имен файлов и их размеров"
+    )
+
+    parser.add_argument(
+        "dataset_path",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Путь к папке с датасетом (не нужен при --dataset/--raw-dataset)",
+    )
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help="Корень workspace для --dataset/--raw-dataset (иначе SMART_TRAIN_WORKSPACE)",
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Имя записи из datasets/datasets_info.json (или каталог с data.yaml)",
+    )
+    parser.add_argument(
+        "--raw-dataset",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Имя источника из raw_data (или data_path в datasets_info.json); zip распаковывается в кэш",
+    )
+    parser.add_argument(
+        "--hash-zip-metadata",
+        action="store_true",
+        help="Для .zip: хеш только от пути/размера/mtime архива (без распаковки и обхода файлов)",
+    )
+
+    parser.add_argument(
+        "--validate",
+        type=str,
+        default=None,
+        help="Ожидаемое значение хеша для валидации",
+    )
+
+    return parser
+
+
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    args = build_hash_arg_parser().parse_args(argv)
+    sel = [
+        bool(args.dataset_path and str(args.dataset_path).strip()),
+        bool(args.dataset and str(args.dataset).strip()),
+        bool(args.raw_dataset and str(args.raw_dataset).strip()),
+    ]
+    if sum(sel) > 1:
+        print(
+            "[ERROR] Укажите ровно один из: путь к датасету, --dataset, --raw-dataset.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    try:
+        root, zip_meta = resolve_hash_dataset_root(
+            args.workspace,
+            args.dataset_path,
+            args.dataset,
+            args.raw_dataset,
+            hash_zip_metadata=bool(args.hash_zip_metadata),
+        )
+        computed_hash = (
+            calculate_zip_metadata_hash(root) if zip_meta else calculate_dataset_hash(root)
+        )
+        
+        if args.validate:
+            if computed_hash.lower() == args.validate.lower():
+                print(f"Валидация успешна. Хеш совпадает: {computed_hash}")
+                sys.exit(0)
+            else:
+                print(f"Валидация не пройдена.")
+                print(f"Ожидалось: {args.validate}")
+                print(f"Получено: {computed_hash}")
+                sys.exit(1)
+        else:
+            print(computed_hash)
+            sys.exit(0)
+
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(2)
+    except ValueError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(2)
+    except KeyError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(2)
+    except Exception as e:
+        print(f"[ERROR] Неожиданная ошибка: {e}", file=sys.stderr)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()
+
