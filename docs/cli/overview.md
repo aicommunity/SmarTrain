@@ -2,7 +2,7 @@
 
 # CLI: overview
 
-Entry point: `smartrain` (Typer router + delegation to argparse modules).
+Entry point: `smartrain` (Typer router with unified command behavior).
 
 ## Command groups
 
@@ -26,3 +26,7 @@ For nested commands:
 smartrain queue list --help
 smartrain analyze inference-benchmark --help
 ```
+
+Calling `smartrain <command>` without required arguments usually prints that command's help.
+`smartrain train` is special: without arguments it enters interactive setup (TTY required).
+Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
