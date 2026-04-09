@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Сканирование прогонов обучения, сводные CSV и сравнение метрик (CSV + PNG).
+Training runs scan, summary CSV export, and metric comparisons (CSV + PNG).
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ DEFAULT_MAP_COL = "metrics/mAP50-95(B)"
 
 
 def resolve_models_scan_root(workspace_cli: str | None, models_root_cli: str | None) -> str:
-    """Явный --models-root, иначе workspace/runs, иначе текущий каталог."""
+    """Use --models-root, else workspace/runs, else current directory."""
     if models_root_cli is not None:
         return os.path.abspath(os.path.expanduser(models_root_cli))
     try:
@@ -103,7 +103,7 @@ def pick_map_column(df: pd.DataFrame) -> str | None:
 def cmd_scan(args: argparse.Namespace) -> None:
     runs = find_run_directories(args.models_root)
     if not runs:
-        print("(прогоны с training_metadata.json не найдены)")
+        print("(no runs with training_metadata.json found)")
         return
     print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'run_dir'}")
     print("-" * 100)
@@ -115,7 +115,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
             ds = (ti.get("dataset") or {}).get("name") or "?"
             print(f"{i:4d}  {str(m)[:14]:<14}  {str(ds)[:24]:<24}  {rd}")
         except OSError as e:
-            print(f"{i:4d}  {'?':<14}  {'?':<24}  {rd}  [ошибка: {e}]")
+            print(f"{i:4d}  {'?':<14}  {'?':<24}  {rd}  [error: {e}]")
 
 
 def cmd_export_table(args: argparse.Namespace) -> None:
@@ -125,13 +125,13 @@ def cmd_export_table(args: argparse.Namespace) -> None:
     if args.analytics_session is not None:
         session_name = args.analytics_session.strip()
         if not session_name:
-            print("[ERROR] --analytics-session не может быть пустым.", file=sys.stderr)
+            print("[ERROR] --analytics-session cannot be empty.", file=sys.stderr)
             sys.exit(1)
         try:
             ws = resolve_workspace_root(args.workspace)
         except ValueError:
             print(
-                f"[ERROR] --analytics-session требует --workspace или {WORKSPACE_ENV_VAR}.",
+                f"[ERROR] --analytics-session requires --workspace or {WORKSPACE_ENV_VAR}.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -172,14 +172,14 @@ def cmd_export_table(args: argparse.Namespace) -> None:
                 row["train_read_error"] = str(e)
         rows.append(row)
     if not rows:
-        print("[ERROR] Нет данных для экспорта.", file=sys.stderr)
+        print("[ERROR] No data to export.", file=sys.stderr)
         sys.exit(1)
     df = pd.DataFrame(rows)
     out_dir = os.path.dirname(os.path.abspath(out_path))
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     df.to_csv(out_path, index=False, encoding="utf-8")
-    print(f"[OK] Сводная таблица: {out_path} ({len(df)} строк)")
+    print(f"[OK] Summary table: {out_path} ({len(df)} rows)")
     if analytics_dir is not None:
         manifest = {
             "scan_root": args.models_root,
@@ -188,7 +188,7 @@ def cmd_export_table(args: argparse.Namespace) -> None:
         }
         with open(os.path.join(analytics_dir, "session.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
-        print(f"[OK] Манифест сессии: {os.path.join(analytics_dir, 'session.json')}")
+        print(f"[OK] Session manifest: {os.path.join(analytics_dir, 'session.json')}")
 
 
 def _finalize_compare_analytics_session(
@@ -206,7 +206,7 @@ def _finalize_compare_analytics_session(
         ws = resolve_workspace_root(args.workspace)
     except ValueError:
         print(
-            f"[ERROR] --analytics-session требует --workspace или {WORKSPACE_ENV_VAR}.",
+            f"[ERROR] --analytics-session requires --workspace or {WORKSPACE_ENV_VAR}.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -236,14 +236,14 @@ def _finalize_compare_analytics_session(
     sj = os.path.join(dest_root, "session.json")
     with open(sj, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
-    print(f"[OK] Манифест сессии compare: {sj}")
+    print(f"[OK] Compare session manifest: {sj}")
 
 
 def _resolve_compare_png_path(
     workspace_cli: str | None,
     out_png_cli: str,
 ) -> str:
-    """Резолв дефолтного пути PNG для compare в analytics/metrics_comparison."""
+    """Resolve default compare PNG path in analytics/metrics_comparison."""
     out_raw = (out_png_cli or "").strip()
     if os.path.isabs(out_raw):
         return os.path.abspath(out_raw)
@@ -276,12 +276,12 @@ def cmd_compare(args: argparse.Namespace) -> None:
     all_runs = [baseline] + others
     for p in all_runs:
         if not os.path.isdir(p) or not os.path.exists(os.path.join(p, "training_metadata.json")):
-            print(f"[ERROR] Не прогон (нет training_metadata.json): {p}", file=sys.stderr)
+            print(f"[ERROR] Not a run (missing training_metadata.json): {p}", file=sys.stderr)
             sys.exit(1)
 
     base_metrics = _read_test_metrics_row(baseline)
     if not base_metrics:
-        print("[WARN] У базы нет test_metrics*.csv — дельты только по train/results.csv", file=sys.stderr)
+        print("[WARN] Baseline has no test_metrics*.csv; deltas only from train/results.csv", file=sys.stderr)
 
     delta_rows: list[dict[str, Any]] = []
     for other in others:
@@ -302,7 +302,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out_csv)) or ".", exist_ok=True)
     pd.DataFrame(delta_rows).to_csv(args.out_csv, index=False, encoding="utf-8")
-    print(f"[OK] Сравнение метрик (test): {args.out_csv}")
+    print(f"[OK] Test metrics comparison: {args.out_csv}")
 
     metric_col = args.metric_column
     plt.figure(figsize=(12, 7))
@@ -313,14 +313,14 @@ def cmd_compare(args: argparse.Namespace) -> None:
         label = os.path.basename(rd.rstrip(os.sep))[:40]
         labels.append(label)
         if not rc:
-            print(f"[WARN] Нет train/results.csv: {rd}")
+            print(f"[WARN] Missing train/results.csv: {rd}")
             continue
         try:
             df = pd.read_csv(rc)
             df.columns = [str(c).strip() for c in df.columns]
             mcol = metric_col if metric_col in df.columns else pick_map_column(df)
             if mcol is None or "epoch" not in df.columns:
-                print(f"[WARN] Нет колонок epoch / mAP в {rc}")
+                print(f"[WARN] Missing epoch / mAP columns in {rc}")
                 continue
             plt.plot(df["epoch"], df[mcol], label=label, linewidth=2)
             plotted = True
@@ -336,11 +336,11 @@ def cmd_compare(args: argparse.Namespace) -> None:
         plt.tight_layout()
         plt.savefig(out_png, dpi=200)
         plt.close()
-        print(f"[OK] График: {out_png}")
+        print(f"[OK] Plot: {out_png}")
     else:
         plt.close()
 
-    # столбчатый график по последнему mAP из results.csv
+    # Bar chart using last-epoch mAP from results.csv
     last_vals: list[float] = []
     last_labs: list[str] = []
     for rd, lab in zip(all_runs, labels):
@@ -363,13 +363,13 @@ def cmd_compare(args: argparse.Namespace) -> None:
         x = range(len(last_labs))
         plt.bar(x, last_vals, tick_label=last_labs)
         plt.ylabel(metric_col or DEFAULT_MAP_COL)
-        plt.title("Последняя эпоха: сравнение")
+        plt.title("Last Epoch Comparison")
         plt.xticks(rotation=25, ha="right")
         plt.tight_layout()
         bar_path = re.sub(r"\.png$", "_bars.png", out_png)
         plt.savefig(bar_path, dpi=200)
         plt.close()
-        print(f"[OK] Столбчатый график: {bar_path}")
+        print(f"[OK] Bar chart: {bar_path}")
 
     _finalize_compare_analytics_session(
         args, baseline, others, args.out_csv, out_png, bar_path
@@ -379,16 +379,16 @@ def cmd_compare(args: argparse.Namespace) -> None:
 def cmd_interactive(args: argparse.Namespace) -> None:
     runs = find_run_directories(args.models_root)
     if not runs:
-        print("Прогоны не найдены.")
+        print("No runs found.")
         return
     for i, rd in enumerate(runs, start=1):
         print(f"  {i}. {rd}")
     try:
-        bi = int(input("Номер базового прогона (baseline): ").strip())
-        oi = input("Номера остальных через запятую: ").strip()
+        bi = int(input("Baseline run number: ").strip())
+        oi = input("Other run numbers (comma-separated): ").strip()
         idxs = [int(x.strip()) for x in oi.split(",") if x.strip()]
     except ValueError:
-        print("Некорректный ввод.")
+        print("Invalid input.")
         sys.exit(1)
     if bi < 1 or bi > len(runs):
         sys.exit(1)
@@ -398,7 +398,7 @@ def cmd_interactive(args: argparse.Namespace) -> None:
         if 1 <= j <= len(runs) and runs[j - 1] != baseline:
             others.append(runs[j - 1])
     if not others:
-        print("Нет прогонов для сравнения.")
+        print("No runs selected for comparison.")
         sys.exit(1)
     out_dir = args.output_dir or os.getcwd()
     os.makedirs(out_dir, exist_ok=True)
@@ -419,7 +419,7 @@ def cmd_interactive(args: argparse.Namespace) -> None:
 
 
 def _extract_pr_curve_from_metrics(metrics_obj: Any) -> tuple[np.ndarray, np.ndarray] | None:
-    """Пытается получить all-classes PR-кривую из объекта метрик Ultralytics."""
+    """Try to extract all-classes PR curve from Ultralytics metrics object."""
     sources = [metrics_obj, getattr(metrics_obj, "box", None)]
     for src in sources:
         if src is None:
@@ -437,12 +437,12 @@ def _extract_pr_curve_from_metrics(metrics_obj: Any) -> tuple[np.ndarray, np.nda
             title = str(item[4]) if len(item) > 4 else ""
             marker = f"{x_label} {y_label} {title}".lower()
 
-            # Ищем именно PR-кривую (Recall -> Precision).
+            # Keep only PR curve data (Recall -> Precision).
             if "recall" not in marker or "precision" not in marker:
                 continue
 
             if y.ndim >= 2:
-                # Обычно shape: (num_classes, points); усредняем по классам.
+                # Usually shape: (num_classes, points); average across classes.
                 y = np.nanmean(y, axis=0)
             if x.ndim > 1:
                 x = np.ravel(x)
@@ -492,20 +492,20 @@ def _is_workers_pickle_error(exc: Exception) -> bool:
 def cmd_pr_curves(args: argparse.Namespace) -> None:
     runs_group_dir = os.path.abspath(os.path.expanduser(args.runs_group_dir))
     if not os.path.isdir(runs_group_dir):
-        print(f"[ERROR] Не найдена папка с моделями: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] Models directory not found: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
     if not args.data_yaml:
-        print("[ERROR] Укажите --data-yaml (путь к data.yaml для split=test).", file=sys.stderr)
+        print("[ERROR] Please provide --data-yaml (path to data.yaml for split=test).", file=sys.stderr)
         sys.exit(1)
     data_yaml = os.path.abspath(os.path.expanduser(args.data_yaml))
     if not os.path.isfile(data_yaml):
-        print(f"[ERROR] Не найден data.yaml: {data_yaml}", file=sys.stderr)
+        print(f"[ERROR] data.yaml not found: {data_yaml}", file=sys.stderr)
         sys.exit(1)
 
     try:
         from ultralytics import YOLO
     except ImportError as e:
-        print(f"[ERROR] Не удалось импортировать ultralytics: {e}", file=sys.stderr)
+        print(f"[ERROR] Failed to import ultralytics: {e}", file=sys.stderr)
         sys.exit(1)
 
     run_dirs = sorted(
@@ -513,7 +513,7 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
         if os.path.isdir(d)
     )
     if not run_dirs:
-        print(f"[ERROR] В папке нет run-каталогов: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] No run directories found in: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
 
     curves: list[tuple[str, np.ndarray, np.ndarray]] = []
@@ -521,7 +521,7 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
         label = os.path.basename(run_dir.rstrip(os.sep))
         best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
         if not os.path.isfile(best_pt):
-            print(f"[WARN] {label}: нет best.pt, пропуск ({best_pt})")
+            print(f"[WARN] {label}: missing best.pt, skipping ({best_pt})")
             continue
         print(f"[INFO] {label}: val(split=test) ...")
         model = YOLO(best_pt)
@@ -535,7 +535,7 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
             )
         except Exception as e:
             if _is_workers_pickle_error(e):
-                print(f"[WARN] {label}: multiprocessing ошибка val(), повтор с workers=0 ...")
+                print(f"[WARN] {label}: multiprocessing val() error, retrying with workers=0 ...")
                 try:
                     metrics = model.val(
                         data=data_yaml,
@@ -546,15 +546,15 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
                         workers=0,
                     )
                 except Exception as e2:
-                    print(f"[WARN] {label}: ошибка val() даже с workers=0: {e2}")
+                    print(f"[WARN] {label}: val() failed even with workers=0: {e2}")
                     continue
             else:
-                print(f"[WARN] {label}: ошибка val(): {e}")
+                print(f"[WARN] {label}: val() error: {e}")
                 continue
 
         pr = _extract_pr_curve_from_metrics(metrics)
         if pr is None:
-            print(f"[WARN] {label}: PR-кривая недоступна в объекте метрик, пропуск")
+            print(f"[WARN] {label}: PR curve not available in metrics object, skipping")
             continue
         recall, precision = pr
         curves.append((label, recall, precision))
@@ -565,10 +565,10 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
         pd.DataFrame({"recall": recall, "precision": precision}).to_csv(
             pr_csv, index=False, encoding="utf-8"
         )
-        print(f"[OK] {label}: сохранено {pr_csv}")
+        print(f"[OK] {label}: saved {pr_csv}")
 
     if not curves:
-        print("[ERROR] Не удалось получить ни одной PR-кривой.", file=sys.stderr)
+        print("[ERROR] Failed to obtain any PR curves.", file=sys.stderr)
         sys.exit(1)
 
     out_png = _resolve_pr_output_png(args.workspace, args.out_png, runs_group_dir)
@@ -585,22 +585,22 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
     plt.tight_layout()
     plt.savefig(out_png, dpi=220)
     plt.close()
-    print(f"[OK] Общий график PR: {out_png}")
+    print(f"[OK] Combined PR plot: {out_png}")
 
 
 def _collect_split_images(data_yaml_path: str, split_name: str, limit: int) -> list[str]:
     with open(data_yaml_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
-        raise ValueError(f"Некорректный YAML: {data_yaml_path}")
+        raise ValueError(f"Invalid YAML: {data_yaml_path}")
     split_rel = data.get(split_name)
     if not split_rel or not isinstance(split_rel, str):
-        raise ValueError(f"В data.yaml нет пути для split={split_name!r}")
+        raise ValueError(f"data.yaml has no path for split={split_name!r}")
 
     base_dir = os.path.dirname(os.path.abspath(data_yaml_path))
     split_path = os.path.abspath(os.path.join(base_dir, split_rel))
     if not os.path.isdir(split_path):
-        raise FileNotFoundError(f"Каталог split не найден: {split_path}")
+        raise FileNotFoundError(f"Split directory not found: {split_path}")
 
     exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
     images = sorted(
@@ -630,17 +630,17 @@ def _resolve_inference_csv_path(
 def cmd_inference_benchmark(args: argparse.Namespace) -> None:
     runs_group_dir = os.path.abspath(os.path.expanduser(args.runs_group_dir))
     if not os.path.isdir(runs_group_dir):
-        print(f"[ERROR] Не найдена папка с моделями: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] Models directory not found: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
     data_yaml = os.path.abspath(os.path.expanduser(args.data_yaml))
     if not os.path.isfile(data_yaml):
-        print(f"[ERROR] Не найден data.yaml: {data_yaml}", file=sys.stderr)
+        print(f"[ERROR] data.yaml not found: {data_yaml}", file=sys.stderr)
         sys.exit(1)
 
     try:
         from ultralytics import YOLO
     except ImportError as e:
-        print(f"[ERROR] Не удалось импортировать ultralytics: {e}", file=sys.stderr)
+        print(f"[ERROR] Failed to import ultralytics: {e}", file=sys.stderr)
         sys.exit(1)
 
     requested_device = str(args.device).strip() if args.device is not None else "cpu"
@@ -652,29 +652,29 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
 
             if not torch.cuda.is_available():
                 print(
-                    f"[WARN] CUDA недоступна (torch.cuda.is_available()=False). "
-                    f"Переключаюсь с device={effective_device!r} на 'cpu'."
+                    f"[WARN] CUDA is unavailable (torch.cuda.is_available()=False). "
+                    f"Switching device from {effective_device!r} to 'cpu'."
                 )
                 effective_device = "cpu"
         except Exception as e:
-            print(f"[WARN] Не удалось проверить CUDA через torch ({e}); используем CPU.")
+            print(f"[WARN] Could not validate CUDA via torch ({e}); using CPU.")
             effective_device = "cpu"
     if effective_device.lower() == "cpu" and effective_half:
-        print("[WARN] --half на CPU не используется; отключаю half.")
+        print("[WARN] --half is not used on CPU; disabling half.")
         effective_half = False
 
     try:
         images = _collect_split_images(data_yaml, args.split, args.frames)
     except Exception as e:
-        print(f"[ERROR] Не удалось получить кадры для теста: {e}", file=sys.stderr)
+        print(f"[ERROR] Failed to load test frames: {e}", file=sys.stderr)
         sys.exit(1)
     if not images:
-        print("[ERROR] Не найдено изображений для инференса.", file=sys.stderr)
+        print("[ERROR] No images found for inference.", file=sys.stderr)
         sys.exit(1)
 
     run_dirs = sorted(d for d in glob(os.path.join(runs_group_dir, "*")) if os.path.isdir(d))
     if not run_dirs:
-        print(f"[ERROR] В папке нет run-каталогов: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] No run directories found in: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
 
     rows: list[dict[str, Any]] = []
@@ -682,12 +682,12 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
         model_name = os.path.basename(run_dir.rstrip(os.sep))
         best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
         if not os.path.isfile(best_pt):
-            print(f"[WARN] {model_name}: нет best.pt, пропуск")
+            print(f"[WARN] {model_name}: missing best.pt, skipping")
             continue
-        print(f"[INFO] {model_name}: benchmark по {len(images)} кадрам ...")
+        print(f"[INFO] {model_name}: benchmarking on {len(images)} frames ...")
         try:
             model = YOLO(best_pt)
-            # Легкий прогрев, чтобы уменьшить перекос на первой итерации.
+            # Warm-up to reduce first-iteration skew.
             model.predict(
                 source=images[0],
                 verbose=False,
@@ -748,10 +748,10 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
             else:
                 print(f"[OK] {model_name}: total={avg_ms:.2f} ms/frame")
         except Exception as e:
-            print(f"[WARN] {model_name}: ошибка benchmark: {e}")
+            print(f"[WARN] {model_name}: benchmark error: {e}")
 
     if not rows:
-        print("[ERROR] Нет результатов benchmark.", file=sys.stderr)
+        print("[ERROR] No benchmark results produced.", file=sys.stderr)
         sys.exit(1)
 
     out_csv = _resolve_inference_csv_path(args.workspace, args.out_csv, runs_group_dir)
@@ -762,7 +762,7 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
     pd.DataFrame(rows).sort_values(sort_col).to_csv(
         out_csv, index=False, encoding="utf-8"
     )
-    print(f"[OK] CSV с результатами: {out_csv}")
+    print(f"[OK] Results CSV: {out_csv}")
 
 
 def _resolve_inference_plot_png(
@@ -785,21 +785,21 @@ def _resolve_inference_plot_png(
 def cmd_inference_plot(args: argparse.Namespace) -> None:
     csv_path = os.path.abspath(os.path.expanduser(args.csv))
     if not os.path.isfile(csv_path):
-        print(f"[ERROR] CSV не найден: {csv_path}", file=sys.stderr)
+        print(f"[ERROR] CSV not found: {csv_path}", file=sys.stderr)
         sys.exit(1)
 
     df = pd.read_csv(csv_path)
     if len(df) == 0:
-        print(f"[ERROR] CSV пустой: {csv_path}", file=sys.stderr)
+        print(f"[ERROR] CSV is empty: {csv_path}", file=sys.stderr)
         sys.exit(1)
     if "model" not in df.columns:
-        print("[ERROR] В CSV нет колонки 'model'.", file=sys.stderr)
+        print("[ERROR] CSV has no 'model' column.", file=sys.stderr)
         sys.exit(1)
     metric = args.metric
     if metric not in df.columns:
         print(
-            f"[ERROR] В CSV нет колонки {metric!r}. "
-            f"Доступно: {', '.join(df.columns)}",
+            f"[ERROR] CSV has no column {metric!r}. "
+            f"Available: {', '.join(df.columns)}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -808,10 +808,10 @@ def cmd_inference_plot(args: argparse.Namespace) -> None:
     plot_df[metric] = pd.to_numeric(plot_df[metric], errors="coerce")
     plot_df = plot_df.dropna(subset=[metric])
     if len(plot_df) == 0:
-        print(f"[ERROR] Нет числовых значений в колонке {metric!r}.", file=sys.stderr)
+        print(f"[ERROR] No numeric values in column {metric!r}.", file=sys.stderr)
         sys.exit(1)
 
-    # Для ms лучше меньше, для fps — больше.
+    # For ms lower is better, for fps higher is better.
     ascending = "fps" not in metric.lower()
     plot_df = plot_df.sort_values(metric, ascending=ascending)
 
@@ -827,7 +827,7 @@ def cmd_inference_plot(args: argparse.Namespace) -> None:
     plt.title(f"Inference benchmark")
     plt.grid(True, axis="y", linestyle="--", alpha=0.6)
 
-    # Подписи значений над столбцами.
+    # Numeric labels above bars.
     ymax = max(vals) if vals else 0.0
     y_pad = ymax * 0.015 if ymax > 0 else 0.01
     for bar, v in zip(bars, vals):
@@ -846,7 +846,7 @@ def cmd_inference_plot(args: argparse.Namespace) -> None:
     plt.tight_layout()
     plt.savefig(out_png, dpi=220)
     plt.close()
-    print(f"[OK] Столбчатая диаграмма: {out_png}")
+    print(f"[OK] Bar chart: {out_png}")
 
 
 def _resolve_test_metrics_plot_png(
@@ -878,12 +878,12 @@ def _resolve_test_metrics_plot_png(
 def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
     runs_group_dir = os.path.abspath(os.path.expanduser(args.runs_group_dir))
     if not os.path.isdir(runs_group_dir):
-        print(f"[ERROR] Не найдена папка с моделями: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] Models directory not found: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
 
     run_dirs = sorted(d for d in glob(os.path.join(runs_group_dir, "*")) if os.path.isdir(d))
     if not run_dirs:
-        print(f"[ERROR] В папке нет run-каталогов: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] No run directories found in: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
 
     rows: list[dict[str, Any]] = []
@@ -891,36 +891,36 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
         model_name = os.path.basename(run_dir.rstrip(os.sep))
         tm = latest_test_metrics_path(run_dir)
         if not tm:
-            print(f"[WARN] {model_name}: нет test_metrics*.csv, пропуск")
+            print(f"[WARN] {model_name}: missing test_metrics*.csv, skipping")
             continue
         try:
             df = pd.read_csv(tm)
             df.columns = [str(c).strip() for c in df.columns]
             if len(df) == 0:
-                print(f"[WARN] {model_name}: пустой CSV {tm}, пропуск")
+                print(f"[WARN] {model_name}: empty CSV {tm}, skipping")
                 continue
             row = {"model": model_name, "run_dir": run_dir}
             row.update(df.iloc[0].to_dict())
             rows.append(row)
         except Exception as e:
-            print(f"[WARN] {model_name}: ошибка чтения {tm}: {e}")
+            print(f"[WARN] {model_name}: failed to read {tm}: {e}")
 
     if not rows:
-        print("[ERROR] Нет данных test_metrics для построения графика.", file=sys.stderr)
+        print("[ERROR] No test_metrics data available for plotting.", file=sys.stderr)
         sys.exit(1)
 
     all_df = pd.DataFrame(rows)
     requested_metrics = [m.strip() for m in args.metrics if m.strip()]
     if not requested_metrics:
-        print("[ERROR] Список --metrics пуст.", file=sys.stderr)
+        print("[ERROR] --metrics list is empty.", file=sys.stderr)
         sys.exit(1)
 
     missing = [m for m in requested_metrics if m not in all_df.columns]
     if missing:
         print(
-            "[ERROR] В test_metrics не найдены колонки: "
+            "[ERROR] Missing columns in test_metrics: "
             + ", ".join(missing)
-            + f". Доступно: {', '.join(all_df.columns)}",
+            + f". Available: {', '.join(all_df.columns)}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -930,7 +930,7 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
         plot_df[metric] = pd.to_numeric(plot_df[metric], errors="coerce")
         plot_df = plot_df.dropna(subset=[metric])
         if len(plot_df) == 0:
-            print(f"[WARN] Метрика {metric!r}: нет числовых значений, пропуск")
+            print(f"[WARN] Metric {metric!r}: no numeric values, skipping")
             continue
 
         plot_df = plot_df.sort_values(metric, ascending=False)
@@ -964,7 +964,7 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
         plt.tight_layout()
         plt.savefig(out_png, dpi=220)
         plt.close()
-        print(f"[OK] Гистограмма test-metrics ({metric}): {out_png}")
+        print(f"[OK] Test-metrics chart ({metric}): {out_png}")
 
 def build_analyze_arg_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
@@ -972,43 +972,43 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         "--workspace",
         type=str,
         default=None,
-        help=f"Корень workspace (иначе {WORKSPACE_ENV_VAR}) для корня прогонов по умолчанию",
+        help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR}) used for default runs root",
     )
     common.add_argument(
         "--models-root",
         type=str,
         default=None,
-        help="Явный корень поиска каталогов с training_metadata.json",
+        help="Explicit root directory to scan for run folders with training_metadata.json",
     )
     common.add_argument(
         "--analytics-session",
         type=str,
         default=None,
-        help="Подкаталог workspace/analytics/: артефакты и session.json (export-table, compare, interactive)",
+        help="Subdirectory in workspace/analytics for artifacts and session.json (export-table, compare, interactive)",
     )
 
-    parser = CliArgumentParser(description="Анализ результатов обучения YOLO (Ultralytics)")
+    parser = CliArgumentParser(description="YOLO training runs analysis (Ultralytics)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_scan = sub.add_parser("scan", parents=[common], help="Список прогонов")
+    p_scan = sub.add_parser("scan", parents=[common], help="List detected runs")
     p_scan.set_defaults(func=cmd_scan)
 
-    p_exp = sub.add_parser("export-table", parents=[common], help="Сводный CSV по всем прогонам")
+    p_exp = sub.add_parser("export-table", parents=[common], help="Export summary CSV for all runs")
     p_exp.add_argument("-o", "--output", type=str, default="runs_summary.csv")
     p_exp.set_defaults(func=cmd_export_table)
 
     p_cmp = sub.add_parser(
         "compare",
         parents=[common],
-        help="Сравнение базового прогона с другими (CSV + графики)",
+        help="Compare baseline run with others (CSV + plots)",
     )
-    p_cmp.add_argument("--baseline", type=str, required=True, help="Каталог прогона (baseline)")
+    p_cmp.add_argument("--baseline", type=str, required=True, help="Baseline run directory")
     p_cmp.add_argument(
         "--others",
         type=str,
         nargs="+",
         required=True,
-        help="Один или несколько каталогов прогонов для сравнения",
+        help="One or more run directories to compare with baseline",
     )
     p_cmp.add_argument("-o", "--out-csv", type=str, default="compare_delta.csv")
     p_cmp.add_argument("--out-png", type=str, default="compare_curves.png")
@@ -1016,20 +1016,20 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         "--metric-column",
         type=str,
         default=DEFAULT_MAP_COL,
-        help="Колонка из train/results.csv для графика",
+        help="Metric column from train/results.csv used for line chart",
     )
     p_cmp.set_defaults(func=cmd_compare)
 
     p_int = sub.add_parser(
         "interactive",
         parents=[common],
-        help="Интерактивный выбор прогонов в терминале",
+        help="Interactive terminal selection of runs",
     )
     p_int.add_argument(
         "--output-dir",
         type=str,
         default=None,
-        help="Куда сохранить compare_*.csv/png",
+        help="Output directory for compare_*.csv/png",
     )
     p_int.add_argument("--metric-column", type=str, default=DEFAULT_MAP_COL)
     p_int.set_defaults(func=cmd_interactive)
@@ -1037,94 +1037,94 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
     p_pr = sub.add_parser(
         "pr-curves",
         parents=[common],
-        help="Повторный test-val для всех моделей в папке + pr.csv по run + общий PR-график",
+        help="Run test val for all models in folder, save per-run pr.csv, and build combined PR plot",
     )
     p_pr.add_argument(
         "--runs-group-dir",
         type=str,
         required=True,
-        help="Папка вида runs/<dataset_name>/, внутри которой лежат каталоги моделей.",
+        help="Directory like runs/<dataset_name>/ containing model run folders",
     )
     p_pr.add_argument(
         "--data-yaml",
         type=str,
         required=True,
-        help="Путь к data.yaml датасета для split=test.",
+        help="Path to dataset data.yaml for split=test",
     )
     p_pr.add_argument(
         "--out-png",
         type=str,
         default=None,
-        help="Куда сохранить общий график. По умолчанию: workspace/analytics/pr_all_classes_<dataset>.png",
+        help="Output PNG path for combined PR plot (default: workspace/analytics/pr_curves/pr_all_classes_<dataset>.png)",
     )
     p_pr.set_defaults(func=cmd_pr_curves)
 
     p_inf = sub.add_parser(
         "inference-benchmark",
         parents=[common],
-        help="Тест скорости инференса всех моделей в папке runs/<dataset>/ (среднее на N кадрах)",
+        help="Benchmark inference speed for all models in runs/<dataset>/ (average over N frames)",
     )
     p_inf.add_argument(
         "--runs-group-dir",
         type=str,
         required=True,
-        help="Папка вида runs/<dataset_name>/, внутри которой лежат каталоги моделей.",
+        help="Directory like runs/<dataset_name>/ containing model run folders",
     )
     p_inf.add_argument(
         "--data-yaml",
         type=str,
         required=True,
-        help="Путь к data.yaml датасета.",
+        help="Path to dataset data.yaml",
     )
     p_inf.add_argument(
         "--split",
         type=str,
         default="test",
         choices=("train", "val", "test"),
-        help="Какой split использовать для кадров benchmark.",
+        help="Dataset split used for benchmark frames",
     )
     p_inf.add_argument(
         "--frames",
         type=int,
         default=100,
-        help="Сколько кадров использовать для расчета среднего времени.",
+        help="Number of frames used to compute average latency",
     )
     p_inf.add_argument(
         "--device",
         type=str,
         default="0",
-        help="Устройство для инференса (например: cpu, 0, 0,1).",
+        help="Inference device (e.g. cpu, 0, 0,1)",
     )
     p_inf.add_argument(
         "--half",
         action="store_true",
-        help="FP16 инференс (актуально в основном для GPU).",
+        help="Enable FP16 inference (mainly useful on GPU)",
     )
     p_inf.add_argument(
         "--out-csv",
         type=str,
         default=None,
-        help="Куда сохранить CSV. По умолчанию: workspace/analytics/inference_tests/<dataset>.csv",
+        help="Output CSV path (default: workspace/analytics/inference_tests/<dataset>.csv)",
     )
     p_inf.set_defaults(func=cmd_inference_benchmark)
 
     p_inf_plot = sub.add_parser(
         "inference-plot",
         parents=[common],
-        help="Построить столбчатую диаграмму по CSV бенчмарка инференса",
+        help="Build bar chart from inference benchmark CSV",
     )
     p_inf_plot.add_argument(
         "--csv",
         type=str,
         required=True,
-        help="Путь к CSV, созданному analyze inference-benchmark.",
+        help="Path to CSV generated by analyze inference-benchmark",
     )
     p_inf_plot.add_argument(
         "--metric",
         type=str,
         default="avg_inference_ms_per_frame",
         help=(
-            "Колонка для диаграммы, например: avg_inference_ms_per_frame, "
+            "Column to plot, e.g.: avg_inference_ms_per_frame, "
             "avg_total_ms_per_frame, avg_total_fps, avg_inference_fps."
         ),
     )
@@ -1132,20 +1132,20 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         "--out-png",
         type=str,
         default=None,
-        help="Куда сохранить PNG. По умолчанию: analytics/inference_tests/<csv_name>_bars.png",
+        help="Output PNG path (default: analytics/inference_tests/<csv_name>_bars.png)",
     )
     p_inf_plot.set_defaults(func=cmd_inference_plot)
 
     p_tm_plot = sub.add_parser(
         "test-metrics-plot",
         parents=[common],
-        help="Построить гистограммы по test_metrics.csv для моделей в папке runs/<dataset>/",
+        help="Build charts from test_metrics.csv for models in runs/<dataset>/",
     )
     p_tm_plot.add_argument(
         "--runs-group-dir",
         type=str,
         required=True,
-        help="Папка вида runs/<dataset_name>/, внутри которой лежат каталоги моделей.",
+        help="Directory like runs/<dataset_name>/ containing model run folders",
     )
     p_tm_plot.add_argument(
         "--metrics",
@@ -1153,7 +1153,7 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         nargs="+",
         required=True,
         help=(
-            "Одна или несколько метрик из test_metrics.csv, например: "
+            "One or more metrics from test_metrics.csv, e.g.: "
             "mAP50 mAP50-95 Box-P Box-R Box-F1"
         ),
     )
@@ -1161,7 +1161,7 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         "--out-dir",
         type=str,
         default=None,
-        help="Куда сохранять PNG. По умолчанию: analytics/metrics_comparison",
+        help="Directory to save PNG files (default: analytics/metrics_comparison)",
     )
     p_tm_plot.set_defaults(func=cmd_test_metrics_plot)
 
