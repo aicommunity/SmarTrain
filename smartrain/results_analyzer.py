@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from glob import glob
 from typing import Any
 
@@ -17,7 +18,9 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import yaml
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
@@ -396,6 +399,406 @@ def cmd_interactive(args: argparse.Namespace) -> None:
     cmd_compare(ns)
 
 
+def _extract_pr_curve_from_metrics(metrics_obj: Any) -> tuple[np.ndarray, np.ndarray] | None:
+    """Пытается получить all-classes PR-кривую из объекта метрик Ultralytics."""
+    sources = [metrics_obj, getattr(metrics_obj, "box", None)]
+    for src in sources:
+        if src is None:
+            continue
+        curves = getattr(src, "curves_results", None)
+        if not curves:
+            continue
+        for item in curves:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            x = np.asarray(item[0], dtype=float)
+            y = np.asarray(item[1], dtype=float)
+            x_label = str(item[2]) if len(item) > 2 else ""
+            y_label = str(item[3]) if len(item) > 3 else ""
+            title = str(item[4]) if len(item) > 4 else ""
+            marker = f"{x_label} {y_label} {title}".lower()
+
+            # Ищем именно PR-кривую (Recall -> Precision).
+            if "recall" not in marker or "precision" not in marker:
+                continue
+
+            if y.ndim >= 2:
+                # Обычно shape: (num_classes, points); усредняем по классам.
+                y = np.nanmean(y, axis=0)
+            if x.ndim > 1:
+                x = np.ravel(x)
+            if y.ndim > 1:
+                y = np.ravel(y)
+
+            n = min(len(x), len(y))
+            if n == 0:
+                continue
+            return x[:n], y[:n]
+    return None
+
+
+def _resolve_pr_output_png(
+    workspace_cli: str | None,
+    out_png_cli: str | None,
+    runs_group_dir: str,
+) -> str:
+    if out_png_cli:
+        return os.path.abspath(os.path.expanduser(out_png_cli))
+    try:
+        ws = resolve_workspace_root(workspace_cli)
+        analytics_dir = WorkspaceLayout(ws).analytics
+    except ValueError:
+        analytics_dir = os.path.join(os.path.dirname(os.path.abspath(runs_group_dir)), "analytics")
+    os.makedirs(analytics_dir, exist_ok=True)
+    ds_name = os.path.basename(os.path.normpath(runs_group_dir))
+    return os.path.join(analytics_dir, f"pr_all_classes_{ds_name}.png")
+
+
+def cmd_pr_curves(args: argparse.Namespace) -> None:
+    runs_group_dir = os.path.abspath(os.path.expanduser(args.runs_group_dir))
+    if not os.path.isdir(runs_group_dir):
+        print(f"[ERROR] Не найдена папка с моделями: {runs_group_dir}", file=sys.stderr)
+        sys.exit(1)
+    if not args.data_yaml:
+        print("[ERROR] Укажите --data-yaml (путь к data.yaml для split=test).", file=sys.stderr)
+        sys.exit(1)
+    data_yaml = os.path.abspath(os.path.expanduser(args.data_yaml))
+    if not os.path.isfile(data_yaml):
+        print(f"[ERROR] Не найден data.yaml: {data_yaml}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        from ultralytics import YOLO
+    except ImportError as e:
+        print(f"[ERROR] Не удалось импортировать ultralytics: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    run_dirs = sorted(
+        d for d in glob(os.path.join(runs_group_dir, "*"))
+        if os.path.isdir(d)
+    )
+    if not run_dirs:
+        print(f"[ERROR] В папке нет run-каталогов: {runs_group_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    curves: list[tuple[str, np.ndarray, np.ndarray]] = []
+    for run_dir in run_dirs:
+        label = os.path.basename(run_dir.rstrip(os.sep))
+        best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+        if not os.path.isfile(best_pt):
+            print(f"[WARN] {label}: нет best.pt, пропуск ({best_pt})")
+            continue
+        print(f"[INFO] {label}: val(split=test) ...")
+        model = YOLO(best_pt)
+        try:
+            metrics = model.val(
+                data=data_yaml,
+                split="test",
+                plots=False,
+                save=False,
+                verbose=False,
+            )
+        except Exception as e:
+            print(f"[WARN] {label}: ошибка val(): {e}")
+            continue
+
+        pr = _extract_pr_curve_from_metrics(metrics)
+        if pr is None:
+            print(f"[WARN] {label}: PR-кривая недоступна в объекте метрик, пропуск")
+            continue
+        recall, precision = pr
+        curves.append((label, recall, precision))
+
+        pr_dir = os.path.join(run_dir, "test")
+        os.makedirs(pr_dir, exist_ok=True)
+        pr_csv = os.path.join(pr_dir, "pr.csv")
+        pd.DataFrame({"recall": recall, "precision": precision}).to_csv(
+            pr_csv, index=False, encoding="utf-8"
+        )
+        print(f"[OK] {label}: сохранено {pr_csv}")
+
+    if not curves:
+        print("[ERROR] Не удалось получить ни одной PR-кривой.", file=sys.stderr)
+        sys.exit(1)
+
+    out_png = _resolve_pr_output_png(args.workspace, args.out_png, runs_group_dir)
+    os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)
+
+    plt.figure(figsize=(10, 7))
+    for label, recall, precision in curves:
+        plt.plot(recall, precision, linewidth=2, label=label)
+    plt.title("PR curves (all classes, test split)")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend(title="Model", fontsize=9)
+    plt.tight_layout()
+    plt.savefig(out_png, dpi=220)
+    plt.close()
+    print(f"[OK] Общий график PR: {out_png}")
+
+
+def _collect_split_images(data_yaml_path: str, split_name: str, limit: int) -> list[str]:
+    with open(data_yaml_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"Некорректный YAML: {data_yaml_path}")
+    split_rel = data.get(split_name)
+    if not split_rel or not isinstance(split_rel, str):
+        raise ValueError(f"В data.yaml нет пути для split={split_name!r}")
+
+    base_dir = os.path.dirname(os.path.abspath(data_yaml_path))
+    split_path = os.path.abspath(os.path.join(base_dir, split_rel))
+    if not os.path.isdir(split_path):
+        raise FileNotFoundError(f"Каталог split не найден: {split_path}")
+
+    exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+    images = sorted(
+        p for p in glob(os.path.join(split_path, "**", "*"), recursive=True)
+        if os.path.isfile(p) and p.lower().endswith(exts)
+    )
+    return images[:limit]
+
+
+def _resolve_inference_csv_path(
+    workspace_cli: str | None,
+    out_csv_cli: str | None,
+    runs_group_dir: str,
+) -> str:
+    if out_csv_cli:
+        return os.path.abspath(os.path.expanduser(out_csv_cli))
+    try:
+        ws = resolve_workspace_root(workspace_cli)
+        base = os.path.join(WorkspaceLayout(ws).analytics, "inference_tests")
+    except ValueError:
+        base = os.path.join(os.path.dirname(os.path.abspath(runs_group_dir)), "analytics", "inference_tests")
+    os.makedirs(base, exist_ok=True)
+    group_name = os.path.basename(os.path.normpath(runs_group_dir))
+    return os.path.join(base, f"{group_name}.csv")
+
+
+def cmd_inference_benchmark(args: argparse.Namespace) -> None:
+    runs_group_dir = os.path.abspath(os.path.expanduser(args.runs_group_dir))
+    if not os.path.isdir(runs_group_dir):
+        print(f"[ERROR] Не найдена папка с моделями: {runs_group_dir}", file=sys.stderr)
+        sys.exit(1)
+    data_yaml = os.path.abspath(os.path.expanduser(args.data_yaml))
+    if not os.path.isfile(data_yaml):
+        print(f"[ERROR] Не найден data.yaml: {data_yaml}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        from ultralytics import YOLO
+    except ImportError as e:
+        print(f"[ERROR] Не удалось импортировать ultralytics: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    requested_device = str(args.device).strip() if args.device is not None else "cpu"
+    effective_device = requested_device or "cpu"
+    effective_half = bool(args.half)
+    if effective_device.lower() != "cpu":
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                print(
+                    f"[WARN] CUDA недоступна (torch.cuda.is_available()=False). "
+                    f"Переключаюсь с device={effective_device!r} на 'cpu'."
+                )
+                effective_device = "cpu"
+        except Exception as e:
+            print(f"[WARN] Не удалось проверить CUDA через torch ({e}); используем CPU.")
+            effective_device = "cpu"
+    if effective_device.lower() == "cpu" and effective_half:
+        print("[WARN] --half на CPU не используется; отключаю half.")
+        effective_half = False
+
+    try:
+        images = _collect_split_images(data_yaml, args.split, args.frames)
+    except Exception as e:
+        print(f"[ERROR] Не удалось получить кадры для теста: {e}", file=sys.stderr)
+        sys.exit(1)
+    if not images:
+        print("[ERROR] Не найдено изображений для инференса.", file=sys.stderr)
+        sys.exit(1)
+
+    run_dirs = sorted(d for d in glob(os.path.join(runs_group_dir, "*")) if os.path.isdir(d))
+    if not run_dirs:
+        print(f"[ERROR] В папке нет run-каталогов: {runs_group_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    rows: list[dict[str, Any]] = []
+    for run_dir in run_dirs:
+        model_name = os.path.basename(run_dir.rstrip(os.sep))
+        best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+        if not os.path.isfile(best_pt):
+            print(f"[WARN] {model_name}: нет best.pt, пропуск")
+            continue
+        print(f"[INFO] {model_name}: benchmark по {len(images)} кадрам ...")
+        try:
+            model = YOLO(best_pt)
+            # Легкий прогрев, чтобы уменьшить перекос на первой итерации.
+            model.predict(
+                source=images[0],
+                verbose=False,
+                device=effective_device,
+                half=effective_half,
+            )
+            timings_ms: list[float] = []
+            prep_ms: list[float] = []
+            infer_ms: list[float] = []
+            post_ms: list[float] = []
+            for img_path in images:
+                t0 = time.perf_counter()
+                results = model.predict(
+                    source=img_path,
+                    verbose=False,
+                    device=effective_device,
+                    half=effective_half,
+                )
+                t1 = time.perf_counter()
+                timings_ms.append((t1 - t0) * 1000.0)
+                if results:
+                    speed = getattr(results[0], "speed", None)
+                    if isinstance(speed, dict):
+                        p = speed.get("preprocess")
+                        i = speed.get("inference")
+                        po = speed.get("postprocess")
+                        if p is not None:
+                            prep_ms.append(float(p))
+                        if i is not None:
+                            infer_ms.append(float(i))
+                        if po is not None:
+                            post_ms.append(float(po))
+            avg_ms = float(np.mean(timings_ms))
+            avg_prep = float(np.mean(prep_ms)) if prep_ms else None
+            avg_infer = float(np.mean(infer_ms)) if infer_ms else None
+            avg_post = float(np.mean(post_ms)) if post_ms else None
+            rows.append(
+                {
+                    "model": model_name,
+                    "run_dir": run_dir,
+                    "weights": best_pt,
+                    "frames_count": len(images),
+                    "device": effective_device,
+                    "half": effective_half,
+                    "avg_total_ms_per_frame": avg_ms,
+                    "avg_preprocess_ms_per_frame": avg_prep,
+                    "avg_inference_ms_per_frame": avg_infer,
+                    "avg_postprocess_ms_per_frame": avg_post,
+                    "avg_total_fps": (1000.0 / avg_ms) if avg_ms > 0 else None,
+                    "avg_inference_fps": (1000.0 / avg_infer) if avg_infer and avg_infer > 0 else None,
+                }
+            )
+            if avg_infer is not None:
+                print(
+                    f"[OK] {model_name}: total={avg_ms:.2f} ms/frame, "
+                    f"infer={avg_infer:.2f} ms/frame"
+                )
+            else:
+                print(f"[OK] {model_name}: total={avg_ms:.2f} ms/frame")
+        except Exception as e:
+            print(f"[WARN] {model_name}: ошибка benchmark: {e}")
+
+    if not rows:
+        print("[ERROR] Нет результатов benchmark.", file=sys.stderr)
+        sys.exit(1)
+
+    out_csv = _resolve_inference_csv_path(args.workspace, args.out_csv, runs_group_dir)
+    os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
+    sort_col = "avg_inference_ms_per_frame" if any(
+        r.get("avg_inference_ms_per_frame") is not None for r in rows
+    ) else "avg_total_ms_per_frame"
+    pd.DataFrame(rows).sort_values(sort_col).to_csv(
+        out_csv, index=False, encoding="utf-8"
+    )
+    print(f"[OK] CSV с результатами: {out_csv}")
+
+
+def _resolve_inference_plot_png(
+    workspace_cli: str | None,
+    out_png_cli: str | None,
+    csv_path: str,
+) -> str:
+    if out_png_cli:
+        return os.path.abspath(os.path.expanduser(out_png_cli))
+    csv_name = os.path.splitext(os.path.basename(csv_path))[0]
+    try:
+        ws = resolve_workspace_root(workspace_cli)
+        base = os.path.join(WorkspaceLayout(ws).analytics, "inference_tests")
+    except ValueError:
+        base = os.path.dirname(os.path.abspath(csv_path))
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, f"{csv_name}_bars.png")
+
+
+def cmd_inference_plot(args: argparse.Namespace) -> None:
+    csv_path = os.path.abspath(os.path.expanduser(args.csv))
+    if not os.path.isfile(csv_path):
+        print(f"[ERROR] CSV не найден: {csv_path}", file=sys.stderr)
+        sys.exit(1)
+
+    df = pd.read_csv(csv_path)
+    if len(df) == 0:
+        print(f"[ERROR] CSV пустой: {csv_path}", file=sys.stderr)
+        sys.exit(1)
+    if "model" not in df.columns:
+        print("[ERROR] В CSV нет колонки 'model'.", file=sys.stderr)
+        sys.exit(1)
+    metric = args.metric
+    if metric not in df.columns:
+        print(
+            f"[ERROR] В CSV нет колонки {metric!r}. "
+            f"Доступно: {', '.join(df.columns)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    plot_df = df[["model", metric]].copy()
+    plot_df[metric] = pd.to_numeric(plot_df[metric], errors="coerce")
+    plot_df = plot_df.dropna(subset=[metric])
+    if len(plot_df) == 0:
+        print(f"[ERROR] Нет числовых значений в колонке {metric!r}.", file=sys.stderr)
+        sys.exit(1)
+
+    # Для ms лучше меньше, для fps — больше.
+    ascending = "fps" not in metric.lower()
+    plot_df = plot_df.sort_values(metric, ascending=ascending)
+
+    out_png = _resolve_inference_plot_png(args.workspace, args.out_png, csv_path)
+    os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)
+
+    plt.figure(figsize=(10, 6))
+    x = range(len(plot_df))
+    vals = plot_df[metric].tolist()
+    bars = plt.bar(x, vals, tick_label=plot_df["model"].tolist())
+    plt.xticks(rotation=25, ha="right")
+    plt.ylabel(metric)
+    plt.title(f"Inference benchmark: {metric}")
+    plt.grid(True, axis="y", linestyle="--", alpha=0.6)
+
+    # Подписи значений над столбцами.
+    ymax = max(vals) if vals else 0.0
+    y_pad = ymax * 0.015 if ymax > 0 else 0.01
+    for bar, v in zip(bars, vals):
+        x_text = bar.get_x() + bar.get_width() / 2.0
+        y_text = bar.get_height()
+        plt.text(
+            x_text,
+            y_text + y_pad,
+            f"{float(v):.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            rotation=0,
+        )
+
+    plt.tight_layout()
+    plt.savefig(out_png, dpi=220)
+    plt.close()
+    print(f"[OK] Столбчатая диаграмма: {out_png}")
+
+
 def build_analyze_arg_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
@@ -463,6 +866,108 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
     )
     p_int.add_argument("--metric-column", type=str, default=DEFAULT_MAP_COL)
     p_int.set_defaults(func=cmd_interactive)
+
+    p_pr = sub.add_parser(
+        "pr-curves",
+        parents=[common],
+        help="Повторный test-val для всех моделей в папке + pr.csv по run + общий PR-график",
+    )
+    p_pr.add_argument(
+        "--runs-group-dir",
+        type=str,
+        required=True,
+        help="Папка вида runs/<dataset_name>/, внутри которой лежат каталоги моделей.",
+    )
+    p_pr.add_argument(
+        "--data-yaml",
+        type=str,
+        required=True,
+        help="Путь к data.yaml датасета для split=test.",
+    )
+    p_pr.add_argument(
+        "--out-png",
+        type=str,
+        default=None,
+        help="Куда сохранить общий график. По умолчанию: workspace/analytics/pr_all_classes_<dataset>.png",
+    )
+    p_pr.set_defaults(func=cmd_pr_curves)
+
+    p_inf = sub.add_parser(
+        "inference-benchmark",
+        parents=[common],
+        help="Тест скорости инференса всех моделей в папке runs/<dataset>/ (среднее на N кадрах)",
+    )
+    p_inf.add_argument(
+        "--runs-group-dir",
+        type=str,
+        required=True,
+        help="Папка вида runs/<dataset_name>/, внутри которой лежат каталоги моделей.",
+    )
+    p_inf.add_argument(
+        "--data-yaml",
+        type=str,
+        required=True,
+        help="Путь к data.yaml датасета.",
+    )
+    p_inf.add_argument(
+        "--split",
+        type=str,
+        default="test",
+        choices=("train", "val", "test"),
+        help="Какой split использовать для кадров benchmark.",
+    )
+    p_inf.add_argument(
+        "--frames",
+        type=int,
+        default=100,
+        help="Сколько кадров использовать для расчета среднего времени.",
+    )
+    p_inf.add_argument(
+        "--device",
+        type=str,
+        default="0",
+        help="Устройство для инференса (например: cpu, 0, 0,1).",
+    )
+    p_inf.add_argument(
+        "--half",
+        action="store_true",
+        help="FP16 инференс (актуально в основном для GPU).",
+    )
+    p_inf.add_argument(
+        "--out-csv",
+        type=str,
+        default=None,
+        help="Куда сохранить CSV. По умолчанию: workspace/analytics/inference_tests/<dataset>.csv",
+    )
+    p_inf.set_defaults(func=cmd_inference_benchmark)
+
+    p_inf_plot = sub.add_parser(
+        "inference-plot",
+        parents=[common],
+        help="Построить столбчатую диаграмму по CSV бенчмарка инференса",
+    )
+    p_inf_plot.add_argument(
+        "--csv",
+        type=str,
+        required=True,
+        help="Путь к CSV, созданному analyze inference-benchmark.",
+    )
+    p_inf_plot.add_argument(
+        "--metric",
+        type=str,
+        default="avg_inference_ms_per_frame",
+        help=(
+            "Колонка для диаграммы, например: avg_inference_ms_per_frame, "
+            "avg_total_ms_per_frame, avg_total_fps, avg_inference_fps."
+        ),
+    )
+    p_inf_plot.add_argument(
+        "--out-png",
+        type=str,
+        default=None,
+        help="Куда сохранить PNG. По умолчанию: analytics/inference_tests/<csv_name>_bars.png",
+    )
+    p_inf_plot.set_defaults(func=cmd_inference_plot)
 
     return parser
 
