@@ -442,34 +442,36 @@ def _render_datasets_class_catalog(
     selected_names: list[str], scanned: dict[str, DatasetStats], *, show_legend: bool
 ) -> None:
     class_ids = _collect_class_ids_by_name(selected_names, scanned)
-    rows: list[tuple[str, str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str, str]] = []
     for cls in sorted(class_ids.keys()):
         present_in = 0
-        total_instances = 0
+        total_instances_all = 0
         for ds_name in selected_names:
             ds = scanned[ds_name]
             cnt = int(sum(ds.per_class_split_instances.get(cls, {}).values()))
-            total_instances += cnt
+            total_instances_all += cnt
             if cnt > 0:
                 present_in += 1
         coverage = f"{present_in}/{len(selected_names)}"
         for ds_name in selected_names:
             ds = scanned[ds_name]
+            cnt = int(sum(ds.per_class_split_instances.get(cls, {}).values()))
             ids_here = sorted([cid for cid, cname in ds.classes_by_id.items() if cname == cls])
             if not ids_here:
                 continue
             class_id = "/".join(str(x) for x in ids_here)
-            rows.append((class_id, cls, coverage, str(total_instances), ds_name))
+            rows.append((class_id, cls, coverage, str(cnt), str(total_instances_all), ds_name))
     table = Table(title="Catalog of classes by datasets")
     table.add_column("ClassID", justify="right")
     table.add_column("ClassName")
     table.add_column("Coverage", justify="right")
-    table.add_column("Total", justify="right")
+    table.add_column("DatasetTotal", justify="right")
+    table.add_column("AllSelectedTotal", justify="right")
     table.add_column("Dataset")
     last_class_name = None
-    for class_id, class_name, coverage, total, dataset in rows:
+    for class_id, class_name, coverage, ds_total, all_total, dataset in rows:
         display_class_name = class_name if class_name != last_class_name else ""
-        table.add_row(class_id, display_class_name, coverage, total, dataset)
+        table.add_row(class_id, display_class_name, coverage, ds_total, all_total, dataset)
         last_class_name = class_name
     console.print(table)
     if show_legend:
@@ -477,7 +479,8 @@ def _render_datasets_class_catalog(
         console.print("[dim]- ClassID: class index in a specific dataset[/dim]")
         console.print("[dim]- ClassName: class name (shown in the first line of the group)[/dim]")
         console.print("[dim]- Coverage: in how many selected datasets does the class have objects (present/total)[/dim]")
-        console.print("[dim]- Total: total number of class objects for the selected datasets[/dim]")
+        console.print("[dim]- DatasetTotal: number of class objects in this dataset[/dim]")
+        console.print("[dim]- AllSelectedTotal: total number of class objects for all selected datasets[/dim]")
         console.print("[dim]- Dataset: dataset name for the string[/dim]")
 
 

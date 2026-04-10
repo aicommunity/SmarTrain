@@ -171,7 +171,56 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
     else:
         args.single_class = None
         args.classes = None
+    args.emit_balance_report = prompt_yes_no(
+        "Write balance report manifest (--emit-balance-report)?",
+        default=bool(args.emit_balance_report),
+    )
+    args.emit_train_config = prompt_yes_no(
+        "Write train config manifest (--emit-train-config)?",
+        default=bool(args.emit_train_config),
+    )
     args.dry_run = prompt_yes_no("Do dry-run (--dry-run)?", default=bool(args.dry_run))
+
+
+def _update_datasets_sidecar(
+    layout: WorkspaceLayout,
+    output_key: str,
+    class_map: dict[str, int],
+    target_dir: str,
+    output_hash: str,
+) -> None:
+    os.makedirs(layout.datasets, exist_ok=True)
+    rel = os.path.relpath(os.path.abspath(target_dir), layout.root)
+    entry = {
+        "classes": {str(k): int(v) for k, v in sorted(class_map.items(), key=lambda kv: int(kv[1]))},
+        "structure": "split",
+        "elements_count": None,
+        "data_path": rel,
+        "dataset_hash": output_hash,
+        "modified": False,
+    }
+    info_path = layout.work_datasets_info_path()
+    previous: dict = {}
+    if os.path.isfile(info_path):
+        with open(info_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            previous = loaded
+    previous[output_key] = entry
+    with open(info_path, "w", encoding="utf-8") as f:
+        json.dump(previous, f, ensure_ascii=False, indent=4)
+
+    cn_path = layout.work_class_names_path()
+    class_names_out: dict[str, str] = {}
+    if os.path.isfile(cn_path):
+        with open(cn_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            class_names_out = {str(k): str(v) for k, v in loaded.items()}
+    for c in class_map.keys():
+        class_names_out[str(c)] = str(c)
+    with open(cn_path, "w", encoding="utf-8") as f:
+        json.dump(class_names_out, f, ensure_ascii=False, indent=4)
 
 
 def _provided_flags(argv: list[str]) -> set[str]:
@@ -363,6 +412,112 @@ def _rfs_expand_pool(
     return out
 
 
+def _ensure_non_empty_eval_splits(
+    balanced_train: list[tuple[str, str, str, list[str]]],
+    passthrough_items: list[tuple[str, str, str, list[str]]],
+    *,
+    seed: int,
+) -> list[tuple[str, str, str, list[str]]]:
+    """
+    Ensure val/test are not empty in output when possible.
+    We keep the current logic as-is unless one of eval splits is empty.
+    If needed, move a deterministic subset of balanced-train items to val/test
+    targeting roughly 80/10/10 split.
+    """
+    out_train = list(balanced_train)
+    val_count = sum(1 for s, *_ in passthrough_items if s == "val")
+    test_count = sum(1 for s, *_ in passthrough_items if s == "test")
+    total = len(out_train) + len(passthrough_items)
+    if total < 3:
+        return out_train
+    have_non_empty_eval = val_count > 0 and test_count > 0
+
+    target_val = max(1, int(round(total * 0.1)))
+    target_test = max(1, int(round(total * 0.1)))
+    need_val = max(0, target_val - val_count)
+    need_test = max(0, target_test - test_count)
+    # Keep at least one item in train.
+    can_move = max(0, len(out_train) - 1)
+    if need_val + need_test > can_move:
+        # Prioritize making both splits non-empty first.
+        min_need_val = 1 if val_count == 0 and can_move > 0 else 0
+        min_need_test = 1 if test_count == 0 and can_move > min_need_val else 0
+        left = max(0, can_move - min_need_val - min_need_test)
+        need_val = min_need_val
+        need_test = min_need_test
+        # Distribute remaining budget approximately evenly.
+        add_val = min(left // 2 + left % 2, max(0, target_val - val_count - need_val))
+        need_val += add_val
+        left -= add_val
+        add_test = min(left, max(0, target_test - test_count - need_test))
+        need_test += add_test
+
+    if (not have_non_empty_eval) and (need_val > 0 or need_test > 0):
+        rng = random.Random(seed)
+        idxs = list(range(len(out_train)))
+        rng.shuffle(idxs)
+
+        pos = 0
+        for _ in range(need_val):
+            i = idxs[pos]
+            pos += 1
+            _s, img, lbl, cls = out_train[i]
+            out_train[i] = ("val", img, lbl, cls)
+        for _ in range(need_test):
+            i = idxs[pos]
+            pos += 1
+            _s, img, lbl, cls = out_train[i]
+            out_train[i] = ("test", img, lbl, cls)
+
+    # Optional class-coverage enrichment for eval splits:
+    # if a class exists globally but is absent in val/test, move a minimal
+    # number of train items containing that class to the target split.
+    global_classes = {
+        c
+        for _s, _img, _lbl, cls_names in (out_train + passthrough_items)
+        for c in cls_names
+    }
+    if not global_classes:
+        return out_train
+
+    rng_cov = random.Random(seed + 17)
+
+    def present_classes(split_name: str) -> set[str]:
+        out = set()
+        for s, _img, _lbl, cls_names in out_train:
+            if s == split_name:
+                out.update(cls_names)
+        for s, _img, _lbl, cls_names in passthrough_items:
+            if s == split_name:
+                out.update(cls_names)
+        return out
+
+    def train_count() -> int:
+        return sum(1 for s, *_ in out_train if s == "train")
+
+    for target_split in ("val", "test"):
+        missing = set(global_classes) - present_classes(target_split)
+        # keep at least one sample in train
+        while missing and train_count() > 1:
+            candidates: list[tuple[int, int]] = []
+            for i, (s, _img, _lbl, cls_names) in enumerate(out_train):
+                if s != "train":
+                    continue
+                cover = len(set(cls_names) & missing)
+                if cover > 0:
+                    candidates.append((cover, i))
+            if not candidates:
+                break
+            # maximize coverage; tie-break with deterministic random jitter.
+            max_cover = max(c for c, _ in candidates)
+            best = [i for c, i in candidates if c == max_cover]
+            chosen_idx = best[rng_cov.randrange(len(best))]
+            s, img, lbl, cls_names = out_train[chosen_idx]
+            out_train[chosen_idx] = (target_split, img, lbl, cls_names)
+            missing -= set(cls_names)
+    return out_train
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = build_balance_arg_parser()
@@ -522,6 +677,11 @@ def main(argv=None):
     out_base = args.output_name or f"{args.dataset}_balanced"
     out_name = next_dataset_name(layout.datasets, out_base)
     out_dir = os.path.join(layout.datasets, out_name)
+    balanced_train = _ensure_non_empty_eval_splits(
+        balanced_train,
+        passthrough_items,
+        seed=int(args.seed),
+    )
 
     if args.dry_run:
         print(f"[OK] dry-run: strategy={args.strategy}, train_in={len(train_items)}, train_out={len(balanced_train)}, output={out_name}")
@@ -558,6 +718,13 @@ def main(argv=None):
         encoding="utf-8",
     )
     out_hash = calculate_dataset_hash(out_dir)
+    _update_datasets_sidecar(
+        layout,
+        out_name,
+        {str(k): int(v) for k, v in class_map.items()},
+        out_dir,
+        out_hash,
+    )
     if args.emit_train_config or args.emit_balance_report:
         counts_after: dict[str, int] = defaultdict(int)
         for _split, _img, _lbl, cls_names in balanced_train:

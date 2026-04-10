@@ -93,6 +93,31 @@ def test_stats_classes_shows_mixed_class_ids_across_datasets(
     assert "mixed(0,2)" in out
 
 
+def test_stats_catalog_shows_dataset_total_not_only_aggregate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deploy_workspace(str(tmp_path))
+    ds_a = _write_ds(tmp_path, "ds_a")
+    _write_jpg(ds_a / "train" / "images" / "a.jpg")
+    (ds_a / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_a / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+    ds_b = _write_ds(tmp_path, "ds_b")
+    _write_jpg(ds_b / "train" / "images" / "b.jpg")
+    (ds_b / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds_b / "train" / "labels" / "b.txt").write_text(
+        "0 0.5 0.5 0.2 0.2\n0 0.4 0.4 0.2 0.2\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as e:
+        stats_main(["--workspace", str(tmp_path), "--dataset", "ds_a", "--dataset", "ds_b"])
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert "DatasetTotal" in out
+    assert "AllSelectedTotal" in out
+
+
 def test_stats_no_legend_flag_hides_column_explanations(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
