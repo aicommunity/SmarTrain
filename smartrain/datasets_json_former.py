@@ -7,10 +7,21 @@ import argparse
 import hashlib
 import zipfile
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 import xml.etree.ElementTree as ET
+
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
@@ -29,6 +40,9 @@ from smartrain.workspace_paths import (
 
 sys.stdout.reconfigure(encoding='utf-8')
 
+# Set SMART_TRAIN_NO_PROGRESS=1 to disable Rich progress bars (e.g. in CI logs).
+_scan_progress: Progress | None = None
+
 OUTPUT_FILE = DATASETS_INFO_FILE
 OUTPUT_CLASS_NAMES_FILE = CLASS_NAMES_FILE
 DEFAULT_DATASETS_LIST_FILE = "datasets_list.txt"
@@ -37,6 +51,67 @@ DATASET_HASH_KEY = "dataset_hash"
 SOURCE_HASH_KEY = "source_hash"
 SOURCE_REF_KEY = "source_ref"
 MODIFIED_KEY = "modified"
+
+
+def _scan_progress_enabled() -> bool:
+    v = os.environ.get("SMART_TRAIN_NO_PROGRESS", "").strip().lower()
+    if v in ("1", "true", "yes"):
+        return False
+    return sys.stderr.isatty()
+
+
+@contextmanager
+def _scan_workflow_progress():
+    global _scan_progress
+    if not _scan_progress_enabled():
+        yield None
+        return
+    console = Console(stderr=True)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(complete_style="cyan", finished_style="green"),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        expand=False,
+    ) as progress:
+        _scan_progress = progress
+        try:
+            yield progress
+        finally:
+            _scan_progress = None
+
+
+def _short_task_label(name: str, max_len: int = 48) -> str:
+    s = name.replace("\n", " ").strip()
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1] + "…"
+
+
+def _list_files_to_copy(src_root: str) -> list[tuple[str, str]]:
+    """Sorted (absolute_path, path_relative_to_src_root) for every file under src_root."""
+    root = os.path.abspath(os.path.expanduser(src_root))
+    out: list[tuple[str, str]] = []
+    for walk_root, _, files in os.walk(root):
+        for fn in files:
+            fp = os.path.join(walk_root, fn)
+            rel = os.path.relpath(fp, root)
+            out.append((fp, rel))
+    out.sort(key=lambda x: x[1])
+    return out
+
+
+def _count_raw_data_sync_entries(raw_source_dir: str) -> int:
+    if not os.path.isdir(raw_source_dir):
+        return 0
+    n = 0
+    for name in os.listdir(raw_source_dir):
+        p = os.path.join(raw_source_dir, name)
+        if os.path.isdir(p) or name.lower().endswith(".zip"):
+            n += 1
+    return n
 
 
 def find_yaml_file(folder_path):
@@ -460,7 +535,10 @@ def process_dataset(folder_path, folder_name):
 
 def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
     parser = CliArgumentParser(
-        description="Processing datasets and creating JSON files with information about classes and structure"
+        description=(
+            "Processing datasets and creating JSON files with information about classes and structure. "
+            "Scan shows progress bars on stderr when attached to a TTY; set SMART_TRAIN_NO_PROGRESS=1 to disable."
+        )
     )
 
     parser.add_argument(
@@ -612,18 +690,34 @@ def _run_scan_folder_roots(folder_roots: list[tuple[str, str, dict]]) -> tuple[d
     """folder_roots: list (logical_name, folder_path on disk, overrides for datasets_info)."""
     datasets_info: dict = {}
     class_names: dict = {}
+    p = _scan_progress
+    outer_tid = None
+    if p is not None and folder_roots:
+        outer_tid = p.add_task("[cyan]Build dataset catalog", total=len(folder_roots))
 
     for logical_name, folder_path, overrides in folder_roots:
-        if not os.path.isdir(folder_path):
-            print(f"[WARNING] Skipping {logical_name!r}: no directory {folder_path}")
-            continue
-        info = process_dataset(folder_path, logical_name)
-        if info:
-            if overrides:
-                info.update(overrides)
-            datasets_info[logical_name] = info
-            for class_name in info["classes"]:
-                class_names[class_name] = class_name
+        sl = _short_task_label(logical_name)
+        if p is not None and outer_tid is not None:
+            p.update(outer_tid, description=f"[cyan]Catalog datasets ({sl})")
+        inner_tid = None
+        if p is not None:
+            inner_tid = p.add_task(f"[green]Analyze: {sl}", total=None)
+        try:
+            if not os.path.isdir(folder_path):
+                print(f"[WARNING] Skipping {logical_name!r}: no directory {folder_path}")
+                continue
+            info = process_dataset(folder_path, logical_name)
+            if info:
+                if overrides:
+                    info.update(overrides)
+                datasets_info[logical_name] = info
+                for class_name in info["classes"]:
+                    class_names[class_name] = class_name
+        finally:
+            if p is not None and inner_tid is not None:
+                p.remove_task(inner_tid)
+            if p is not None and outer_tid is not None:
+                p.advance(outer_tid)
     return datasets_info, class_names
 
 
@@ -783,10 +877,30 @@ def _compute_source_signature(path: str) -> str:
 
 
 def _copy_source_to_training(src_root: str, dst_root: str) -> None:
+    p = _scan_progress
+    src_abs = os.path.abspath(os.path.expanduser(src_root))
     if os.path.isdir(dst_root):
         shutil.rmtree(dst_root, ignore_errors=True)
     os.makedirs(os.path.dirname(dst_root), exist_ok=True)
-    shutil.copytree(src_root, dst_root)
+    label = _short_task_label(os.path.basename(dst_root.rstrip(os.sep)))
+    if p is not None:
+        pairs = _list_files_to_copy(src_abs)
+        total = len(pairs)
+        tid = p.add_task(f"[green]Copy files: {label}", total=total if total > 0 else 1)
+        try:
+            if total == 0:
+                os.makedirs(dst_root, exist_ok=True)
+                p.advance(tid)
+            else:
+                for abs_src, rel in pairs:
+                    dst_fp = os.path.join(dst_root, rel)
+                    os.makedirs(os.path.dirname(dst_fp), exist_ok=True)
+                    shutil.copy2(abs_src, dst_fp)
+                    p.advance(tid)
+        finally:
+            p.remove_task(tid)
+    else:
+        shutil.copytree(src_root, dst_root)
     _ensure_training_ready_after_copy(dst_root)
 
 
@@ -1083,7 +1197,8 @@ def main(argv=None):
                     continue
                 root_path = resolve_or_extract_dataset_root(layout.root, name, prev_entry, datasets_dir)
                 folder_roots.append((name, root_path, {"data_path": dp}))
-        datasets_info, class_names = _run_scan_folder_roots(folder_roots)
+        with _scan_workflow_progress():
+            datasets_info, class_names = _run_scan_folder_roots(folder_roots)
         previous_info = previous_full
     else:
         if not os.path.exists(datasets_dir):
@@ -1099,234 +1214,252 @@ def main(argv=None):
             except Exception as e:
                 print(f"[WARNING] Failed to read existing {output_file}: {e}")
         previous_info_for_diff = copy.deepcopy(previous_info)
-        folder_roots = []
-        used_names: set[str] = set()
-
-        def _sync_one_source(*, logical_name: str, source_for_copy: str, source_ref: str, source_signature: str) -> bool:
-            dst_dir = os.path.join(layout.datasets, logical_name)
-            prev_entry = previous_info.get(logical_name)
-            normalized_on_skip = False
-            if isinstance(prev_entry, dict) and bool(prev_entry.get(MODIFIED_KEY)):
-                print(f"[WARNING] Skipping synchronization {logical_name!r}: modified=true.")
-                return False
-
-            source_hash = _dataset_content_hash(source_for_copy)
-            if source_hash:
-                for ds_name in os.listdir(layout.datasets):
-                    ds_path = os.path.join(layout.datasets, ds_name)
-                    if not os.path.isdir(ds_path):
+        with _scan_workflow_progress():
+            folder_roots = []
+            used_names: set[str] = set()
+            
+            def _sync_one_source(*, logical_name: str, source_for_copy: str, source_ref: str, source_signature: str) -> bool:
+                dst_dir = os.path.join(layout.datasets, logical_name)
+                prev_entry = previous_info.get(logical_name)
+                normalized_on_skip = False
+                if isinstance(prev_entry, dict) and bool(prev_entry.get(MODIFIED_KEY)):
+                    print(f"[WARNING] Skipping synchronization {logical_name!r}: modified=true.")
+                    return False
+            
+                source_hash = _dataset_content_hash(source_for_copy)
+                if source_hash:
+                    for ds_name in os.listdir(layout.datasets):
+                        ds_path = os.path.join(layout.datasets, ds_name)
+                        if not os.path.isdir(ds_path):
+                            continue
+                        if ds_name == logical_name:
+                            continue
+                        ds_hash = None
+                        if isinstance(previous_info.get(ds_name), dict):
+                            ds_hash = previous_info[ds_name].get(DATASET_HASH_KEY)
+                        if not ds_hash:
+                            ds_hash = _dataset_content_hash(ds_path)
+                        if ds_hash and ds_hash == source_hash:
+                            print(
+                                f"[WARNING] Skipping source {logical_name!r}: data matches datasets/{ds_name!r}."
+                            )
+                            return False
+            
+                prev_sig = prev_entry.get(SOURCE_SIGNATURE_KEY) if isinstance(prev_entry, dict) else None
+                if prev_sig == source_signature and _dir_has_content(dst_dir):
+                    print(f"[INFO] Skipping {logical_name!r}: source has not changed.")
+                    # Even with skip we maintain compatibility: we configure the training-ready layout.
+                    normalized_on_skip = _ensure_training_ready_after_copy(dst_dir)
+                else:
+                    _copy_source_to_training(source_for_copy, dst_dir)
+            
+                entry = _ensure_prev_entry(previous_info, logical_name)
+                entry[SOURCE_SIGNATURE_KEY] = source_signature
+                entry[SOURCE_REF_KEY] = source_ref
+                entry[MODIFIED_KEY] = bool(entry.get(MODIFIED_KEY, False))
+                if source_hash:
+                    entry[SOURCE_HASH_KEY] = source_hash
+                # dataset_hash should reflect the actual contents of datasets/<name>
+                # after possible normalization in training-ready layout.
+                # Do not overwrite dataset_hash with normal skip (otherwise we will lose detection of manual edits).
+                # We update it only after actual synchronization or normalization of cvat11.
+                if not (prev_sig == source_signature and _dir_has_content(dst_dir)) or normalized_on_skip:
+                    current_dst_hash = _dataset_content_hash(dst_dir)
+                    if current_dst_hash:
+                        entry[DATASET_HASH_KEY] = current_dst_hash
+                return True
+            
+            if use_workspace:
+                if os.path.isdir(raw_source_dir):
+                    pbar = _scan_progress
+                    raw_total = _count_raw_data_sync_entries(raw_source_dir)
+                    sync_raw_tid = None
+                    if pbar is not None and raw_total > 0:
+                        sync_raw_tid = pbar.add_task("[yellow]Sync raw_data", total=raw_total)
+                    for src_name in os.listdir(raw_source_dir):
+                        src_path = os.path.join(raw_source_dir, src_name)
+                        if not (os.path.isdir(src_path) or src_name.lower().endswith(".zip")):
+                            continue
+                        try:
+                            logical_name = os.path.splitext(src_name)[0] if src_name.lower().endswith(".zip") else src_name
+                            if src_name.lower().endswith(".zip"):
+                                sig = _compute_source_signature(src_path)
+                                try:
+                                    extracted = resolve_or_extract_dataset_root(
+                                        layout.root,
+                                        logical_name,
+                                        {"data_path": os.path.relpath(src_path, layout.root)},
+                                        raw_source_dir,
+                                    )
+                                except Exception as e:
+                                    print(f"[WARNING] Skipping archive {src_name!r} from raw_data: {e}")
+                                    continue
+                                synced = _sync_one_source(
+                                    logical_name=logical_name,
+                                    source_for_copy=extracted,
+                                    source_ref=os.path.relpath(src_path, layout.root),
+                                    source_signature=sig,
+                                )
+                                if synced:
+                                    processed_raw_sources.add(os.path.abspath(src_path))
+                            else:
+                                synced = _sync_one_source(
+                                    logical_name=logical_name,
+                                    source_for_copy=src_path,
+                                    source_ref=os.path.relpath(src_path, layout.root),
+                                    source_signature=_compute_source_signature(src_path),
+                                )
+                                if synced:
+                                    processed_raw_sources.add(os.path.abspath(src_path))
+                        finally:
+                            if sync_raw_tid is not None and pbar is not None:
+                                pbar.advance(sync_raw_tid)
+            
+            if use_workspace and args.dataset:
+                used_names_for_explicit = {
+                    d for d in os.listdir(layout.datasets) if os.path.isdir(os.path.join(layout.datasets, d))
+                }
+                for raw_item in args.dataset:
+                    token = (raw_item or "").strip()
+                    if not token:
                         continue
-                    if ds_name == logical_name:
-                        continue
-                    ds_hash = None
-                    if isinstance(previous_info.get(ds_name), dict):
-                        ds_hash = previous_info[ds_name].get(DATASET_HASH_KEY)
-                    if not ds_hash:
-                        ds_hash = _dataset_content_hash(ds_path)
-                    if ds_hash and ds_hash == source_hash:
-                        print(
-                            f"[WARNING] Skipping source {logical_name!r}: data matches datasets/{ds_name!r}."
+                    candidate = os.path.abspath(os.path.expanduser(token))
+                    if os.path.exists(candidate):
+                        src_path = candidate
+                        base_name = (
+                            os.path.splitext(os.path.basename(src_path))[0]
+                            if src_path.lower().endswith(".zip")
+                            else os.path.basename(src_path)
                         )
-                        return False
-
-            prev_sig = prev_entry.get(SOURCE_SIGNATURE_KEY) if isinstance(prev_entry, dict) else None
-            if prev_sig == source_signature and _dir_has_content(dst_dir):
-                print(f"[INFO] Skipping {logical_name!r}: source has not changed.")
-                # Even with skip we maintain compatibility: we configure the training-ready layout.
-                normalized_on_skip = _ensure_training_ready_after_copy(dst_dir)
-            else:
-                _copy_source_to_training(source_for_copy, dst_dir)
-
-            entry = _ensure_prev_entry(previous_info, logical_name)
-            entry[SOURCE_SIGNATURE_KEY] = source_signature
-            entry[SOURCE_REF_KEY] = source_ref
-            entry[MODIFIED_KEY] = bool(entry.get(MODIFIED_KEY, False))
-            if source_hash:
-                entry[SOURCE_HASH_KEY] = source_hash
-            # dataset_hash should reflect the actual contents of datasets/<name>
-            # after possible normalization in training-ready layout.
-            # Do not overwrite dataset_hash with normal skip (otherwise we will lose detection of manual edits).
-            # We update it only after actual synchronization or normalization of cvat11.
-            if not (prev_sig == source_signature and _dir_has_content(dst_dir)) or normalized_on_skip:
-                current_dst_hash = _dataset_content_hash(dst_dir)
-                if current_dst_hash:
-                    entry[DATASET_HASH_KEY] = current_dst_hash
-            return True
-
-        if use_workspace:
-            if os.path.isdir(raw_source_dir):
-                for src_name in os.listdir(raw_source_dir):
-                    src_path = os.path.join(raw_source_dir, src_name)
-                    if not (os.path.isdir(src_path) or src_name.lower().endswith(".zip")):
-                        continue
-                    logical_name = os.path.splitext(src_name)[0] if src_name.lower().endswith(".zip") else src_name
-                    if src_name.lower().endswith(".zip"):
+                        list_value = src_path
+                    else:
+                        name = token[:-4] if token.lower().endswith(".zip") else token
+                        dir_candidate = os.path.join(layout.raw_data, name)
+                        zip_candidate = os.path.join(layout.raw_data, f"{name}.zip")
+                        if os.path.isdir(dir_candidate):
+                            src_path = dir_candidate
+                            base_name = name
+                            list_value = name
+                        elif os.path.isfile(zip_candidate):
+                            src_path = zip_candidate
+                            base_name = name
+                            list_value = f"{name}.zip"
+                        else:
+                            print(f"[WARNING] --dataset {raw_item!r}: path/name not found")
+                            continue
+                    logical_name = _unique_dataset_key(base_name, used_names_for_explicit)
+                    if src_path.lower().endswith(".zip"):
                         sig = _compute_source_signature(src_path)
                         try:
                             extracted = resolve_or_extract_dataset_root(
                                 layout.root,
                                 logical_name,
                                 {"data_path": os.path.relpath(src_path, layout.root)},
-                                raw_source_dir,
+                                layout.raw_data,
                             )
                         except Exception as e:
-                            print(f"[WARNING] Skipping archive {src_name!r} from raw_data: {e}")
+                            print(f"[WARNING] --dataset {raw_item!r}: failed to unpack zip ({e})")
                             continue
-                        synced = _sync_one_source(
+                        _sync_one_source(
                             logical_name=logical_name,
                             source_for_copy=extracted,
-                            source_ref=os.path.relpath(src_path, layout.root),
+                            source_ref=src_path,
                             source_signature=sig,
                         )
-                        if synced:
-                            processed_raw_sources.add(os.path.abspath(src_path))
                     else:
-                        synced = _sync_one_source(
+                        _sync_one_source(
                             logical_name=logical_name,
                             source_for_copy=src_path,
-                            source_ref=os.path.relpath(src_path, layout.root),
+                            source_ref=src_path,
                             source_signature=_compute_source_signature(src_path),
                         )
-                        if synced:
-                            processed_raw_sources.add(os.path.abspath(src_path))
-
-        if use_workspace and args.dataset:
-            used_names_for_explicit = {
-                d for d in os.listdir(layout.datasets) if os.path.isdir(os.path.join(layout.datasets, d))
-            }
-            for raw_item in args.dataset:
-                token = (raw_item or "").strip()
-                if not token:
-                    continue
-                candidate = os.path.abspath(os.path.expanduser(token))
-                if os.path.exists(candidate):
-                    src_path = candidate
-                    base_name = (
-                        os.path.splitext(os.path.basename(src_path))[0]
-                        if src_path.lower().endswith(".zip")
-                        else os.path.basename(src_path)
+                    _append_to_datasets_list(
+                        os.path.join(layout.raw_data, DEFAULT_DATASETS_LIST_FILE), list_value
                     )
-                    list_value = src_path
-                else:
-                    name = token[:-4] if token.lower().endswith(".zip") else token
-                    dir_candidate = os.path.join(layout.raw_data, name)
-                    zip_candidate = os.path.join(layout.raw_data, f"{name}.zip")
-                    if os.path.isdir(dir_candidate):
-                        src_path = dir_candidate
-                        base_name = name
-                        list_value = name
-                    elif os.path.isfile(zip_candidate):
-                        src_path = zip_candidate
-                        base_name = name
-                        list_value = f"{name}.zip"
-                    else:
-                        print(f"[WARNING] --dataset {raw_item!r}: path/name not found")
-                        continue
-                logical_name = _unique_dataset_key(base_name, used_names_for_explicit)
-                if src_path.lower().endswith(".zip"):
-                    sig = _compute_source_signature(src_path)
-                    try:
-                        extracted = resolve_or_extract_dataset_root(
-                            layout.root,
-                            logical_name,
-                            {"data_path": os.path.relpath(src_path, layout.root)},
-                            layout.raw_data,
-                        )
-                    except Exception as e:
-                        print(f"[WARNING] --dataset {raw_item!r}: failed to unpack zip ({e})")
-                        continue
-                    _sync_one_source(
-                        logical_name=logical_name,
-                        source_for_copy=extracted,
-                        source_ref=src_path,
-                        source_signature=sig,
-                    )
-                else:
-                    _sync_one_source(
-                        logical_name=logical_name,
-                        source_for_copy=src_path,
-                        source_ref=src_path,
-                        source_signature=_compute_source_signature(src_path),
-                    )
-                _append_to_datasets_list(
-                    os.path.join(layout.raw_data, DEFAULT_DATASETS_LIST_FILE), list_value
-                )
-        if args.datasets_list:
-            list_path = os.path.abspath(os.path.expanduser(args.datasets_list))
-            if not os.path.isfile(list_path):
-                print(f"[ERROR] File not found --datasets-list: {list_path}")
-                return
-        elif use_workspace:
-            auto_list = os.path.join(raw_source_dir, DEFAULT_DATASETS_LIST_FILE)
-            list_path = auto_list if os.path.isfile(auto_list) else None
-        else:
-            list_path = None
-        if list_path:
-            # In workspace mode, datasets_list.txt describes external sources,
-            # of which you need to prepare copies in datasets and include them in the index.
-            if use_workspace:
-                entries = _load_datasets_list_file(list_path)
-                for src_path in entries:
-                    if not os.path.exists(src_path):
-                        print(f"[WARNING] Skipping from datasets-list: path not found: {src_path}")
-                        continue
-                    base_name = (
-                        os.path.splitext(os.path.basename(src_path))[0]
-                        if src_path.lower().endswith(".zip")
-                        else os.path.basename(src_path)
-                    )
-                    logical_name = _unique_dataset_key(base_name, used_names)
-                    dst_dir = os.path.join(layout.datasets, logical_name)
-                    sig = _compute_source_signature(src_path)
-                    prev_sig = None
-                    if os.path.isfile(output_file):
-                        try:
-                            with open(output_file, "r", encoding="utf-8") as pf:
-                                prev_j = json.load(pf)
-                            if isinstance(prev_j, dict) and isinstance(prev_j.get(logical_name), dict):
-                                prev_sig = prev_j[logical_name].get(SOURCE_SIGNATURE_KEY)
-                        except Exception:
-                            prev_sig = None
-                    if src_path.lower().endswith(".zip"):
-                        try:
-                            extracted = _extract_zip_for_scan(
-                                src_path,
-                                os.path.join(output_dir, "tmp", "datasets_list_extract"),
-                            )
-                        except Exception as e:
-                            print(f"[WARNING] Skipping archives from datasets-list {src_path!r}: {e}")
-                            continue
-                        source_for_copy = extracted
-                    else:
-                        source_for_copy = src_path
-                    _sync_one_source(
-                        logical_name=logical_name,
-                        source_for_copy=source_for_copy,
-                        source_ref=src_path,
-                        source_signature=sig,
-                    )
+            if args.datasets_list:
+                list_path = os.path.abspath(os.path.expanduser(args.datasets_list))
+                if not os.path.isfile(list_path):
+                    print(f"[ERROR] File not found --datasets-list: {list_path}")
+                    return
+            elif use_workspace:
+                auto_list = os.path.join(raw_source_dir, DEFAULT_DATASETS_LIST_FILE)
+                list_path = auto_list if os.path.isfile(auto_list) else None
             else:
-                _append_roots_from_datasets_list(
-                    list_path=list_path,
-                    folder_roots=folder_roots,
-                    used_names=used_names,
-                    use_workspace=use_workspace,
-                    layout=layout,
-                    output_dir=output_dir,
-                )
-
-        for folder_name in os.listdir(datasets_dir):
-            folder_path = os.path.join(datasets_dir, folder_name)
-            if not os.path.isdir(folder_path):
-                continue
-            overrides: dict[str, Any] = {}
-            if use_workspace:
-                rel = os.path.relpath(folder_path, layout.root)
-                overrides = {"data_path": rel}
-            folder_roots.append((folder_name, folder_path, overrides))
-            used_names.add(folder_name)
-
-        datasets_info, class_names = _run_scan_folder_roots(folder_roots)
+                list_path = None
+            if list_path:
+                # In workspace mode, datasets_list.txt describes external sources,
+                # of which you need to prepare copies in datasets and include them in the index.
+                if use_workspace:
+                    entries = _load_datasets_list_file(list_path)
+                    pbar = _scan_progress
+                    list_tid = None
+                    if pbar is not None and entries:
+                        list_tid = pbar.add_task("[yellow]datasets_list sources", total=len(entries))
+                    for src_path in entries:
+                        try:
+                            if not os.path.exists(src_path):
+                                print(f"[WARNING] Skipping from datasets-list: path not found: {src_path}")
+                                continue
+                            base_name = (
+                                os.path.splitext(os.path.basename(src_path))[0]
+                                if src_path.lower().endswith(".zip")
+                                else os.path.basename(src_path)
+                            )
+                            logical_name = _unique_dataset_key(base_name, used_names)
+                            dst_dir = os.path.join(layout.datasets, logical_name)
+                            sig = _compute_source_signature(src_path)
+                            prev_sig = None
+                            if os.path.isfile(output_file):
+                                try:
+                                    with open(output_file, "r", encoding="utf-8") as pf:
+                                        prev_j = json.load(pf)
+                                    if isinstance(prev_j, dict) and isinstance(prev_j.get(logical_name), dict):
+                                        prev_sig = prev_j[logical_name].get(SOURCE_SIGNATURE_KEY)
+                                except Exception:
+                                    prev_sig = None
+                            if src_path.lower().endswith(".zip"):
+                                try:
+                                    extracted = _extract_zip_for_scan(
+                                        src_path,
+                                        os.path.join(output_dir, "tmp", "datasets_list_extract"),
+                                    )
+                                except Exception as e:
+                                    print(f"[WARNING] Skipping archives from datasets-list {src_path!r}: {e}")
+                                    continue
+                                source_for_copy = extracted
+                            else:
+                                source_for_copy = src_path
+                            _sync_one_source(
+                                logical_name=logical_name,
+                                source_for_copy=source_for_copy,
+                                source_ref=src_path,
+                                source_signature=sig,
+                            )
+                        finally:
+                            if list_tid is not None and pbar is not None:
+                                pbar.advance(list_tid)
+                else:
+                    _append_roots_from_datasets_list(
+                        list_path=list_path,
+                        folder_roots=folder_roots,
+                        used_names=used_names,
+                        use_workspace=use_workspace,
+                        layout=layout,
+                        output_dir=output_dir,
+                    )
+            
+            for folder_name in os.listdir(datasets_dir):
+                folder_path = os.path.join(datasets_dir, folder_name)
+                if not os.path.isdir(folder_path):
+                    continue
+                overrides: dict[str, Any] = {}
+                if use_workspace:
+                    rel = os.path.relpath(folder_path, layout.root)
+                    overrides = {"data_path": rel}
+                folder_roots.append((folder_name, folder_path, overrides))
+                used_names.add(folder_name)
+            
+            datasets_info, class_names = _run_scan_folder_roots(folder_roots)
 
     if use_workspace and args.mode == "scan" and args.purge_processed_raw:
         root_raw = os.path.abspath(layout.raw_data)
