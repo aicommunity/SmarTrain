@@ -474,3 +474,36 @@ def test_roi_legacy_direct_images_only_without_labels(tmp_path: Path) -> None:
     assert not (out_dir / "labels").exists()
     assert not (out_dir / "images").exists()
     assert not (out_dir / "data.yaml").exists()
+
+
+def test_roi_images_only_flag_ignores_existing_labels(tmp_path: Path) -> None:
+    ds_root = tmp_path / "ds_with_labels"
+    (ds_root / "images").mkdir(parents=True, exist_ok=True)
+    (ds_root / "labels").mkdir(parents=True, exist_ok=True)
+    _write_jpg(ds_root / "images" / "a.jpg", size=(64, 64))
+    (ds_root / "labels" / "a.txt").write_text("0 0.5 0.5 0.4 0.4\n", encoding="utf-8")
+    _write_minimal_data_yaml(ds_root / "images")
+
+    out_dir = tmp_path / "out_roi_images_only_flag"
+    fake_result = MagicMock()
+    fake_result.boxes = None
+    fake_model = MagicMock()
+    fake_model.task = "detect"
+    fake_model.predict = MagicMock(return_value=[fake_result])
+    with patch("smartrain.dataset_roi_yolo.YOLO", return_value=fake_model):
+        roi_main(
+            [
+                "--source-path",
+                str(ds_root),
+                "--output-path",
+                str(out_dir),
+                "--weights",
+                str(tmp_path / "dummy.pt"),
+                "--images-only",
+            ]
+        )
+
+    assert (out_dir / "images__a.jpg").is_file()
+    assert not (out_dir / "labels").exists()
+    assert not (out_dir / "images").exists()
+    assert not (out_dir / "data.yaml").exists()

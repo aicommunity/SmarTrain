@@ -829,6 +829,12 @@ def main(argv=None) -> None:
             exclude_test=False,
         )
         images_only_items: list[tuple[str, str]] = []
+        if args.images_only:
+            if len(resolved_keys) > 1:
+                sys.exit("[ERROR] --images-only does not support processing multiple datasets in one run.")
+            images_only_items = _iter_images_only(dataset_root)
+            if not images_only_items:
+                sys.exit("[ERROR] No images found for images-only mode.")
         if not buckets:
             # Auto-fallback for direct legacy single-dataset runs (no datasets_info.json).
             images_only_allowed = bool(args.images_only) or bool(direct_legacy_single)
@@ -850,9 +856,11 @@ def main(argv=None) -> None:
             out_lbl_dir: Optional[str],
             label_lines: List[str],
             write_labels: bool,
+            stem_prefix: str,
         ) -> None:
             fname = os.path.basename(src_img)
             stem, _ext = os.path.splitext(fname)
+            base_stem = f"{stem_prefix}{stem}" if stem_prefix else stem
 
             with Image.open(src_img) as im:
                 im = im.convert("RGB")
@@ -910,17 +918,19 @@ def main(argv=None) -> None:
 
             if cfg["roi_policy"] == "per_box":
                 for idx, box in enumerate(roi_list, start=1):
-                    process_one_crop(box, f"{stem}_split_{idx}")
+                    process_one_crop(box, f"{base_stem}_split_{idx}")
                 stats["images"] += len(roi_list)
             else:
-                process_one_crop(roi_list[0], stem)
+                process_one_crop(roi_list[0], base_stem)
                 stats["images"] += 1
 
         if images_only_items:
             for src_img, rel_dir in tqdm(images_only_items, desc=f"{dataset_key}:images-only"):
                 # In images-only mode we write ONLY images directly into output_root,
                 # with no extra folders, labels or data.yaml.
-                _ = rel_dir
+                stem_prefix = ""
+                if rel_dir:
+                    stem_prefix = rel_dir.replace(os.sep, "__").strip("_") + "__"
                 out_img_dir = output_root
                 _process_one_image(
                     src_img=src_img,
@@ -928,6 +938,7 @@ def main(argv=None) -> None:
                     out_lbl_dir=None,
                     label_lines=[],
                     write_labels=False,
+                    stem_prefix=stem_prefix,
                 )
         else:
             for img_dir, lbl_dir in buckets:
@@ -948,6 +959,7 @@ def main(argv=None) -> None:
                         out_lbl_dir=out_lbl_dir,
                         label_lines=label_lines,
                         write_labels=True,
+                        stem_prefix="",
                     )
 
         if not images_only_items:
