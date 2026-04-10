@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import shutil
@@ -18,23 +19,85 @@ from smartrain.cli_replay import build_non_interactive_command, print_replay_com
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.dataset_passport import next_dataset_name, write_dataset_passport
+from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+BALANCE_PRESETS: dict[str, dict[str, object]] = {
+    # Conservative weighted balancing for most datasets.
+    "weights-safe": {
+        "strategy": "weights",
+        "weight_mode": "effective",
+        "beta": 0.9999,
+        "image_weight_agg": "mean",
+        "weight_clip_min": 0.5,
+        "weight_clip_max": 2.0,
+        "replacement": "auto",
+        "target": 1.2,
+        "max_repeat_per_image": 3,
+    },
+    # LVIS-like repeat-factor sampling, more aggressive on tail classes.
+    "rfs-aggressive": {
+        "strategy": "rfs",
+        "rfs_thresh": 0.002,
+        "rfs_power": 0.5,
+        "target": 1.5,
+        "max_repeat_per_image": 6,
+    },
+    # Recommended default: moderate RFS + weighted sampling.
+    "hybrid-default": {
+        "strategy": "hybrid",
+        "weight_mode": "effective",
+        "beta": 0.9999,
+        "image_weight_agg": "max",
+        "weight_clip_min": 0.4,
+        "weight_clip_max": 3.0,
+        "replacement": "auto",
+        "rfs_thresh": 0.001,
+        "rfs_power": 0.5,
+        "target": 1.3,
+        "max_repeat_per_image": 5,
+    },
+}
 
 
 def build_balance_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(description="Balancing the dataset into a new datasets/<name>")
     p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
     p.add_argument("--dataset", type=str, default=None, help="Source dataset name")
-    p.add_argument("--strategy", choices=("oversample", "undersample", "class-aware", "weights"), default="oversample")
+    p.add_argument(
+        "--preset",
+        choices=tuple(BALANCE_PRESETS.keys()),
+        default=None,
+        help=(
+            "Preset with tuned balancing parameters. "
+            "weights-safe: conservative; "
+            "rfs-aggressive: stronger tail upsampling; "
+            "hybrid-default: recommended general-purpose balance."
+        ),
+    )
+    p.add_argument(
+        "--strategy",
+        choices=("copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid"),
+        default="oversample",
+    )
     p.add_argument("--target", type=float, default=1.0, help="Train size multiplier after balancing")
     p.add_argument("--max-ratio", type=float, default=3.0, help="max/min limit for oversample/class-aware")
     p.add_argument("--min-count", type=int, default=1, help="Minimum class count for accounting")
+    p.add_argument("--weight-mode", choices=("effective", "inverse", "sqrt-inverse"), default="effective")
+    p.add_argument("--beta", type=float, default=0.9999, help="Beta for effective-number weighting")
+    p.add_argument("--image-weight-agg", choices=("max", "mean", "sum"), default="max")
+    p.add_argument("--weight-clip-min", type=float, default=0.2)
+    p.add_argument("--weight-clip-max", type=float, default=5.0)
+    p.add_argument("--replacement", choices=("auto", "on", "off"), default="auto")
+    p.add_argument("--max-repeat-per-image", type=int, default=5)
+    p.add_argument("--rfs-thresh", type=float, default=0.001)
+    p.add_argument("--rfs-power", type=float, default=0.5)
     p.add_argument("--class", dest="single_class", type=str, default=None, help="Balance only one class")
     p.add_argument("--classes", type=str, default=None, help="Balance CSV class list")
     p.add_argument("--output-name", type=str, default=None, help="Name of output dataset (default <dataset>_balanced)")
     p.add_argument("--emit-train-config", action="store_true", help="Save balance_manifest.json for train")
+    p.add_argument("--emit-balance-report", action="store_true", help="Write expanded balance report to manifest")
     p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--dry-run", action="store_true")
     return p
@@ -87,7 +150,7 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
     args.dataset = prompt("Dataset: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
     args.strategy = prompt_choice(
         "Strategy",
-        ["oversample", "undersample", "class-aware", "weights"],
+        ["copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid"],
         default=args.strategy,
     )
     args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
@@ -111,10 +174,204 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
     args.dry_run = prompt_yes_no("Do dry-run (--dry-run)?", default=bool(args.dry_run))
 
 
+def _provided_flags(argv: list[str]) -> set[str]:
+    out: set[str] = set()
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok.startswith("--"):
+            flag = tok.split("=", 1)[0]
+            out.add(flag)
+        i += 1
+    return out
+
+
+def _apply_preset_defaults(args: argparse.Namespace, provided_flags: set[str]) -> None:
+    if not getattr(args, "preset", None):
+        return
+    preset_cfg = BALANCE_PRESETS.get(str(args.preset), {})
+    flag_for_attr = {
+        "strategy": "--strategy",
+        "weight_mode": "--weight-mode",
+        "beta": "--beta",
+        "image_weight_agg": "--image-weight-agg",
+        "weight_clip_min": "--weight-clip-min",
+        "weight_clip_max": "--weight-clip-max",
+        "replacement": "--replacement",
+        "rfs_thresh": "--rfs-thresh",
+        "rfs_power": "--rfs-power",
+        "target": "--target",
+        "max_repeat_per_image": "--max-repeat-per-image",
+    }
+    for attr, value in preset_cfg.items():
+        flag = flag_for_attr.get(attr)
+        if flag and flag in provided_flags:
+            continue
+        setattr(args, attr, value)
+
+
+def _build_balancing_stats(
+    selected_pool: list[tuple[str, str, str, list[str]]],
+    selected_classes: set[str],
+) -> tuple[dict[str, int], dict[str, int], dict[str, set[str]]]:
+    bbox_count: dict[str, int] = defaultdict(int)
+    image_presence: dict[str, int] = defaultdict(int)
+    img_to_classes: dict[str, set[str]] = {}
+    for _split, img, _lbl, cls_names in selected_pool:
+        classes = {c for c in cls_names if not selected_classes or c in selected_classes}
+        if not classes and selected_classes:
+            continue
+        if not classes:
+            classes = set(cls_names)
+        img_to_classes[img] = classes
+        for c in classes:
+            image_presence[c] += 1
+        for c in cls_names:
+            if not selected_classes or c in selected_classes:
+                bbox_count[c] += 1
+    return bbox_count, image_presence, img_to_classes
+
+
+def _class_weights(
+    bbox_count: dict[str, int],
+    *,
+    mode: str,
+    beta: float,
+    min_count: int,
+) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for c, n_raw in bbox_count.items():
+        n = max(int(n_raw), int(min_count))
+        if mode == "inverse":
+            w = 1.0 / max(1, n)
+        elif mode == "sqrt-inverse":
+            w = 1.0 / math.sqrt(max(1, n))
+        else:
+            b = min(max(float(beta), 0.0), 0.999999)
+            eff = (1.0 - (b**n)) / max(1e-12, 1.0 - b)
+            w = 1.0 / max(eff, 1e-12)
+        out[c] = w
+    if not out:
+        return out
+    mean_w = sum(out.values()) / len(out)
+    if mean_w > 0:
+        out = {k: v / mean_w for k, v in out.items()}
+    return out
+
+
+def _image_weights(
+    selected_pool: list[tuple[str, str, str, list[str]]],
+    class_weights: dict[str, float],
+    *,
+    agg: str,
+    clip_min: float,
+    clip_max: float,
+    selected_classes: set[str],
+) -> list[float]:
+    weights: list[float] = []
+    for _split, _img, _lbl, cls_names in selected_pool:
+        classes = [c for c in cls_names if (not selected_classes or c in selected_classes)]
+        vals = [class_weights.get(c, 1.0) for c in classes] or [1.0]
+        if agg == "sum":
+            w = sum(vals)
+        elif agg == "mean":
+            w = sum(vals) / len(vals)
+        else:
+            w = max(vals)
+        w = max(float(clip_min), min(float(clip_max), float(w)))
+        weights.append(w)
+    return weights
+
+
+def _weighted_sample_items(
+    pool: list[tuple[str, str, str, list[str]]],
+    weights: list[float],
+    target_n: int,
+    *,
+    replacement: str,
+    max_repeat_per_image: int,
+    rng: random.Random,
+) -> list[tuple[str, str, str, list[str]]]:
+    if not pool:
+        return []
+    if replacement == "on":
+        use_repl = True
+    elif replacement == "off":
+        use_repl = False
+    else:
+        use_repl = target_n > len(pool)
+    target_n = max(1, int(target_n))
+    out: list[tuple[str, str, str, list[str]]] = []
+    if not use_repl:
+        idxs = list(range(len(pool)))
+        pick_n = min(target_n, len(pool))
+        chosen = rng.choices(idxs, weights=weights, k=pick_n * 2)
+        seen = set()
+        for i in chosen:
+            if i in seen:
+                continue
+            seen.add(i)
+            out.append(pool[i])
+            if len(out) >= pick_n:
+                break
+        if len(out) < pick_n:
+            for i in idxs:
+                if i in seen:
+                    continue
+                out.append(pool[i])
+                if len(out) >= pick_n:
+                    break
+        return out
+    counts_by_img: dict[str, int] = defaultdict(int)
+    idxs = list(range(len(pool)))
+    while len(out) < target_n:
+        i = rng.choices(idxs, weights=weights, k=1)[0]
+        img_key = pool[i][1]
+        if counts_by_img[img_key] >= max(1, int(max_repeat_per_image)):
+            continue
+        counts_by_img[img_key] += 1
+        out.append(pool[i])
+    return out
+
+
+def _rfs_expand_pool(
+    pool: list[tuple[str, str, str, list[str]]],
+    img_to_classes: dict[str, set[str]],
+    image_presence: dict[str, int],
+    *,
+    rfs_thresh: float,
+    rfs_power: float,
+    max_repeat_per_image: int,
+    rng: random.Random,
+) -> list[tuple[str, str, str, list[str]]]:
+    n_images = max(1, len({img for _s, img, _l, _c in pool}))
+    class_repeat: dict[str, float] = {}
+    for c, n_img in image_presence.items():
+        f_c = max(1e-12, float(n_img) / float(n_images))
+        class_repeat[c] = max(1.0, (float(rfs_thresh) / f_c) ** float(rfs_power))
+    out: list[tuple[str, str, str, list[str]]] = []
+    for item in pool:
+        img = item[1]
+        classes = img_to_classes.get(img, set())
+        r_i = max([class_repeat.get(c, 1.0) for c in classes] or [1.0])
+        base = int(math.floor(r_i))
+        frac = r_i - base
+        repeats = base + (1 if rng.random() < frac else 0)
+        repeats = min(max(1, repeats), max(1, int(max_repeat_per_image)))
+        for _ in range(repeats):
+            out.append(item)
+    return out
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = build_balance_arg_parser()
     args = parser.parse_args(argv)
+    interactive_allowed = is_interactive_allowed(argv)
+    if args.dataset is None and not interactive_allowed:
+        print("[ERROR] Incomplete arguments: specify --dataset.")
+        return
+    _apply_preset_defaults(args, _provided_flags(argv))
     interactive_used = False
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
@@ -123,12 +380,12 @@ def main(argv=None):
         print("[ERROR] datasets_info.json was not found or is empty.")
         return
 
-    if args.dataset is None and sys.stdin.isatty():
+    if args.dataset is None and interactive_allowed and sys.stdin.isatty():
         all_classes = sorted({k for v in catalog.values() if isinstance(v, dict) for k in (v.get("classes") or {}).keys()})
         _interactive_fill(args, sorted(catalog.keys()), all_classes)
         interactive_used = True
     if not args.dataset:
-        print("[ERROR] Specify --dataset or use interactive mode.")
+        print("[ERROR] Incomplete arguments: specify --dataset.")
         return
     if args.dataset not in catalog:
         print(f"[ERROR] Unknown dataset: {args.dataset}")
@@ -200,14 +457,67 @@ def main(argv=None):
     if not selected_pool:
         selected_pool = train_items
 
-    if args.strategy == "undersample":
+    if args.strategy == "copy":
+        balanced_train = list(selected_pool)
+    elif args.strategy == "undersample":
         target_n = max(1, int(len(selected_pool) * max(0.1, min(1.0, args.target))))
         balanced_train = random.sample(selected_pool, min(target_n, len(selected_pool)))
-    elif args.strategy in ("oversample", "class-aware"):
+    elif args.strategy == "oversample":
         target_n = max(len(selected_pool), int(len(selected_pool) * max(1.0, args.target)))
         balanced_train = [random.choice(selected_pool) for _ in range(target_n)]
-    else:  # weights
-        balanced_train = list(selected_pool)
+    else:
+        rng = random.Random(args.seed)
+        bbox_count, image_presence, img_to_classes = _build_balancing_stats(selected_pool, selected_classes)
+        if args.strategy == "rfs":
+            expanded = _rfs_expand_pool(
+                selected_pool,
+                img_to_classes,
+                image_presence,
+                rfs_thresh=args.rfs_thresh,
+                rfs_power=args.rfs_power,
+                max_repeat_per_image=args.max_repeat_per_image,
+                rng=rng,
+            )
+            target_n = max(1, int(len(selected_pool) * max(0.1, args.target)))
+            if target_n <= len(expanded):
+                balanced_train = expanded[:target_n]
+            else:
+                balanced_train = expanded + [rng.choice(expanded) for _ in range(target_n - len(expanded))]
+        else:
+            class_w = _class_weights(
+                bbox_count,
+                mode=args.weight_mode,
+                beta=args.beta,
+                min_count=args.min_count,
+            )
+            pool_for_weights = selected_pool
+            if args.strategy == "hybrid":
+                pool_for_weights = _rfs_expand_pool(
+                    selected_pool,
+                    img_to_classes,
+                    image_presence,
+                    rfs_thresh=args.rfs_thresh,
+                    rfs_power=args.rfs_power,
+                    max_repeat_per_image=args.max_repeat_per_image,
+                    rng=rng,
+                )
+            img_w = _image_weights(
+                pool_for_weights,
+                class_w,
+                agg=args.image_weight_agg,
+                clip_min=args.weight_clip_min,
+                clip_max=args.weight_clip_max,
+                selected_classes=selected_classes,
+            )
+            target_n = max(1, int(len(selected_pool) * max(0.1, args.target)))
+            balanced_train = _weighted_sample_items(
+                pool_for_weights,
+                img_w,
+                target_n,
+                replacement=args.replacement,
+                max_repeat_per_image=args.max_repeat_per_image,
+                rng=rng,
+            )
 
     out_base = args.output_name or f"{args.dataset}_balanced"
     out_name = next_dataset_name(layout.datasets, out_base)
@@ -248,7 +558,12 @@ def main(argv=None):
         encoding="utf-8",
     )
     out_hash = calculate_dataset_hash(out_dir)
-    if args.emit_train_config:
+    if args.emit_train_config or args.emit_balance_report:
+        counts_after: dict[str, int] = defaultdict(int)
+        for _split, _img, _lbl, cls_names in balanced_train:
+            for c in cls_names:
+                if not selected_classes or c in selected_classes:
+                    counts_after[c] += 1
         Path(out_dir, "balance_manifest.json").write_text(
             json.dumps(
                 {
@@ -256,6 +571,19 @@ def main(argv=None):
                     "selected_classes": sorted(selected_classes),
                     "train_input": len(train_items),
                     "train_output": len(balanced_train),
+                    "seed": args.seed,
+                    "target": args.target,
+                    "replacement": args.replacement,
+                    "weight_mode": args.weight_mode,
+                    "beta": args.beta,
+                    "image_weight_agg": args.image_weight_agg,
+                    "weight_clip_min": args.weight_clip_min,
+                    "weight_clip_max": args.weight_clip_max,
+                    "rfs_thresh": args.rfs_thresh,
+                    "rfs_power": args.rfs_power,
+                    "max_repeat_per_image": args.max_repeat_per_image,
+                    "class_counts_before_bbox": dict(class_counts),
+                    "class_counts_after_bbox": dict(counts_after),
                 },
                 ensure_ascii=False,
                 indent=2,

@@ -28,6 +28,7 @@ from smartrain.datasets_json_former import (
     find_yaml_file,
     load_yaml,
 )
+from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -269,6 +270,63 @@ def _copy_and_patch_yaml(dataset_root: str, output_root: str) -> None:
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
 
 
+def _infer_structure_from_dataset_root(dataset_root: str) -> str:
+    """
+    Infer dataset structure when there is no datasets_info.json.
+    Returns one of: 'split' or 'flat'.
+    """
+    root = os.path.abspath(os.path.expanduser(dataset_root))
+    # split layout
+    if any(
+        os.path.isdir(os.path.join(root, s, "images")) or os.path.isdir(os.path.join(root, s, "labels"))
+        for s in ("train", "val", "test")
+    ):
+        return "split"
+    # flat layout
+    if os.path.isdir(os.path.join(root, "images")) and os.path.isdir(os.path.join(root, "labels")):
+        return "flat"
+    # fallback: treat as flat (iter_image_label_buckets will validate)
+    return "flat"
+
+
+def _infer_classes_from_data_yaml(dataset_root: str) -> dict[str, int]:
+    y = find_yaml_file(dataset_root)
+    if not y:
+        return {}
+    data = load_yaml(y)
+    if not isinstance(data, dict):
+        return {}
+    names = data.get("names")
+    if isinstance(names, list):
+        return {str(v): int(i) for i, v in enumerate(names)}
+    if isinstance(names, dict):
+        out: dict[str, int] = {}
+        for k, v in names.items():
+            try:
+                out[str(v)] = int(k)
+            except Exception:
+                continue
+        # normalize to 0..N-1 if keys are not contiguous is out of scope here
+        return out
+    return {}
+
+
+def _iter_images_only(dataset_root: str) -> list[tuple[str, str]]:
+    """
+    All images under dataset_root (recursive).
+    Returns (abs_image_path, rel_dir_under_root) where rel_dir_under_root == '' for root.
+    """
+    root = os.path.abspath(os.path.expanduser(dataset_root))
+    out: list[tuple[str, str]] = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        rel_dir = os.path.relpath(dirpath, root)
+        if rel_dir == ".":
+            rel_dir = ""
+        for fn in sorted(filenames):
+            if _is_image_file(fn):
+                out.append((os.path.join(dirpath, fn), rel_dir))
+    return out
+
 def _ensure_data_yaml_after_roi(output_root: str, entry: Dict[str, Any]) -> None:
     """
     If the source didn't have data.yaml (often cvat11/zip), scan skips the ROI output.
@@ -358,6 +416,14 @@ def build_roi_arg_parser() -> argparse.ArgumentParser:
         "--require-roi-auto",
         action="store_true",
         help="Require roi_auto block in datasets_info (otherwise --weights, etc. is sufficient)",
+    )
+    p.add_argument(
+        "--images-only",
+        action="store_true",
+        help=(
+            "Allow input without labels (images-only). ROI is applied to images and empty label files "
+            "are created in the output."
+        ),
     )
     return p
 
@@ -636,11 +702,23 @@ def main(argv=None) -> None:
         argv = sys.argv[1:]
     parser = build_roi_arg_parser()
     args = parser.parse_args(argv)
+    interactive_allowed = is_interactive_allowed(argv)
     interactive_used = False
     selected_dataset_names = _parse_selected_datasets(args)
+    legacy_source = (args.source_path or "").strip()
+    direct_legacy_single = False
+    if legacy_source and (args.output_path or "").strip() and not selected_dataset_names and not (args.datasets_info_path or "").strip():
+        # Direct legacy mode: treat --source-path as dataset root (no datasets_info.json required).
+        direct_legacy_single = True
+        selected_dataset_names = [Path(os.path.abspath(os.path.expanduser(legacy_source))).name]
     if not selected_dataset_names:
+        if not interactive_allowed:
+            sys.exit("[ERROR] Incomplete arguments: specify --dataset-name/--dataset/--datasets.")
         if not sys.stdin.isatty():
-            sys.exit("[ERROR] Specify --dataset-name/--dataset/--datasets or run the command interactively (TTY).")
+            sys.exit(
+                "[ERROR] Interactive roi mode requires a terminal (TTY). "
+                "Run without arguments in TTY or pass complete flags."
+            )
         if not _run_interactive_roi_setup(args):
             return
         interactive_used = True
@@ -649,7 +727,6 @@ def main(argv=None) -> None:
     if interactive_used:
         replay_cmd = build_non_interactive_command("roi", parser, args)
         print_replay_command("before launch", replay_cmd)
-    legacy_source = (args.source_path or "").strip()
     workspace_root: Optional[str] = None
     layout: Optional[WorkspaceLayout] = None
 
@@ -660,10 +737,14 @@ def main(argv=None) -> None:
         if not args.output_path or not str(args.output_path).strip():
             sys.exit("[ERROR] In legacy mode (--source-path), specify --output-path")
         source_path_abs = os.path.abspath(os.path.expanduser(legacy_source))
-        info_path = _resolve_datasets_info_file(
-            args.datasets_info_path, os.path.join(source_path_abs, DATASETS_INFO_FILE)
-        )
-        temp_root = os.path.join(source_path_abs, "tmp")
+        if direct_legacy_single:
+            info_path = None
+            temp_root = os.path.join(source_path_abs, "tmp")
+        else:
+            info_path = _resolve_datasets_info_file(
+                args.datasets_info_path, os.path.join(source_path_abs, DATASETS_INFO_FILE)
+            )
+            temp_root = os.path.join(source_path_abs, "tmp")
         os.makedirs(temp_root, exist_ok=True)
     else:
         ws = (args.workspace or "").strip() or (os.environ.get(WORKSPACE_ENV_VAR) or "").strip()
@@ -684,11 +765,20 @@ def main(argv=None) -> None:
         if not (args.output_path or "").strip():
             need_default_roi_output = True
 
-    if not os.path.isfile(info_path):
-        sys.exit(f"[ERROR] {info_path} not found")
-
-    with open(info_path, "r", encoding="utf-8") as f:
-        datasets_info = json.load(f)
+    if direct_legacy_single:
+        datasets_info = {
+            selected_dataset_names[0]: {
+                "structure": _infer_structure_from_dataset_root(source_path_abs),
+                "classes": _infer_classes_from_data_yaml(source_path_abs),
+                "roi_auto": {},
+            }
+        }
+    else:
+        assert info_path is not None
+        if not os.path.isfile(info_path):
+            sys.exit(f"[ERROR] {info_path} not found")
+        with open(info_path, "r", encoding="utf-8") as f:
+            datasets_info = json.load(f)
 
     resolved_keys: list[str] = []
     for req_name in selected_dataset_names:
@@ -706,9 +796,12 @@ def main(argv=None) -> None:
             sys.exit(f"[ERROR] There is no structure field in the dataset record {dataset_key!r}")
         if legacy_source:
             source_path_abs = os.path.abspath(os.path.expanduser(legacy_source))
-            dataset_root = _validate_layout_legacy(
-                source_path_abs, dataset_key, args.datasets_info_path
-            )
+            if direct_legacy_single:
+                dataset_root = source_path_abs
+            else:
+                dataset_root = _validate_layout_legacy(
+                    source_path_abs, dataset_key, args.datasets_info_path
+                )
             output_root = os.path.abspath(os.path.expanduser(str(args.output_path).strip()))
         else:
             assert workspace_root is not None and layout is not None
@@ -742,67 +835,86 @@ def main(argv=None) -> None:
             temp_root=temp_root,
             exclude_test=False,
         )
+        images_only_items: list[tuple[str, str]] = []
+        if args.images_only:
+            if len(resolved_keys) > 1:
+                sys.exit("[ERROR] --images-only does not support processing multiple datasets in one run.")
+            images_only_items = _iter_images_only(dataset_root)
+            if not images_only_items:
+                sys.exit("[ERROR] No images found for images-only mode.")
         if not buckets:
-            sys.exit(f"[ERROR] No images/labels pairs for structure={structure}")
+            # Auto-fallback for direct legacy single-dataset runs (no datasets_info.json).
+            images_only_allowed = bool(args.images_only) or bool(direct_legacy_single)
+            if images_only_allowed:
+                images_only_items = _iter_images_only(dataset_root)
+            if not images_only_items:
+                sys.exit(f"[ERROR] No images/labels pairs for structure={structure}")
+            print(
+                "[WARNING] No labels found; running in images-only mode. "
+                "Only images will be saved to the output directory."
+            )
 
         stats = {"images": 0, "skipped": 0}
 
-        for img_dir, lbl_dir in buckets:
-            rel_base = _relpath_under_dataset(img_dir, dataset_root, "images")
-            out_img_dir = os.path.join(output_root, rel_base)
-            rel_lbl = _relpath_under_dataset(lbl_dir, dataset_root, "labels")
-            out_lbl_dir = os.path.join(output_root, rel_lbl)
+        def _process_one_image(
+            *,
+            src_img: str,
+            out_img_dir: str,
+            out_lbl_dir: Optional[str],
+            label_lines: List[str],
+            write_labels: bool,
+            stem_prefix: str,
+        ) -> None:
+            fname = os.path.basename(src_img)
+            stem, _ext = os.path.splitext(fname)
+            base_stem = f"{stem_prefix}{stem}" if stem_prefix else stem
 
-            files = [f for f in sorted(os.listdir(img_dir)) if _is_image_file(f)]
-            for fname in tqdm(files, desc=f"{dataset_key}:{rel_base}"):
-                src_img = os.path.join(img_dir, fname)
-                stem, _ext = os.path.splitext(fname)
-                src_lbl = os.path.join(lbl_dir, stem + ".txt")
-                label_lines = _read_label_lines(src_lbl)
+            with Image.open(src_img) as im:
+                im = im.convert("RGB")
+                iw, ih = im.size
 
-                with Image.open(src_img) as im:
-                    im = im.convert("RGB")
-                    iw, ih = im.size
+            results = model.predict(
+                source=src_img,
+                conf=cfg["conf"],
+                verbose=False,
+            )
+            r = results[0]
+            if r.boxes is None or len(r.boxes) == 0:
+                xyxy, cls, confs = [], [], []
+            else:
+                xyxy = r.boxes.xyxy.cpu().numpy()
+                cls = r.boxes.cls.cpu().numpy()
+                confs = r.boxes.conf.cpu().numpy()
 
-                results = model.predict(
-                    source=src_img,
-                    conf=cfg["conf"],
-                    verbose=False,
-                )
-                r = results[0]
-                if r.boxes is None or len(r.boxes) == 0:
-                    xyxy, cls, confs = [], [], []
-                else:
-                    xyxy = r.boxes.xyxy.cpu().numpy()
-                    cls = r.boxes.cls.cpu().numpy()
-                    confs = r.boxes.conf.cpu().numpy()
+            roi_list = _select_roi_boxes(
+                xyxy, cls, confs, cfg["class_ids"], cfg["roi_policy"], iw, ih
+            )
 
-                roi_list = _select_roi_boxes(
-                    xyxy, cls, confs, cfg["class_ids"], cfg["roi_policy"], iw, ih
-                )
+            if not roi_list:
+                if args.on_empty == "fail":
+                    sys.exit(f"[ERROR] No detections for ROI: {src_img}")
+                if args.on_empty == "skip":
+                    stats["skipped"] += 1
+                    return
+                roi_list = [_full_image_crop(iw, ih)]
 
-                if not roi_list:
-                    if args.on_empty == "fail":
-                        sys.exit(f"[ERROR] No detections for ROI: {src_img}")
-                    if args.on_empty == "skip":
-                        stats["skipped"] += 1
-                        continue
-                    roi_list = [_full_image_crop(iw, ih)]
+            def process_one_crop(
+                crop_unpadded: Tuple[float, float, float, float],
+                out_stem: str,
+            ) -> None:
+                x1, y1, x2, y2 = crop_unpadded
+                crop = _clamp_crop(x1, y1, x2, y2, cfg["pad_px"], iw, ih)
+                cx0, cy0, cx1, cy1 = crop
+                with Image.open(src_img) as im2:
+                    im2 = im2.convert("RGB")
+                    cropped = im2.crop((cx0, cy0, cx1, cy1))
+                out_image_path = os.path.join(out_img_dir, out_stem + os.path.splitext(fname)[1])
+                os.makedirs(out_img_dir, exist_ok=True)
+                cropped.save(out_image_path)
 
-                def process_one_crop(
-                    crop_unpadded: Tuple[float, float, float, float],
-                    out_stem: str,
-                ) -> None:
-                    x1, y1, x2, y2 = crop_unpadded
-                    crop = _clamp_crop(x1, y1, x2, y2, cfg["pad_px"], iw, ih)
-                    cx0, cy0, cx1, cy1 = crop
-                    with Image.open(src_img) as im2:
-                        im2 = im2.convert("RGB")
-                        cropped = im2.crop((cx0, cy0, cx1, cy1))
-                    out_image_path = os.path.join(out_img_dir, out_stem + os.path.splitext(fname)[1])
-                    os.makedirs(out_img_dir, exist_ok=True)
-                    cropped.save(out_image_path)
-
+                if write_labels:
+                    if not out_lbl_dir:
+                        sys.exit("[ERROR] Internal: out_lbl_dir is required when write_labels=True.")
                     out_lines: List[str] = []
                     for raw in label_lines:
                         new_l = _transform_label_line(raw, crop, iw, ih)
@@ -811,16 +923,55 @@ def main(argv=None) -> None:
                     out_lbl_path = os.path.join(out_lbl_dir, out_stem + ".txt")
                     _write_label_lines(out_lbl_path, out_lines)
 
-                if cfg["roi_policy"] == "per_box":
-                    for idx, box in enumerate(roi_list, start=1):
-                        process_one_crop(box, f"{stem}_split_{idx}")
-                    stats["images"] += len(roi_list)
-                else:
-                    process_one_crop(roi_list[0], stem)
-                    stats["images"] += 1
+            if cfg["roi_policy"] == "per_box":
+                for idx, box in enumerate(roi_list, start=1):
+                    process_one_crop(box, f"{base_stem}_split_{idx}")
+                stats["images"] += len(roi_list)
+            else:
+                process_one_crop(roi_list[0], base_stem)
+                stats["images"] += 1
 
-        _copy_and_patch_yaml(dataset_root, output_root)
-        _ensure_data_yaml_after_roi(output_root, entry)
+        if images_only_items:
+            for src_img, rel_dir in tqdm(images_only_items, desc=f"{dataset_key}:images-only"):
+                # In images-only mode we write ONLY images directly into output_root,
+                # with no extra folders, labels or data.yaml.
+                stem_prefix = ""
+                if rel_dir:
+                    stem_prefix = rel_dir.replace(os.sep, "__").strip("_") + "__"
+                out_img_dir = output_root
+                _process_one_image(
+                    src_img=src_img,
+                    out_img_dir=out_img_dir,
+                    out_lbl_dir=None,
+                    label_lines=[],
+                    write_labels=False,
+                    stem_prefix=stem_prefix,
+                )
+        else:
+            for img_dir, lbl_dir in buckets:
+                rel_base = _relpath_under_dataset(img_dir, dataset_root, "images")
+                out_img_dir = os.path.join(output_root, rel_base)
+                rel_lbl = _relpath_under_dataset(lbl_dir, dataset_root, "labels")
+                out_lbl_dir = os.path.join(output_root, rel_lbl)
+
+                files = [f for f in sorted(os.listdir(img_dir)) if _is_image_file(f)]
+                for fname in tqdm(files, desc=f"{dataset_key}:{rel_base}"):
+                    src_img = os.path.join(img_dir, fname)
+                    stem, _ext = os.path.splitext(fname)
+                    src_lbl = os.path.join(lbl_dir, stem + ".txt")
+                    label_lines = _read_label_lines(src_lbl)
+                    _process_one_image(
+                        src_img=src_img,
+                        out_img_dir=out_img_dir,
+                        out_lbl_dir=out_lbl_dir,
+                        label_lines=label_lines,
+                        write_labels=True,
+                        stem_prefix="",
+                    )
+
+        if not images_only_items:
+            _copy_and_patch_yaml(dataset_root, output_root)
+            _ensure_data_yaml_after_roi(output_root, entry)
         try:
             passport_path = write_dataset_passport(
                 output_dataset_dir=output_root,

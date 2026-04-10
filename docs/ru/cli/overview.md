@@ -6,7 +6,7 @@
 
 ## Группы команд
 
-- Датасеты: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`
+- Датасеты: `scan`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `hash`, `stats`
 - Обучение: `train`, `clearml-upload`
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
@@ -27,6 +27,17 @@ smartrain queue list --help
 smartrain analyze inference-benchmark --help
 ```
 
-Вызов `smartrain <команда>` без обязательных аргументов обычно выводит справку этой команды.
-Исключение: `smartrain train` без аргументов запускает интерактивную настройку (нужен TTY).
+Единый контракт интерактива:
+
+- интерактив включается только при запуске команды без аргументов (TTY обязателен);
+- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient` пустой вызов запускает интерактивный режим;
+- если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
+
+Дополнения для балансировки и статистики:
+
+- `smartrain balance` поддерживает стратегии `weights`, `rfs`, `hybrid` и параметры их настройки.
+- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` применяет готовые настройки под типовые сценарии.
+- `smartrain stats --balance-ready` выводит метрики дисбаланса и рекомендации для балансировщика.
+- `smartrain prune empty` удаляет пустые пары image/label в новый датасет `<dataset>_pruned`.
+- `smartrain prune dedup` удаляет дубли изображений по содержимому в `<dataset>_deduped` (глобальный приоритет split: train > val > test).

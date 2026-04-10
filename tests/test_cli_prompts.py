@@ -24,3 +24,17 @@ def test_prompt_multichoice_csv_by_indices(monkeypatch) -> None:
         "one",
         "three",
     ]
+
+
+def test_prompt_multichoice_csv_accepts_numeric_named_values(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_prompts,
+        "prompt",
+        lambda *args, **kwargs: "170325, 2026-04-04_19-37-54-merged, oringinal_old",
+    )
+    options = [
+        "170325",
+        "2026-04-04_19-37-54-merged",
+        "oringinal_old",
+    ]
+    assert cli_prompts.prompt_multi_choice_csv("Input datasets", options, default_values=[]) == options

@@ -18,6 +18,7 @@ from rich.table import Table
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -1015,7 +1016,101 @@ def build_stats_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--class-desc", action="store_true", help="Sort the class table in descending order")
     parser.add_argument("--class-limit", type=int, default=None, help="Row limit in class tables")
+    parser.add_argument("--balance-ready", action="store_true", help="Show metrics for configuring balance command")
+    parser.add_argument("--beta", type=float, default=0.9999, help="Beta for effective-number summary in balance-ready")
+    parser.add_argument("--tail-thresh", type=float, default=0.05, help="Tail threshold by image-frequency share")
+    parser.add_argument(
+        "--export-balance-report",
+        type=str,
+        default=None,
+        help="Export balance-ready metrics to JSON file path",
+    )
     return parser
+
+
+def _gini(values: list[float]) -> float:
+    arr = [float(v) for v in values if float(v) >= 0]
+    if not arr:
+        return 0.0
+    if sum(arr) <= 0:
+        return 0.0
+    arr.sort()
+    n = len(arr)
+    cum = 0.0
+    for i, v in enumerate(arr, 1):
+        cum += i * v
+    return (2.0 * cum) / (n * sum(arr)) - (n + 1) / n
+
+
+def _effective_num(n: int, beta: float) -> float:
+    b = min(max(float(beta), 0.0), 0.999999)
+    return (1.0 - (b ** max(0, int(n)))) / max(1e-12, 1.0 - b)
+
+
+def _build_balance_ready_record(ds: DatasetStats, *, beta: float, tail_thresh: float) -> dict:
+    bbox_counts = [sum(split.values()) for split in ds.per_class_split_instances.values()]
+    img_counts = list(ds.per_class_images.values())
+    nonzero_bbox = [x for x in bbox_counts if x > 0]
+    nonzero_img = [x for x in img_counts if x > 0]
+    total_img = max(1, ds.images_total)
+    img_freqs = [x / total_img for x in nonzero_img]
+    tail_mask = [f <= float(tail_thresh) for f in img_freqs]
+    tail_share_images = (sum(x for x, m in zip(nonzero_img, tail_mask) if m) / max(1, sum(nonzero_img))) if nonzero_img else 0.0
+    tail_share_bbox = (sum(x for x, m in zip(nonzero_bbox, tail_mask) if m) / max(1, sum(nonzero_bbox))) if nonzero_bbox else 0.0
+    eff_vals = [_effective_num(n, beta) for n in nonzero_bbox]
+    return {
+        "dataset": ds.name,
+        "images_total": ds.images_total,
+        "bboxes_total": ds.instances_total,
+        "empty_images": ds.empty_images,
+        "classes_present": len(nonzero_bbox),
+        "class_img_freq_min": min(img_freqs) if img_freqs else 0.0,
+        "class_img_freq_median": statistics.median(img_freqs) if img_freqs else 0.0,
+        "class_img_freq_max": max(img_freqs) if img_freqs else 0.0,
+        "class_bbox_freq_min": min(nonzero_bbox) if nonzero_bbox else 0,
+        "class_bbox_freq_median": statistics.median(nonzero_bbox) if nonzero_bbox else 0,
+        "class_bbox_freq_max": max(nonzero_bbox) if nonzero_bbox else 0,
+        "imbalance_ratio_bbox": (max(nonzero_bbox) / min(nonzero_bbox)) if len(nonzero_bbox) >= 2 else 1.0,
+        "imbalance_ratio_image": (max(nonzero_img) / min(nonzero_img)) if len(nonzero_img) >= 2 else 1.0,
+        "tail_share_bbox": tail_share_bbox,
+        "tail_share_images": tail_share_images,
+        "gini_bbox": _gini(nonzero_bbox),
+        "gini_image": _gini(nonzero_img),
+        "effective_num_min": min(eff_vals) if eff_vals else 0.0,
+        "effective_num_median": statistics.median(eff_vals) if eff_vals else 0.0,
+        "effective_num_max": max(eff_vals) if eff_vals else 0.0,
+        "suggested_strategy": "hybrid" if (len(nonzero_bbox) >= 2 and (max(nonzero_bbox) / max(1, min(nonzero_bbox))) > 20) else "weights",
+        "suggested_beta": beta,
+        "suggested_rfs_thresh": 0.001,
+        "suggested_rfs_power": 0.5,
+        "suggested_target_range": [1.0, 1.5] if ds.instances_total > 0 else [1.0, 1.0],
+    }
+
+
+def _render_balance_ready(scanned: dict[str, DatasetStats], *, beta: float, tail_thresh: float) -> list[dict]:
+    rows = [_build_balance_ready_record(ds, beta=beta, tail_thresh=tail_thresh) for ds in scanned.values()]
+    table = Table(title="Balance-ready dataset metrics")
+    table.add_column("dataset")
+    table.add_column("images")
+    table.add_column("bboxes")
+    table.add_column("classes")
+    table.add_column("imb_bbox")
+    table.add_column("gini_bbox")
+    table.add_column("tail_bbox")
+    table.add_column("suggested")
+    for r in rows:
+        table.add_row(
+            str(r["dataset"]),
+            str(r["images_total"]),
+            str(r["bboxes_total"]),
+            str(r["classes_present"]),
+            f"{r['imbalance_ratio_bbox']:.2f}",
+            f"{r['gini_bbox']:.3f}",
+            f"{r['tail_share_bbox']:.3f}",
+            str(r["suggested_strategy"]),
+        )
+    console.print(table)
+    return rows
 
 
 def build_stats_compare_arg_parser() -> argparse.ArgumentParser:
@@ -1037,7 +1132,13 @@ def build_stats_compare_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_stats(args, layout: WorkspaceLayout) -> int:
+def _run_stats(args, layout: WorkspaceLayout, *, interactive_allowed: bool) -> int:
+    if not args.dataset and not interactive_allowed:
+        console.print(
+            "[ERROR] Incomplete arguments: specify --dataset "
+            "(or run command without arguments for interactive mode)."
+        )
+        return 2
     available = _available_dataset_dirs(layout)
     if not available:
         console.print("[ERROR] No datasets found in datasets/.")
@@ -1050,7 +1151,7 @@ def _run_stats(args, layout: WorkspaceLayout) -> int:
         and not args.check_near_duplicates
         and not args.export_issues
     )
-    if interactive and sys.stdin.isatty():
+    if interactive and interactive_allowed and sys.stdin.isatty():
         console.print("[INFO] Interactive stats mode")
         _print_interactive_catalog(available)
         _prompt_interactive_datasets(args, sorted(available.keys()))
@@ -1084,17 +1185,31 @@ def _run_stats(args, layout: WorkspaceLayout) -> int:
         args.class_limit,
         show_legend=not bool(getattr(args, "no_legend", False)),
     )
+    if bool(getattr(args, "balance_ready", False)):
+        rows = _render_balance_ready(
+            scanned,
+            beta=float(getattr(args, "beta", 0.9999)),
+            tail_thresh=float(getattr(args, "tail_thresh", 0.05)),
+        )
+        out_path = getattr(args, "export_balance_report", None)
+        if out_path:
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump({"generated_at": datetime.now().isoformat(), "datasets": rows}, f, ensure_ascii=False, indent=2)
+            console.print(f"[OK] Balance-ready report exported: {out_path}")
     if replay_cmd:
         print_replay_command("after execution", replay_cmd)
     return 0
 
 
-def _run_stats_compare(args, layout: WorkspaceLayout) -> int:
+def _run_stats_compare(args, layout: WorkspaceLayout, *, interactive_allowed: bool) -> int:
+    if (not args.left or not args.right) and not interactive_allowed:
+        console.print("[ERROR] Incomplete arguments: compare requires --left and --right.")
+        return 2
     available = _available_dataset_dirs(layout)
     if not available:
         console.print("[ERROR] No datasets found in datasets/.")
         return 2
-    if (not args.left or not args.right) and sys.stdin.isatty():
+    if (not args.left or not args.right) and interactive_allowed and sys.stdin.isatty():
         console.print("[INFO] Interactive mode stats compare")
         _print_interactive_catalog(available)
         prompt_interactive_compare_args(args, sorted(available.keys()))
@@ -1137,13 +1252,14 @@ def main(argv=None):
         argv = argv[1:]
     parser = build_stats_compare_arg_parser() if subcmd == "compare" else build_stats_arg_parser()
     args = parser.parse_args(argv)
+    interactive_allowed = is_interactive_allowed(argv)
     try:
         root = resolve_workspace_root(args.workspace)
         layout = WorkspaceLayout(root)
         if subcmd == "compare":
-            code = _run_stats_compare(args, layout)
+            code = _run_stats_compare(args, layout, interactive_allowed=interactive_allowed)
         else:
-            code = _run_stats(args, layout)
+            code = _run_stats(args, layout, interactive_allowed=interactive_allowed)
     except ValueError as e:
         console.print(f"[ERROR] {e}")
         code = 2

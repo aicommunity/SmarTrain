@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from PIL import Image
 
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
@@ -334,8 +335,8 @@ def test_roi_workspace_external_path_via_datasets_list(tmp_path: Path) -> None:
     assert (out_dir / "images" / "e.jpg").is_file()
 
 
-def test_roi_interactive_mode_without_dataset_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_roi_partial_args_do_not_trigger_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from smartrain.workspace_paths import DATASETS_INFO_FILE
 
@@ -350,35 +351,11 @@ def test_roi_interactive_mode_without_dataset_name(
         json.dumps({"roi_ds": {"classes": {"cls0": 0}, "structure": "flat"}}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    out_dir = tmp_path / "datasets" / "roi_ds_roi_i"
-    prompts = iter(
-        [
-            "roi_ds",  # dataset-name
-            str(out_dir),  # output-path
-            "yolo_detect",  # mode
-            "largest",  # roi-policy
-            "full_image",  # on-empty
-            "/tmp/model.pt",  # weights
-            "",  # conf
-            "",  # pad-px
-            "",  # require-roi-auto => default n
-        ]
-    )
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    monkeypatch.setattr("smartrain.dataset_roi_yolo._prompt_input", lambda *a, **k: next(prompts))
-    fake_boxes = MagicMock()
-    fake_boxes.xyxy.cpu.return_value.numpy.return_value = [[5.0, 5.0, 40.0, 30.0]]
-    fake_boxes.cls.cpu.return_value.numpy.return_value = [0]
-    fake_boxes.conf.cpu.return_value.numpy.return_value = [0.95]
-    fake_result = MagicMock()
-    fake_result.boxes = fake_boxes
-    fake_model = MagicMock()
-    fake_model.task = "detect"
-    fake_model.predict = MagicMock(return_value=[fake_result])
-    with patch("smartrain.dataset_roi_yolo.YOLO", return_value=fake_model):
+    with pytest.raises(SystemExit) as e:
         roi_main(["--workspace", root])
-    assert (out_dir / "images" / "one.jpg").is_file()
-    assert (out_dir / "labels" / "one.txt").is_file()
+    out = (capsys.readouterr().out + capsys.readouterr().err + str(e.value)).lower()
+    assert "incomplete arguments" in out.lower()
 
 
 def test_roi_multiple_datasets_batch_mode(tmp_path: Path) -> None:
@@ -415,3 +392,95 @@ def test_roi_multiple_datasets_batch_mode(tmp_path: Path) -> None:
         )
     assert (out_base / "ds1_roi" / "images" / "a.jpg").is_file()
     assert (out_base / "ds2_roi" / "images" / "a.jpg").is_file()
+
+
+def test_roi_legacy_direct_source_without_datasets_info(tmp_path: Path) -> None:
+    ds_root = tmp_path / "some_dataset_root"
+    (ds_root / "images").mkdir(parents=True, exist_ok=True)
+    (ds_root / "labels").mkdir(parents=True, exist_ok=True)
+    _write_jpg(ds_root / "images" / "one.jpg", size=(64, 64))
+    (ds_root / "labels" / "one.txt").write_text("0 0.5 0.5 0.4 0.4\n", encoding="utf-8")
+    _write_minimal_data_yaml(ds_root / "images")
+
+    out_dir = tmp_path / "out_roi"
+    fake_result = MagicMock()
+    fake_result.boxes = None
+    fake_model = MagicMock()
+    fake_model.task = "detect"
+    fake_model.predict = MagicMock(return_value=[fake_result])
+    with patch("smartrain.dataset_roi_yolo.YOLO", return_value=fake_model):
+        roi_main(
+            [
+                "--source-path",
+                str(ds_root),
+                "--output-path",
+                str(out_dir),
+                "--weights",
+                str(tmp_path / "dummy.pt"),
+            ]
+        )
+
+    assert (out_dir / "images" / "one.jpg").is_file()
+    assert (out_dir / "labels" / "one.txt").is_file()
+
+
+def test_roi_legacy_direct_images_only_without_labels(tmp_path: Path) -> None:
+    ds_root = tmp_path / "imgs_only"
+    ds_root.mkdir(parents=True, exist_ok=True)
+    _write_jpg(ds_root / "a.jpg", size=(64, 64))
+
+    out_dir = tmp_path / "out_roi_imgs_only"
+    fake_result = MagicMock()
+    fake_result.boxes = None
+    fake_model = MagicMock()
+    fake_model.task = "detect"
+    fake_model.predict = MagicMock(return_value=[fake_result])
+    with patch("smartrain.dataset_roi_yolo.YOLO", return_value=fake_model):
+        roi_main(
+            [
+                "--source-path",
+                str(ds_root),
+                "--output-path",
+                str(out_dir),
+                "--weights",
+                str(tmp_path / "dummy.pt"),
+            ]
+        )
+
+    assert (out_dir / "a.jpg").is_file()
+    assert not (out_dir / "labels").exists()
+    assert not (out_dir / "images").exists()
+    assert not (out_dir / "data.yaml").exists()
+
+
+def test_roi_images_only_flag_ignores_existing_labels(tmp_path: Path) -> None:
+    ds_root = tmp_path / "ds_with_labels"
+    (ds_root / "images").mkdir(parents=True, exist_ok=True)
+    (ds_root / "labels").mkdir(parents=True, exist_ok=True)
+    _write_jpg(ds_root / "images" / "a.jpg", size=(64, 64))
+    (ds_root / "labels" / "a.txt").write_text("0 0.5 0.5 0.4 0.4\n", encoding="utf-8")
+    _write_minimal_data_yaml(ds_root / "images")
+
+    out_dir = tmp_path / "out_roi_images_only_flag"
+    fake_result = MagicMock()
+    fake_result.boxes = None
+    fake_model = MagicMock()
+    fake_model.task = "detect"
+    fake_model.predict = MagicMock(return_value=[fake_result])
+    with patch("smartrain.dataset_roi_yolo.YOLO", return_value=fake_model):
+        roi_main(
+            [
+                "--source-path",
+                str(ds_root),
+                "--output-path",
+                str(out_dir),
+                "--weights",
+                str(tmp_path / "dummy.pt"),
+                "--images-only",
+            ]
+        )
+
+    assert (out_dir / "images__a.jpg").is_file()
+    assert not (out_dir / "labels").exists()
+    assert not (out_dir / "images").exists()
+    assert not (out_dir / "data.yaml").exists()

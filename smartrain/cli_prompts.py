@@ -119,12 +119,12 @@ def prompt_choice(label: str, options: Sequence[str], default: str | None = None
         if not raw:
             _echo_default_if_used(choice_default, _prompt_label(f"{label} (number or value)", choice_default))
             return choice_default
+        if raw in options:
+            return raw
         if raw.isdigit():
             idx = int(raw)
             if 1 <= idx <= len(options):
                 return options[idx - 1]
-        if raw in options:
-            return raw
         print(f"[ERROR] Incorrect selection: {raw!r}")
 
 
@@ -158,7 +158,9 @@ def prompt_multi_choice_csv(
         for part in (x.strip() for x in raw.split(",")):
             if not part:
                 continue
-            if part.isdigit():
+            if part in options:
+                val = part
+            elif part.isdigit():
                 idx = int(part)
                 if 1 <= idx <= len(options):
                     val = options[idx - 1]

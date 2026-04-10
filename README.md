@@ -72,9 +72,15 @@ Current documentation is organized into sections in `docs/`:
 
 ## Important details
 
-- Running `smartrain <command>` without required arguments usually prints command help.
-- `smartrain train` without arguments starts interactive mode (requires TTY terminal).
+- Interactive mode starts only when a command is launched with zero arguments (TTY required).
+- Interactive dataset commands: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`; plus `train`.
+- Dataset cleanup command: `prune` (`prune empty` for empty pairs, `prune dedup` for duplicate images by content).
+- If any arguments are provided but required ones are missing, commands return a clear "incomplete arguments" error instead of interactive prompts.
 - Command help now includes practical `Examples` / `Quick examples` blocks for common workflows.
+- `smartrain balance` presets:
+  - `--preset weights-safe` for conservative balancing
+  - `--preset rfs-aggressive` for stronger tail upsampling
+  - `--preset hybrid-default` as a general default
 - For `hash --validate`: `0` for a match, `1` for a mismatch, `2` for an error.
 - By default, the workspace queue uses `queue.txt` and `tmp/status.txt`.
 - Dependency extras:

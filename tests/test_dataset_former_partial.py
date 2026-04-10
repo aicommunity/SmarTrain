@@ -8,7 +8,7 @@ import pytest
 from PIL import Image
 
 from smartrain.dataset_former import main as fusion_main, prune_output_empty_label_pairs
-from smartrain.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, deploy_workspace
+from smartrain.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, WORKSPACE_ENV_VAR, deploy_workspace
 
 
 def _write_jpg(path: Path, color: tuple[int, int, int] = (10, 20, 30)) -> None:
@@ -238,7 +238,9 @@ def test_fusion_accepts_datasets_csv(tmp_path: Path) -> None:
     assert (tmp_path / "datasets" / "merged_csv" / "dataset_passport.json").is_file()
 
 
-def test_fusion_interactive_mode_without_dataset_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fusion_partial_args_do_not_trigger_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     deploy_workspace(str(tmp_path))
     sd = tmp_path / "datasets"
     _write_split_dataset(tmp_path, "ds_a", "cat", 0, "a1")
@@ -251,11 +253,6 @@ def test_fusion_interactive_mode_without_dataset_args(tmp_path: Path, monkeypatc
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("smartrain.dataset_former._prompt_dataset_selection", lambda available: ["ds_a"])
-    monkeypatch.setattr(
-        "smartrain.dataset_former._prompt_interactive_options",
-        lambda args, default_output_name, class_candidates: None,
-    )
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     fusion_main(
@@ -268,7 +265,9 @@ def test_fusion_interactive_mode_without_dataset_args(tmp_path: Path, monkeypatc
             "cat",
         ]
     )
-    assert (tmp_path / "datasets" / "merged_interactive" / "data.yaml").is_file()
+    out = capsys.readouterr().out + capsys.readouterr().err
+    assert "incomplete arguments" in out.lower()
+    assert not (tmp_path / "datasets" / "merged_interactive" / "data.yaml").is_file()
 
 
 def test_fusion_interactive_options_apply_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,6 +290,7 @@ def test_fusion_interactive_options_apply_defaults(tmp_path: Path, monkeypatch: 
 
     monkeypatch.setattr("smartrain.dataset_former._prompt_dataset_selection", lambda available: ["ds_a", "ds_b"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
 
     def _fake_options(args, default_output_name, class_candidates):
         args.output_name = "merged_from_interactive"
@@ -300,7 +300,7 @@ def test_fusion_interactive_options_apply_defaults(tmp_path: Path, monkeypatch: 
 
     monkeypatch.setattr("smartrain.dataset_former._prompt_interactive_options", _fake_options)
 
-    fusion_main(["--workspace", str(tmp_path)])
+    fusion_main([])
     assert (tmp_path / "datasets" / "merged_from_interactive" / "data.yaml").is_file()
 
 

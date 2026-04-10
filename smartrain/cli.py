@@ -7,12 +7,14 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Callable, Optional
 
 import typer
 from rich.console import Console
 
+from smartrain.interactive_contract import INTERACTIVE_ALLOWED_ENV
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 app = typer.Typer(
@@ -136,6 +138,19 @@ def _invoke_module_main(module: str, args: list[str]) -> None:
     fn(args)
 
 
+@contextmanager
+def _interactive_flag_env(allowed: bool):
+    prev = os.environ.get(INTERACTIVE_ALLOWED_ENV)
+    os.environ[INTERACTIVE_ALLOWED_ENV] = "1" if allowed else "0"
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop(INTERACTIVE_ALLOWED_ENV, None)
+        else:
+            os.environ[INTERACTIVE_ALLOWED_ENV] = prev
+
+
 def _forward_argparse_command(
     ctx: typer.Context,
     *,
@@ -146,6 +161,9 @@ def _forward_argparse_command(
     empty_args_mode: str = "help",
 ) -> None:
     args = list(prepend_args or []) + list(ctx.args)
+    interactive_allowed = (
+        len(args) == 0 and empty_args_mode in ("invoke", "invoke_if_tty_else_help")
+    )
     def _enhance_parser_help(parser_obj: object) -> None:
         if prog is None:
             return
@@ -158,11 +176,13 @@ def _forward_argparse_command(
 
     if not args:
         if empty_args_mode == "invoke":
-            _invoke_module_main(module, args)
+            with _interactive_flag_env(interactive_allowed):
+                _invoke_module_main(module, args)
             return
         if empty_args_mode == "invoke_if_tty_else_help":
             if sys.stdin.isatty():
-                _invoke_module_main(module, args)
+                with _interactive_flag_env(interactive_allowed):
+                    _invoke_module_main(module, args)
                 return
         if build_parser:
             parser = build_parser()
@@ -185,7 +205,8 @@ def _forward_argparse_command(
             if code is None:
                 code = 0
             raise typer.Exit(code if isinstance(code, int) else 1)
-    _invoke_module_main(module, args)
+    with _interactive_flag_env(interactive_allowed):
+        _invoke_module_main(module, args)
 
 
 @app.command(
@@ -317,6 +338,44 @@ def cmd_balance(ctx: typer.Context) -> None:
         module="smartrain.dataset_balance",
         build_parser=build_balance_arg_parser,
         prog="smartrain balance",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@app.command(
+    "prune",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_prune(ctx: typer.Context) -> None:
+    """Prune dataset: remove empty pairs or duplicates.
+
+    Examples:
+      smartrain prune empty --dataset my_dataset
+      smartrain prune dedup --dataset my_dataset
+      smartrain prune dedup --dataset my_dataset --allow-balanced-dedup
+    """
+    from smartrain.dataset_prune import (
+        build_prune_arg_parser,
+        build_prune_dedup_arg_parser,
+        build_prune_empty_arg_parser,
+    )
+
+    parser = build_prune_arg_parser
+    prog = "smartrain prune"
+    if ctx.args and ctx.args[0] == "empty":
+        parser = build_prune_empty_arg_parser
+        prog = "smartrain prune empty"
+    elif ctx.args and ctx.args[0] == "dedup":
+        parser = build_prune_dedup_arg_parser
+        prog = "smartrain prune dedup"
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.dataset_prune",
+        build_parser=parser,
+        prog=prog,
+        empty_args_mode="invoke_if_tty_else_help",
     )
 
 
@@ -656,6 +715,15 @@ def cmd_analyze_inference_plot(ctx: typer.Context) -> None:
       smartrain analyze inference-plot --csv analytics/inference_tests/ds_a.csv --out-png analytics/ds_a_speed.png
     """
     _invoke_module_main("smartrain.results_analyzer", ["inference-plot", *list(ctx.args)])
+
+
+@analyze_app.command(
+    "test-metrics-plot",
+    short_help="Plot test metrics from CSV files.",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def cmd_analyze_test_metrics_plot(ctx: typer.Context) -> None:
+    _invoke_module_main("smartrain.results_analyzer", ["test-metrics-plot", *list(ctx.args)])
 
 
 def _analyze_group_callback(ctx: typer.Context) -> None:
