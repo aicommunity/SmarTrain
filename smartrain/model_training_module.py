@@ -15,6 +15,7 @@ from ultralytics import YOLO
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.dataset_hash import calculate_dataset_hash
+from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.train_profile import (
     apply_cli_smartrain_overrides,
     dataset_root_from_data_yaml,
@@ -1238,7 +1239,7 @@ def main(argv=None):
         argv = sys.argv[1:]
     args = parse_args(argv)
     parser = build_train_arg_parser()
-    interactive_mode = len(argv) == 0
+    interactive_mode = is_interactive_allowed(argv)
     replay_cmd = None
     if interactive_mode:
         if not sys.stdin.isatty():

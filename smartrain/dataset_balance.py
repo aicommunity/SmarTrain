@@ -19,6 +19,7 @@ from smartrain.cli_replay import build_non_interactive_command, print_replay_com
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.dataset_passport import next_dataset_name, write_dataset_passport
+from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -366,6 +367,10 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = build_balance_arg_parser()
     args = parser.parse_args(argv)
+    interactive_allowed = is_interactive_allowed(argv)
+    if args.dataset is None and not interactive_allowed:
+        print("[ERROR] Incomplete arguments: specify --dataset.")
+        return
     _apply_preset_defaults(args, _provided_flags(argv))
     interactive_used = False
     root = resolve_workspace_root(args.workspace)
@@ -375,12 +380,12 @@ def main(argv=None):
         print("[ERROR] datasets_info.json was not found or is empty.")
         return
 
-    if args.dataset is None and sys.stdin.isatty():
+    if args.dataset is None and interactive_allowed and sys.stdin.isatty():
         all_classes = sorted({k for v in catalog.values() if isinstance(v, dict) for k in (v.get("classes") or {}).keys()})
         _interactive_fill(args, sorted(catalog.keys()), all_classes)
         interactive_used = True
     if not args.dataset:
-        print("[ERROR] Specify --dataset or use interactive mode.")
+        print("[ERROR] Incomplete arguments: specify --dataset.")
         return
     if args.dataset not in catalog:
         print(f"[ERROR] Unknown dataset: {args.dataset}")

@@ -72,8 +72,9 @@ Current documentation is organized into sections in `docs/`:
 
 ## Important details
 
-- Running `smartrain <command>` without required arguments usually prints command help.
-- `smartrain train` without arguments starts interactive mode (requires TTY terminal).
+- Interactive mode starts only when a command is launched with zero arguments (TTY required).
+- Interactive dataset commands: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`; plus `train`.
+- If any arguments are provided but required ones are missing, commands return a clear "incomplete arguments" error instead of interactive prompts.
 - Command help now includes practical `Examples` / `Quick examples` blocks for common workflows.
 - `smartrain balance` presets:
   - `--preset weights-safe` for conservative balancing

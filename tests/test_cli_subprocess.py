@@ -193,3 +193,30 @@ def test_train_without_args_dispatches_to_interactive_flow(
     # In non-TTY subprocesses interactive train reports this message;
     # this proves we call train main([]) instead of printing argparse help.
     assert "interactive train mode requires a terminal" in out.lower()
+
+
+@pytest.mark.parametrize(
+    "cmd,required_error,forbidden_phrase",
+    [
+        (["fusion", "--", "--workspace", "."], "incomplete arguments", "interactive"),
+        (["augment", "--", "--workspace", "."], "incomplete arguments", "interactive augment mode"),
+        (["balance", "--", "--workspace", "."], "incomplete arguments", "interactive balance mode"),
+        (["orient", "--", "--workspace", "."], "incomplete arguments", "interactive"),
+        (["roi", "--", "--workspace", "."], "incomplete arguments", "interactive roi mode"),
+        (["stats", "compare", "--left", "foo"], "incomplete arguments", "interactive mode stats compare"),
+    ],
+)
+def test_partial_args_do_not_trigger_interactive(
+    cmd: list[str],
+    required_error: str,
+    forbidden_phrase: str,
+    subprocess_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(cmd, cwd=tmp_path, env=env)
+    out = ((r.stdout or "") + (r.stderr or "")).lower()
+    assert required_error in out
+    assert forbidden_phrase not in out

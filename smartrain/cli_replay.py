@@ -37,6 +37,18 @@ def build_non_interactive_command(
             if value is False:
                 parts.append(opt or "")
             continue
+        if isinstance(action, argparse.BooleanOptionalAction):
+            # BooleanOptionalAction exposes both positive/negative options.
+            # Emit only the explicit flag form, never " --flag True/False ".
+            if value is True:
+                if action.option_strings:
+                    positive = next((o for o in action.option_strings if o.startswith("--no-") is False), None)
+                    parts.append(positive or (opt or ""))
+            elif value is False:
+                if action.option_strings:
+                    negative = next((o for o in action.option_strings if o.startswith("--no-")), None)
+                    parts.append(negative or (opt or ""))
+            continue
         if value is None:
             continue
         if isinstance(action, argparse._AppendAction):

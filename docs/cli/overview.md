@@ -27,8 +27,11 @@ smartrain queue list --help
 smartrain analyze inference-benchmark --help
 ```
 
-Calling `smartrain <command>` without required arguments usually prints that command's help.
-`smartrain train` is special: without arguments it enters interactive setup (TTY required).
+Unified interactive contract:
+
+- interactive mode starts only when a command is run with zero arguments (TTY required);
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, empty invocation enters interactive mode;
+- if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
 Balance and stats additions:

@@ -18,6 +18,7 @@ from rich.table import Table
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -1131,7 +1132,13 @@ def build_stats_compare_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_stats(args, layout: WorkspaceLayout) -> int:
+def _run_stats(args, layout: WorkspaceLayout, *, interactive_allowed: bool) -> int:
+    if not args.dataset and not interactive_allowed:
+        console.print(
+            "[ERROR] Incomplete arguments: specify --dataset "
+            "(or run command without arguments for interactive mode)."
+        )
+        return 2
     available = _available_dataset_dirs(layout)
     if not available:
         console.print("[ERROR] No datasets found in datasets/.")
@@ -1144,7 +1151,7 @@ def _run_stats(args, layout: WorkspaceLayout) -> int:
         and not args.check_near_duplicates
         and not args.export_issues
     )
-    if interactive and sys.stdin.isatty():
+    if interactive and interactive_allowed and sys.stdin.isatty():
         console.print("[INFO] Interactive stats mode")
         _print_interactive_catalog(available)
         _prompt_interactive_datasets(args, sorted(available.keys()))
@@ -1194,12 +1201,15 @@ def _run_stats(args, layout: WorkspaceLayout) -> int:
     return 0
 
 
-def _run_stats_compare(args, layout: WorkspaceLayout) -> int:
+def _run_stats_compare(args, layout: WorkspaceLayout, *, interactive_allowed: bool) -> int:
+    if (not args.left or not args.right) and not interactive_allowed:
+        console.print("[ERROR] Incomplete arguments: compare requires --left and --right.")
+        return 2
     available = _available_dataset_dirs(layout)
     if not available:
         console.print("[ERROR] No datasets found in datasets/.")
         return 2
-    if (not args.left or not args.right) and sys.stdin.isatty():
+    if (not args.left or not args.right) and interactive_allowed and sys.stdin.isatty():
         console.print("[INFO] Interactive mode stats compare")
         _print_interactive_catalog(available)
         prompt_interactive_compare_args(args, sorted(available.keys()))
@@ -1242,13 +1252,14 @@ def main(argv=None):
         argv = argv[1:]
     parser = build_stats_compare_arg_parser() if subcmd == "compare" else build_stats_arg_parser()
     args = parser.parse_args(argv)
+    interactive_allowed = is_interactive_allowed(argv)
     try:
         root = resolve_workspace_root(args.workspace)
         layout = WorkspaceLayout(root)
         if subcmd == "compare":
-            code = _run_stats_compare(args, layout)
+            code = _run_stats_compare(args, layout, interactive_allowed=interactive_allowed)
         else:
-            code = _run_stats(args, layout)
+            code = _run_stats(args, layout, interactive_allowed=interactive_allowed)
     except ValueError as e:
         console.print(f"[ERROR] {e}")
         code = 2

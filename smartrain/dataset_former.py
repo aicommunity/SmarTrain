@@ -18,6 +18,7 @@ from smartrain.dataset_access import (
     resolve_dataset_root_for_entry,
 )
 from smartrain.dataset_passport import write_dataset_passport
+from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -767,6 +768,11 @@ def main(argv=None):
         argv = sys.argv[1:]
     parser = build_dataset_former_arg_parser()
     args = parser.parse_args(argv)
+    interactive_allowed = is_interactive_allowed(argv)
+    preselected_dataset_names = _parse_selected_datasets(args)
+    if not preselected_dataset_names and not interactive_allowed:
+        print("[ERROR] Incomplete arguments: specify --dataset/--datasets.")
+        return
 
     legacy = (
         args.source_path is not None
@@ -816,8 +822,8 @@ def main(argv=None):
         class_names_map = json.load(f)
 
     output_dataset_name = os.path.basename(target_dir)
-    selected_dataset_names = _parse_selected_datasets(args)
-    interactive_mode = not selected_dataset_names
+    selected_dataset_names = preselected_dataset_names
+    interactive_mode = not selected_dataset_names and interactive_allowed
     available_dataset_names = sorted(
         [
             n
@@ -827,10 +833,13 @@ def main(argv=None):
     )
 
     if not selected_dataset_names:
+        if not interactive_allowed:
+            print("[ERROR] Incomplete arguments: specify --dataset/--datasets.")
+            return
         if not sys.stdin.isatty():
             print(
-                "[ERROR] No input datasets specified. Use --dataset/--datasets "
-                "or run in an interactive terminal."
+                "[ERROR] Interactive fusion mode requires a terminal (TTY). "
+                "Pass --dataset/--datasets or run command without arguments in TTY."
             )
             return
         try:

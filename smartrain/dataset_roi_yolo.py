@@ -28,6 +28,7 @@ from smartrain.datasets_json_former import (
     find_yaml_file,
     load_yaml,
 )
+from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -701,6 +702,7 @@ def main(argv=None) -> None:
         argv = sys.argv[1:]
     parser = build_roi_arg_parser()
     args = parser.parse_args(argv)
+    interactive_allowed = is_interactive_allowed(argv)
     interactive_used = False
     selected_dataset_names = _parse_selected_datasets(args)
     legacy_source = (args.source_path or "").strip()
@@ -710,8 +712,13 @@ def main(argv=None) -> None:
         direct_legacy_single = True
         selected_dataset_names = [Path(os.path.abspath(os.path.expanduser(legacy_source))).name]
     if not selected_dataset_names:
+        if not interactive_allowed:
+            sys.exit("[ERROR] Incomplete arguments: specify --dataset-name/--dataset/--datasets.")
         if not sys.stdin.isatty():
-            sys.exit("[ERROR] Specify --dataset-name/--dataset/--datasets or run the command interactively (TTY).")
+            sys.exit(
+                "[ERROR] Interactive roi mode requires a terminal (TTY). "
+                "Run without arguments in TTY or pass complete flags."
+            )
         if not _run_interactive_roi_setup(args):
             return
         interactive_used = True

@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from smartrain.dataset_stats import main as stats_main
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
 def _write_jpg(path: Path) -> None:
@@ -111,6 +111,7 @@ def test_stats_compare_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     (right / "train" / "labels" / "b.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
 
     def _fake_prompt(args, available_names):
         assert "left_ds" in available_names and "right_ds" in available_names
@@ -124,6 +125,6 @@ def test_stats_compare_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr("smartrain.dataset_stats.prompt_interactive_compare_args", _fake_prompt)
     with pytest.raises(SystemExit) as e:
-        stats_main(["compare", "--workspace", str(tmp_path)])
+        stats_main(["compare"])
     assert e.value.code == 0
 
