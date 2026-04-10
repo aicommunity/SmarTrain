@@ -98,6 +98,15 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-name", type=str, default=None, help="Name of output dataset (default <dataset>_balanced)")
     p.add_argument("--emit-train-config", action="store_true", help="Save balance_manifest.json for train")
     p.add_argument("--emit-balance-report", action="store_true", help="Write expanded balance report to manifest")
+    p.add_argument(
+        "--eval-coverage",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Auto-adjust balanced train split to keep eval splits non-empty and improve class coverage "
+            "(enabled by default; disable with --no-eval-coverage)."
+        ),
+    )
     p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--dry-run", action="store_true")
     return p
@@ -178,6 +187,10 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
     args.emit_train_config = prompt_yes_no(
         "Write train config manifest (--emit-train-config)?",
         default=bool(args.emit_train_config),
+    )
+    args.eval_coverage = prompt_yes_no(
+        "Auto-fix eval split coverage (--eval-coverage)?",
+        default=bool(args.eval_coverage),
     )
     args.dry_run = prompt_yes_no("Do dry-run (--dry-run)?", default=bool(args.dry_run))
 
@@ -677,11 +690,12 @@ def main(argv=None):
     out_base = args.output_name or f"{args.dataset}_balanced"
     out_name = next_dataset_name(layout.datasets, out_base)
     out_dir = os.path.join(layout.datasets, out_name)
-    balanced_train = _ensure_non_empty_eval_splits(
-        balanced_train,
-        passthrough_items,
-        seed=int(args.seed),
-    )
+    if bool(getattr(args, "eval_coverage", True)):
+        balanced_train = _ensure_non_empty_eval_splits(
+            balanced_train,
+            passthrough_items,
+            seed=int(args.seed),
+        )
 
     if args.dry_run:
         print(f"[OK] dry-run: strategy={args.strategy}, train_in={len(train_items)}, train_out={len(balanced_train)}, output={out_name}")
