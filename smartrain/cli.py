@@ -343,6 +343,43 @@ def cmd_balance(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "prune",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_prune(ctx: typer.Context) -> None:
+    """Prune dataset: remove empty pairs or duplicates.
+
+    Examples:
+      smartrain prune empty --dataset my_dataset
+      smartrain prune dedup --dataset my_dataset
+      smartrain prune dedup --dataset my_dataset --allow-balanced-dedup
+    """
+    from smartrain.dataset_prune import (
+        build_prune_arg_parser,
+        build_prune_dedup_arg_parser,
+        build_prune_empty_arg_parser,
+    )
+
+    parser = build_prune_arg_parser
+    prog = "smartrain prune"
+    if ctx.args and ctx.args[0] == "empty":
+        parser = build_prune_empty_arg_parser
+        prog = "smartrain prune empty"
+    elif ctx.args and ctx.args[0] == "dedup":
+        parser = build_prune_dedup_arg_parser
+        prog = "smartrain prune dedup"
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.dataset_prune",
+        build_parser=parser,
+        prog=prog,
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@app.command(
     "hash",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,

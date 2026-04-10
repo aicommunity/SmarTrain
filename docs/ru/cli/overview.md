@@ -6,7 +6,7 @@
 
 ## Группы команд
 
-- Датасеты: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`
+- Датасеты: `scan`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `hash`, `stats`
 - Обучение: `train`, `clearml-upload`
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
@@ -39,3 +39,5 @@ smartrain analyze inference-benchmark --help
 - `smartrain balance` поддерживает стратегии `weights`, `rfs`, `hybrid` и параметры их настройки.
 - `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` применяет готовые настройки под типовые сценарии.
 - `smartrain stats --balance-ready` выводит метрики дисбаланса и рекомендации для балансировщика.
+- `smartrain prune empty` удаляет пустые пары image/label в новый датасет `<dataset>_pruned`.
+- `smartrain prune dedup` удаляет дубли изображений по содержимому в `<dataset>_deduped` (глобальный приоритет split: train > val > test).

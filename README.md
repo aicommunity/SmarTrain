@@ -74,6 +74,7 @@ Current documentation is organized into sections in `docs/`:
 
 - Interactive mode starts only when a command is launched with zero arguments (TTY required).
 - Interactive dataset commands: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`; plus `train`.
+- Dataset cleanup command: `prune` (`prune empty` for empty pairs, `prune dedup` for duplicate images by content).
 - If any arguments are provided but required ones are missing, commands return a clear "incomplete arguments" error instead of interactive prompts.
 - Command help now includes practical `Examples` / `Quick examples` blocks for common workflows.
 - `smartrain balance` presets:
