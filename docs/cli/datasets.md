@@ -21,7 +21,7 @@ Collects a new dataset from several sources:
 ## `augment`, `balance`, `orient`, `roi`
 
 - `augment` — autonomous augmentations with recording of a new dataset;
-- `balance` — class balancing;
+- `balance` — class balancing; after balancing, `--eval-coverage` (default) can rebalance items across `train`/`val`/`test` so eval splits are non-empty when possible and rare classes appear in `val`/`test`; `--no-eval-coverage` turns this off;
 - `orient` — frame rotation correction;
 - `roi` — crop according to the ROI-model.
 

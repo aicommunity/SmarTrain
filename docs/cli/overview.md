@@ -38,6 +38,7 @@ Balance and stats additions:
 
 - `smartrain balance` supports `weights`, `rfs`, and `hybrid` strategies, plus weight/rfs tuning flags.
 - `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` applies tuned defaults for common scenarios.
+- `smartrain balance --eval-coverage` (default on) adjusts the balanced train pool so `val`/`test` stay non-empty when possible and missing classes in eval splits are filled from train; `--no-eval-coverage` disables this. Interactive `balance` prompts for the same choice.
 - `smartrain stats --balance-ready` prints imbalance metrics and balancing recommendations.
 - `smartrain prune empty` removes empty image/label pairs into a new `<dataset>_pruned` dataset.
 - `smartrain prune dedup` removes duplicate images by file content into `<dataset>_deduped` (global split priority: train > val > test).
