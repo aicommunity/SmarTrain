@@ -1335,6 +1335,7 @@ def main(argv=None):
             }
         ],
         parameters=vars(args),
+        workspace_root=layout.root,
         transformations=[
             {
                 "enable_flip": bool(args.enable_flip),

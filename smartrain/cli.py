@@ -224,6 +224,7 @@ def cmd_scan(ctx: typer.Context) -> None:
 
     Notes:
       - Synchronizes workspace raw_data and dataset metadata.
+      - Optional: --repair-relative-paths / --repair-relative-paths-dry-run normalize stored paths under the workspace.
       - Use --help to inspect all low-level scan flags.
     """
     from smartrain.datasets_json_former import build_datasets_json_arg_parser
