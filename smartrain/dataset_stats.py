@@ -404,12 +404,9 @@ def _collect_available_classes(available: dict[str, str]) -> list[str]:
     return sorted(classes)
 
 
-def _print_interactive_catalog(available: dict[str, str]) -> None:
-    names = sorted(available.keys())
+def _print_interactive_class_overview(available: dict[str, str]) -> None:
+    """Print class catalog for context; dataset choice uses numbered prompts separately."""
     class_names = _collect_available_classes(available)
-    console.print("[INFO] Available datasets:")
-    for name in names:
-        console.print(f"  - {name}")
     console.print("[INFO] Available classes:")
     if class_names:
         for cls in class_names:
@@ -961,19 +958,32 @@ def _prompt_interactive_datasets(args, available_names: list[str]) -> None:
 
 
 def prompt_interactive_compare_args(args, available_names: list[str]) -> None:
-    from smartrain.cli_prompts import prompt_choice, prompt_text
+    from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_text
+
+    print_numbered_options("Datasets", available_names)
+    if len(available_names) < 2:
+        console.print("[ERROR] Compare requires at least two datasets in datasets/.")
+        return
+    default_left = str(getattr(args, "left", "") or "").strip()
+    if default_left not in available_names:
+        default_left = available_names[0]
     while True:
-        left = prompt_text(
+        left = prompt_choice(
             "Left dataset",
-            default=str(getattr(args, "left", "") or ""),
-            choices=available_names,
-        ).strip()
-        right = prompt_text(
+            available_names,
+            default=default_left,
+            show_options=False,
+        )
+        default_right = str(getattr(args, "right", "") or "").strip()
+        if default_right not in available_names or default_right == left:
+            default_right = next((n for n in available_names if n != left), available_names[1])
+        right = prompt_choice(
             "Right dataset",
-            default=str(getattr(args, "right", "") or ""),
-            choices=available_names,
-        ).strip()
-        if left and right and left != right:
+            available_names,
+            default=default_right,
+            show_options=False,
+        )
+        if left != right:
             args.left = left
             args.right = right
             break
@@ -1156,7 +1166,7 @@ def _run_stats(args, layout: WorkspaceLayout, *, interactive_allowed: bool) -> i
     )
     if interactive and interactive_allowed and sys.stdin.isatty():
         console.print("[INFO] Interactive stats mode")
-        _print_interactive_catalog(available)
+        _print_interactive_class_overview(available)
         _prompt_interactive_datasets(args, sorted(available.keys()))
         replay_cmd = build_non_interactive_command("stats", build_stats_arg_parser(), args)
         print_replay_command("before launch", replay_cmd)
@@ -1214,7 +1224,7 @@ def _run_stats_compare(args, layout: WorkspaceLayout, *, interactive_allowed: bo
         return 2
     if (not args.left or not args.right) and interactive_allowed and sys.stdin.isatty():
         console.print("[INFO] Interactive mode stats compare")
-        _print_interactive_catalog(available)
+        _print_interactive_class_overview(available)
         prompt_interactive_compare_args(args, sorted(available.keys()))
         replay_cmd = build_non_interactive_command("stats compare", build_stats_compare_arg_parser(), args)
         print_replay_command("before launch", replay_cmd)

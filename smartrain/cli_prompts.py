@@ -102,12 +102,26 @@ def prompt_optional_float(label: str, default: float | None = None) -> float | N
             print(f"[ERROR] Expecting a number or empty value, received: {raw!r}")
 
 
-def prompt_choice(label: str, options: Sequence[str], default: str | None = None) -> str:
+def print_numbered_options(label: str, options: Sequence[str]) -> None:
+    """Print a numbered list (1-based). Used when options are shown once, then ``prompt_choice(..., show_options=False)``."""
     if not options:
-        raise ValueError("options is empty")
+        return
     print(f"[INFO] Options for {label}:")
     for i, opt in enumerate(options, start=1):
         print(f"  {i}. {opt}")
+
+
+def prompt_choice(
+    label: str,
+    options: Sequence[str],
+    default: str | None = None,
+    *,
+    show_options: bool = True,
+) -> str:
+    if not options:
+        raise ValueError("options is empty")
+    if show_options:
+        print_numbered_options(label, options)
     choice_default = default if default in options else options[0]
     while True:
         raw = prompt(
@@ -132,12 +146,13 @@ def prompt_multi_choice_csv(
     label: str,
     options: Sequence[str],
     default_values: Sequence[str] | None = None,
+    *,
+    show_options: bool = True,
 ) -> list[str]:
     if not options:
         return []
-    print(f"[INFO] Options for {label}:")
-    for i, opt in enumerate(options, start=1):
-        print(f"  {i}. {opt}")
+    if show_options:
+        print_numbered_options(label, options)
     default_csv = ",".join(default_values or [])
     while True:
         raw = prompt(

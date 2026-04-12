@@ -303,18 +303,9 @@ def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
 
 
 def _prompt_dataset_name(available: list[str]) -> str:
-    from prompt_toolkit.completion import WordCompleter
+    from smartrain.cli_prompts import prompt_choice
 
-    completer = WordCompleter(available, ignore_case=True)
-    while True:
-        raw = _prompt_input(
-            "Dataset (name from datasets/datasets_info.json): ",
-            default="",
-            completer=completer,
-        ).strip()
-        if raw in available:
-            return raw
-        print("[ERROR] Unknown dataset name. Available:", ", ".join(available))
+    return prompt_choice("Dataset", available, default=available[0])
 
 
 def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str) -> list[dict[str, str]]:
@@ -414,9 +405,6 @@ def _run_interactive_train_setup(args) -> bool:
             "Please scan first."
         )
         return False
-    print("[INFO] Available datasets:")
-    for name in dataset_names:
-        print(f"  - {name}")
     args.data = _prompt_dataset_name(dataset_names)
     baseline_u_cfg: dict[str, Any] = {}
     baseline_sm_opts: dict[str, Any] = {}

@@ -26,6 +26,13 @@ def test_prompt_multichoice_csv_by_indices(monkeypatch) -> None:
     ]
 
 
+def test_prompt_choice_show_options_false_skips_list(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli_prompts, "prompt", lambda *a, **kwargs: "2")
+    assert cli_prompts.prompt_choice("Pick", ["a", "b", "c"], default="a", show_options=False) == "b"
+    out = capsys.readouterr().out
+    assert "Options for Pick" not in out
+
+
 def test_prompt_multichoice_csv_accepts_numeric_named_values(monkeypatch) -> None:
     monkeypatch.setattr(
         cli_prompts,

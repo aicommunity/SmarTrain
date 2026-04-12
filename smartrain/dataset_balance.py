@@ -150,13 +150,10 @@ def _read_label_classes(label_path: str) -> list[int]:
 
 def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) -> None:
     print("[INFO] Interactive balance mode")
-    print("[INFO] Available datasets:")
-    for n in dataset_names:
-        print(f"  - {n}")
     print("[INFO] Available classes:")
     for c in class_names:
         print(f"  - {c}")
-    args.dataset = prompt("Dataset: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
+    args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
     args.strategy = prompt_choice(
         "Strategy",
         ["copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid"],

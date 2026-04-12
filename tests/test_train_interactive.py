@@ -2,12 +2,24 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from smartrain import cli_prompts
 from smartrain import model_training_module as mtm
 from smartrain.workspace_paths import DATASETS_INFO_FILE, deploy_workspace
+
+
+def _patch_train_prompts(monkeypatch: pytest.MonkeyPatch, answers: Iterator[str]) -> None:
+    """Dataset choice uses ``cli_prompts.prompt``; other fields use ``mtm._prompt_input``."""
+
+    def _one(*_a, **_k):
+        return next(answers)
+
+    monkeypatch.setattr(cli_prompts, "prompt", _one)
+    monkeypatch.setattr(mtm, "_prompt_input", _one)
 
 
 def _base_args(workspace: Path) -> argparse.Namespace:
@@ -65,7 +77,7 @@ def test_train_interactive_defaults_apply(tmp_path: Path, monkeypatch: pytest.Mo
             "",  # non_interactive
         ]
     )
-    monkeypatch.setattr(mtm, "_prompt_input", lambda *a, **k: next(answers))
+    _patch_train_prompts(monkeypatch, answers)
 
     assert mtm._run_interactive_train_setup(args) is True
     assert args.data == "ds_a"
@@ -108,13 +120,13 @@ def test_train_interactive_prints_available_datasets_like_fusion(
             "",
         ]
     )
-    monkeypatch.setattr(mtm, "_prompt_input", lambda *a, **k: next(answers))
+    _patch_train_prompts(monkeypatch, answers)
     assert mtm._run_interactive_train_setup(args) is True
 
     out = capsys.readouterr().out
-    assert "[INFO] Available datasets:" in out
-    assert "  - ds_a" in out
-    assert "  - ds_b" in out
+    assert "[INFO] Options for Dataset:" in out
+    assert "  1. ds_a" in out
+    assert "  2. ds_b" in out
 
 
 def test_train_interactive_test_only_requires_model_dir(
@@ -150,7 +162,7 @@ def test_train_interactive_test_only_requires_model_dir(
             "",  # non_interactive
         ]
     )
-    monkeypatch.setattr(mtm, "_prompt_input", lambda *a, **k: next(answers))
+    _patch_train_prompts(monkeypatch, answers)
 
     assert mtm._run_interactive_train_setup(args) is True
     assert args.test_only is True
@@ -198,7 +210,7 @@ def test_train_interactive_skips_prompts_for_values_from_ultralytics_yaml(
             "",  # non_interactive
         ]
     )
-    monkeypatch.setattr(mtm, "_prompt_input", lambda *a, **k: next(answers))
+    _patch_train_prompts(monkeypatch, answers)
     monkeypatch.setattr(
         mtm,
         "_load_ultralytics_yaml",
@@ -284,7 +296,7 @@ def test_train_interactive_uses_selected_base_run_defaults(
             "",  # non_interactive
         ]
     )
-    monkeypatch.setattr(mtm, "_prompt_input", lambda *a, **k: next(answers))
+    _patch_train_prompts(monkeypatch, answers)
 
     assert mtm._run_interactive_train_setup(args) is True
     assert args.model == "yolo11m.pt"

@@ -222,9 +222,8 @@ def test_stats_interactive_prints_datasets_and_classes_list(
         stats_main([])
     assert e.value.code == 0
     out = capsys.readouterr().out
-    assert "Available datasets:" in out
-    assert "ds_i_print" in out
     assert "Available classes:" in out
+    assert "ds_i_print" in out
     assert "cat" in out
 
 

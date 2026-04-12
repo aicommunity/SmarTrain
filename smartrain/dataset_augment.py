@@ -897,13 +897,10 @@ def _list_workspace_detector_models(workspace_root: str) -> list[str]:
 
 def _interactive_fill(args, dataset_names: list[str], classes: list[str], workspace_root: str) -> None:
     print("[INFO] Interactive augment mode")
-    print("[INFO] Available datasets:")
-    for n in dataset_names:
-        print(f"  - {n}")
     print("[INFO] Available classes:")
     for c in classes:
         print(f"  - {c}")
-    args.dataset = prompt("Dataset: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
+    args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
     args.classes = (
         prompt(
             "Classes separated by commas (empty=all): ",

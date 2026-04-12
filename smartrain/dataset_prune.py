@@ -269,9 +269,6 @@ def _prune_dedup(out_dir: str) -> dict[str, int]:
 
 def _interactive_fill(args: argparse.Namespace, mode: str, dataset_names: list[str]) -> None:
     print("[INFO] Interactive prune mode")
-    print("[INFO] Available datasets:")
-    for n in dataset_names:
-        print(f"  - {n}")
     args.dataset = prompt_choice("Dataset", dataset_names, default=(args.dataset or dataset_names[0]))
     args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
     if mode == "dedup":

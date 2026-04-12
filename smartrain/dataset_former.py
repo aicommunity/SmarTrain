@@ -252,9 +252,6 @@ def _prompt_dataset_selection(available: list[str]) -> list[str]:
     from smartrain.cli_prompts import prompt_multi_choice_csv
 
     print("[INFO] --dataset/--datasets not specified: interactive selection of input datasets.")
-    print("[INFO] Available datasets:")
-    for name in available:
-        print(f"  - {name}")
     parsed = prompt_multi_choice_csv("Input datasets", available, default_values=[])
     uniq: list[str] = []
     seen: set[str] = set()
