@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.dataset_former import main as fusion_main, prune_output_empty_label_pairs
+from smartrain.dataset_former import _collect_label_image_pairs, main as fusion_main, prune_output_empty_label_pairs
 from smartrain.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, WORKSPACE_ENV_VAR, deploy_workspace
 
 
@@ -70,6 +70,19 @@ def test_fusion_without_partial_requires_all_classes_in_each_dataset(
     out = capsys.readouterr().out + capsys.readouterr().err
     assert "No dataset contains all selected classes" in out
     assert not (tmp_path / "datasets" / "merged" / "data.yaml").is_file()
+
+
+def test_collect_label_image_pairs_finds_nested_labels(tmp_path: Path) -> None:
+    """Regression: fusion must not only os.listdir(labels) — nested YOLO layout must be included."""
+    root = tmp_path / "d"
+    (root / "images" / "s").mkdir(parents=True)
+    (root / "labels" / "s").mkdir(parents=True)
+    (root / "images" / "s" / "z.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    (root / "labels" / "s" / "z.txt").write_text("0 0.5 0.5 0.1 0.1\n", encoding="utf-8")
+    pairs = _collect_label_image_pairs(str(root / "images"), str(root / "labels"))
+    assert len(pairs) == 1
+    assert pairs[0][0].endswith("z.jpg")
+    assert pairs[0][1].endswith("z.txt")
 
 
 def test_fusion_include_partial_merges_disjoint_class_datasets(tmp_path: Path) -> None:

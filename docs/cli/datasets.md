@@ -10,6 +10,12 @@ Updates the dataset index and synchronizes sources in the workspace.
 - Supports sources from `raw_data/`, `--dataset`, `--datasets-list`.
 - Useful modes: `--mode refresh`, `--purge-processed-raw`.
 
+## `normalize-data-yaml`
+
+Rewrites every `datasets/**/data.yaml`: drops `path`, makes split paths relative. Foreign absolute paths from another machine are mapped to `train/images`, `val/images`, etc. when those folders exist under the same dataset root.
+
+Example: `smartrain normalize-data-yaml --workspace /path/to/workspace` or `--datasets-dir ... --dry-run`.
+
 ## `fusion`
 
 Collects a new dataset from several sources:

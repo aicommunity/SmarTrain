@@ -166,5 +166,5 @@ def test_augment_preserves_valid_split_and_data_yaml_points_to_valid(tmp_path: P
     out = tmp_path / "datasets" / "ds_v_aug"
     assert (out / "valid" / "images" / "v.jpg").is_file()
     data_yaml = (out / "data.yaml").read_text(encoding="utf-8")
-    assert "val: ./valid/images" in data_yaml
+    assert "val: valid/images" in data_yaml
 

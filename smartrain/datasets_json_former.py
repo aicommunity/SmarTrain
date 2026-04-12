@@ -808,10 +808,10 @@ def _ensure_training_ready_after_copy(dataset_root: str) -> bool:
         return False
 
     labels_dir = os.path.join(dataset_root, "labels")
-    had_labels_before = os.path.isdir(labels_dir) and any(
-        os.path.isfile(os.path.join(labels_dir, n)) for n in os.listdir(labels_dir)
-    )
-    had_yaml_before = os.path.isfile(os.path.join(dataset_root, "data.yaml"))
+    # Always rebuild labels from annotations.xml so stale flat labels (older scan layout)
+    # cannot coexist with nested image paths.
+    if os.path.isdir(labels_dir):
+        shutil.rmtree(labels_dir, ignore_errors=True)
     os.makedirs(labels_dir, exist_ok=True)
     class_name_to_id = {name: idx for idx, name in enumerate(names)}
     try:
@@ -826,13 +826,17 @@ def _ensure_training_ready_after_copy(dataset_root: str) -> bool:
 
     data_yaml = os.path.join(dataset_root, "data.yaml")
     with open(data_yaml, "w", encoding="utf-8") as f:
-        # For the flat representation train/val/test we point to images.
-        f.write("train: ./images\n")
-        f.write("val: ./images\n")
-        f.write("test: ./images\n\n")
+        f.write(
+            "# smartrain (CVAT 1.1 scan): images/ may contain nested subfolders; "
+            "labels/ mirrors the same relative paths (YOLO pairing).\n"
+            "# No path: key — Ultralytics uses this file's directory as dataset root.\n"
+        )
+        f.write("train: images\n")
+        f.write("val: images\n")
+        f.write("test: images\n\n")
         f.write(f"nc: {len(names)}\n")
         f.write(f"names: {names}\n")
-    return (not had_labels_before) or (not had_yaml_before)
+    return True
 
 
 def _dataset_content_hash(path: str) -> Optional[str]:
@@ -1124,6 +1128,11 @@ def main(argv=None):
                     if not ds_hash:
                         ds_hash = _dataset_content_hash(ds_path)
                     if ds_hash and ds_hash == source_hash:
+                        # Recreate datasets/<logical_name> after manual deletion: the slot may still
+                        # be listed in datasets_info.json while the directory is gone; do not treat
+                        # another folder with the same content as a reason to skip materializing it.
+                        if not _dir_has_content(dst_dir) and logical_name in previous_info:
+                            break
                         print(
                             f"[WARNING] Skipping source {logical_name!r}: data matches datasets/{ds_name!r}."
                         )

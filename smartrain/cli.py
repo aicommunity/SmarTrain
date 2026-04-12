@@ -238,6 +238,36 @@ def cmd_scan(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "normalize-data-yaml",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_normalize_data_yaml(ctx: typer.Context) -> None:
+    """Rewrite datasets/*/data.yaml to portable Ultralytics layout (no path key, relative splits).
+
+    Examples:
+      smartrain normalize-data-yaml
+      smartrain normalize-data-yaml --workspace /data/MarsSmarTrain
+      smartrain normalize-data-yaml --datasets-dir /data/MarsSmarTrain/datasets --dry-run
+    """
+    from smartrain.data_yaml_normalize import build_arg_parser
+
+    parser = build_arg_parser()
+    if getattr(ctx, "resilient_parsing", False):
+        return
+    args = parser.parse_args(list(ctx.args))
+    from smartrain.data_yaml_normalize import run_normalize
+    from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
+
+    if args.datasets_dir:
+        ddir = os.path.abspath(os.path.expanduser(args.datasets_dir))
+    else:
+        root = resolve_workspace_root(args.workspace)
+        ddir = WorkspaceLayout(root).datasets
+    raise typer.Exit(run_normalize(ddir, dry_run=bool(args.dry_run), as_json=bool(args.as_json)))
+
+
+@app.command(
     "fusion",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,

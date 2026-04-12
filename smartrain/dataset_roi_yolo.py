@@ -340,11 +340,10 @@ def _ensure_data_yaml_after_roi(output_root: str, entry: Dict[str, Any]) -> None
         pairs = sorted(classes.items(), key=lambda kv: int(kv[1]))
         names_list = [str(k) for k, _ in pairs]
     nc = len(names_list)
-    root_abs = os.path.abspath(output_root)
     blob: Dict[str, Any] = {
-        "path": root_abs,
         "train": "images",
         "val": "images",
+        "test": "images",
         "nc": nc,
         "names": names_list,
     }

@@ -20,7 +20,7 @@ def _write_ds(root: Path, name: str, cls_names: list[str]) -> Path:
     ds.mkdir(parents=True, exist_ok=True)
     names_map = "\n".join([f"  {i}: {n}" for i, n in enumerate(cls_names)])
     (ds / "data.yaml").write_text(
-        f"path: .\ntrain: train/images\nval: val/images\ntest: test/images\nnames:\n{names_map}\n",
+        f"train: train/images\nval: val/images\ntest: test/images\nnames:\n{names_map}\n",
         encoding="utf-8",
     )
     return ds

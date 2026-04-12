@@ -66,6 +66,43 @@ def is_cvat11_images_xml(xml_path: Path) -> bool:
     return True
 
 
+def _cvat_xml_name_to_label_rel(cvat_image_name: str, *, use_nested: bool) -> Path:
+    """
+    Relative path for a YOLO .txt under labels/, mirroring images/ when use_nested.
+
+    When the image file exists only at images/<basename>, use_nested=False so labels stay flat.
+    """
+    name = (cvat_image_name or "").strip().replace("\\", "/")
+    if not name:
+        return Path("_invalid.txt")
+    if not use_nested:
+        return Path(Path(name).name)
+
+    parts: List[str] = []
+    for seg in name.split("/"):
+        seg = seg.strip()
+        if not seg or seg == ".":
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+            else:
+                return Path(Path(name).name)
+        else:
+            parts.append(seg)
+    if not parts:
+        return Path(Path(name).name)
+    return Path(*parts)
+
+
+def _label_path_contained_in_dir(label_file: Path, base_dir: Path) -> bool:
+    try:
+        label_file.resolve().relative_to(base_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def generate_temp_yolo_labels_from_cvat11_extracted(
     *,
     dataset_root: Path,
@@ -97,13 +134,17 @@ def generate_temp_yolo_labels_from_cvat11_extracted(
         if not isinstance(cvat_image_name, str) or not cvat_image_name:
             continue
 
-        src = images_dir / cvat_image_name
-        if not src.exists():
-            src = images_dir / Path(cvat_image_name).name
-        if not src.exists():
-            continue
+        primary = images_dir / cvat_image_name
+        if primary.exists():
+            src = primary
+            use_nested = True
+        else:
+            fb = images_dir / Path(cvat_image_name).name
+            if not fb.exists():
+                continue
+            src = fb
+            use_nested = False
 
-        dst_name = Path(cvat_image_name).name
         images_found += 1
 
         img_w = int(img.get("width", -1))
@@ -125,7 +166,11 @@ def generate_temp_yolo_labels_from_cvat11_extracted(
             if yolo:
                 lines.append(yolo)
 
-        label_path = labels_out_dir / f"{Path(dst_name).stem}.txt"
+        label_rel = _cvat_xml_name_to_label_rel(cvat_image_name, use_nested=use_nested)
+        label_path = labels_out_dir / label_rel.with_suffix(".txt")
+        if not _label_path_contained_in_dir(label_path, labels_out_dir):
+            label_path = labels_out_dir / Path(Path(cvat_image_name).name).with_suffix(".txt")
+        label_path.parent.mkdir(parents=True, exist_ok=True)
         label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         labels_written += 1
 
@@ -343,9 +388,9 @@ def import_cvat11_zip_to_yolo(
         # data.yaml (flat dataset)
         yaml_path = output_dir / "data.yaml"
         yaml_path.write_text(
-            "train: ./images\n"
-            "val: ./images\n"
-            "test: ./images\n\n"
+            "train: images\n"
+            "val: images\n"
+            "test: images\n\n"
             f"nc: {len(names)}\n"
             f"names: {names}\n",
             encoding="utf-8",

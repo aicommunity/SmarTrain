@@ -633,6 +633,23 @@ def _validate_dataset_dir(dataset_path: str) -> None:
         raise FileNotFoundError(f"Yaml file not found: {data_yaml}")
 
 
+def _split_dir_from_dataset_yaml(dataset_path: str, raw: dict, split_key: str) -> str | None:
+    """
+    Uses train/val/test from data.yaml when they point at an existing directory under dataset_path.
+    Needed for CVAT-style layouts (single shared images/ bucket) where split subfolders are absent.
+    """
+    v = raw.get(split_key)
+    if not isinstance(v, str) or not v.strip():
+        return None
+    rel = v.strip().replace("\\", "/").lstrip("./")
+    if not rel:
+        return None
+    abs_p = os.path.normpath(os.path.join(dataset_path, rel))
+    if os.path.isdir(abs_p):
+        return rel
+    return None
+
+
 def _pick_split_relative_dir(dataset_path: str, split_aliases: tuple[str, ...]) -> str | None:
     """
     Searches for the split directory within the selected dataset_path.
@@ -659,9 +676,15 @@ def _build_runtime_data_yaml(dataset_path: str, run_dir: str, *, stage: str) -> 
     if not isinstance(raw, dict):
         raise ValueError(f"Incorrect YAML format data.yaml: {src_yaml}")
 
-    train_rel = _pick_split_relative_dir(dataset_path, ("train",))
-    val_rel = _pick_split_relative_dir(dataset_path, ("val", "valid"))
-    test_rel = _pick_split_relative_dir(dataset_path, ("test",))
+    train_rel = _pick_split_relative_dir(dataset_path, ("train",)) or _split_dir_from_dataset_yaml(
+        dataset_path, raw, "train"
+    )
+    val_rel = _pick_split_relative_dir(dataset_path, ("val", "valid")) or _split_dir_from_dataset_yaml(
+        dataset_path, raw, "val"
+    )
+    test_rel = _pick_split_relative_dir(dataset_path, ("test",)) or _split_dir_from_dataset_yaml(
+        dataset_path, raw, "test"
+    )
     if train_rel is None or val_rel is None:
         raise FileNotFoundError(
             f"Required train/val split folders not found inside {dataset_path}."

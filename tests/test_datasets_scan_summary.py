@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
+
+import yaml
 
 from smartrain.datasets_json_former import main as datasets_json_main
 from smartrain.workspace_paths import (
@@ -21,16 +24,23 @@ def _flat_dataset(root: Path, name: str) -> None:
     (ds / "data.yaml").write_text("nc: 1\nnames: ['bee']\n", encoding="utf-8")
 
 
-def _cvat11_dataset(root: Path, name: str) -> None:
+def _cvat11_dataset(root: Path, name: str, *, nested_image: bool = False) -> None:
     ds = root / name
     (ds / "images").mkdir(parents=True, exist_ok=True)
-    (ds / "images" / "img001.jpg").write_bytes(b"\x00")
+    if nested_image:
+        sub = ds / "images" / "subfolder"
+        sub.mkdir(parents=True, exist_ok=True)
+        (sub / "img001.jpg").write_bytes(b"\x00")
+        img_name = "subfolder/img001.jpg"
+    else:
+        (ds / "images" / "img001.jpg").write_bytes(b"\x00")
+        img_name = "img001.jpg"
     (ds / "annotations.xml").write_text(
-        """<?xml version="1.0" encoding="utf-8"?>
+        f"""<?xml version="1.0" encoding="utf-8"?>
 <annotations>
   <version>1.1</version>
   <meta><task><labels><label><name>bee</name></label></labels></task></meta>
-  <image id="0" name="img001.jpg" width="100" height="80">
+  <image id="0" name="{img_name}" width="100" height="80">
     <box label="bee" xtl="10" ytl="10" xbr="40" ybr="30"/>
   </image>
 </annotations>
@@ -133,8 +143,43 @@ def test_scan_converts_cvat11_to_training_ready_layout(tmp_path: Path) -> None:
     assert (out_root / "data.yaml").is_file()
     assert (out_root / "labels" / "img001.txt").is_file()
     yaml_text = (out_root / "data.yaml").read_text(encoding="utf-8")
-    assert "train: ./images" in yaml_text
+    assert "train: images" in yaml_text
+    cfg = yaml.safe_load(yaml_text)
+    assert "path" not in cfg
     assert "names:" in yaml_text
+
+
+def test_scan_recreates_deleted_dataset_even_if_duplicate_hash_elsewhere(
+    tmp_path: Path,
+) -> None:
+    """Deleting datasets/<name> must not be blocked by dedupe vs another folder with same content."""
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _cvat11_dataset(rd, "cvat_src")
+
+    datasets_json_main(["--workspace", str(tmp_path)])
+    src_ds = tmp_path / "datasets" / "cvat_src"
+    assert src_ds.is_dir()
+
+    shutil.copytree(src_ds, tmp_path / "datasets" / "cvat_shadow")
+    shutil.rmtree(src_ds)
+
+    datasets_json_main(["--workspace", str(tmp_path)])
+    assert (tmp_path / "datasets" / "cvat_src").is_dir()
+    assert (tmp_path / "datasets" / "cvat_src" / "labels" / "img001.txt").is_file()
+
+
+def test_scan_cvat11_nested_image_mirrors_labels_under_subfolder(tmp_path: Path) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _cvat11_dataset(rd, "cvat_nested", nested_image=True)
+
+    datasets_json_main(["--workspace", str(tmp_path)])
+    out_root = tmp_path / "datasets" / "cvat_nested"
+    assert (out_root / "images" / "subfolder" / "img001.jpg").is_file()
+    assert (out_root / "labels" / "subfolder" / "img001.txt").is_file()
+    yaml_text = (out_root / "data.yaml").read_text(encoding="utf-8")
+    assert "train: images" in yaml_text
 
 
 def test_scan_purge_processed_raw_yes_deletes_processed_source(

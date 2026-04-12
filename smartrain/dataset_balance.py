@@ -726,7 +726,7 @@ def main(argv=None):
 
     names = [k for k, _ in sorted(class_map.items(), key=lambda kv: kv[1])]
     Path(out_dir, "data.yaml").write_text(
-        "train: ./train/images\nval: ./val/images\ntest: ./test/images\n\n"
+        "train: train/images\nval: val/images\ntest: test/images\n\n"
         f"nc: {len(names)}\n"
         f"names: {names}\n",
         encoding="utf-8",

@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 from PIL import Image
 
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
@@ -70,7 +71,7 @@ def test_iter_image_label_buckets_cvat11(tmp_path: Path) -> None:
     assert len(buckets) == 1
     img_d, lbl_d = buckets[0]
     assert Path(lbl_d).name == "ds1"
-    assert any(Path(lbl_d).glob("*.txt"))
+    assert any(Path(lbl_d).rglob("*.txt"))
 
 
 def test_resolve_dataset_root_zip_workspace(tmp_path: Path) -> None:
@@ -216,6 +217,9 @@ def test_ensure_data_yaml_after_roi_when_no_source_yaml(tmp_path: Path) -> None:
     y = (out / "data.yaml").read_text(encoding="utf-8")
     assert "nc: 2" in y or "nc: 2\n" in y
     assert "apple" in y and "zebra" in y
+    cfg = yaml.safe_load(y)
+    assert "path" not in cfg
+    assert cfg.get("train") == "images" and cfg.get("val") == "images"
 
 
 def test_roi_dataset_name_with_zip_suffix_resolves_key(tmp_path: Path) -> None:

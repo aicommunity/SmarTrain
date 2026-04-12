@@ -7,6 +7,7 @@ import tempfile
 import sys
 import hashlib
 from datetime import datetime
+from pathlib import Path
 from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
@@ -65,6 +66,28 @@ def parse_fusion_split_arg(value: str | None) -> tuple[float, float, float]:
 
 def safe_mkdir(path):
     os.makedirs(path, exist_ok=True)
+
+
+def _collect_label_image_pairs(images_path: str, labels_path: str) -> list[tuple[str, str]]:
+    """
+    All YOLO *.txt under labels_path (recursive), paired with images under images_path
+    using the same relative path (labels/sub/a.txt -> images/sub/a.jpg).
+    """
+    pairs: list[tuple[str, str]] = []
+    labels_root = Path(labels_path)
+    images_root = Path(images_path)
+    if not labels_root.is_dir() or not images_root.is_dir():
+        return pairs
+    for label_path in sorted(labels_root.rglob("*.txt")):
+        rel = label_path.relative_to(labels_root)
+        parent = rel.parent
+        stem = rel.stem
+        for ext in YOLO_IMAGE_EXTS:
+            cand = images_root / parent / f"{stem}{ext}"
+            if cand.is_file():
+                pairs.append((str(cand), str(label_path)))
+                break
+    return pairs
 
 
 def _unique_merge_stem(dataset_name, src_image_path, used_stems):
@@ -1084,7 +1107,9 @@ def main(argv=None):
             )
             buckets_by_dataset[dataset_name] = buckets
             for _, labels_path in buckets:
-                total_labels += len([f for f in os.listdir(labels_path) if f.endswith(".txt")])
+                lp = Path(labels_path)
+                if lp.is_dir():
+                    total_labels += sum(1 for _ in lp.rglob("*.txt"))
 
         used_stems = {split: set() for split in ("train", "valid", "test")}
         dedup_map: dict[str, dict] = {}
@@ -1099,16 +1124,7 @@ def main(argv=None):
                 buckets = buckets_by_dataset[dataset_name]
                 for images_path, labels_path in buckets:
 
-                    pairs = []
-                    for label_file in os.listdir(labels_path):
-                        if not label_file.endswith(".txt"):
-                            continue
-                        image_name = os.path.splitext(label_file)[0]
-                        for ext in list(YOLO_IMAGE_EXTS):
-                            candidate = os.path.join(images_path, image_name + ext)
-                            if os.path.exists(candidate):
-                                pairs.append((candidate, os.path.join(labels_path, label_file)))
-                                break
+                    pairs = _collect_label_image_pairs(images_path, labels_path)
 
                     if not pairs:
                         continue
@@ -1196,9 +1212,9 @@ def main(argv=None):
 
     yaml_path = os.path.join(target_dir, "data.yaml")
     with open(yaml_path, "w", encoding="utf-8") as f:
-        f.write("train: ./train/images\n")
-        f.write("val: ./valid/images\n")
-        f.write("test: ./test/images\n\n")
+        f.write("train: train/images\n")
+        f.write("val: valid/images\n")
+        f.write("test: test/images\n\n")
         f.write(f"nc: {len(selected_classes)}\n")
         f.write(f"names: {selected_classes}\n")
 
