@@ -30,6 +30,7 @@ smartrain analyze inference-benchmark --help
 Единый контракт интерактива:
 
 - интерактив включается только при запуске команды без аргументов (TTY обязателен);
+- выбор датасета(ов): сразу нумерованный список; ввод по имени или по номеру (несколько датасетов — через CSV номеров или имён);
 - для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
@@ -38,6 +39,7 @@ smartrain analyze inference-benchmark --help
 
 - `smartrain balance` поддерживает стратегии `weights`, `rfs`, `hybrid` и параметры их настройки.
 - `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` применяет готовые настройки под типовые сценарии.
+- `smartrain balance --eval-coverage` (по умолчанию включено) подстраивает пул train после балансировки: по возможности не оставлять пустыми `val`/`test` и донаполнять в eval отсутствующие классы из train; отключение — `--no-eval-coverage`. В интерактивном `balance` тот же выбор задаётся вопросом.
 - `smartrain stats --balance-ready` выводит метрики дисбаланса и рекомендации для балансировщика.
 - `smartrain prune empty` удаляет пустые пары image/label в новый датасет `<dataset>_pruned`.
 - `smartrain prune dedup` удаляет дубли изображений по содержимому в `<dataset>_deduped` (глобальный приоритет split: train > val > test).

@@ -111,6 +111,7 @@ def test_balance_interactive_can_enable_emit_report(
             "all",         # classes mode
             "y",           # emit-balance-report
             "n",           # emit-train-config
+            "y",           # eval-coverage
             "n",           # dry-run
         ]
     )
@@ -142,6 +143,28 @@ def test_balance_ensures_non_empty_val_and_test_when_possible(tmp_path: Path) ->
     test_imgs = list((out / "test" / "images").glob("*.jpg"))
     assert len(val_imgs) > 0
     assert len(test_imgs) > 0
+
+
+def test_balance_can_disable_eval_coverage(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "copy",
+            "--no-eval-coverage",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_b_balanced"
+    # source had only train in this fixture, so with disabled eval_coverage
+    # val/test remain empty.
+    val_imgs = list((out / "val" / "images").glob("*.jpg"))
+    test_imgs = list((out / "test" / "images").glob("*.jpg"))
+    assert len(val_imgs) == 0
+    assert len(test_imgs) == 0
 
 
 def test_balance_enriches_eval_class_coverage_from_train(tmp_path: Path) -> None:

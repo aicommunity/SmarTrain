@@ -25,6 +25,7 @@ from smartrain.train_profile import (
     resolve_profile_data_path,
     task_to_metadata_task_type,
 )
+from smartrain.path_portable import relativize_if_under
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -302,18 +303,9 @@ def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
 
 
 def _prompt_dataset_name(available: list[str]) -> str:
-    from prompt_toolkit.completion import WordCompleter
+    from smartrain.cli_prompts import prompt_choice
 
-    completer = WordCompleter(available, ignore_case=True)
-    while True:
-        raw = _prompt_input(
-            "Dataset (name from datasets/datasets_info.json): ",
-            default="",
-            completer=completer,
-        ).strip()
-        if raw in available:
-            return raw
-        print("[ERROR] Unknown dataset name. Available:", ", ".join(available))
+    return prompt_choice("Dataset", available, default=available[0])
 
 
 def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str) -> list[dict[str, str]]:
@@ -413,9 +405,6 @@ def _run_interactive_train_setup(args) -> bool:
             "Please scan first."
         )
         return False
-    print("[INFO] Available datasets:")
-    for name in dataset_names:
-        print(f"  - {name}")
     args.data = _prompt_dataset_name(dataset_names)
     baseline_u_cfg: dict[str, Any] = {}
     baseline_sm_opts: dict[str, Any] = {}
@@ -633,6 +622,23 @@ def _validate_dataset_dir(dataset_path: str) -> None:
         raise FileNotFoundError(f"Yaml file not found: {data_yaml}")
 
 
+def _split_dir_from_dataset_yaml(dataset_path: str, raw: dict, split_key: str) -> str | None:
+    """
+    Uses train/val/test from data.yaml when they point at an existing directory under dataset_path.
+    Needed for CVAT-style layouts (single shared images/ bucket) where split subfolders are absent.
+    """
+    v = raw.get(split_key)
+    if not isinstance(v, str) or not v.strip():
+        return None
+    rel = v.strip().replace("\\", "/").lstrip("./")
+    if not rel:
+        return None
+    abs_p = os.path.normpath(os.path.join(dataset_path, rel))
+    if os.path.isdir(abs_p):
+        return rel
+    return None
+
+
 def _pick_split_relative_dir(dataset_path: str, split_aliases: tuple[str, ...]) -> str | None:
     """
     Searches for the split directory within the selected dataset_path.
@@ -659,9 +665,15 @@ def _build_runtime_data_yaml(dataset_path: str, run_dir: str, *, stage: str) -> 
     if not isinstance(raw, dict):
         raise ValueError(f"Incorrect YAML format data.yaml: {src_yaml}")
 
-    train_rel = _pick_split_relative_dir(dataset_path, ("train",))
-    val_rel = _pick_split_relative_dir(dataset_path, ("val", "valid"))
-    test_rel = _pick_split_relative_dir(dataset_path, ("test",))
+    train_rel = _pick_split_relative_dir(dataset_path, ("train",)) or _split_dir_from_dataset_yaml(
+        dataset_path, raw, "train"
+    )
+    val_rel = _pick_split_relative_dir(dataset_path, ("val", "valid")) or _split_dir_from_dataset_yaml(
+        dataset_path, raw, "val"
+    )
+    test_rel = _pick_split_relative_dir(dataset_path, ("test",)) or _split_dir_from_dataset_yaml(
+        dataset_path, raw, "test"
+    )
     if train_rel is None or val_rel is None:
         raise FileNotFoundError(
             f"Required train/val split folders not found inside {dataset_path}."
@@ -1082,17 +1094,29 @@ def save_training_metadata(
     ultralytics_train_summary=None,
     onnx_relative=None,
 ):
+    ds_abs = os.path.abspath(dataset_path)
+    dataset_block: dict[str, Any] = {
+        "name": os.path.basename(os.path.normpath(dataset_path)),
+        "path_relative": _get_relative_path(dataset_path, model_dir),
+        "hash": dataset_hash,
+    }
+    if workspace_root is not None:
+        wr_abs = os.path.abspath(workspace_root)
+        if ds_abs == wr_abs or ds_abs.startswith(wr_abs + os.sep):
+            rel_uw = relativize_if_under(workspace_root, ds_abs)
+            if rel_uw is not None:
+                dataset_block["path_under_workspace"] = rel_uw
+        else:
+            dataset_block["path_absolute"] = ds_abs
+    else:
+        dataset_block["path_absolute"] = ds_abs
+
     metadata = {
         "training_info": {
             "framework": "ultralytics",
             "task_type": task_type or "detection",
             "model": model_version,
-            "dataset": {
-                "name": os.path.basename(os.path.normpath(dataset_path)),
-                "path_absolute": os.path.abspath(dataset_path),
-                "path_relative": _get_relative_path(dataset_path, model_dir),
-                "hash": dataset_hash,
-            },
+            "dataset": dataset_block,
             "hyperparameters": {
                 "epochs": epochs,
                 "batch_size": batch,
@@ -1140,7 +1164,7 @@ def save_training_metadata(
 
     if workspace_root is not None:
         metadata["workspace"] = {
-            "root": os.path.abspath(workspace_root),
+            "root": ".",
             "dataset_path_relative": _relative_to_workspace(dataset_path, workspace_root),
             "run_directory_relative": _relative_to_workspace(model_dir, workspace_root),
         }

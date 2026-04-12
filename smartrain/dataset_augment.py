@@ -833,9 +833,9 @@ def _apply_copy_paste(
 
 def _write_data_yaml(out_dir: str, names: list[str]) -> None:
     p = Path(out_dir) / "data.yaml"
-    val_rel = "./valid/images" if (Path(out_dir) / "valid" / "images").is_dir() else "./val/images"
+    val_rel = "valid/images" if (Path(out_dir) / "valid" / "images").is_dir() else "val/images"
     p.write_text(
-        f"train: ./train/images\nval: {val_rel}\ntest: ./test/images\n\n"
+        f"train: train/images\nval: {val_rel}\ntest: test/images\n\n"
         f"nc: {len(names)}\n"
         f"names: {names}\n",
         encoding="utf-8",
@@ -897,13 +897,10 @@ def _list_workspace_detector_models(workspace_root: str) -> list[str]:
 
 def _interactive_fill(args, dataset_names: list[str], classes: list[str], workspace_root: str) -> None:
     print("[INFO] Interactive augment mode")
-    print("[INFO] Available datasets:")
-    for n in dataset_names:
-        print(f"  - {n}")
     print("[INFO] Available classes:")
     for c in classes:
         print(f"  - {c}")
-    args.dataset = prompt("Dataset: ", completer=WordCompleter(dataset_names, ignore_case=True)).strip()
+    args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
     args.classes = (
         prompt(
             "Classes separated by commas (empty=all): ",
@@ -1335,6 +1332,7 @@ def main(argv=None):
             }
         ],
         parameters=vars(args),
+        workspace_root=layout.root,
         transformations=[
             {
                 "enable_flip": bool(args.enable_flip),

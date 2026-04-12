@@ -148,9 +148,9 @@ def _copy_source_dataset(src_root: str, entry: dict[str, Any], out_dir: str, dat
 
 def _write_data_yaml(out_dir: str, class_map: dict[str, Any]) -> None:
     names = [k for k, _ in sorted(((str(k), int(v)) for k, v in class_map.items()), key=lambda kv: kv[1])]
-    val_rel = "./valid/images" if (Path(out_dir) / "valid" / "images").is_dir() else "./val/images"
+    val_rel = "valid/images" if (Path(out_dir) / "valid" / "images").is_dir() else "val/images"
     Path(out_dir, "data.yaml").write_text(
-        f"train: ./train/images\nval: {val_rel}\ntest: ./test/images\n\n"
+        f"train: train/images\nval: {val_rel}\ntest: test/images\n\n"
         f"nc: {len(names)}\n"
         f"names: {names}\n",
         encoding="utf-8",
@@ -269,9 +269,6 @@ def _prune_dedup(out_dir: str) -> dict[str, int]:
 
 def _interactive_fill(args: argparse.Namespace, mode: str, dataset_names: list[str]) -> None:
     print("[INFO] Interactive prune mode")
-    print("[INFO] Available datasets:")
-    for n in dataset_names:
-        print(f"  - {n}")
     args.dataset = prompt_choice("Dataset", dataset_names, default=(args.dataset or dataset_names[0]))
     args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
     if mode == "dedup":
@@ -376,6 +373,7 @@ def main(argv=None) -> None:
         command=f"prune-{mode}",
         source_datasets=[{"name": args.dataset, "path": src_root, "dataset_hash": entry.get("dataset_hash")}],
         parameters=vars(args),
+        workspace_root=layout.root,
         transformations=[{"mode": mode}],
         stats_before={"copied_images": copied},
         stats_after=stats | {"output_hash": out_hash},

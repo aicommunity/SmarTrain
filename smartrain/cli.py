@@ -224,6 +224,7 @@ def cmd_scan(ctx: typer.Context) -> None:
 
     Notes:
       - Synchronizes workspace raw_data and dataset metadata.
+      - Optional: --repair-relative-paths / --repair-relative-paths-dry-run normalize stored paths under the workspace.
       - Use --help to inspect all low-level scan flags.
     """
     from smartrain.datasets_json_former import build_datasets_json_arg_parser
@@ -235,6 +236,36 @@ def cmd_scan(ctx: typer.Context) -> None:
         prog="smartrain scan",
         empty_args_mode="invoke_if_tty_else_help",
     )
+
+
+@app.command(
+    "normalize-data-yaml",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_normalize_data_yaml(ctx: typer.Context) -> None:
+    """Rewrite datasets/*/data.yaml to portable Ultralytics layout (no path key, relative splits).
+
+    Examples:
+      smartrain normalize-data-yaml
+      smartrain normalize-data-yaml --workspace /data/MarsSmarTrain
+      smartrain normalize-data-yaml --datasets-dir /data/MarsSmarTrain/datasets --dry-run
+    """
+    from smartrain.data_yaml_normalize import build_arg_parser
+
+    parser = build_arg_parser()
+    if getattr(ctx, "resilient_parsing", False):
+        return
+    args = parser.parse_args(list(ctx.args))
+    from smartrain.data_yaml_normalize import run_normalize
+    from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
+
+    if args.datasets_dir:
+        ddir = os.path.abspath(os.path.expanduser(args.datasets_dir))
+    else:
+        root = resolve_workspace_root(args.workspace)
+        ddir = WorkspaceLayout(root).datasets
+    raise typer.Exit(run_normalize(ddir, dry_run=bool(args.dry_run), as_json=bool(args.as_json)))
 
 
 @app.command(

@@ -18,7 +18,7 @@ def _write_ds(root: Path, name: str) -> Path:
     ds = root / "datasets" / name
     ds.mkdir(parents=True, exist_ok=True)
     (ds / "data.yaml").write_text(
-        "path: .\ntrain: train/images\nval: val/images\ntest: test/images\nnames:\n  0: cat\n  1: dog\n",
+        "train: train/images\nval: val/images\ntest: test/images\nnames:\n  0: cat\n  1: dog\n",
         encoding="utf-8",
     )
     return ds
@@ -68,7 +68,7 @@ def test_stats_classes_shows_mixed_class_ids_across_datasets(
     deploy_workspace(str(tmp_path))
     ds_a = _write_ds(tmp_path, "ds_a")
     (ds_a / "data.yaml").write_text(
-        "path: .\ntrain: train/images\nval: val/images\ntest: test/images\nnames:\n  0: cat\n  1: dog\n",
+        "train: train/images\nval: val/images\ntest: test/images\nnames:\n  0: cat\n  1: dog\n",
         encoding="utf-8",
     )
     _write_jpg(ds_a / "train" / "images" / "a.jpg")
@@ -77,7 +77,7 @@ def test_stats_classes_shows_mixed_class_ids_across_datasets(
 
     ds_b = _write_ds(tmp_path, "ds_b")
     (ds_b / "data.yaml").write_text(
-        "path: .\ntrain: train/images\nval: val/images\ntest: test/images\nnames:\n  2: cat\n  3: dog\n",
+        "train: train/images\nval: val/images\ntest: test/images\nnames:\n  2: cat\n  3: dog\n",
         encoding="utf-8",
     )
     _write_jpg(ds_b / "train" / "images" / "b.jpg")
@@ -222,9 +222,8 @@ def test_stats_interactive_prints_datasets_and_classes_list(
         stats_main([])
     assert e.value.code == 0
     out = capsys.readouterr().out
-    assert "Available datasets:" in out
-    assert "ds_i_print" in out
     assert "Available classes:" in out
+    assert "ds_i_print" in out
     assert "cat" in out
 
 

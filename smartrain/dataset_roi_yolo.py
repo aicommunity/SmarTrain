@@ -261,7 +261,7 @@ def _copy_and_patch_yaml(dataset_root: str, output_root: str) -> None:
     if not data or not isinstance(data, dict):
         return
     data = dict(data)
-    data["path"] = os.path.abspath(output_root)
+    data.pop("path", None)
     dest = os.path.join(output_root, rel)
     dest_dir = os.path.dirname(dest)
     if dest_dir:
@@ -340,11 +340,10 @@ def _ensure_data_yaml_after_roi(output_root: str, entry: Dict[str, Any]) -> None
         pairs = sorted(classes.items(), key=lambda kv: int(kv[1]))
         names_list = [str(k) for k, _ in pairs]
     nc = len(names_list)
-    root_abs = os.path.abspath(output_root)
     blob: Dict[str, Any] = {
-        "path": root_abs,
         "train": "images",
         "val": "images",
+        "test": "images",
         "nc": nc,
         "names": names_list,
     }
@@ -523,30 +522,16 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
         print("[ERROR] There are no available datasets in datasets_info.json.")
         return False
     names = sorted(str(k) for k in catalog.keys())
-    print("[INFO] Available datasets:")
-    for n in names:
-        print(f"  - {n}")
-    ds_comp = WordCompleter(names, ignore_case=True)
-    while True:
-        raw = _prompt_input(
-            "Datasets (--dataset/--datasets) separated by commas (empty = first in list)",
-            default=str(args.datasets or args.dataset_name or ""),
-            completer=ds_comp,
-        ).strip()
-        if not raw and names:
-            picked = [names[0]]
-        else:
-            picked = [x.strip() for x in raw.split(",") if x.strip()]
-        if not picked:
-            print("[ERROR] At least one dataset must be selected.")
-            continue
-        unknown = [x for x in picked if x not in catalog]
-        if unknown:
-            print(f"[ERROR] Unknown datasets: {', '.join(unknown)}")
-            continue
-        args.dataset = picked
-        args.dataset_name = picked[0]
-        break
+    from smartrain.cli_prompts import prompt_multi_choice_csv
+
+    print("[INFO] Datasets for ROI: CSV of numbers or names (empty = first in list).")
+    picked = prompt_multi_choice_csv(
+        "Input datasets for ROI",
+        names,
+        default_values=[names[0]] if names else [],
+    )
+    args.dataset = picked
+    args.dataset_name = picked[0]
     default_out = str(args.output_path or (layout.datasets if len(args.dataset) > 1 else os.path.join(layout.datasets, f"{args.dataset_name}_roi")))
     out_raw = _prompt_input(
         "Output directory (--output-path)",
@@ -984,6 +969,7 @@ def main(argv=None) -> None:
                     }
                 ],
                 parameters=vars(args),
+                workspace_root=layout.root if layout is not None else None,
                 transformations=[
                     {
                         "mode": cfg["mode"],

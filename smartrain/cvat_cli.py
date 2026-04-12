@@ -10,6 +10,22 @@ from smartrain.cvat11_converter import import_cvat11_zip_to_yolo, export_yolo_to
 from smartrain.dataset_passport import write_dataset_passport
 
 
+def _workspace_root_if_inside(output_dir: str) -> str | None:
+    try:
+        from smartrain.workspace_paths import resolve_workspace_root
+    except Exception:
+        return None
+    try:
+        ws = resolve_workspace_root(None)
+    except ValueError:
+        return None
+    out_abs = os.path.abspath(os.path.expanduser(output_dir))
+    ws_abs = os.path.abspath(ws)
+    if out_abs == ws_abs or out_abs.startswith(ws_abs + os.sep):
+        return ws_abs
+    return None
+
+
 def build_cvat_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(description="CVAT 1.1 conversion (Images + bbox): import/export.")
     p.add_argument(
@@ -100,6 +116,7 @@ def main(argv: list[str] | None = None) -> None:
                     }
                 ],
                 parameters=vars(args),
+                workspace_root=_workspace_root_if_inside(str(info["output_dir"])),
                 transformations=[
                     {
                         "type": "cvat11_to_yolo",
