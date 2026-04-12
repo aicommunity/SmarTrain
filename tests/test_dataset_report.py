@@ -73,6 +73,13 @@ def test_dataset_report_markdown_and_assets(tiny_workspace: Path, monkeypatch: p
     assert len(list(dog_dir.glob("*.png"))) <= 3
     en = (out / "en" / "index.md").read_text(encoding="utf-8")
     assert "cat" in en and "dog" in en
+    assert "Dataset statistics" in en
+    assert "|:---:" in en and "![Example" in en
+    ru_md = (out / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "Статистика датасета" in ru_md
+    sample_png = next(cat_dir.glob("*.png"))
+    with Image.open(sample_png) as im:
+        assert im.size == (200, 200)
 
 
 def test_dataset_report_default_output_under_analytics(tiny_workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import os
 import random
 import re
@@ -19,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
@@ -27,12 +28,26 @@ from smartrain.cli_prompts import prompt_choice, prompt_int, prompt_text
 from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.dataset_former import _collect_label_image_pairs
-from smartrain.dataset_stats import _classes_from_data_yaml
+from smartrain.dataset_stats import (
+    SPLITS,
+    DatasetStats,
+    _classes_from_data_yaml,
+    _imbalance_summary,
+    _scan_one_dataset,
+)
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.yolo_labels import YoloBBox, YoloLabel, YoloSegment, read_yolo_labels
 
 DATASETS_REPORTS_SUBDIR = ("analytics", "datasets-reports")
+
+# Letterboxed RGB previews so figures are comparable across classes (fits inside this box).
+PREVIEW_CANVAS_W = 200
+PREVIEW_CANVAS_H = 200
+# If letterbox would upscale more than this, grow the square context crop around the object instead.
+REPORT_MAX_LETTERBOX_SCALE = 1.0
+# Below this max side (px), outline is drawn outside the true box by one bbox width/height per axis.
+TINY_OBJECT_MAX_SIDE_PX = 20
 
 
 def _log(msg: str) -> None:
@@ -59,6 +74,27 @@ UI: dict[str, dict[str, str]] = {
         "example_caption": "Example",
         "no_instances": "No labeled instances found for this class.",
         "footer_classes": "Classes in data.yaml",
+        "stats_heading": "Dataset statistics",
+        "stats_classes": "Classes (with objects)",
+        "stats_images": "Images (total)",
+        "stats_labeled": "Labeled images (≥1 object)",
+        "stats_empty": "Empty images (no objects)",
+        "stats_empty_pct": "Empty share",
+        "stats_instances": "Instances (total)",
+        "stats_per_split": "Per split",
+        "stats_split_images": "images",
+        "stats_split_objects": "objects",
+        "stats_imbalance": "Imbalance (max/min per class)",
+        "stats_gini": "Gini (class distribution)",
+        "stats_quality": "Quality (basic checks)",
+        "stats_quality_ok": "OK",
+        "stats_quality_warn": "WARN",
+        "stats_issues": "Issues",
+        "stats_broken_lines": "broken label lines",
+        "stats_unknown_ids": "unknown class ids",
+        "stats_orphan_images": "images without label file",
+        "stats_orphan_labels": "label files without image",
+        "stats_no_splits": "No per-split counts (unusual layout).",
     },
     "ru": {
         "doc_title": "Отчёт по примерам датасета",
@@ -69,6 +105,27 @@ UI: dict[str, dict[str, str]] = {
         "example_caption": "Пример",
         "no_instances": "Для этого класса нет размеченных экземпляров.",
         "footer_classes": "Классы в data.yaml",
+        "stats_heading": "Статистика датасета",
+        "stats_classes": "Классов (с объектами)",
+        "stats_images": "Изображений (всего)",
+        "stats_labeled": "Размеченных изображений (≥1 объект)",
+        "stats_empty": "Пустых изображений (без объектов)",
+        "stats_empty_pct": "Доля пустых",
+        "stats_instances": "Экземпляров (всего)",
+        "stats_per_split": "По сплитам",
+        "stats_split_images": "изображений",
+        "stats_split_objects": "объектов",
+        "stats_imbalance": "Дисбаланс (макс/мин по классу)",
+        "stats_gini": "Джини (по классам)",
+        "stats_quality": "Качество (базовые проверки)",
+        "stats_quality_ok": "OK",
+        "stats_quality_warn": "ВНИМАНИЕ",
+        "stats_issues": "Замечания",
+        "stats_broken_lines": "битых строк разметки",
+        "stats_unknown_ids": "неизвестных id класса",
+        "stats_orphan_images": "изображений без файла разметки",
+        "stats_orphan_labels": "файлов разметки без изображения",
+        "stats_no_splits": "Нет счётчиков по сплитам (нестандартная структура).",
     },
 }
 
@@ -78,9 +135,124 @@ def _t(lang: str, key: str) -> str:
     return block.get(key) or UI["en"][key]
 
 
+def _tiny_outline_margins_xy(inst: _Instance) -> tuple[float, float]:
+    """
+    Extra margin left/right (``mx``) and top/bottom (``my``) for drawing only, in image pixels.
+    For very small objects (max side ≤ ``TINY_OBJECT_MAX_SIDE_PX``), use one bbox width per
+    horizontal side and one bbox height per vertical side so the frame stays visible.
+    """
+    ax1, ay1 = min(inst.x1, inst.x2), min(inst.y1, inst.y2)
+    ax2, ay2 = max(inst.x1, inst.x2), max(inst.y1, inst.y2)
+    bw = max(ax2 - ax1, 1e-9)
+    bh = max(ay2 - ay1, 1e-9)
+    if max(bw, bh) > TINY_OBJECT_MAX_SIDE_PX:
+        return 0.0, 0.0
+    return bw, bh
+
+
+def _expand_polygon_radial(
+    pts: tuple[tuple[float, float], ...],
+    *,
+    margin: float,
+) -> list[tuple[float, float]]:
+    if margin <= 0 or len(pts) < 2:
+        return [(float(x), float(y)) for x, y in pts]
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    out: list[tuple[float, float]] = []
+    for px, py in pts:
+        vx, vy = px - cx, py - cy
+        L = math.hypot(vx, vy)
+        if L < 1e-6:
+            out.append((px, py))
+            continue
+        out.append((px + margin * vx / L, py + margin * vy / L))
+    return out
+
+
+def _markdown_examples_grid(items: list[tuple[Any, str]], lang: str) -> list[str]:
+    """
+    Two columns via a pipe table and standard ``![alt](url)`` figures.
+    Raw ``<img>`` HTML is omitted by Pandoc's LaTeX/PDF writer, so tables keep PDFs working.
+    """
+    if not items:
+        return ["", ""]
+    lines: list[str] = ["", "|  |  |", "|:---:|:---:|"]
+    for j in range(0, len(items), 2):
+        alt_l = f"{_t(lang, 'example_caption')} {j + 1}"
+        rel_l = items[j][1]
+        cell_l = f"![{alt_l}](../{rel_l})"
+        if j + 1 < len(items):
+            alt_r = f"{_t(lang, 'example_caption')} {j + 2}"
+            rel_r = items[j + 1][1]
+            cell_r = f"![{alt_r}](../{rel_r})"
+            lines.append(f"| {cell_l} | {cell_r} |")
+        else:
+            lines.append(f"| {cell_l} |  |")
+    lines.append("")
+    return lines
+
+
 def _slug(s: str) -> str:
     raw = re.sub(r"[^\w\-]+", "_", s, flags=re.UNICODE).strip("_")
     return raw[:80] if raw else "class"
+
+
+def _dataset_stats_markdown_lines(ds: DatasetStats, lang: str) -> list[str]:
+    """Summary aligned with ``smartrain stats`` table row (no duplicate-scan flags)."""
+    class_totals = {
+        k: sum(v.values()) for k, v in ds.per_class_split_instances.items() if sum(v.values()) > 0
+    }
+    m = _imbalance_summary(class_totals)
+    empty_pct = (100.0 * ds.empty_images / ds.images_total) if ds.images_total else 0.0
+    quality_ok = (
+        ds.broken_label_lines == 0
+        and ds.unknown_class_ids == 0
+        and ds.orphan_images == 0
+        and ds.orphan_labels == 0
+    )
+    q_key = "stats_quality_ok" if quality_ok else "stats_quality_warn"
+    split_lines: list[str] = []
+    for sp in SPLITS:
+        ni = int(ds.split_images.get(sp, 0))
+        no = int(ds.split_instances.get(sp, 0))
+        if ni or no:
+            split_lines.append(
+                f"  - `{sp}`: {ni} {_t(lang, 'stats_split_images')}, {no} {_t(lang, 'stats_split_objects')}"
+            )
+    lines: list[str] = [
+        f"## {_t(lang, 'stats_heading')}",
+        "",
+        f"- **{_t(lang, 'stats_classes')}:** {len(class_totals)}",
+        f"- **{_t(lang, 'stats_images')}:** {ds.images_total}",
+        f"- **{_t(lang, 'stats_labeled')}:** {ds.labeled_images}",
+        f"- **{_t(lang, 'stats_empty')}:** {ds.empty_images}",
+        f"- **{_t(lang, 'stats_empty_pct')}:** {empty_pct:.2f}%",
+        f"- **{_t(lang, 'stats_instances')}:** {ds.instances_total}",
+        f"- **{_t(lang, 'stats_imbalance')}:** {m['ratio']:.3f}",
+        f"- **{_t(lang, 'stats_gini')}:** {m['gini']:.3f}",
+        f"- **{_t(lang, 'stats_quality')}:** {_t(lang, q_key)}",
+        "",
+        f"### {_t(lang, 'stats_per_split')}",
+        "",
+    ]
+    if split_lines:
+        lines.extend(split_lines)
+    else:
+        lines.append(f"- {_t(lang, 'stats_no_splits')}")
+    lines.extend(
+        [
+            "",
+            f"### {_t(lang, 'stats_issues')}",
+            "",
+            f"- {_t(lang, 'stats_broken_lines')}: **{ds.broken_label_lines}** · "
+            f"{_t(lang, 'stats_unknown_ids')}: **{ds.unknown_class_ids}** · "
+            f"{_t(lang, 'stats_orphan_images')}: **{ds.orphan_images}** · "
+            f"{_t(lang, 'stats_orphan_labels')}: **{ds.orphan_labels}**",
+            "",
+        ]
+    )
+    return lines
 
 
 def _bbox_norm_to_px(lb: YoloBBox, w: int, h: int) -> tuple[float, float, float, float]:
@@ -140,13 +312,29 @@ def _crop_phash(img: Image.Image) -> int:
 _FPHASH_THUMB_MAX = 128
 
 
-def _raw_crop_phash(opened_rgb: Image.Image, inst: _Instance, padding_frac: float) -> int:
+def _raw_crop_phash(
+    opened_rgb: Image.Image,
+    inst: _Instance,
+    padding_frac: float,
+    *,
+    canvas_w: int,
+    canvas_h: int,
+    max_letterbox_scale: float,
+) -> int:
     """
-    Perceptual hash of the padded ROI without drawing boxes/text (fast path for diversity).
+    Perceptual hash of the same context ROI as the report preview (no overlay).
     ``opened_rgb`` must be RGB mode and already loaded.
     """
     iw, ih = opened_rgb.size
-    roi = _padded_roi(inst.x1, inst.y1, inst.x2, inst.y2, iw=iw, ih=ih, padding_frac=padding_frac)
+    roi = _report_context_roi(
+        inst,
+        iw,
+        ih,
+        padding_frac=padding_frac,
+        canvas_w=canvas_w,
+        canvas_h=canvas_h,
+        max_letterbox_scale=max_letterbox_scale,
+    )
     tile = opened_rgb.crop(roi)
     if tile.width > _FPHASH_THUMB_MAX or tile.height > _FPHASH_THUMB_MAX:
         tile = tile.copy()
@@ -159,6 +347,9 @@ def _fingerprint_hashes_by_class(
     *,
     padding_frac: float,
     pbar: tqdm | None,
+    canvas_w: int,
+    canvas_h: int,
+    max_letterbox_scale: float,
 ) -> dict[int, tuple[list[int], list[int]]]:
     """
     For each class id, returns (hashes, valid_instance_indices) for diversity selection.
@@ -178,7 +369,14 @@ def _fingerprint_hashes_by_class(
                 im = im.convert("RGB")
                 for cid, idx, inst in group:
                     try:
-                        h = _raw_crop_phash(im, inst, padding_frac)
+                        h = _raw_crop_phash(
+                            im,
+                            inst,
+                            padding_frac,
+                            canvas_w=canvas_w,
+                            canvas_h=canvas_h,
+                            max_letterbox_scale=max_letterbox_scale,
+                        )
                         acc[cid].append((idx, h))
                     except Exception:
                         continue
@@ -241,6 +439,44 @@ class _Instance:
     segment_points: tuple[tuple[float, float], ...] | None
 
 
+def _report_context_roi(
+    inst: _Instance,
+    iw: int,
+    ih: int,
+    *,
+    padding_frac: float,
+    canvas_w: int,
+    canvas_h: int,
+    max_letterbox_scale: float,
+) -> tuple[int, int, int, int]:
+    """
+    Square crop centered on the instance bbox, at least as large as the padded label ROI,
+    and large enough that fitting to ``canvas_w``×``canvas_h`` does not upscale beyond
+    ``max_letterbox_scale`` (when the image border allows it).
+    """
+    base = _padded_roi(inst.x1, inst.y1, inst.x2, inst.y2, iw=iw, ih=ih, padding_frac=padding_frac)
+    m = max(float(max_letterbox_scale), 1e-6)
+    min_side = float(min(canvas_w, canvas_h)) / m
+
+    cx = 0.5 * (inst.x1 + inst.x2)
+    cy = 0.5 * (inst.y1 + inst.y2)
+    half_x = max(abs(float(base[0]) - cx), abs(float(base[2]) - cx))
+    half_y = max(abs(float(base[1]) - cy), abs(float(base[3]) - cy))
+    side_need = 2.0 * max(half_x, half_y, 1e-6)
+    s = max(side_need, min_side)
+
+    x1 = int(math.floor(cx - s * 0.5))
+    y1 = int(math.floor(cy - s * 0.5))
+    x2 = int(math.ceil(cx + s * 0.5))
+    y2 = int(math.ceil(cy + s * 0.5))
+
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(iw, max(x2, x1 + 1))
+    y2 = min(ih, max(y2, y1 + 1))
+    return x1, y1, x2, y2
+
+
 def _labels_to_instances(image_path: str, label_path: str, labels: Iterable[YoloLabel]) -> list[_Instance]:
     im = Image.open(image_path)
     iw, ih = im.size
@@ -281,46 +517,94 @@ def _labels_to_instances(image_path: str, label_path: str, labels: Iterable[Yolo
     return out
 
 
-def _render_instance_crop(
+def _build_report_instance_image(
     inst: _Instance,
     *,
     class_name: str,
     padding_frac: float,
+    canvas_w: int,
+    canvas_h: int,
+    max_letterbox_scale: float,
+    bg: tuple[int, int, int] = (246, 246, 246),
 ) -> Image.Image:
+    """
+    Context ROI (expanded when the object is small so letterbox does not upscale too much)
+    → letterbox to ``canvas_w``×``canvas_h`` → draw bbox/segment on the final pixels.
+    """
     im = Image.open(inst.image_path).convert("RGB")
     iw, ih = im.size
-    roi = _padded_roi(inst.x1, inst.y1, inst.x2, inst.y2, iw=iw, ih=ih, padding_frac=padding_frac)
+    roi = _report_context_roi(
+        inst,
+        iw,
+        ih,
+        padding_frac=padding_frac,
+        canvas_w=canvas_w,
+        canvas_h=canvas_h,
+        max_letterbox_scale=max_letterbox_scale,
+    )
     crop = im.crop(roi)
-    ox1, oy1 = roi[0], roi[1]
-    draw = ImageDraw.Draw(crop)
-    col = _class_color(class_name)
-    if inst.kind == "bbox" and inst.segment_points is None:
-        rx1 = inst.x1 - ox1
-        ry1 = inst.y1 - oy1
-        rx2 = inst.x2 - ox1
-        ry2 = inst.y2 - oy1
-        draw.rectangle([rx1, ry1, rx2, ry2], outline=col, width=max(2, int(min(crop.size) * 0.005) + 1))
-    elif inst.segment_points:
-        poly = [(x - ox1, y - oy1) for x, y in inst.segment_points]
-        if len(poly) >= 2:
-            draw.line(poly + [poly[0]], fill=col, width=max(2, int(min(crop.size) * 0.005) + 1))
-        bx1, by1, bx2, by2 = inst.x1 - ox1, inst.y1 - oy1, inst.x2 - ox1, inst.y2 - oy1
-        draw.rectangle([bx1, by1, bx2, by2], outline=col, width=1)
+    w, h = crop.size
+    ox1, oy1 = float(roi[0]), float(roi[1])
 
-    label = class_name
-    try:
-        font = ImageFont.truetype("DejaVuSans.ttf", size=max(12, int(min(crop.size) * 0.04)))
-    except OSError:
-        font = ImageFont.load_default()
-    if hasattr(draw, "textbbox"):
-        tw, th = draw.textbbox((0, 0), label, font=font)[2:4]
-    else:
-        tw, th = draw.textsize(label, font=font)
-    pad = 4
-    tx, ty = 4, 4
-    draw.rectangle([tx, ty, tx + tw + pad * 2, ty + th + pad * 2], fill=(0, 0, 0))
-    draw.text((tx + pad, ty + pad), label, fill=(255, 255, 255), font=font)
-    return crop
+    if canvas_w < 8 or canvas_h < 8:
+        return crop.convert("RGB")
+    if w <= 0 or h <= 0:
+        return Image.new("RGB", (canvas_w, canvas_h), bg)
+
+    scale = min(canvas_w / w, canvas_h / h)
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    resample = (
+        Image.Resampling.LANCZOS if max(w, h) > max(canvas_w, canvas_h) else Image.Resampling.BICUBIC
+    )
+    resized = crop.resize((nw, nh), resample)
+    out = Image.new("RGB", (canvas_w, canvas_h), bg)
+    ox = (canvas_w - nw) // 2
+    oy = (canvas_h - nh) // 2
+    out.paste(resized, (ox, oy))
+
+    def map_xy(lx: float, ly: float) -> tuple[float, float]:
+        return ox + lx * nw / w, oy + ly * nh / h
+
+    mx, my = _tiny_outline_margins_xy(inst)
+    ax1, ay1 = min(inst.x1, inst.x2), min(inst.y1, inst.y2)
+    ax2, ay2 = max(inst.x1, inst.x2), max(inst.y1, inst.y2)
+    dr_x1, dr_y1 = ax1 - mx, ay1 - my
+    dr_x2, dr_y2 = ax2 + mx, ay2 + my
+
+    col = _class_color(class_name)
+    line_w = max(2, int(min(canvas_w, canvas_h) * 0.012))
+    draw = ImageDraw.Draw(out)
+    if inst.kind == "bbox" and inst.segment_points is None:
+        px1, py1 = map_xy(dr_x1 - ox1, dr_y1 - oy1)
+        px2, py2 = map_xy(dr_x2 - ox1, dr_y2 - oy1)
+        x1, y1, x2, y2 = (
+            int(round(min(px1, px2))),
+            int(round(min(py1, py2))),
+            int(round(max(px1, px2))),
+            int(round(max(py1, py2))),
+        )
+        draw.rectangle([x1, y1, x2, y2], outline=col, width=line_w)
+    elif inst.segment_points:
+        m_poly = max(mx, my) if (mx > 0 or my > 0) else 0.0
+        pts_draw = (
+            tuple(_expand_polygon_radial(inst.segment_points, margin=m_poly))
+            if m_poly > 0
+            else inst.segment_points
+        )
+        poly = [map_xy(x - ox1, y - oy1) for x, y in pts_draw]
+        if len(poly) >= 2:
+            draw.line(poly + [poly[0]], fill=col, width=line_w)
+        bx1, by1 = map_xy(dr_x1 - ox1, dr_y1 - oy1)
+        bx2, by2 = map_xy(dr_x2 - ox1, dr_y2 - oy1)
+        rx1, ry1, rx2, ry2 = (
+            int(round(min(bx1, bx2))),
+            int(round(min(by1, by2))),
+            int(round(max(bx1, bx2))),
+            int(round(max(by1, by2))),
+        )
+        draw.rectangle([rx1, ry1, rx2, ry2], outline=col, width=1)
+    return out
 
 
 def _load_catalog(layout: WorkspaceLayout) -> dict[str, Any]:
@@ -372,6 +656,15 @@ def build_report_dataset_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.12,
         help="Extra padding around each box as a fraction of max(box width, height)",
+    )
+    p.add_argument(
+        "--report-max-letterbox-scale",
+        type=float,
+        default=REPORT_MAX_LETTERBOX_SCALE,
+        help=(
+            "When fitting crops to the preview canvas, do not upscale raw pixels beyond this factor; "
+            "if needed, a larger square context around the object is taken instead (default: 1.0 = no upscale)."
+        ),
     )
     p.add_argument("--no-pdf", action="store_true", help="Do not build PDF")
     p.add_argument("--no-odt", action="store_true", help="Do not build ODT")
@@ -913,8 +1206,12 @@ def main(argv: list[str] | None = None) -> None:
         print("[ERROR] No class names found (data.yaml missing or empty names) and no labels scanned.")
         return
 
+    _log("[INFO] Dataset statistics (same scan as `smartrain stats`)…")
+    ds_stats = _scan_one_dataset(src_root, args.dataset)
+
     picks: dict[int, list[tuple[_Instance, str]]] = {cid: [] for cid in sorted(classes_by_id.keys())}
     padding = float(args.crop_padding)
+    max_lb_scale = max(0.25, min(float(getattr(args, "report_max_letterbox_scale", 1.0)), 8.0))
 
     fp_total = sum(len(v) for v in by_class.values())
     uniq_images = len({inst.image_path for v in by_class.values() for inst in v})
@@ -933,7 +1230,14 @@ def main(argv: list[str] | None = None) -> None:
             disable=uniq_images < 80,
         )
     try:
-        fp_result = _fingerprint_hashes_by_class(by_class, padding_frac=padding, pbar=pbar_fp)
+        fp_result = _fingerprint_hashes_by_class(
+            by_class,
+            padding_frac=padding,
+            pbar=pbar_fp,
+            canvas_w=PREVIEW_CANVAS_W,
+            canvas_h=PREVIEW_CANVAS_H,
+            max_letterbox_scale=max_lb_scale,
+        )
         for cid, instances in by_class.items():
             hashes, valid_idx = fp_result.get(cid, ([], []))
             if not hashes:
@@ -961,7 +1265,14 @@ def main(argv: list[str] | None = None) -> None:
         new_items: list[tuple[_Instance, str]] = []
         for k, (inst, _rel) in enumerate(items):
             rel = os.path.join("assets", _slug(cname), f"{k}.png").replace(os.sep, "/")
-            crop = _render_instance_crop(inst, class_name=cname, padding_frac=padding)
+            crop = _build_report_instance_image(
+                inst,
+                class_name=cname,
+                padding_frac=padding,
+                canvas_w=PREVIEW_CANVAS_W,
+                canvas_h=PREVIEW_CANVAS_H,
+                max_letterbox_scale=max_lb_scale,
+            )
             crop.save(os.path.join(out_dir, rel.replace("/", os.sep)))
             new_items.append((inst, rel))
         picks[cid] = new_items
@@ -976,6 +1287,7 @@ def main(argv: list[str] | None = None) -> None:
         lines.append(f"- **{_t(lang, 'dataset')}:** `{args.dataset}`")
         lines.append(f"- **{_t(lang, 'generated')}:** {datetime.now().isoformat(timespec='seconds')}")
         lines.append("")
+        lines.extend(_dataset_stats_markdown_lines(ds_stats, lang))
         lines.append(f"## {_t(lang, 'footer_classes')}")
         lines.append("")
         for cid0 in sorted(classes_by_id.keys()):
@@ -992,11 +1304,7 @@ def main(argv: list[str] | None = None) -> None:
                 lines.append("")
                 continue
             lines.append(f"### {_t(lang, 'examples_heading')}")
-            lines.append("")
-            for j, (_inst, rel) in enumerate(items):
-                alt = f"{_t(lang, 'example_caption')} {j + 1}"
-                lines.append(f"![{alt}](../{rel})")
-                lines.append("")
+            lines.extend(_markdown_examples_grid(items, lang))
         with open(os.path.join(lang_dir, "index.md"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
         _log(f"[INFO] Wrote {lang}/index.md")
