@@ -777,6 +777,7 @@ def main(argv=None):
         command="balance",
         source_datasets=[{"name": args.dataset, "path": src_root, "dataset_hash": entry.get("dataset_hash")}],
         parameters=vars(args),
+        workspace_root=layout.root,
         transformations=[
             {
                 "strategy": args.strategy,

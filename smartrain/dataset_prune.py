@@ -376,6 +376,7 @@ def main(argv=None) -> None:
         command=f"prune-{mode}",
         source_datasets=[{"name": args.dataset, "path": src_root, "dataset_hash": entry.get("dataset_hash")}],
         parameters=vars(args),
+        workspace_root=layout.root,
         transformations=[{"mode": mode}],
         stats_before={"copied_images": copied},
         stats_after=stats | {"output_hash": out_hash},

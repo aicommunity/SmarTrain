@@ -261,7 +261,7 @@ def _copy_and_patch_yaml(dataset_root: str, output_root: str) -> None:
     if not data or not isinstance(data, dict):
         return
     data = dict(data)
-    data["path"] = os.path.abspath(output_root)
+    data.pop("path", None)
     dest = os.path.join(output_root, rel)
     dest_dir = os.path.dirname(dest)
     if dest_dir:
@@ -983,6 +983,7 @@ def main(argv=None) -> None:
                     }
                 ],
                 parameters=vars(args),
+                workspace_root=layout.root if layout is not None else None,
                 transformations=[
                     {
                         "mode": cfg["mode"],

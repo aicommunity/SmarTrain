@@ -871,6 +871,7 @@ def main(argv=None) -> None:
         output_dataset_dir=out_dir,
         command="orient",
         source_datasets=[{"name": args.dataset, "dataset_hash": entry.get("dataset_hash") if isinstance(entry, dict) else None}],
+        workspace_root=layout.root,
         parameters={
             "dataset": args.dataset,
             "output_name": out_name,

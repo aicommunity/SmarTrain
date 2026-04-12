@@ -25,6 +25,7 @@ from smartrain.train_profile import (
     resolve_profile_data_path,
     task_to_metadata_task_type,
 )
+from smartrain.path_portable import relativize_if_under
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -1105,17 +1106,29 @@ def save_training_metadata(
     ultralytics_train_summary=None,
     onnx_relative=None,
 ):
+    ds_abs = os.path.abspath(dataset_path)
+    dataset_block: dict[str, Any] = {
+        "name": os.path.basename(os.path.normpath(dataset_path)),
+        "path_relative": _get_relative_path(dataset_path, model_dir),
+        "hash": dataset_hash,
+    }
+    if workspace_root is not None:
+        wr_abs = os.path.abspath(workspace_root)
+        if ds_abs == wr_abs or ds_abs.startswith(wr_abs + os.sep):
+            rel_uw = relativize_if_under(workspace_root, ds_abs)
+            if rel_uw is not None:
+                dataset_block["path_under_workspace"] = rel_uw
+        else:
+            dataset_block["path_absolute"] = ds_abs
+    else:
+        dataset_block["path_absolute"] = ds_abs
+
     metadata = {
         "training_info": {
             "framework": "ultralytics",
             "task_type": task_type or "detection",
             "model": model_version,
-            "dataset": {
-                "name": os.path.basename(os.path.normpath(dataset_path)),
-                "path_absolute": os.path.abspath(dataset_path),
-                "path_relative": _get_relative_path(dataset_path, model_dir),
-                "hash": dataset_hash,
-            },
+            "dataset": dataset_block,
             "hyperparameters": {
                 "epochs": epochs,
                 "batch_size": batch,
@@ -1163,7 +1176,7 @@ def save_training_metadata(
 
     if workspace_root is not None:
         metadata["workspace"] = {
-            "root": os.path.abspath(workspace_root),
+            "root": ".",
             "dataset_path_relative": _relative_to_workspace(dataset_path, workspace_root),
             "run_directory_relative": _relative_to_workspace(model_dir, workspace_root),
         }

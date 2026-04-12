@@ -1245,6 +1245,7 @@ def main(argv=None):
                 command="fusion",
                 source_datasets=source_datasets,
                 parameters=vars(args),
+                workspace_root=workspace_root,
                 transformations=[
                     {
                         "selected_classes": list(selected_classes),

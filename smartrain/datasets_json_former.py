@@ -509,6 +509,24 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Workspace/scan only: after confirmation, remove from raw_data the sources processed in the current run.",
     )
+    parser.add_argument(
+        "--repair-relative-paths",
+        action="store_true",
+        dest="repair_relative_paths",
+        help="Workspace only: after a successful scan, rewrite absolute paths under the workspace in datasets/, runs/, tmp cache.",
+    )
+    parser.add_argument(
+        "--repair-relative-paths-dry-run",
+        action="store_true",
+        dest="repair_relative_paths_dry_run",
+        help="Like --repair-relative-paths but only print planned changes (no writes).",
+    )
+    parser.add_argument(
+        "--repair-relative-paths-include-datasets-list",
+        action="store_true",
+        dest="repair_relative_paths_include_datasets_list",
+        help="With path repair, also rewrite absolute paths inside raw_data/datasets_list.txt when they lie under the workspace.",
+    )
 
     return parser
 
@@ -930,6 +948,7 @@ def _ensure_scan_initial_passport(
             "workspace": workspace_root,
             "kind": "initial",
         },
+        workspace_root=workspace_root,
         transformations=[
             {
                 "type": "initial_sync_from_raw_data",
@@ -1453,6 +1472,22 @@ def main(argv=None):
         had_previous_datasets=bool(old_ds_keys),
         had_previous_class_names=bool(previous_cn_keys),
     )
+
+    if use_workspace and (
+        getattr(args, "repair_relative_paths", False)
+        or getattr(args, "repair_relative_paths_dry_run", False)
+    ):
+        from smartrain.workspace_path_repair import print_repair_report, repair_workspace_paths
+
+        dry = bool(getattr(args, "repair_relative_paths_dry_run", False))
+        rep = repair_workspace_paths(
+            layout.root,
+            dry_run=dry,
+            include_datasets_list=bool(
+                getattr(args, "repair_relative_paths_include_datasets_list", False)
+            ),
+        )
+        print_repair_report(rep, dry_run=dry)
 
 
 if __name__ == "__main__":

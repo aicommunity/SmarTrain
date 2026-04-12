@@ -10,6 +10,8 @@ import shutil
 import zipfile
 from typing import Any
 
+from smartrain.path_portable import relativize_if_under, resolve_stored_path_under_workspace
+
 WORKSPACE_ENV_VAR = "SMART_TRAIN_WORKSPACE"
 
 DATASETS_INFO_FILE = "datasets_info.json"
@@ -124,6 +126,19 @@ def _choose_extracted_dataset_root(extract_dir: str) -> str:
     return extract_dir
 
 
+def _resolved_zip_path_from_meta(workspace_root: str, meta: dict[str, Any]) -> str | None:
+    raw = meta.get("zip_path")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    s = raw.strip()
+    if os.path.isabs(s):
+        return os.path.abspath(s)
+    try:
+        return resolve_stored_path_under_workspace(workspace_root, s)
+    except (OSError, ValueError):
+        return None
+
+
 def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
     """
     Unpacks a zip dataset into the workspace/tmp/extracted_datasets cache with invalidation
@@ -137,6 +152,7 @@ def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
     cache_key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:16]
 
     layout = WorkspaceLayout(workspace_root)
+    wr_abs = layout.root
     cache_root = layout.extracted_datasets
     cache_dir = os.path.join(cache_root, cache_key)
     meta_path = os.path.join(cache_dir, "__meta__.json")
@@ -146,8 +162,9 @@ def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
         try:
             with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
+            meta_zip = _resolved_zip_path_from_meta(workspace_root, meta)
             if (
-                meta.get("zip_path") == abs_zip
+                meta_zip == abs_zip
                 and meta.get("size") == stat.st_size
                 and meta.get("mtime_ns") == stat.st_mtime_ns
             ):
@@ -165,10 +182,15 @@ def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
     dataset_root = _choose_extracted_dataset_root(cache_dir)
     rel_root = os.path.relpath(dataset_root, cache_dir)
 
+    zip_stored: str = abs_zip
+    rel_zip = relativize_if_under(wr_abs, abs_zip)
+    if isinstance(rel_zip, str) and rel_zip != abs_zip:
+        zip_stored = rel_zip
+
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(
             {
-                "zip_path": abs_zip,
+                "zip_path": zip_stored,
                 "size": stat.st_size,
                 "mtime_ns": stat.st_mtime_ns,
                 "dataset_root_rel": "" if rel_root == "." else rel_root,
