@@ -6,7 +6,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 
 ## Command groups
 
-- Datasets: `scan`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `hash`, `stats`
+- Datasets: `scan`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `hash`, `stats`, `report dataset`
 - Training: `train`, `clearml-upload`
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
@@ -30,7 +30,7 @@ smartrain analyze inference-benchmark --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `report dataset`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -42,3 +42,4 @@ Balance and stats additions:
 - `smartrain stats --balance-ready` prints imbalance metrics and balancing recommendations.
 - `smartrain prune empty` removes empty image/label pairs into a new `<dataset>_pruned` dataset.
 - `smartrain prune dedup` removes duplicate images by file content into `<dataset>_deduped` (global split priority: train > val > test).
+- `smartrain report dataset` writes a multilingual per-class sample report (Markdown + PNG; default folder `analytics/datasets-reports/<dataset>_<timestamp>/`). Default dependencies include bundled pandoc (`pypandoc-binary`), WeasyPrint, `fpdf2`, and `odfpy` for PDF/ODT. WeasyPrint may need OS libraries (Cairo, Pango) if wheels are unavailable.

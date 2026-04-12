@@ -55,6 +55,15 @@ Quick examples:
   smartrain registry models-list
 """
 
+HELP_REPORT_GROUP = """Dataset sample reports (multilingual Markdown, figures, optional PDF/ODT).
+
+Default output folder: workspace `analytics/datasets-reports/<dataset>_<timestamp>/`.
+
+Quick examples:
+  smartrain report dataset --dataset my_dataset
+  smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
+"""
+
 ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
     "smartrain train": (
         "Examples:\n"
@@ -79,6 +88,12 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "  smartrain heatmap --model models/best.pt --source image.jpg\n"
         "  smartrain heatmap --model models/best.pt --source image.jpg --output heatmap.png\n"
         "  smartrain heatmap --model models/best.pt --source image.jpg --colormap 12\n"
+    ),
+    "smartrain report dataset": (
+        "Examples:\n"
+        "  smartrain report dataset --dataset my_dataset\n"
+        "  smartrain report dataset --dataset my_dataset -n 6 --languages en,ru\n"
+        "  smartrain report dataset --workspace /data/ws --dataset my_dataset --no-odt\n"
     ),
 }
 
@@ -485,6 +500,51 @@ def cmd_roi(ctx: typer.Context) -> None:
         prog="smartrain roi",
         empty_args_mode="invoke_if_tty_else_help",
     )
+
+
+report_app = typer.Typer(
+    help=HELP_REPORT_GROUP,
+    invoke_without_command=True,
+)
+
+
+def _report_group_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        console.print(HELP_REPORT_GROUP)
+        console.print("Run: [cyan]smartrain report dataset --help[/cyan]")
+        raise typer.Exit(0)
+
+
+@report_app.command(
+    "dataset",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_report_dataset(ctx: typer.Context) -> None:
+    """Multilingual per-class sample report (Markdown + PNG; PDF/ODT via pandoc or extras).
+
+    Examples:
+      smartrain report dataset --dataset my_dataset
+      smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
+      smartrain report dataset --workspace /data/MarsSmarTrain --dataset my_dataset --no-pdf
+    """
+    from smartrain.dataset_report import build_report_dataset_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.dataset_report",
+        build_parser=build_report_dataset_arg_parser,
+        prog="smartrain report dataset",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+app.add_typer(
+    report_app,
+    name="report",
+    invoke_without_command=True,
+    callback=_report_group_callback,
+)
 
 
 queue_app = typer.Typer(
