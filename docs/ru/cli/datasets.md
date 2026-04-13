@@ -22,7 +22,7 @@
 Собирает новый датасет из нескольких источников:
 
 - выбор входов: `--dataset` (повторяемый) или `--datasets` (CSV);
-- управление классами: `--classes`, `--merge-classes`, `--common-classes-only`;
+- управление классами: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
 - разбиение: `--fusion-split train,val,test`.
 
 ## `augment`, `balance`, `orient`, `roi`

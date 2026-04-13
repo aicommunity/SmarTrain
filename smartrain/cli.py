@@ -293,7 +293,8 @@ def cmd_fusion(ctx: typer.Context) -> None:
 
     Examples:
       smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
-      smartrain fusion --dataset ds_a --dataset ds_b --name merged_ds
+      smartrain fusion --dataset ds_a --dataset ds_b --exclude-classes "background,trash"
+      smartrain fusion --dataset ds_a --dataset ds_b --output-name merged_ds
       smartrain fusion --workspace /data/MarsSmarTrain --dataset ds_a
 
     Notes:

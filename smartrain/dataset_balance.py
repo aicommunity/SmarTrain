@@ -443,20 +443,26 @@ def _ensure_non_empty_eval_splits(
     out_train = list(balanced_train)
     passthrough_keys = {_source_image_key(img) for _s, img, _lbl, _cls in passthrough_items}
 
-    def movable_train_indexes() -> list[int]:
-        counts: dict[str, int] = defaultdict(int)
-        for s, img, _lbl, _cls in out_train:
-            if s != "train":
-                continue
-            counts[_source_image_key(img)] += 1
-        out: list[int] = []
+    def train_groups() -> dict[str, list[int]]:
+        groups: dict[str, list[int]] = defaultdict(list)
         for i, (s, img, _lbl, _cls) in enumerate(out_train):
             if s != "train":
                 continue
-            key = _source_image_key(img)
-            if counts.get(key, 0) == 1 and key not in passthrough_keys:
-                out.append(i)
-        return out
+            groups[_source_image_key(img)].append(i)
+        return groups
+
+    def movable_train_keys() -> list[str]:
+        groups = train_groups()
+        return [key for key in groups.keys() if key not in passthrough_keys]
+
+    def move_key_to_split(key: str, target_split: str) -> int:
+        moved = 0
+        for i in train_groups().get(key, []):
+            s, img, lbl, cls = out_train[i]
+            if s != target_split:
+                out_train[i] = (target_split, img, lbl, cls)
+                moved += 1
+        return moved
 
     val_count = sum(1 for s, *_ in passthrough_items if s == "val")
     test_count = sum(1 for s, *_ in passthrough_items if s == "test")
@@ -469,8 +475,8 @@ def _ensure_non_empty_eval_splits(
     target_test = max(1, int(round(total * 0.1)))
     need_val = max(0, target_val - val_count)
     need_test = max(0, target_test - test_count)
-    # Keep at least one item in train and move only split-safe unique keys.
-    can_move = max(0, len(movable_train_indexes()) - 1)
+    # Keep at least one source key in train and move only split-safe keys.
+    can_move = max(0, len(movable_train_keys()) - 1)
     if need_val + need_test > can_move:
         # Prioritize making both splits non-empty first.
         min_need_val = 1 if val_count == 0 and can_move > 0 else 0
@@ -487,24 +493,35 @@ def _ensure_non_empty_eval_splits(
 
     if (not have_non_empty_eval) and (need_val > 0 or need_test > 0):
         rng = random.Random(seed)
-        idxs = movable_train_indexes()
-        rng.shuffle(idxs)
+        keys = movable_train_keys()
+        rng.shuffle(keys)
 
         pos = 0
         for _ in range(need_val):
-            if pos >= len(idxs):
+            if pos >= len(keys):
                 break
-            i = idxs[pos]
+            key = keys[pos]
             pos += 1
-            _s, img, lbl, cls = out_train[i]
-            out_train[i] = ("val", img, lbl, cls)
+            move_key_to_split(key, "val")
         for _ in range(need_test):
-            if pos >= len(idxs):
+            if pos >= len(keys):
                 break
-            i = idxs[pos]
+            key = keys[pos]
             pos += 1
-            _s, img, lbl, cls = out_train[i]
-            out_train[i] = ("test", img, lbl, cls)
+            move_key_to_split(key, "test")
+
+        cur_val = sum(1 for s, *_ in out_train if s == "val") + val_count
+        cur_test = sum(1 for s, *_ in out_train if s == "test") + test_count
+        if val_count == 0 and cur_val == 0:
+            print(
+                "[WARN] eval_coverage: val is empty and could not be seeded; "
+                "no split-safe train source keys are available."
+            )
+        if test_count == 0 and cur_test == 0:
+            print(
+                "[WARN] eval_coverage: test is empty and could not be seeded; "
+                "no split-safe train source keys are available."
+            )
 
     # Optional class-coverage enrichment for eval splits:
     # if a class exists globally but is absent in val/test, move a minimal
@@ -536,29 +553,41 @@ def _ensure_non_empty_eval_splits(
         missing = set(global_classes) - present_classes(target_split)
         # keep at least one sample in train
         while missing and train_count() > 1:
-            movable = set(movable_train_indexes())
-            candidates: list[tuple[int, int]] = []
-            for i, (s, _img, _lbl, cls_names) in enumerate(out_train):
-                if s != "train":
-                    continue
-                if i not in movable:
-                    continue
-                cover = len(set(cls_names) & missing)
+            groups = train_groups()
+            movable = [k for k in groups.keys() if k not in passthrough_keys]
+            candidates: list[tuple[int, str]] = []
+            for key in movable:
+                idxs = groups.get(key, [])
+                group_classes: set[str] = set()
+                for i in idxs:
+                    s, _img, _lbl, cls_names = out_train[i]
+                    if s != "train":
+                        continue
+                    group_classes.update(cls_names)
+                cover = len(group_classes & missing)
                 if cover > 0:
-                    candidates.append((cover, i))
+                    candidates.append((cover, key))
             if not candidates:
+                missing_preview = ", ".join(sorted(missing)[:8])
+                movable_count = len(movable)
                 print(
-                    f"[WARN] eval_coverage: cannot fully enrich '{target_split}' "
-                    "without cross-split duplicate risk; keeping current coverage."
+                    f"[WARN] eval_coverage: cannot cover missing classes in '{target_split}' "
+                    f"without cross-split duplicate risk. Missing ({len(missing)}): {missing_preview}"
+                    f"{' ...' if len(missing) > 8 else ''}; movable source keys: {movable_count}."
                 )
                 break
             # maximize coverage; tie-break with deterministic random jitter.
             max_cover = max(c for c, _ in candidates)
-            best = [i for c, i in candidates if c == max_cover]
-            chosen_idx = best[rng_cov.randrange(len(best))]
-            s, img, lbl, cls_names = out_train[chosen_idx]
-            out_train[chosen_idx] = (target_split, img, lbl, cls_names)
-            missing -= set(cls_names)
+            best_keys = [k for c, k in candidates if c == max_cover]
+            chosen_key = best_keys[rng_cov.randrange(len(best_keys))]
+            covered: set[str] = set()
+            for i in train_groups().get(chosen_key, []):
+                s, _img, _lbl, cls_names = out_train[i]
+                if s != "train":
+                    continue
+                covered.update(cls_names)
+            move_key_to_split(chosen_key, target_split)
+            missing -= covered
     return out_train
 
 

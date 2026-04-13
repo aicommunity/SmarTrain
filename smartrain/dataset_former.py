@@ -163,6 +163,12 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Class names separated by commas; if not specified, combine all classes from all datasets in datasets_info.json (except the output one)",
     )
+    parser.add_argument(
+        "--exclude-classes",
+        type=str,
+        default=None,
+        help="Class names separated by commas to exclude from the resulting class set (applied after --classes or auto-union)",
+    )
 
     parser.add_argument(
         "--datasets-info-path",
@@ -293,6 +299,12 @@ def _prompt_interactive_options(
         choices=class_candidates,
     ).strip()
     args.classes = classes_raw or None
+    exclude_classes_raw = prompt_text(
+        "Comma separated classes to exclude (empty = exclude nothing)",
+        default=(args.exclude_classes or ""),
+        choices=class_candidates,
+    ).strip()
+    args.exclude_classes = exclude_classes_raw or None
 
     split_default = args.fusion_split or f"{TRAIN_PART},{VAL_PART},{TEST_PART}"
     args.fusion_split = prompt_text(
@@ -340,6 +352,20 @@ def _validate_requested_classes(
         if _normalize_name(cls, class_names_map) not in available_norm
     ]
     return (len(missing) == 0), missing
+
+
+def _parse_csv_classes(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in str(raw).split(","):
+        name = part.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
 
 
 def _normalize_name(name, class_names_map):
@@ -928,7 +954,7 @@ def main(argv=None):
 
     # Selected classes
     if args.classes:
-        selected_classes = [cls.strip() for cls in args.classes.split(",") if cls.strip()]
+        selected_classes = _parse_csv_classes(args.classes)
         if not selected_classes:
             print("[ERROR] The --classes parameter is specified, but the name list is empty.")
             return
@@ -961,6 +987,33 @@ def main(argv=None):
         print(
             f"[INFO] --classes is not specified: a union of classes from all datasets is used"
             f"({len(selected_classes)}): {', '.join(selected_classes)}"
+        )
+
+    excluded_classes = _parse_csv_classes(args.exclude_classes)
+    if excluded_classes:
+        is_valid_excluded, missing_excluded = _validate_requested_classes(
+            excluded_classes,
+            class_candidates_for_selected,
+            class_names_map,
+        )
+        if not is_valid_excluded:
+            print(
+                "[ERROR] --exclude-classes contains unknown classes for the selected datasets: "
+                f"{', '.join(missing_excluded)}"
+            )
+            if class_candidates_for_selected:
+                print(
+                    "[INFO] Available classes of selected datasets: "
+                    f"{', '.join(class_candidates_for_selected)}"
+                )
+            return
+        excluded_set = set(excluded_classes)
+        selected_classes = [cls for cls in selected_classes if cls not in excluded_set]
+        if not selected_classes:
+            print("[ERROR] --exclude-classes removed all selected classes.")
+            return
+        print(
+            f"[INFO] Excluded classes ({len(excluded_classes)}): {', '.join(excluded_classes)}"
         )
 
     try:
@@ -1247,6 +1300,7 @@ def main(argv=None):
                     {
                         "selected_classes": list(selected_classes),
                         "merge_classes": args.merge_classes or [],
+                        "exclude_classes": excluded_classes,
                         "fusion_split": [train_part, val_part, test_part],
                         "include_partial_datasets": bool(args.include_partial_datasets),
                         "common_classes_only": bool(args.common_classes_only),
