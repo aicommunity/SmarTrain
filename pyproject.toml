@@ -47,3 +47,9 @@ sahi = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+filterwarnings = [
+    "ignore:Error fetching version info:UserWarning:albumentations\\.check_version",
+    "ignore:ShiftScaleRotate is a special case of Affine transform\\. Please use Affine transform instead\\.:UserWarning:albumentations\\.core\\.validation",
+    "ignore:The distutils package is deprecated and slated for removal in Python 3\\.12\\.:DeprecationWarning:redis\\.connection",
+    "ignore::UserWarning:torch\\.autograd\\.graph",
+]

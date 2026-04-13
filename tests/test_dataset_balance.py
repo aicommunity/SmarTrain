@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -23,10 +24,41 @@ def _prepare_workspace(tmp_path: Path) -> None:
     (raw / "train" / "labels").mkdir(parents=True, exist_ok=True)
     _write_jpg(raw / "train" / "images" / "a.jpg")
     _write_jpg(raw / "train" / "images" / "b.jpg")
+    _write_jpg(raw / "train" / "images" / "c.jpg")
+    (raw / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (raw / "train" / "labels" / "b.txt").write_text("1 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (raw / "train" / "labels" / "c.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (raw / "data.yaml").write_text("nc: 2\nnames: ['cat','dog']\n", encoding="utf-8")
+    scan_main(["--workspace", str(tmp_path)])
+
+
+def _prepare_workspace_tiny(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    raw = tmp_path / "raw_data" / "ds_tiny"
+    (raw / "train" / "images").mkdir(parents=True, exist_ok=True)
+    (raw / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    _write_jpg(raw / "train" / "images" / "a.jpg")
+    _write_jpg(raw / "train" / "images" / "b.jpg")
     (raw / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
     (raw / "train" / "labels" / "b.txt").write_text("1 0.5 0.5 0.2 0.2\n", encoding="utf-8")
     (raw / "data.yaml").write_text("nc: 2\nnames: ['cat','dog']\n", encoding="utf-8")
     scan_main(["--workspace", str(tmp_path)])
+
+
+def _source_key_from_output_name(name: str) -> str:
+    stem = Path(name).stem
+    stem = re.sub(r"_\d+$", "", stem)
+    if stem.endswith("_bal"):
+        stem = stem[: -len("_bal")]
+    return stem
+
+
+def _collect_split_keys(dataset_dir: Path) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {"train": set(), "val": set(), "test": set()}
+    for split in ("train", "val", "test"):
+        for p in (dataset_dir / split / "images").glob("*.*"):
+            out[split].add(_source_key_from_output_name(p.name))
+    return out
 
 
 def test_balance_creates_new_dataset_and_passport(tmp_path: Path) -> None:
@@ -133,9 +165,7 @@ def test_balance_ensures_non_empty_val_and_test_when_possible(tmp_path: Path) ->
             "--dataset",
             "ds_b",
             "--strategy",
-            "oversample",
-            "--target",
-            "1.5",
+            "copy",
         ]
     )
     out = tmp_path / "datasets" / "ds_b_balanced"
@@ -202,4 +232,101 @@ def test_balance_enriches_eval_class_coverage_from_train(tmp_path: Path) -> None
     val_text = "\n".join(p.read_text(encoding="utf-8") for p in val_labels.glob("*.txt"))
     test_text = "\n".join(p.read_text(encoding="utf-8") for p in test_labels.glob("*.txt"))
     assert ("1 " in val_text) or ("1 " in test_text)
+
+
+def test_balance_oversample_has_no_cross_split_source_duplicates(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "oversample",
+            "--target",
+            "3.0",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_b_balanced"
+    keys = _collect_split_keys(out)
+    assert keys["train"].isdisjoint(keys["val"])
+    assert keys["train"].isdisjoint(keys["test"])
+    assert keys["val"].isdisjoint(keys["test"])
+
+
+def test_balance_weights_has_no_cross_split_source_duplicates(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "weights",
+            "--target",
+            "3.0",
+            "--max-repeat-per-image",
+            "6",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_b_balanced"
+    keys = _collect_split_keys(out)
+    assert keys["train"].isdisjoint(keys["val"])
+    assert keys["train"].isdisjoint(keys["test"])
+    assert keys["val"].isdisjoint(keys["test"])
+
+
+def test_balance_rfs_has_no_cross_split_source_duplicates(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "rfs",
+            "--target",
+            "2.0",
+            "--rfs-thresh",
+            "2.0",
+            "--rfs-power",
+            "0.5",
+            "--max-repeat-per-image",
+            "6",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_b_balanced"
+    keys = _collect_split_keys(out)
+    assert keys["train"].isdisjoint(keys["val"])
+    assert keys["train"].isdisjoint(keys["test"])
+    assert keys["val"].isdisjoint(keys["test"])
+
+
+def test_balance_eval_coverage_degrades_safely_when_unique_images_insufficient(tmp_path: Path) -> None:
+    _prepare_workspace_tiny(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_tiny",
+            "--strategy",
+            "oversample",
+            "--target",
+            "3.0",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_tiny_balanced"
+    keys = _collect_split_keys(out)
+    assert keys["train"].isdisjoint(keys["val"])
+    assert keys["train"].isdisjoint(keys["test"])
+    assert keys["val"].isdisjoint(keys["test"])
+    val_count = len(list((out / "val" / "images").glob("*.jpg")))
+    test_count = len(list((out / "test" / "images").glob("*.jpg")))
+    # In tiny dataset there may be not enough unique source images
+    # to fill both eval splits without leakage.
+    assert (val_count == 0) or (test_count == 0)
 

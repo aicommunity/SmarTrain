@@ -104,7 +104,8 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
         default=True,
         help=(
             "Auto-adjust balanced train split to keep eval splits non-empty and improve class coverage "
-            "(enabled by default; disable with --no-eval-coverage)."
+            "without source-image leakage between train/val/test; if unique images are insufficient, "
+            "eval splits may stay partially unfilled (enabled by default; disable with --no-eval-coverage)."
         ),
     )
     p.add_argument("--seed", type=int, default=12345)
@@ -130,6 +131,11 @@ def _detect_split(images_path: str) -> str:
     if "/test/" in low:
         return "test"
     return "train"
+
+
+def _source_image_key(image_path: str) -> str:
+    # Stable key for split-uniqueness checks across copied/linked paths.
+    return os.path.normcase(os.path.realpath(image_path))
 
 
 def _read_label_classes(label_path: str) -> list[int]:
@@ -435,6 +441,23 @@ def _ensure_non_empty_eval_splits(
     targeting roughly 80/10/10 split.
     """
     out_train = list(balanced_train)
+    passthrough_keys = {_source_image_key(img) for _s, img, _lbl, _cls in passthrough_items}
+
+    def movable_train_indexes() -> list[int]:
+        counts: dict[str, int] = defaultdict(int)
+        for s, img, _lbl, _cls in out_train:
+            if s != "train":
+                continue
+            counts[_source_image_key(img)] += 1
+        out: list[int] = []
+        for i, (s, img, _lbl, _cls) in enumerate(out_train):
+            if s != "train":
+                continue
+            key = _source_image_key(img)
+            if counts.get(key, 0) == 1 and key not in passthrough_keys:
+                out.append(i)
+        return out
+
     val_count = sum(1 for s, *_ in passthrough_items if s == "val")
     test_count = sum(1 for s, *_ in passthrough_items if s == "test")
     total = len(out_train) + len(passthrough_items)
@@ -446,8 +469,8 @@ def _ensure_non_empty_eval_splits(
     target_test = max(1, int(round(total * 0.1)))
     need_val = max(0, target_val - val_count)
     need_test = max(0, target_test - test_count)
-    # Keep at least one item in train.
-    can_move = max(0, len(out_train) - 1)
+    # Keep at least one item in train and move only split-safe unique keys.
+    can_move = max(0, len(movable_train_indexes()) - 1)
     if need_val + need_test > can_move:
         # Prioritize making both splits non-empty first.
         min_need_val = 1 if val_count == 0 and can_move > 0 else 0
@@ -464,16 +487,20 @@ def _ensure_non_empty_eval_splits(
 
     if (not have_non_empty_eval) and (need_val > 0 or need_test > 0):
         rng = random.Random(seed)
-        idxs = list(range(len(out_train)))
+        idxs = movable_train_indexes()
         rng.shuffle(idxs)
 
         pos = 0
         for _ in range(need_val):
+            if pos >= len(idxs):
+                break
             i = idxs[pos]
             pos += 1
             _s, img, lbl, cls = out_train[i]
             out_train[i] = ("val", img, lbl, cls)
         for _ in range(need_test):
+            if pos >= len(idxs):
+                break
             i = idxs[pos]
             pos += 1
             _s, img, lbl, cls = out_train[i]
@@ -509,14 +536,21 @@ def _ensure_non_empty_eval_splits(
         missing = set(global_classes) - present_classes(target_split)
         # keep at least one sample in train
         while missing and train_count() > 1:
+            movable = set(movable_train_indexes())
             candidates: list[tuple[int, int]] = []
             for i, (s, _img, _lbl, cls_names) in enumerate(out_train):
                 if s != "train":
+                    continue
+                if i not in movable:
                     continue
                 cover = len(set(cls_names) & missing)
                 if cover > 0:
                     candidates.append((cover, i))
             if not candidates:
+                print(
+                    f"[WARN] eval_coverage: cannot fully enrich '{target_split}' "
+                    "without cross-split duplicate risk; keeping current coverage."
+                )
                 break
             # maximize coverage; tie-break with deterministic random jitter.
             max_cover = max(c for c, _ in candidates)
@@ -526,6 +560,43 @@ def _ensure_non_empty_eval_splits(
             out_train[chosen_idx] = (target_split, img, lbl, cls_names)
             missing -= set(cls_names)
     return out_train
+
+
+def _enforce_no_cross_split_duplicates(
+    balanced_train: list[tuple[str, str, str, list[str]]],
+    passthrough_items: list[tuple[str, str, str, list[str]]],
+) -> tuple[list[tuple[str, str, str, list[str]]], list[tuple[str, str, str, list[str]]], int]:
+    """
+    Force each source image key to belong to exactly one split globally.
+    Priority: train > val > test.
+    """
+    split_priority = {"train": 0, "val": 1, "test": 2}
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for s, img, _lbl, _cls in balanced_train:
+        grouped[_source_image_key(img)].append(s)
+    for s, img, _lbl, _cls in passthrough_items:
+        grouped[_source_image_key(img)].append(s)
+
+    winner_by_key: dict[str, str] = {}
+    for key, splits in grouped.items():
+        winner_by_key[key] = min(splits, key=lambda s: split_priority.get(s, 99))
+
+    changed = 0
+    new_balanced: list[tuple[str, str, str, list[str]]] = []
+    for s, img, lbl, cls in balanced_train:
+        win = winner_by_key[_source_image_key(img)]
+        if s != win:
+            changed += 1
+        new_balanced.append((win, img, lbl, cls))
+
+    new_passthrough: list[tuple[str, str, str, list[str]]] = []
+    for s, img, lbl, cls in passthrough_items:
+        win = winner_by_key[_source_image_key(img)]
+        if s != win:
+            changed += 1
+        new_passthrough.append((win, img, lbl, cls))
+
+    return new_balanced, new_passthrough, changed
 
 
 def main(argv=None):
@@ -692,6 +763,15 @@ def main(argv=None):
             balanced_train,
             passthrough_items,
             seed=int(args.seed),
+        )
+    balanced_train, passthrough_items, forced_reassignments = _enforce_no_cross_split_duplicates(
+        balanced_train,
+        passthrough_items,
+    )
+    if forced_reassignments > 0:
+        print(
+            f"[WARN] balance: reassigned {forced_reassignments} items to prevent "
+            "cross-split duplicates (priority train > val > test)."
         )
 
     if args.dry_run:
