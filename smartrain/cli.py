@@ -64,6 +64,14 @@ Quick examples:
   smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
 """
 
+HELP_MODEL_GROUP = """Model conversion tools.
+
+Quick examples:
+  smartrain model convert --input models/best.pt --format onnx
+  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
+  smartrain model convert --input models/my_model.onnx --format tensorrt
+"""
+
 ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
     "smartrain train": (
         "Examples:\n"
@@ -833,6 +841,54 @@ app.add_typer(
     name="analyze",
     invoke_without_command=True,
     callback=_analyze_group_callback,
+)
+
+model_app = typer.Typer(
+    help=HELP_MODEL_GROUP,
+    invoke_without_command=True,
+)
+
+
+@model_app.command(
+    "convert",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_model_convert(ctx: typer.Context) -> None:
+    """Convert `.pt`/`.onnx` models to ONNX and TensorRT.
+
+    Examples:
+      smartrain model convert --input models/best.pt --format onnx
+      smartrain model convert --input runs/my_dataset/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
+      smartrain model convert --input models/my_model.onnx --format tensorrt
+      smartrain model convert
+    """
+    from smartrain.model_convert_cli import build_model_convert_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.model_convert_cli",
+        build_parser=build_model_convert_arg_parser,
+        prog="smartrain model convert",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+def _model_group_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        from smartrain.model_convert_cli import build_model_convert_arg_parser
+
+        p = build_model_convert_arg_parser()
+        p.prog = "smartrain model"
+        p.print_help()
+        raise typer.Exit(0)
+
+
+app.add_typer(
+    model_app,
+    name="model",
+    invoke_without_command=True,
+    callback=_model_group_callback,
 )
 
 
