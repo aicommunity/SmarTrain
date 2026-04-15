@@ -2,6 +2,7 @@ import copy
 import json
 import os
 import argparse
+import re
 import sys
 import traceback
 import gc
@@ -111,7 +112,10 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         "--model",
         type=str,
         default=argparse.SUPPRESS,
-        help=f"Model (default {MODEL_VERSION} or from profile --config)",
+        help=(
+            f"Model (default {MODEL_VERSION} or from profile --config). "
+            "Specify full alias/weights including scale (n/s/m/l/x), e.g. yolo11x.pt."
+        ),
     )
 
     parser.add_argument(
@@ -471,10 +475,13 @@ def _run_interactive_train_setup(args) -> bool:
         )
 
     if "model" in ultra_u_cfg:
-        args.model = str(ultra_u_cfg["model"])
+        args.model = _normalize_model_spec(str(ultra_u_cfg["model"]), add_pt_when_missing=True)
         print(f"[INFO] Model taken from --ultralytics_yaml: {args.model}")
     else:
-        model_default = str(_get_interactive_default(args, "model", MODEL_VERSION, baseline_u_cfg, "model"))
+        model_default = _normalize_model_spec(
+            str(_get_interactive_default(args, "model", MODEL_VERSION, baseline_u_cfg, "model")),
+            add_pt_when_missing=True,
+        )
         args.model = (
             _prompt_input(
                 "Model (--model): ",
@@ -482,6 +489,8 @@ def _run_interactive_train_setup(args) -> bool:
             ).strip()
             or model_default
         )
+        args.model = _normalize_model_spec(args.model, add_pt_when_missing=True)
+    print(f"[INFO] Final model for launch: {args.model}")
     if "epochs" in ultra_u_cfg:
         args.epochs = int(ultra_u_cfg["epochs"])
         print(f"[INFO] Epochs taken from --ultralytics_yaml: {args.epochs}")
@@ -775,6 +784,46 @@ def _load_ultralytics_yaml(path: str | None) -> dict[str, Any]:
     return raw
 
 
+def _normalize_model_spec(spec: Any, *, add_pt_when_missing: bool = False) -> str:
+    value = str(spec or "").strip()
+    if not value:
+        value = MODEL_VERSION
+    if (
+        add_pt_when_missing
+        and Path(value).suffix == ""
+        and "/" not in value
+        and "\\" not in value
+        and value.lower().startswith("yolo")
+    ):
+        value = f"{value}.pt"
+    return value
+
+
+def _extract_effective_loaded_model(model: Any, fallback: str) -> str:
+    for candidate in (
+        getattr(model, "ckpt_path", None),
+        getattr(model, "model_name", None),
+        (getattr(model, "overrides", {}) or {}).get("model"),
+    ):
+        if candidate:
+            return str(candidate)
+    return str(fallback)
+
+
+def _extract_model_family_scale(spec: str) -> tuple[str, str] | None:
+    token = Path(str(spec)).name.lower()
+    if token.endswith(".pt"):
+        token = token[:-3]
+    for suffix in ("-seg", "-cls", "-pose", "-obb"):
+        if token.endswith(suffix):
+            token = token[: -len(suffix)]
+            break
+    m = re.match(r"^(yolo(?:v)?\d+)([nslmx])$", token)
+    if not m:
+        return None
+    return m.group(1), m.group(2)
+
+
 def _merge_sources_with_priority(
     *,
     config_profile: dict[str, Any],
@@ -832,7 +881,11 @@ def train_yolo(
     data_yaml = _build_runtime_data_yaml(dataset_path, target_dir, stage="train")
     dataset_name = os.path.basename(os.path.normpath(dataset_path))
 
-    model_version = str(ultralytics_cfg.get("model", MODEL_VERSION))
+    model_version = _normalize_model_spec(
+        ultralytics_cfg.get("model", MODEL_VERSION),
+        add_pt_when_missing=True,
+    )
+    ultralytics_cfg["model"] = model_version
     epochs = int(ultralytics_cfg.get("epochs", EPOCHS))
 
     try:
@@ -901,12 +954,31 @@ def train_yolo(
     print(f"[INFO] Saving results in {model_dir}")
     print("=" * 60 + "\n")
 
-    _, model_ext = os.path.splitext(str(train_kw.get("model", "")))
-    spec = train_kw["model"]
-    if model_ext == "":
-        model = YOLO(str(spec) + ".pt")
-    else:
-        model = YOLO(str(spec))
+    requested_model = _normalize_model_spec(train_kw.get("model", model_version), add_pt_when_missing=True)
+    train_kw["model"] = requested_model
+    model = YOLO(requested_model)
+    loaded_model = _extract_effective_loaded_model(model, fallback=requested_model)
+    print(f"[INFO] Requested model: {requested_model}")
+    print(f"[INFO] Loaded model: {loaded_model}")
+
+    req_fs = _extract_model_family_scale(requested_model)
+    loaded_fs = _extract_model_family_scale(loaded_model)
+    if req_fs and loaded_fs and req_fs != loaded_fs:
+        mismatch_msg = (
+            "[ERROR] Model family/scale mismatch: "
+            f"requested {req_fs[0]}{req_fs[1]}, loaded {loaded_fs[0]}{loaded_fs[1]}. "
+            "Silent model replacement is blocked."
+        )
+        if non_interactive:
+            raise RuntimeError(mismatch_msg)
+        while True:
+            answer = input(f"{mismatch_msg} Continue anyway? (y/n): ").strip().lower()
+            if answer == "y":
+                print("[WARNING] User confirmed training with mismatched model.")
+                break
+            if answer == "n":
+                raise RuntimeError("Training aborted by user due to model mismatch.")
+            print("Please enter 'y' or 'n' only.\n")
 
     if smartrain_opts.get("weighted_sampling"):
         from smartrain.weighted_yolo_dataset import register_weighted_sampling_callback
@@ -1317,7 +1389,8 @@ def main(argv=None):
 
     u_cfg.pop("data", None)
 
-    model_version = str(u_cfg.get("model", MODEL_VERSION))
+    model_version = _normalize_model_spec(u_cfg.get("model", MODEL_VERSION), add_pt_when_missing=True)
+    u_cfg["model"] = model_version
     epochs = int(u_cfg.get("epochs", EPOCHS))
     batch = int(u_cfg.get("batch", BATCH))
     img_size = u_cfg.get("imgsz", IMG_SIZE)

@@ -78,7 +78,7 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "Examples:\n"
         "  smartrain train --data 2026-01-01_12-00-00-merged -y\n"
         "  smartrain train --data my_dataset --model yolo11n.pt --epochs 50\n"
-        "  smartrain train --data my_dataset --batch 16 --imgsz 1024\n"
+        "  smartrain train --data my_dataset --batch 16 --img-size 1024\n"
     ),
     "smartrain cvat": (
         "Examples:\n"
@@ -332,7 +332,7 @@ def cmd_train(ctx: typer.Context) -> None:
     Examples:
       smartrain train --data 2026-01-01_12-00-00-merged -y
       smartrain train --data my_dataset --model yolo11n.pt --epochs 50
-      smartrain train --data my_dataset --batch 16 --imgsz 1024
+      smartrain train --data my_dataset --batch 16 --img-size 1024
       smartrain train --workspace /data/MarsSmarTrain --data my_dataset
 
     Notes:
