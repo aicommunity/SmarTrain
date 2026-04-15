@@ -725,12 +725,39 @@ def _gather_instances(pairs: list[tuple[str, str]], classes_by_id: dict[int, str
     return by_class
 
 
+def _resolve_pandoc_path(candidate: str) -> str | None:
+    """
+    ``pypandoc.get_pandoc_path()`` often returns ``.../pandoc`` on Windows while the real binary is
+    ``pandoc.exe`` next to it (pypandoc-binary wheel). Accept either form.
+    """
+    c = (candidate or "").strip()
+    if not c:
+        return None
+    if os.path.isfile(c):
+        return c
+    if os.name == "nt":
+        if c.lower().endswith(".exe"):
+            return None
+        with_exe = f"{c}.exe"
+        if os.path.isfile(with_exe):
+            return with_exe
+        parent, base = os.path.split(c)
+        if base == "pandoc":
+            alt = os.path.join(parent, "pandoc.exe")
+            if os.path.isfile(alt):
+                return alt
+    return None
+
+
 def _pandoc_executable() -> str | None:
     """PANDOC env, then PATH, then bundled pandoc from optional ``pypandoc-binary``."""
     raw = (os.environ.get("PANDOC") or "").strip()
     if raw:
         if os.path.isfile(raw):
             return raw
+        resolved = _resolve_pandoc_path(raw)
+        if resolved:
+            return resolved
         w = shutil.which(raw)
         if w:
             return w
@@ -741,9 +768,10 @@ def _pandoc_executable() -> str | None:
         import pypandoc
 
         p = pypandoc.get_pandoc_path()
-        if p and os.path.isfile(p):
-            _log(f"[INFO] Using bundled pandoc: {p}")
-            return p
+        resolved = _resolve_pandoc_path(p) if p else None
+        if resolved:
+            _log(f"[INFO] Using bundled pandoc: {resolved}")
+            return resolved
     except Exception as e:
         _log(f"[INFO] pypandoc/bundled pandoc unavailable ({e}); reinstall smartrain or set PANDOC.")
     return None
@@ -759,6 +787,16 @@ def _pandoc_resource_path(out_dir: str, lang: str) -> str:
     return os.pathsep.join(parts)
 
 
+def _weasyprint_import_ok() -> bool:
+    """WeasyPrint is often installed but unusable on Windows without GTK/Pango; skip noisy pandoc attempts."""
+    try:
+        import weasyprint  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
 def _pandoc_pdf_engine_variants() -> list[list[str]]:
     """
     Try engines that avoid a full TeX stack first (typst, weasyprint, wkhtmltopdf).
@@ -767,7 +805,7 @@ def _pandoc_pdf_engine_variants() -> list[list[str]]:
     variants: list[list[str]] = []
     if shutil.which("typst"):
         variants.append(["--pdf-engine=typst"])
-    if shutil.which("weasyprint"):
+    if shutil.which("weasyprint") and _weasyprint_import_ok():
         variants.append(["--pdf-engine=weasyprint"])
     if shutil.which("wkhtmltopdf"):
         variants.append(["--pdf-engine=wkhtmltopdf"])
@@ -853,15 +891,47 @@ def _fpdf_dejavu_paths() -> tuple[str | None, str | None]:
     try:
         import fpdf
 
-        d = Path(fpdf.__file__).resolve().parent / "font"
-        r = d / "DejaVuSans.ttf"
-        b = d / "DejaVuSans-Bold.ttf"
-        if r.is_file():
-            reg = str(r)
-            if b.is_file():
-                return reg, str(b)
+        base = Path(fpdf.__file__).resolve().parent
+        for sub in ("font", "fonts"):
+            d = base / sub
+            r = d / "DejaVuSans.ttf"
+            b = d / "DejaVuSans-Bold.ttf"
+            if r.is_file():
+                reg = str(r)
+                if b.is_file():
+                    return reg, str(b)
+                return reg, reg
     except Exception:
         pass
+    try:
+        import matplotlib.font_manager as fm
+
+        reg_p = fm.findfont(fm.FontProperties(family="DejaVu Sans"))
+        if reg_p and os.path.isfile(reg_p) and "dejavu" in os.path.basename(reg_p).lower():
+            bold_p = fm.findfont(fm.FontProperties(family="DejaVu Sans", weight="bold"))
+            reg = reg_p
+            if (
+                bold_p
+                and os.path.isfile(bold_p)
+                and os.path.normcase(bold_p) != os.path.normcase(reg_p)
+                and "dejavu" in os.path.basename(bold_p).lower()
+            ):
+                return reg, bold_p
+            return reg, reg
+    except Exception:
+        pass
+    windir = os.environ.get("WINDIR") or os.environ.get("SystemRoot") or r"C:\Windows"
+    if os.name == "nt":
+        fonts = os.path.join(windir, "Fonts")
+        for reg_name, bold_name in (
+            ("arial.ttf", "arialbd.ttf"),
+            ("calibri.ttf", "calibrib.ttf"),
+            ("segoeui.ttf", "segoeuib.ttf"),
+        ):
+            rp = os.path.join(fonts, reg_name)
+            bp = os.path.join(fonts, bold_name)
+            if os.path.isfile(rp):
+                return rp, bp if os.path.isfile(bp) else rp
     for p in (
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf",
@@ -885,7 +955,10 @@ def _export_pdf_fpdf2(lang: str, out_dir: str, dataset_name: str, picks: dict[in
 
     font_path, bold_path = _fpdf_dejavu_paths()
     if not font_path:
-        _log("[WARNING] fpdf2 PDF: no DejaVuSans.ttf found; Cyrillic/non-ASCII text would break. Install fonts-dejavu or pip fpdf2 (bundled font).")
+        _log(
+            "[WARNING] fpdf2 PDF: no Unicode TTF found (DejaVu/matplotlib/WINDOWS\\Fonts). "
+            "Install fonts-dejavu (Linux) or ensure matplotlib or system fonts are available."
+        )
         return False
 
     pdf_path = os.path.join(out_dir, f"report-{lang}.pdf")
