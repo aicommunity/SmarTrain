@@ -104,6 +104,12 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "  smartrain report dataset --dataset my_dataset -n 6 --languages en,ru\n"
         "  smartrain report dataset --workspace /data/ws --dataset my_dataset --no-odt\n"
     ),
+    "smartrain inference": (
+        "Examples:\n"
+        "  smartrain inference --model-name my_promoted_model --data-mode folder --source-dir raw_images\n"
+        "  smartrain inference --model-name my_promoted_model --data-mode dataset-split --dataset my_dataset --split test --limit 200\n"
+        "  smartrain inference --run 1 --data-mode folder --source-dir samples --roi-pre-detect --roi-weights yolo11n.pt\n"
+    ),
 }
 
 
@@ -509,6 +515,24 @@ def cmd_roi(ctx: typer.Context) -> None:
         build_parser=build_roi_arg_parser,
         prog="smartrain roi",
         empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@app.command(
+    "inference",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_inference(ctx: typer.Context) -> None:
+    """Run inference and save JSON report to workspace inference/."""
+    from smartrain.inference_cli import build_inference_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.inference_cli",
+        build_parser=build_inference_arg_parser,
+        prog="smartrain inference",
+        empty_args_mode="invoke",
     )
 
 

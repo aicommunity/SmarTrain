@@ -26,6 +26,7 @@ CLI_HELP_CASES: list[tuple[str, list[str]]] = [
     ("stats", ["--", "--help"]),
     ("stats", ["compare", "--help"]),
     ("roi", ["--", "--help"]),
+    ("inference", ["--", "--help"]),
     ("cvat", ["--", "--help"]),
     ("queue", ["list"]),
     ("queue-run", ["--", "--help"]),
@@ -206,6 +207,7 @@ def test_train_without_args_dispatches_to_interactive_flow(
         (["balance", "--", "--workspace", "."], "incomplete arguments", "interactive balance mode"),
         (["orient", "--", "--workspace", "."], "incomplete arguments", "interactive"),
         (["roi", "--", "--workspace", "."], "incomplete arguments", "interactive roi mode"),
+        (["inference", "--", "--workspace", ".", "--data-mode", "folder"], "incomplete arguments", "interactive inference mode"),
         (["stats", "compare", "--left", "foo"], "incomplete arguments", "interactive mode stats compare"),
     ],
 )

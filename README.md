@@ -35,7 +35,7 @@ smartrain deploy
 ## What's included
 
 - Single entry point: `smartrain` (module `smartrain.cli`).
-- Single-workspace model: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `tmp/`.
+- Single-workspace model: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `inference/`, `tmp/`.
 - Pipeline support: `scan -> fusion -> train -> analyze`.
 - Additional tools: `queue`, `registry`, `cvat`, `sahi`, `heatmap`, `orient`.
 
@@ -56,6 +56,7 @@ smartrain deploy
 | `smartrain scan` | Synchronize sources and update the dataset catalog |
 | `smartrain fusion` | Build the final training dataset |
 | `smartrain train` | Train and validate YOLO models |
+| `smartrain inference` | Run inference on folder or dataset split and save JSON report |
 | `smartrain queue` / `smartrain queue-run` | Manage and run the command queue |
 | `smartrain analyze` | Summaries, run comparison, PR curves, and inference benchmarks |
 | `smartrain registry` | Catalog run artifacts and promoted models |
@@ -73,7 +74,7 @@ Current documentation is organized into sections in `docs/`:
 ## Important details
 
 - Interactive mode starts only when a command is launched with zero arguments (TTY required).
-- Interactive dataset commands: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`; plus `train`.
+- Interactive dataset commands: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `inference`; plus `train`.
 - Dataset cleanup command: `prune` (`prune empty` for empty pairs, `prune dedup` for duplicate images by content).
 - If any arguments are provided but required ones are missing, commands return a clear "incomplete arguments" error instead of interactive prompts.
 - Command help now includes practical `Examples` / `Quick examples` blocks for common workflows.

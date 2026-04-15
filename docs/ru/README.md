@@ -35,7 +35,7 @@ smartrain deploy
 ## Что внутри
 
 - Единая точка входа: `smartrain` (модуль `smartrain.cli`).
-- Модель единого рабочего каталога: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `tmp/`.
+- Модель единого рабочего каталога: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `inference/`, `tmp/`.
 - Поддержка конвейера: `scan -> fusion -> train -> analyze`.
 - Отдельные инструменты: `queue`, `registry`, `cvat`, `sahi`, `heatmap`, `orient`.
 
@@ -56,6 +56,7 @@ smartrain deploy
 | `smartrain scan` | Синхронизация источников и обновление каталога датасетов |
 | `smartrain fusion` | Сборка итогового датасета для обучения |
 | `smartrain train` | Обучение/валидация модели YOLO |
+| `smartrain inference` | Инференс по папке или сплиту датасета с сохранением JSON-отчёта |
 | `smartrain queue` / `smartrain queue-run` | Управление и запуск очереди команд |
 | `smartrain analyze` | Сводки, сравнение запусков, PR-кривые, бенчмарк инференса |
 | `smartrain registry` | Каталогизация артефактов запусков и промо моделей |
@@ -73,7 +74,7 @@ smartrain deploy
 ## Важные детали
 
 - Интерактивный режим включается только если команда запущена вообще без аргументов (нужен TTY).
-- Интерактивные команды по датасетам: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, а также `train`.
+- Интерактивные команды по датасетам: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `inference`, а также `train`.
 - Очистка датасетов: `prune` (`prune empty` для удаления пустых пар, `prune dedup` для удаления дублей изображений по содержимому).
 - Если аргументы переданы частично и обязательных не хватает, команда выводит понятную ошибку о неполных аргументах и не уходит в prompt-режим.
 - В справке команд есть практические блоки `Examples` / `Quick examples` для типовых сценариев.

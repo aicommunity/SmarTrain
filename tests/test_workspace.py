@@ -21,6 +21,7 @@ def test_deploy_workspace_creates_structure(tmp_path: Path) -> None:
     assert "raw_data" in info["created_dirs"]
     assert "datasets" in info["created_dirs"]
     assert "runs" in info["created_dirs"]
+    assert "inference" in info["created_dirs"]
     assert "tmp" in info["created_dirs"]
     layout = WorkspaceLayout(str(tmp_path))
     assert Path(layout.source_datasets_info_path()).is_file()
