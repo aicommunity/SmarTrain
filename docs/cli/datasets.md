@@ -21,7 +21,7 @@ Example: `smartrain normalize-data-yaml --workspace /path/to/workspace` or `--da
 Collects a new dataset from several sources:
 
 - selection of inputs: `--dataset` (repeatable) or `--datasets` (CSV);
-- class management: `--classes`, `--merge-classes`, `--common-classes-only`;
+- class management: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
 - crash: `--fusion-split train,val,test`.
 
 ## `augment`, `balance`, `orient`, `roi`

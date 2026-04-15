@@ -19,6 +19,7 @@ smartrain analyze scan
 
 - `scan` синхронизирует источники и обновляет `datasets/datasets_info.json`.
 - `fusion` создаёт итоговый датасет, обычно в `datasets/<name>`.
+- Для исключения классов в `fusion` можно использовать `--exclude-classes`, например: `smartrain fusion --dataset ds_a --dataset ds_b --exclude-classes "background,trash" --output-name ds_filtered`.
 - `train` использует `--data` как имя набора из `datasets_info.json` или путь к каталогу с `data.yaml`.
 - `analyze` дополнительно поддерживает `pr-curves`, `inference-benchmark`, `inference-plot`.
 
