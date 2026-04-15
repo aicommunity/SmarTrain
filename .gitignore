@@ -9,5 +9,8 @@ __pycache__
 *.egg-info/
 tmp/
 tmp_merge_check/
+models/
+datasets/
+runs/
 
 

@@ -70,6 +70,7 @@ Quick examples:
   smartrain model convert --input models/best.pt --format onnx
   smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
   smartrain model convert --input models/my_model.onnx --format tensorrt
+  smartrain model release --run runs/my_ds/2026-01-01_00-00-00
 """
 
 ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
@@ -874,13 +875,35 @@ def cmd_model_convert(ctx: typer.Context) -> None:
     )
 
 
+@model_app.command(
+    "release",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_model_release(ctx: typer.Context) -> None:
+    """Release run `best.pt` into workspace models catalog.
+
+    Examples:
+      smartrain model release --run runs/my_dataset/2026-01-01_00-00-00
+      smartrain model release --run 1
+      smartrain model release
+    """
+    from smartrain.model_release_cli import build_model_release_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.model_release_cli",
+        build_parser=build_model_release_arg_parser,
+        prog="smartrain model release",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
 def _model_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        from smartrain.model_convert_cli import build_model_convert_arg_parser
-
-        p = build_model_convert_arg_parser()
-        p.prog = "smartrain model"
-        p.print_help()
+        console.print(HELP_MODEL_GROUP)
+        console.print("Run: [cyan]smartrain model convert --help[/cyan]")
+        console.print("Run: [cyan]smartrain model release --help[/cyan]")
         raise typer.Exit(0)
 
 

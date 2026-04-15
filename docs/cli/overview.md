@@ -11,7 +11,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
-- Models: `model convert`
+- Models: `model convert`, `model release`
 - Format tools: `cvat`, `sahi`, `heatmap`
 
 ## Reference
@@ -31,7 +31,7 @@ smartrain analyze inference-benchmark --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `report dataset`, `model convert`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `report dataset`, `model convert`, `model release`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -40,6 +40,12 @@ Model convert highlights:
 - `smartrain model convert` exports `.pt` to `onnx`, `tensorrt`, or `both`, and also supports direct `.onnx -> tensorrt` conversion.
 - Defaults: static batch mode, `--batch 1`, `--precision fp32`.
 - Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows selection by number or manual path input.
+
+Model release highlights:
+
+- `smartrain model release` publishes only `train/weights/best.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
+- A sidecar JSON with the same basename is created next to the model file and includes source/training/metrics/classes/io specification.
+- Re-running for the same run with the same source hash performs a no-op skip.
 
 Balance and stats additions:
 
