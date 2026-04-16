@@ -33,6 +33,7 @@ class WorkspaceLayout:
         self.runs = os.path.join(self.root, "runs")
         self.analytics = os.path.join(self.root, "analytics")
         self.models = os.path.join(self.root, "models")
+        self.inference = os.path.join(self.root, "inference")
         self.extracted_datasets = os.path.join(self.root, "tmp", "extracted_datasets")
 
     def source_datasets_info_path(self) -> str:
@@ -247,6 +248,7 @@ def deploy_workspace(target_root: str | None = None) -> dict[str, Any]:
         ("runs", layout.runs),
         ("analytics", layout.analytics),
         ("models", layout.models),
+        ("inference", layout.inference),
         ("tmp", os.path.join(root, "tmp")),
         ("extracted_datasets", layout.extracted_datasets),
     ]

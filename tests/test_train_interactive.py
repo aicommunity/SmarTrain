@@ -81,7 +81,7 @@ def test_train_interactive_defaults_apply(tmp_path: Path, monkeypatch: pytest.Mo
 
     assert mtm._run_interactive_train_setup(args) is True
     assert args.data == "ds_a"
-    assert args.model == mtm.MODEL_VERSION
+    assert args.model == f"{mtm.MODEL_VERSION}.pt"
     assert args.epochs == mtm.EPOCHS
     assert args.batch == mtm.BATCH
     assert args.img_size == mtm.IMG_SIZE
