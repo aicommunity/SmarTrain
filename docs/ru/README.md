@@ -14,9 +14,7 @@ cd smart-train
 pip install -e .
 ```
 
-Работа с рабочим каталогом (workspace):
-
-`SMART_TRAIN_WORKSPACE` — опционален. Если переменная не задана, `smartrain` использует текущий каталог как корень workspace.
+Основной сценарий работы — из текущего каталога проекта:
 
 ```bash
 smartrain deploy
@@ -25,19 +23,12 @@ smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
 smartrain train --data 2026-01-01_12-00-00-merged -y
 ```
 
-Явное указание корня workspace (опционально):
-
-```bash
-export SMART_TRAIN_WORKSPACE=/path/to/workspace
-smartrain deploy
-```
-
 ## Что внутри
 
 - Единая точка входа: `smartrain` (модуль `smartrain.cli`).
 - Модель единого рабочего каталога: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `inference/`, `tmp/`.
 - Поддержка конвейера: `scan -> fusion -> train -> analyze`.
-- Отдельные инструменты: `queue`, `registry`, `cvat`, `sahi`, `heatmap`, `orient`.
+- Отдельные инструменты: `queue`, `registry`, `report`, `model`, `normalize-data-yaml`, `migrate-models`, `clearml-upload`, `plot`, `cvat`, `sahi`, `heatmap`, `orient`.
 
 ## Принцип работы
 
@@ -70,6 +61,13 @@ smartrain deploy
 - [CLI-руководство](cli/overview.md)
 - [Справочник форматов и API](reference/api.md)
 - [Архитектура и диаграммы](development/architecture.md)
+
+## Тестирование
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
 ## Важные детали
 

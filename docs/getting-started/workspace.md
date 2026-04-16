@@ -2,12 +2,11 @@
 
 # Workspace
 
-`smartrain` uses a single workspace root:
+`smartrain` uses a single workspace root. The default mode is to work from the current directory.
 
-- via the `SMART_TRAIN_WORKSPACE` environment variable;
-- or via the global flag `smartrain --workspace /path/to/ws ...`.
+You can optionally override the workspace root with a global flag:
 
-`--workspace` takes precedence over the environment variable.
+- `smartrain --workspace /path/to/ws ...`.
 
 ## Directory structure
 
@@ -20,9 +19,26 @@
 
 The default queue file is `queue.txt` in the workspace root.
 
+## Workspace layout diagram
+
+```mermaid
+flowchart TD
+    workspaceRoot["workspaceRoot(current directory)"]
+    workspaceRoot --> rawDataDir["raw_data/"]
+    workspaceRoot --> datasetsDir["datasets/"]
+    workspaceRoot --> runsDir["runs/"]
+    workspaceRoot --> analyticsDir["analytics/"]
+    workspaceRoot --> modelsDir["models/"]
+    workspaceRoot --> tmpDir["tmp/"]
+    workspaceRoot --> queueFile["queue.txt"]
+    tmpDir --> statusFile["status.txt"]
+    datasetsDir --> datasetsInfo["datasets_info.json"]
+```
+
 ## Initialization
 
 ```bash
-export SMART_TRAIN_WORKSPACE=/path/to/workspace
 smartrain deploy
+smartrain scan
+smartrain train --data my_dataset -y
 ```

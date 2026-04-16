@@ -6,13 +6,14 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 
 ## Command groups
 
-- Datasets: `scan`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `hash`, `stats`, `report dataset`
+- Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `inference`, `hash`, `stats`, `report dataset`
 - Training: `train`, `clearml-upload`
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
 - Models: `model convert`, `model release`
 - Format tools: `cvat`, `sahi`, `heatmap`
+- Migration: `migrate-models`
 
 ## Reference
 
@@ -26,6 +27,7 @@ For nested commands:
 ```bash
 smartrain queue list --help
 smartrain analyze inference-benchmark --help
+smartrain model convert --help
 ```
 
 Unified interactive contract:
