@@ -14,9 +14,17 @@ import yaml
 from ultralytics import YOLO
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_prompts import print_numbered_options, prompt_text
 from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.train_resume import (
+    RUN_STATUS_RESUMABLE_INCOMPLETE,
+    RunDiagnosis,
+    list_incomplete_runs,
+    resume_training_in_run,
+    update_resume_metadata,
+)
 from smartrain.train_profile import (
     apply_cli_smartrain_overrides,
     dataset_root_from_data_yaml,
@@ -226,6 +234,104 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
 
 def parse_args(argv=None):
     return build_train_arg_parser().parse_args(argv)
+
+
+def build_train_resume_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(
+        prog="smartrain train resume",
+        description="Resume an interrupted training run",
+    )
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR})",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help="Absolute or workspace-relative run directory to resume",
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        dest="non_interactive",
+        help="Non-interactive mode. Requires --run-dir.",
+    )
+    return parser
+
+
+def _resume_display_value(diag: RunDiagnosis) -> str:
+    dataset_name = os.path.basename(os.path.dirname(diag.run_dir.rstrip(os.sep)))
+    run_name = os.path.basename(diag.run_dir.rstrip(os.sep))
+    reason = diag.reasons[0] if diag.reasons else "n/a"
+    return f"{dataset_name}/{run_name} | {diag.status} | {reason}"
+
+
+def _select_resume_candidate_interactive(candidates: list[RunDiagnosis]) -> RunDiagnosis | None:
+    if not candidates:
+        print("[ERROR] No incomplete runs found.")
+        return None
+    options = [_resume_display_value(d) for d in candidates]
+    print_numbered_options("Incomplete run to resume", options)
+    while True:
+        raw = prompt_text("Choose run number", default="1").strip()
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(candidates):
+                return candidates[idx - 1]
+        print(f"[ERROR] Incorrect selection: {raw!r}")
+
+
+def _run_resume_command(argv: list[str]) -> int:
+    args = build_train_resume_arg_parser().parse_args(argv)
+    try:
+        workspace_root = resolve_workspace_root(args.workspace)
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return 1
+
+    if args.non_interactive and not args.run_dir:
+        print("[ERROR] In non-interactive mode, --run-dir is required.")
+        return 2
+
+    candidates = list_incomplete_runs(workspace_root)
+    chosen: RunDiagnosis | None = None
+    if args.run_dir:
+        run_dir = args.run_dir
+        if not os.path.isabs(run_dir):
+            run_dir = os.path.join(WorkspaceLayout(workspace_root).runs, run_dir)
+        chosen = next((d for d in candidates if os.path.abspath(run_dir) == d.run_dir), None)
+        if chosen is None:
+            from smartrain.train_resume import diagnose_run
+
+            chosen = diagnose_run(run_dir)
+    else:
+        if not sys.stdin.isatty():
+            print("[ERROR] Interactive resume mode requires a terminal (TTY).")
+            return 1
+        chosen = _select_resume_candidate_interactive(candidates)
+        if chosen is None:
+            return 1
+
+    if chosen.status != RUN_STATUS_RESUMABLE_INCOMPLETE:
+        print(f"[ERROR] Run is not resumable: {chosen.run_dir}")
+        print(f"[INFO] Status: {chosen.status}")
+        print(f"[INFO] Reasons: {', '.join(chosen.reasons)}")
+        return 2
+
+    try:
+        resume_training_in_run(chosen.run_dir)
+        update_resume_metadata(chosen.run_dir, success=True, error=None, diagnosis=chosen)
+        print(f"[OK] Resume completed: {chosen.run_dir}")
+        return 0
+    except Exception as e:
+        update_resume_metadata(chosen.run_dir, success=False, error=str(e), diagnosis=chosen)
+        print(f"[ERROR] Failed to resume run: {chosen.run_dir}")
+        print(f"[ERROR] {e}")
+        return 1
 
 
 def _prompt_input(label: str, default: str = "", completer=None, show_default_hint: bool = True) -> str:
@@ -1114,6 +1220,7 @@ def test_yolo(
     except Exception as e:
         test_end_time = datetime.now()
         print(f"[ERROR] Failed to test {model_dir} on dataset {dataset_path}: {e}")
+        raise
 
     return test_start_time, test_end_time, inference_record
 
@@ -1333,6 +1440,8 @@ def _maybe_free_cuda_memory() -> None:
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
+    if argv and argv[0] == "resume":
+        return _run_resume_command(argv[1:])
     args = parse_args(argv)
     parser = build_train_arg_parser()
     interactive_mode = is_interactive_allowed(argv)
