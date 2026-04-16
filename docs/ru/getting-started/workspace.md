@@ -2,12 +2,11 @@
 
 # Рабочий каталог (workspace)
 
-`smartrain` ориентирован на единый корень рабочего каталога:
+`smartrain` использует единый корень рабочего каталога. Базовый режим — запуск из текущей директории.
 
-- через переменную `SMART_TRAIN_WORKSPACE`;
-- или через глобальный флаг `smartrain --workspace /path/to/ws ...`.
+При необходимости корень можно переопределить глобальным флагом:
 
-`--workspace` имеет приоритет над переменной окружения.
+- `smartrain --workspace /path/to/ws ...`.
 
 ## Структура каталогов
 
@@ -20,9 +19,26 @@
 
 Файл очереди по умолчанию: `queue.txt` в корне рабочего каталога.
 
+## Схема структуры workspace
+
+```mermaid
+flowchart TD
+    workspaceRoot["workspaceRoot(текущая директория)"]
+    workspaceRoot --> rawDataDir["raw_data/"]
+    workspaceRoot --> datasetsDir["datasets/"]
+    workspaceRoot --> runsDir["runs/"]
+    workspaceRoot --> analyticsDir["analytics/"]
+    workspaceRoot --> modelsDir["models/"]
+    workspaceRoot --> tmpDir["tmp/"]
+    workspaceRoot --> queueFile["queue.txt"]
+    tmpDir --> statusFile["status.txt"]
+    datasetsDir --> datasetsInfo["datasets_info.json"]
+```
+
 ## Инициализация
 
 ```bash
-export SMART_TRAIN_WORKSPACE=/path/to/workspace
 smartrain deploy
+smartrain scan
+smartrain train --data my_dataset -y
 ```

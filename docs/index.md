@@ -16,7 +16,7 @@ This section reflects the current codebase and is organized by scenarios: gettin
 - [Datasets: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`](cli/datasets.md)
 - [Training and evaluation: `train`, `clearml-upload`](cli/training.md)
 - [Queue: `queue`, `queue-run`](cli/queue.md)
-- [Analytics: `analyze` (including `pr-curves`, `inference-benchmark`, `inference-plot`)](cli/analyze.md)
+- [Analytics: `analyze` (including `pr-curves`, `inference-benchmark`, `inference-plot`, `test-metrics-plot`)](cli/analyze.md)
 - [Model registry: `registry`](cli/registry.md)
 - [CVAT 1.1: `cvat`](cli/cvat.md)
 - [Inference tools: `sahi`, `heatmap`](cli/inference-tools.md)

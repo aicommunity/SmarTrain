@@ -14,9 +14,7 @@ cd smart-train
 pip install -e .
 ```
 
-Working with the workspace:
-
-`SMART_TRAIN_WORKSPACE` is optional. If it is not set, `smartrain` uses the current directory as the workspace root.
+Work from the project root (current directory):
 
 ```bash
 smartrain deploy
@@ -25,19 +23,12 @@ smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
 smartrain train --data 2026-01-01_12-00-00-merged -y
 ```
 
-Optional explicit workspace root:
-
-```bash
-export SMART_TRAIN_WORKSPACE=/path/to/workspace
-smartrain deploy
-```
-
 ## What's included
 
 - Single entry point: `smartrain` (module `smartrain.cli`).
 - Single-workspace model: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `inference/`, `tmp/`.
 - Pipeline support: `scan -> fusion -> train -> analyze`.
-- Additional tools: `queue`, `registry`, `cvat`, `sahi`, `heatmap`, `orient`.
+- Additional tools: `queue`, `registry`, `report`, `model`, `normalize-data-yaml`, `migrate-models`, `clearml-upload`, `plot`, `cvat`, `sahi`, `heatmap`, `orient`.
 
 ## How it works
 
@@ -70,6 +61,13 @@ Current documentation is organized into sections in `docs/`:
 - [CLI guide](docs/cli/overview.md)
 - [API and format reference](docs/reference/api.md)
 - [Architecture and diagrams](docs/development/architecture.md)
+
+## Testing
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
 ## Important details
 

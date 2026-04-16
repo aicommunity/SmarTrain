@@ -6,13 +6,14 @@
 
 ## Группы команд
 
-- Датасеты: `scan`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `inference`, `hash`, `stats`, `report dataset`
+- Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `inference`, `hash`, `stats`, `report dataset`
 - Обучение: `train`, `clearml-upload`
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
 - Модели: `model convert`, `model release`
 - Инструменты форматов: `cvat`, `sahi`, `heatmap`
+- Миграция: `migrate-models`
 
 ## Справка
 
@@ -26,6 +27,7 @@ smartrain <команда> --help
 ```bash
 smartrain queue list --help
 smartrain analyze inference-benchmark --help
+smartrain model convert --help
 ```
 
 Единый контракт интерактива:
