@@ -380,3 +380,166 @@ def test_train_interactive_model_options_filtered_by_task(
     assert "[INFO] Model options:" in out
     assert "-seg" in out
 
+
+def test_train_interactive_selects_external_provider_from_prefixed_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deploy_workspace(str(tmp_path))
+    (tmp_path / "datasets" / DATASETS_INFO_FILE).write_text(
+        json.dumps({"ds_a": {"classes": {"cat": 0}}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    args = _base_args(tmp_path)
+
+    monkeypatch.setattr(
+        mtm,
+        "list_provider_records",
+        lambda: [
+            {
+                "provider_id": "dr-yolo",
+                "install_state": "installed",
+                "repo_path": "/tmp/dr-yolo",
+            }
+        ],
+    )
+    answers = iter(
+        [
+            "ds_a",  # dataset
+            "",  # ultralytics_yaml
+            "",  # task
+            "dr-yolo:yolov8n",  # model via external provider alias
+            "",  # epochs
+            "",  # batch
+            "",  # img_size
+            "",  # target_path
+            "",  # test_only
+            "",  # val_imgsz
+            "",  # val_conf
+            "",  # val_iou
+            "",  # weighted_sampling
+            "",  # export_onnx
+            "",  # export_onnx_fp32
+            "",  # clearml
+            "",  # non_interactive
+        ]
+    )
+    _patch_train_prompts(monkeypatch, answers)
+    assert mtm._run_interactive_train_setup(args) is True
+    assert args.external_provider == "dr-yolo"
+    assert args.model == "yolov8n.pt"
+
+
+def test_train_main_parses_provider_prefixed_model_and_writes_external_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "ds_a"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / "data.yaml").write_text("train: train/images\nval: val/images\n", encoding="utf-8")
+    (tmp_path / "target").mkdir(parents=True, exist_ok=True)
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_external_train(provider_id: str, repo_path: str, venv_path: str, **kwargs):
+        captured["provider_id"] = provider_id
+        captured["repo_path"] = repo_path
+        captured["venv_path"] = venv_path
+        captured["model"] = kwargs.get("model")
+        return 0
+
+    monkeypatch.setattr(mtm, "run_external_train", _fake_run_external_train)
+    rc = mtm.main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--data",
+            str(dataset_dir),
+            "--target-path",
+            str(tmp_path / "target"),
+            "--external-repo",
+            str(tmp_path / "ext-repo"),
+            "--model",
+            "dr-yolo:yolov8n",
+        ]
+    )
+    assert rc == 0
+    assert captured["provider_id"] == "dr-yolo"
+    assert captured["model"] == "yolov8n.pt"
+    marker = tmp_path / "target" / "_external_train_last.json"
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    assert payload["provider"]["id"] == "dr-yolo"
+    assert payload["model"] == "yolov8n.pt"
+
+
+def test_train_main_unknown_provider_in_model_returns_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "ds_a"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / "data.yaml").write_text("train: train/images\nval: val/images\n", encoding="utf-8")
+    rc = mtm.main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--data",
+            str(dataset_dir),
+            "--target-path",
+            str(tmp_path / "target"),
+            "--model",
+            "unknown-provider:yolov8n",
+        ]
+    )
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "Unknown external provider in model ref" in out
+
+
+def test_train_main_external_layout_normalized_to_train_subdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "ds_a"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / "data.yaml").write_text("train: train/images\nval: val/images\n", encoding="utf-8")
+    target_root = tmp_path / "target"
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(mtm, "calculate_dataset_hash", lambda _p: "abc12345")
+    monkeypatch.setattr(mtm, "_build_run_name", lambda *a, **k: "run-fixed")
+
+    def _fake_run_external_train(provider_id: str, repo_path: str, venv_path: str, **kwargs):
+        run_dir = target_root / "ds_a" / "run-fixed"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "args.yaml").write_text("epochs: 1\n", encoding="utf-8")
+        (run_dir / "weights").mkdir(parents=True, exist_ok=True)
+        (run_dir / "weights" / "best.pt").write_bytes(b"fake")
+        return 0
+
+    monkeypatch.setattr(mtm, "run_external_train", _fake_run_external_train)
+    rc = mtm.main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--data",
+            str(dataset_dir),
+            "--target-path",
+            str(target_root),
+            "--external-provider",
+            "dr-yolo",
+            "--external-repo",
+            str(tmp_path / "ext-repo"),
+            "--epochs",
+            "1",
+            "--batch",
+            "2",
+            "--img-size",
+            "640",
+        ]
+    )
+    assert rc == 0
+    run_dir = target_root / "ds_a" / "run-fixed"
+    assert (run_dir / "train" / "args.yaml").is_file()
+    assert (run_dir / "train" / "weights" / "best.pt").is_file()
+    assert (run_dir / "training_metadata.json").is_file()
+

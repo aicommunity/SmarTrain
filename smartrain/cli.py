@@ -18,6 +18,7 @@ from rich.console import Console
 from smartrain.interactive_contract import INTERACTIVE_ALLOWED_ENV
 from smartrain.train_backend_registry import default_train_provider
 from smartrain.train_model_catalog import TrainModelCatalog
+from smartrain.provider_global_index import list_provider_records
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 app = typer.Typer(
@@ -185,6 +186,25 @@ def cmd_info(
     typer.echo("Supported train models:")
     for row in _format_columns(aliases):
         typer.echo(row)
+    records = [r for r in list_provider_records() if str(r.get("install_state", "")) == "installed"]
+    ext_ids = sorted({str(r.get("provider_id", "")).strip() for r in records if str(r.get("provider_id", "")).strip()})
+    if ext_ids:
+        typer.echo("")
+        typer.echo("Supported train models (external providers):")
+        for pid in ext_ids:
+            typer.echo(f"Model source: {pid}")
+            ext_aliases = tuple(f"{pid}:{a}" for a in aliases)
+            for row in _format_columns(ext_aliases):
+                typer.echo(row)
+    typer.echo("")
+    typer.echo("Installed external providers:")
+    if not records:
+        typer.echo("none")
+    else:
+        for rec in sorted(records, key=lambda x: str(x.get("provider_id", ""))):
+            pid = str(rec.get("provider_id", ""))
+            repo = str(rec.get("repo_path", ""))
+            typer.echo(f"- {pid}: {repo}")
 
 
 def _format_columns(items: tuple[str, ...], *, max_columns: int = 4) -> list[str]:
@@ -780,6 +800,50 @@ app.add_typer(
     name="registry",
     invoke_without_command=True,
     callback=_registry_group_callback,
+)
+
+
+providers_app = typer.Typer(
+    invoke_without_command=True,
+    help="Install/uninstall/status for external providers.",
+)
+
+
+@providers_app.command("install", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_providers_install(ctx: typer.Context) -> None:
+    _invoke_module_main("smartrain.providers_cli", ["install", *list(ctx.args)])
+
+
+@providers_app.command("uninstall", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_providers_uninstall(ctx: typer.Context) -> None:
+    _invoke_module_main("smartrain.providers_cli", ["uninstall", *list(ctx.args)])
+
+
+@providers_app.command("status", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_providers_status(ctx: typer.Context) -> None:
+    _invoke_module_main("smartrain.providers_cli", ["status", *list(ctx.args)])
+
+
+@providers_app.command("doctor", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def cmd_providers_doctor(ctx: typer.Context) -> None:
+    _invoke_module_main("smartrain.providers_cli", ["doctor", *list(ctx.args)])
+
+
+def _providers_group_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        from smartrain.providers_cli import build_providers_arg_parser
+
+        p = build_providers_arg_parser()
+        p.prog = "smartrain providers"
+        p.print_help()
+        raise typer.Exit(0)
+
+
+app.add_typer(
+    providers_app,
+    name="providers",
+    invoke_without_command=True,
+    callback=_providers_group_callback,
 )
 
 

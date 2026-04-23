@@ -24,6 +24,10 @@ from smartrain.datasets_json_former import find_yaml_file
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.path_portable import relativize_if_under
 from smartrain.results_analyzer import find_run_directories
+from smartrain.provider_global_index import get_provider_location
+from smartrain.external_providers.runner import run_external_infer
+from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
+from smartrain.external_providers.registry import list_provider_specs
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -55,6 +59,8 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--roi-pad-px", type=int, default=0, help="Padding in pixels around selected ROI.")
     p.add_argument("--roi-on-empty", choices=ON_EMPTY_MODES, default="full_image", help="Behavior when ROI detector has no detections.")
     p.add_argument("--roi-class-ids", type=str, default=None, help="CSV class ids for ROI detector (empty=all).")
+    p.add_argument("--external-provider", type=str, default=None, help="External provider id for inference.")
+    p.add_argument("--external-repo", type=str, default=None, help="Override external provider repository path.")
     return p
 
 
@@ -542,6 +548,10 @@ def _build_report(
         "model": {
             "source": model_source,
             "name": model_name,
+            "provider": {
+                "type": "external" if str(getattr(args, "external_provider", "") or "").strip() else "builtin",
+                "id": str(getattr(args, "external_provider", "") or "").strip() or "ultralytics",
+            },
             "weights_absolute": str(model_path),
             "weights_relative": relativize_if_under(layout.root, str(model_path)) or str(model_path),
         },
@@ -612,20 +622,123 @@ def main(argv: list[str] | None = None) -> None:
     else:
         _validate_non_interactive_args(parser, args)
 
+    known_provider_ids = {spec.id for spec in list_provider_specs()}
+    try:
+        parsed_weights_ref = validate_external_model_ref(
+            parse_external_model_ref(getattr(args, "weights", None)),
+            known_provider_ids=known_provider_ids,
+        )
+        parsed_model_name_ref = validate_external_model_ref(
+            parse_external_model_ref(getattr(args, "model_name", None)),
+            known_provider_ids=known_provider_ids,
+        )
+    except ValueError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        raise SystemExit(2)
+    if parsed_weights_ref.is_external and parsed_weights_ref.provider_id and not getattr(args, "external_provider", None):
+        args.external_provider = parsed_weights_ref.provider_id
+        args.weights = parsed_weights_ref.model_ref
+        print(f"[INFO] External provider inferred from --weights: {parsed_weights_ref.provider_id}")
+    if parsed_model_name_ref.is_external and parsed_model_name_ref.provider_id and not getattr(args, "external_provider", None):
+        args.external_provider = parsed_model_name_ref.provider_id
+        args.model_name = None
+        args.weights = parsed_model_name_ref.model_ref
+        print(f"[INFO] External provider inferred from --model-name: {parsed_model_name_ref.provider_id}")
+
     try:
         from ultralytics import YOLO
     except ImportError as e:
         print(f"[ERROR] Failed to import ultralytics: {e}", file=sys.stderr)
         raise SystemExit(1)
 
-    try:
-        model_path, model_name, model_source = _resolve_model(args, layout)
-    except Exception as e:
-        print(f"[ERROR] Failed to resolve model: {e}", file=sys.stderr)
-        raise SystemExit(1)
+    ext_provider = str(getattr(args, "external_provider", "") or "").strip()
+    if ext_provider and args.weights:
+        raw_weight = str(args.weights).strip()
+        maybe_path = Path(raw_weight).expanduser()
+        if maybe_path.is_file():
+            model_path = maybe_path.resolve()
+            model_name = model_path.stem
+            model_source = "weights"
+        else:
+            model_path = Path(raw_weight)
+            model_name = _sanitize_segment(model_path.name or raw_weight)
+            model_source = "external-model"
+    else:
+        try:
+            model_path, model_name, model_source = _resolve_model(args, layout)
+        except Exception as e:
+            print(f"[ERROR] Failed to resolve model: {e}", file=sys.stderr)
+            raise SystemExit(1)
     if args.img_size is None:
-        inferred = _infer_img_size_from_model_context(model_path)
+        inferred = _infer_img_size_from_model_context(model_path) if isinstance(model_path, Path) else None
         args.img_size = int(inferred) if inferred is not None else 640
+
+    if ext_provider:
+        location = get_provider_location(ext_provider)
+        if location is None and not getattr(args, "external_repo", None):
+            print(
+                f"[ERROR] External provider {ext_provider!r} is not installed. "
+                "Use `smartrain providers install` or pass --external-repo.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        repo_path = str(getattr(args, "external_repo", "") or "").strip() or (location.repo_path if location else "")
+        venv_path = location.venv_path if location else os.path.join(repo_path, "venv")
+        if not venv_path:
+            print(f"[ERROR] Missing venv for external provider {ext_provider!r}.", file=sys.stderr)
+            raise SystemExit(1)
+        source_for_external = _resolve_external_source(args, layout)
+        source_short = (
+            os.path.basename(os.path.abspath(os.path.expanduser(str(args.source_dir))).rstrip(os.sep)) or "folder"
+            if args.data_mode == "folder"
+            else f"{args.dataset}-{args.split}"
+        )
+        out_root = _resolve_output_root(layout, model_name, source_short)
+        report_path = os.path.join(out_root, "inference_results.json")
+        rc = run_external_infer(
+            ext_provider,
+            repo_path,
+            venv_path,
+            model_path=str(model_path),
+            source_path=source_for_external,
+            conf=float(args.conf),
+            imgsz=int(args.img_size),
+            device=str(args.device) if args.device else None,
+        )
+        external_report = {
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            "workspace": {"root_absolute": layout.root},
+            "model": {
+                "source": "external",
+                "name": model_name,
+                "provider": {"type": "external", "id": ext_provider},
+                "weights_value": str(model_path),
+            },
+            "parameters": {
+                "conf": args.conf,
+                "img_size": int(args.img_size),
+                "device": args.device,
+                "data_mode": args.data_mode,
+            },
+            "source": _source_descriptor(args, source_for_external, source_short, layout),
+            "output": {
+                "dir_absolute": out_root,
+                "dir_relative": relativize_if_under(layout.root, out_root) or out_root,
+                "json_absolute": report_path,
+                "json_relative": relativize_if_under(layout.root, report_path) or report_path,
+            },
+            "external_execution": {
+                "provider_id": ext_provider,
+                "repo_path": repo_path,
+                "venv_path": venv_path,
+                "return_code": int(rc),
+            },
+            "summary": {"images_input": None, "images_processed": None, "images_skipped": None, "detections_total": None},
+            "images": [],
+        }
+        _write_report(report_path, external_report)
+        print(f"[OK] External inference report: {report_path}")
+        raise SystemExit(rc)
     model = YOLO(str(model_path))
     roi_model = None
     if args.roi_pre_detect:
@@ -785,6 +898,18 @@ def main(argv: list[str] | None = None) -> None:
     if interactive_used:
         replay_cmd = build_non_interactive_command("inference", parser, args)
         print_replay_command("after execution", replay_cmd)
+
+
+def _resolve_external_source(args: argparse.Namespace, layout: WorkspaceLayout) -> str:
+    if args.data_mode == "folder":
+        return os.path.abspath(os.path.expanduser(str(args.source_dir)))
+    _, split_dir = _collect_split_images_for_dataset(
+        layout,
+        str(args.dataset),
+        str(args.split),
+        int(args.limit),
+    )
+    return split_dir
 
 
 if __name__ == "__main__":
