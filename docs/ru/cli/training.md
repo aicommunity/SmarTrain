@@ -16,8 +16,15 @@ smartrain train --test-only --model-dir /path/to/run --data /path/to/dataset
 `CLI > --ultralytics_yaml > --config > defaults`
 
 Поле `data` из `--ultralytics_yaml` игнорируется, используется выбранный `--data`.
+Также из `--ultralytics_yaml` игнорируются: `project`, `name`, `exist_ok`, `cfg`, `device`, `model_dir`, `target_path`, `workspace`.
 
 То есть параметры командной строки всегда имеют наивысший приоритет.
+
+Выбор модели:
+
+- Список поддерживаемых алиасов для обучения выводится командой `smartrain info`.
+- В интерактивном режиме `train` предлагает выбор из этого списка и пункт `<manual>` для ручного ввода.
+- `--model` принимает и YOLO-алиасы, и путь к весам; для обычных YOLO-алиасов автоматически добавляется `.pt`.
 
 ## `clearml-upload`
 

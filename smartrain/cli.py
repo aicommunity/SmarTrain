@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import shutil
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,6 +16,8 @@ import typer
 from rich.console import Console
 
 from smartrain.interactive_contract import INTERACTIVE_ALLOWED_ENV
+from smartrain.train_backend_registry import default_train_provider
+from smartrain.train_model_catalog import TrainModelCatalog
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 app = typer.Typer(
@@ -159,6 +162,62 @@ def cmd_deploy(
     for s in info["skipped"]:
         console.print(f"[yellow]∟ already exists:[/yellow] {s}")
     console.print("[green]Done.[/green]")
+
+
+@app.command("info")
+def cmd_info(
+    provider: Annotated[
+        str,
+        typer.Option(
+            "--provider",
+            help="Training provider key for supported aliases.",
+        ),
+    ] = default_train_provider(),
+) -> None:
+    """Show product info and supported train model aliases."""
+    try:
+        catalog = TrainModelCatalog(provider=provider)
+        aliases = tuple(a for a in catalog.supported_aliases() if _is_detection_model_alias(a))
+    except ValueError as exc:
+        typer.echo(f"[ERROR] {exc}")
+        raise typer.Exit(2)
+    typer.echo(f"Model source: {provider}")
+    typer.echo("Supported train models:")
+    for row in _format_columns(aliases):
+        typer.echo(row)
+
+
+def _format_columns(items: tuple[str, ...], *, max_columns: int = 4) -> list[str]:
+    if not items:
+        return []
+    width = shutil.get_terminal_size(fallback=(100, 20)).columns
+    col_width = max(len(x) for x in items) + 2
+    if col_width <= 0:
+        return list(items)
+    cols = max(1, min(max_columns, width // col_width))
+    if cols <= 1:
+        return list(items)
+    rows_count = (len(items) + cols - 1) // cols
+    lines: list[str] = []
+    for row in range(rows_count):
+        parts: list[str] = []
+        for col in range(cols):
+            idx = col * rows_count + row
+            if idx >= len(items):
+                continue
+            cell = items[idx]
+            if col < cols - 1:
+                parts.append(cell.ljust(col_width))
+            else:
+                parts.append(cell)
+        lines.append("".join(parts).rstrip())
+    return lines
+
+
+def _is_detection_model_alias(alias: str) -> bool:
+    lowered = alias.lower()
+    non_detection_markers = ("-seg", "-cls", "-pose", "-obb")
+    return not any(marker in lowered for marker in non_detection_markers)
 
 
 def _invoke_module_main(module: str, args: list[str]) -> None:

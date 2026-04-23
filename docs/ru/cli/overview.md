@@ -8,6 +8,7 @@
 
 - Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `inference`, `hash`, `stats`, `report dataset`
 - Обучение: `train`, `clearml-upload`
+- Инфо: `info`
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
@@ -38,6 +39,11 @@ smartrain model convert --help
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
 
+Особенности `smartrain info`:
+
+- Печатает секцию `Supported train models` с алиасами, которые можно копировать напрямую в `smartrain train --model ...`.
+- Текущий список алиасов формируется для backend по умолчанию.
+
 Особенности `model convert`:
 
 - `smartrain model convert` экспортирует `.pt` в `onnx`, `tensorrt` или `both`, а также поддерживает прямую конвертацию `.onnx -> tensorrt`.
@@ -56,6 +62,7 @@ smartrain model convert --help
 - Перед `model.train()` выводятся `Requested model` и `Loaded model` для проверки фактически загруженных весов.
 - Для YOLO-алиасов контролируется не только family, но и scale (`n/s/m/l/x`): тихая подмена вроде `yolo11x -> yolo11n` блокируется.
 - В non-interactive режиме при таком расхождении запуск завершается ошибкой; в interactive режиме требуется явное подтверждение.
+- В интерактивном режиме выбор модели выполняется из списка поддерживаемых алиасов с опцией `<manual>` для ручного ввода (например для форков/кастомных весов).
 
 Дополнения для балансировки и статистики:
 

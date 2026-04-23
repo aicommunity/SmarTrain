@@ -14,6 +14,7 @@ from smartrain.results_analyzer import build_analyze_arg_parser
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 CLI_HELP_CASES: list[tuple[str, list[str]]] = [
+    ("info", []),
     ("deploy", ["--help"]),
     ("scan", ["--", "--help"]),
     ("fusion", ["--", "--help"]),
@@ -197,6 +198,32 @@ def test_train_without_args_dispatches_to_interactive_flow(
     # In non-TTY subprocesses interactive train reports this message;
     # this proves we call train main([]) instead of printing argparse help.
     assert "interactive train mode requires a terminal" in out.lower()
+
+
+def test_info_prints_supported_train_models(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["info"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "Model source: ultralytics" in out
+    assert "Supported train models:" in out
+    assert "yolov8n" in out
+    assert "-seg" not in out
+    assert "-cls" not in out
+    assert "-pose" not in out
+    assert "-obb" not in out
+
+
+def test_info_unknown_provider_returns_error(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["info", "--provider", "unknown-provider"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 2, out
+    assert "Unknown training provider" in out
 
 
 @pytest.mark.parametrize(

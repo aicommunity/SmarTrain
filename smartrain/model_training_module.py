@@ -3,6 +3,7 @@ import json
 import os
 import argparse
 import re
+import shutil
 import sys
 import traceback
 import gc
@@ -34,6 +35,8 @@ from smartrain.train_profile import (
     resolve_profile_data_path,
     task_to_metadata_task_type,
 )
+from smartrain.train_model_catalog import TrainModelCatalog
+from smartrain.train_model_resolver import TrainModelResolver
 from smartrain.path_portable import relativize_if_under
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
@@ -67,6 +70,7 @@ _ULTRALYTICS_YAML_IGNORED_KEYS = frozenset(
         "workspace",
     }
 )
+_MANUAL_MODEL_ENTRY = "<manual>"
 
 
 def build_train_arg_parser() -> argparse.ArgumentParser:
@@ -418,6 +422,74 @@ def _prompt_dataset_name(available: list[str]) -> str:
     return prompt_choice("Dataset", available, default=available[0])
 
 
+def _train_model_picker_options(default_model: str) -> list[str]:
+    catalog = TrainModelCatalog()
+    options = list(catalog.supported_aliases())
+    if default_model and default_model not in options:
+        options.append(default_model)
+    options.append(_MANUAL_MODEL_ENTRY)
+    return options
+
+
+def _model_matches_task(alias: str, task: str) -> bool:
+    low = alias.lower()
+    task_low = (task or "").strip().lower()
+    if task_low == "segment":
+        return "-seg" in low
+    if task_low == "classify":
+        return "-cls" in low
+    if task_low == "pose":
+        return "-pose" in low
+    if task_low == "obb":
+        return "-obb" in low
+    # detect by default: hide non-detection heads
+    return all(marker not in low for marker in ("-seg", "-cls", "-pose", "-obb"))
+
+
+def _format_numbered_columns(items: list[str], *, columns: int = 4) -> list[str]:
+    if not items:
+        return []
+    indexed = [f"{idx + 1}) {name}" for idx, name in enumerate(items)]
+    term_w = shutil.get_terminal_size(fallback=(120, 20)).columns
+    col_width = max(len(x) for x in indexed) + 2
+    cols = max(1, min(columns, max(1, term_w // col_width)))
+    rows = (len(indexed) + cols - 1) // cols
+    lines: list[str] = []
+    for row in range(rows):
+        parts: list[str] = []
+        for col in range(cols):
+            pos = col * rows + row
+            if pos >= len(indexed):
+                continue
+            cell = indexed[pos]
+            if col < cols - 1:
+                parts.append(cell.ljust(col_width))
+            else:
+                parts.append(cell)
+        lines.append("".join(parts).rstrip())
+    return lines
+
+
+def _pick_model_interactive(options: list[str], default_alias: str) -> str:
+    print("[INFO] Model options:")
+    for line in _format_numbered_columns(options, columns=4):
+        print(f"  {line}")
+    while True:
+        raw = _prompt_input(
+            "Model (--model, number/value): ",
+            default=default_alias,
+        ).strip()
+        if not raw:
+            return default_alias
+        if raw in options:
+            return raw
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(options):
+                return options[idx - 1]
+        print(f"[ERROR] Incorrect selection: {raw!r}")
+
+
 def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     runs_root = Path(layout.runs)
@@ -588,14 +660,22 @@ def _run_interactive_train_setup(args) -> bool:
             str(_get_interactive_default(args, "model", MODEL_VERSION, baseline_u_cfg, "model")),
             add_pt_when_missing=True,
         )
-        args.model = (
-            _prompt_input(
-                "Model (--model): ",
-                default=model_default,
-            ).strip()
-            or model_default
-        )
-        args.model = _normalize_model_spec(args.model, add_pt_when_missing=True)
+        all_options = _train_model_picker_options(model_default.replace(".pt", ""))
+        task_options = [opt for opt in all_options if (opt == _MANUAL_MODEL_ENTRY or _model_matches_task(opt, args.task))]
+        options = task_options or all_options
+        default_alias = model_default.replace(".pt", "")
+        if default_alias not in options:
+            default_alias = options[0]
+        model_choice = _pick_model_interactive(options, default_alias)
+        if model_choice == _MANUAL_MODEL_ENTRY:
+            model_choice = (
+                _prompt_input(
+                    "Manual model alias/path (--model): ",
+                    default=model_default,
+                ).strip()
+                or model_default
+            )
+        args.model = _normalize_model_spec(model_choice, add_pt_when_missing=True)
     print(f"[INFO] Final model for launch: {args.model}")
     if "epochs" in ultra_u_cfg:
         args.epochs = int(ultra_u_cfg["epochs"])
@@ -891,18 +971,12 @@ def _load_ultralytics_yaml(path: str | None) -> dict[str, Any]:
 
 
 def _normalize_model_spec(spec: Any, *, add_pt_when_missing: bool = False) -> str:
-    value = str(spec or "").strip()
-    if not value:
-        value = MODEL_VERSION
-    if (
-        add_pt_when_missing
-        and Path(value).suffix == ""
-        and "/" not in value
-        and "\\" not in value
-        and value.lower().startswith("yolo")
-    ):
-        value = f"{value}.pt"
-    return value
+    resolver = TrainModelResolver()
+    return resolver.resolve(
+        None if spec is None else str(spec),
+        default_model=MODEL_VERSION,
+        add_pt_when_missing=add_pt_when_missing,
+    ).normalized
 
 
 def _extract_effective_loaded_model(model: Any, fallback: str) -> str:

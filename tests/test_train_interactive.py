@@ -304,3 +304,79 @@ def test_train_interactive_uses_selected_base_run_defaults(
     assert args.batch == 6
     assert args.img_size == 960
 
+
+def test_train_interactive_model_manual_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deploy_workspace(str(tmp_path))
+    (tmp_path / "datasets" / DATASETS_INFO_FILE).write_text(
+        json.dumps({"ds_a": {"classes": {"cat": 0}}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    args = _base_args(tmp_path)
+
+    answers = iter(
+        [
+            "ds_a",  # dataset
+            "",  # ultralytics_yaml
+            "",  # task
+            "<manual>",  # choose manual model input
+            "fork-yolo11s.pt",  # manual model
+            "",  # epochs
+            "",  # batch
+            "",  # img_size
+            "",  # target_path
+            "",  # test_only
+            "",  # val_imgsz
+            "",  # val_conf
+            "",  # val_iou
+            "",  # weighted_sampling
+            "",  # export_onnx
+            "",  # export_onnx_fp32
+            "",  # clearml
+            "",  # non_interactive
+        ]
+    )
+    _patch_train_prompts(monkeypatch, answers)
+    assert mtm._run_interactive_train_setup(args) is True
+    assert args.model == "fork-yolo11s.pt"
+
+
+def test_train_interactive_model_options_filtered_by_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deploy_workspace(str(tmp_path))
+    (tmp_path / "datasets" / DATASETS_INFO_FILE).write_text(
+        json.dumps({"ds_a": {"classes": {"cat": 0}}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    args = _base_args(tmp_path)
+
+    answers = iter(
+        [
+            "ds_a",  # dataset
+            "",  # ultralytics_yaml
+            "segment",  # task
+            "",  # model (default from segment-filtered list)
+            "",  # epochs
+            "",  # batch
+            "",  # img_size
+            "",  # target_path
+            "",  # test_only
+            "",  # val_imgsz
+            "",  # val_conf
+            "",  # val_iou
+            "",  # weighted_sampling
+            "",  # export_onnx
+            "",  # export_onnx_fp32
+            "",  # clearml
+            "",  # non_interactive
+        ]
+    )
+    _patch_train_prompts(monkeypatch, answers)
+    assert mtm._run_interactive_train_setup(args) is True
+    assert args.model.endswith("-seg.pt")
+    out = capsys.readouterr().out
+    assert "[INFO] Model options:" in out
+    assert "-seg" in out
+
