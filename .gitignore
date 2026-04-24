@@ -1,3 +1,16 @@
 .idea
 __pycache__
+*.png
+*.jpg
+*.bmp
+*.csv
+*.pt
+*.onnx
+*.egg-info/
+tmp/
+tmp_merge_check/
+models/
+datasets/
+runs/
+
 
