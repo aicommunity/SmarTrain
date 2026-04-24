@@ -53,9 +53,10 @@ def main(argv: list[str] | None = None) -> int:
     _patch_mfel_missing_symbols()
 
     model = YOLO(args.model, task="detect")
+    resolved_device = _resolve_mfel_predict_device(args.device)
     kwargs = {"source": args.source, "conf": float(args.conf), "imgsz": int(args.imgsz), "save": True}
-    if args.device:
-        kwargs["device"] = str(args.device)
+    if resolved_device:
+        kwargs["device"] = str(resolved_device)
     if args.project:
         kwargs["project"] = str(args.project)
     if args.name:
@@ -64,6 +65,21 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["exist_ok"] = True
     model.predict(**kwargs)
     return 0
+
+
+def _resolve_mfel_predict_device(requested_device: str | None) -> str | None:
+    requested = str(requested_device or "").strip().lower()
+    if requested not in {"", "cpu"}:
+        return requested_device
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            print("[INFO] MFEL launcher: overriding --device cpu to device=0 (CUDA available).")
+            return "0"
+    except Exception:
+        pass
+    return requested_device
 
 
 def _patch_mfel_missing_symbols() -> None:

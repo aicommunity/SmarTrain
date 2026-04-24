@@ -276,3 +276,5 @@ def test_inference_rejects_unsupported_model_for_external_provider(monkeypatch, 
     assert int(ex.value.code or 0) == 2
     err = capsys.readouterr().err
     assert "is not supported by external provider" in err
+
+
