@@ -115,3 +115,8 @@ Quick run overview:
 smartrain analyze scan
 smartrain analyze export-table -o runs_summary.csv
 ```
+
+## Developers
+
+- [@palexab](https://github.com/palexab)
+- [@greisersem](https://github.com/greisersem)

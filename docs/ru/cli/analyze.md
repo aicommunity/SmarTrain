@@ -25,7 +25,7 @@ smartrain analyze export-table -o runs_summary.csv
 smartrain analyze compare --baseline /path/to/run_a --others /path/to/run_b /path/to/run_c --out-csv cmp.csv
 smartrain analyze pr-curves --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml
 smartrain analyze inference-benchmark --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml --split test --frames 200
-smartrain analyze inference-plot --csv benchmark.csv --out benchmark.png
+smartrain analyze inference-plot --csv benchmark.csv --out-png benchmark.png
 smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 mAP50-95 Box-F1
 ```
 
