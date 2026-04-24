@@ -42,3 +42,16 @@ def test_mfel_infer_launcher_reports_missing_dcnv4(monkeypatch, tmp_path: Path, 
     )
     assert rc == 2
     assert "DCNv4" in capsys.readouterr().err
+
+
+def test_mfel_train_launcher_resolves_custom_model_aliases(tmp_path: Path) -> None:
+    repo = tmp_path / "mfel"
+    cfg_dir = repo / "ultralytics" / "cfg" / "MFEL-YOLO"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "MFEL-YOLO.yaml").write_text("nc: 1\n", encoding="utf-8")
+    (cfg_dir / "E_PAN+.yaml").write_text("nc: 1\n", encoding="utf-8")
+
+    resolved_main = mfel_train_launcher._resolve_mfel_model_spec(repo, "mfel-yolo")
+    resolved_epan = mfel_train_launcher._resolve_mfel_model_spec(repo, "e_pan+")
+    assert resolved_main.endswith("MFEL-YOLO.yaml")
+    assert resolved_epan.endswith("E_PAN+.yaml")

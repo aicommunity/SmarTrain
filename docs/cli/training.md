@@ -25,6 +25,9 @@ Model selection:
 - To list aliases supported by the default training backend, run `smartrain info`.
 - In interactive mode, `train` offers model selection from this list and provides `<manual>` for custom values.
 - `--model` accepts both YOLO aliases and explicit weights path; for plain YOLO aliases `.pt` is added automatically.
+- For external providers, provider-scoped refs are supported: `provider:model` (example: `dr-yolo:yolov8n`).
+- External provider aliases are strictly validated against provider catalog; unsupported aliases fail before launch.
+- If `--external-provider` is set and `--model` is not specified, provider default model alias is used automatically.
 
 ## `clearml-upload`
 

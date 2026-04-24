@@ -8,6 +8,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 
 - Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `inference`, `hash`, `stats`, `report dataset`
 - Training: `train`, `clearml-upload`
+- Providers: `providers`
 - Info: `info`
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
@@ -41,7 +42,7 @@ Most important commands and groups also include `Examples` / `Quick examples` di
 `smartrain info` highlights:
 
 - Prints `Supported train models` section for copy-paste use in `smartrain train --model ...`.
-- Current list is alias-based and includes models supported by the default training backend.
+- Includes default backend aliases plus provider-scoped aliases for installed external providers.
 
 Model convert highlights:
 

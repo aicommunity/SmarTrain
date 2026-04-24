@@ -58,3 +58,18 @@ def test_train_model_catalog_is_populated_from_backend_spec() -> None:
     # In fallback mode (when dynamic discovery is unavailable), only YOLO aliases may be present.
     assert any(a.startswith("rtdetr") for a in aliases) or "yolov8n" in aliases
 
+
+def test_external_provider_catalog_uses_provider_specific_aliases() -> None:
+    aliases = TrainModelCatalog(provider="dr-yolo").supported_aliases()
+    assert "yolov8n" in aliases
+
+
+def test_mfel_catalog_reads_custom_yaml_aliases(tmp_path) -> None:
+    cfg_dir = tmp_path / "ultralytics" / "cfg" / "MFEL-YOLO"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "MFEL-YOLO.yaml").write_text("nc: 1\n", encoding="utf-8")
+    (cfg_dir / "E_PAN+.yaml").write_text("nc: 1\n", encoding="utf-8")
+    aliases = TrainModelCatalog(provider="mfel-yolo", provider_repo_path=str(tmp_path)).supported_aliases()
+    assert "mfel-yolo" in aliases
+    assert "e_pan+" in aliases
+

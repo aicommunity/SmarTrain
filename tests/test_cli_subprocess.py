@@ -305,7 +305,7 @@ def test_info_lists_external_provider_model_aliases(subprocess_env: dict[str, st
     assert r.returncode == 0, out
     assert "Supported train models (external providers):" in out
     assert "Model source: dr-yolo" in out
-    assert "dr-yolo:yolov8n" in out
+    assert "dr-yolo:yolov7" in out
 
 
 def test_providers_doctor_reports_not_installed(subprocess_env: dict[str, str], tmp_path: Path) -> None:

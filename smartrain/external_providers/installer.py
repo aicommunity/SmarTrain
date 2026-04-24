@@ -129,6 +129,17 @@ def _run(cmd: list[str], *, cwd: str, timeout_sec: int | None = None) -> None:
 
 
 def _install_provider_runtime_deps(provider_id: str, repo_dir: Path, python_bin: str) -> None:
+    common_pip_deps: dict[str, list[str]] = {
+        "dr-yolo": ["ultralytics"],
+        "leaf-yolo": ["ultralytics", "timm"],
+        "mp-yolo": ["ultralytics"],
+        "ssdm-yolo": ["ultralytics", "tqdm"],
+        "enhanced-yolov8": ["ultralytics", "timm"],
+    }
+    extras = common_pip_deps.get(provider_id, [])
+    if extras:
+        _run([python_bin, "-m", "pip", "install", *extras], cwd=str(repo_dir))
+
     if provider_id != "mfel-yolo":
         return
     # Best-effort extras for MFEL custom ops/runtime.

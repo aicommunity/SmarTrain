@@ -24,7 +24,7 @@ def test_mfel_train_adapter_uses_launcher() -> None:
     assert "--name" in spec.args
 
 
-def test_dr_infer_adapter_uses_detect_script() -> None:
+def test_dr_infer_adapter_uses_launcher() -> None:
     spec = build_external_infer_spec(
         "dr-yolo",
         "/tmp/dr",
@@ -34,11 +34,11 @@ def test_dr_infer_adapter_uses_detect_script() -> None:
         imgsz=640,
         device="cpu",
     )
-    assert spec.script_path.endswith("detect.py")
+    assert "mp_infer_launcher.py" in spec.script_path
     assert "--source" in spec.args
 
 
-def test_ssdm_train_adapter_uses_yolov5_style_args() -> None:
+def test_ssdm_train_adapter_uses_launcher_args() -> None:
     spec = build_external_train_spec(
         "ssdm-yolo",
         "/tmp/ssdm",
@@ -50,14 +50,14 @@ def test_ssdm_train_adapter_uses_yolov5_style_args() -> None:
         device="0",
         target_dir="/tmp/runs",
     )
-    assert spec.script_path.endswith("train.py")
+    assert "mp_train_launcher.py" in spec.script_path
     assert "--data" in spec.args
     assert "--imgsz" in spec.args
     assert "--batch" in spec.args
     assert "--project" in spec.args
 
 
-def test_ssdm_infer_adapter_uses_conf_thres() -> None:
+def test_ssdm_infer_adapter_uses_launcher_conf() -> None:
     spec = build_external_infer_spec(
         "ssdm-yolo",
         "/tmp/ssdm",
@@ -67,12 +67,12 @@ def test_ssdm_infer_adapter_uses_conf_thres() -> None:
         imgsz=640,
         device="cpu",
     )
-    assert spec.script_path.endswith("detect.py")
-    assert "--conf-thres" in spec.args
+    assert "mp_infer_launcher.py" in spec.script_path
+    assert "--conf" in spec.args
     assert "--imgsz" in spec.args
 
 
-def test_enhanced_train_adapter_uses_weight_flag() -> None:
+def test_enhanced_train_adapter_uses_launcher_args() -> None:
     spec = build_external_train_spec(
         "enhanced-yolov8",
         "/tmp/enhanced",
@@ -84,13 +84,12 @@ def test_enhanced_train_adapter_uses_weight_flag() -> None:
         device="0",
         target_dir="/tmp/runs",
     )
-    assert spec.script_path.endswith("train.py")
-    assert "--weight" in spec.args
-    assert "--weights" not in spec.args
+    assert "mp_train_launcher.py" in spec.script_path
+    assert "--model" in spec.args
     assert "--data" in spec.args
 
 
-def test_enhanced_infer_adapter_uses_weight_and_conf() -> None:
+def test_enhanced_infer_adapter_uses_launcher_conf() -> None:
     spec = build_external_infer_spec(
         "enhanced-yolov8",
         "/tmp/enhanced",
@@ -100,7 +99,7 @@ def test_enhanced_infer_adapter_uses_weight_and_conf() -> None:
         imgsz=640,
         device="cpu",
     )
-    assert spec.script_path.endswith("detect.py")
-    assert "--weight" in spec.args
+    assert "mp_infer_launcher.py" in spec.script_path
+    assert "--model" in spec.args
     assert "--conf" in spec.args
 

@@ -37,19 +37,20 @@ def build_external_train_spec(
     pid = provider_id.strip().lower()
     project_dir = _external_project_dir(target_dir, dataset_path)
     if pid in ("dr-yolo", "leaf-yolo"):
-        data_yaml = str(Path(dataset_path).resolve() / "data.yaml")
+        launcher = Path(__file__).resolve().parent / "launchers" / "mp_train_launcher.py"
         args = [
+            "--repo",
+            str(repo),
             "--data",
-            data_yaml,
-            "--img",
-            str(imgsz),
-            str(imgsz),
-            "--batch-size",
-            str(batch),
+            str(Path(dataset_path).resolve() / "data.yaml"),
+            "--model",
+            model,
             "--epochs",
             str(epochs),
-            "--weights",
-            model if model.endswith(".pt") or os.path.isfile(model) else "",
+            "--batch",
+            str(batch),
+            "--imgsz",
+            str(imgsz),
         ]
         if project_dir:
             args += ["--project", project_dir]
@@ -57,21 +58,23 @@ def build_external_train_spec(
             args += ["--name", str(run_name)]
         if device:
             args += ["--device", str(device)]
-        return ExternalRunSpec(script_path=str(repo / "train.py"), args=args, env_overrides={})
+        return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "ssdm-yolo":
-        data_yaml = str(Path(dataset_path).resolve() / "data.yaml")
+        launcher = Path(__file__).resolve().parent / "launchers" / "mp_train_launcher.py"
         args = [
+            "--repo",
+            str(repo),
             "--data",
-            data_yaml,
-            "--imgsz",
-            str(imgsz),
-            "--batch",
-            str(batch),
+            str(Path(dataset_path).resolve() / "data.yaml"),
+            "--model",
+            model,
             "--epochs",
             str(epochs),
-            "--weights",
-            model if model.endswith(".pt") or os.path.isfile(model) else "",
+            "--batch",
+            str(batch),
+            "--imgsz",
+            str(imgsz),
         ]
         if project_dir:
             args += ["--project", project_dir]
@@ -79,31 +82,31 @@ def build_external_train_spec(
             args += ["--name", str(run_name)]
         if device:
             args += ["--device", str(device)]
-        return ExternalRunSpec(script_path=str(repo / "train.py"), args=args, env_overrides={})
+        return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "enhanced-yolov8":
-        data_yaml = str(Path(dataset_path).resolve() / "data.yaml")
+        launcher = Path(__file__).resolve().parent / "launchers" / "mp_train_launcher.py"
         args = [
+            "--repo",
+            str(repo),
             "--data",
-            data_yaml,
+            str(Path(dataset_path).resolve() / "data.yaml"),
+            "--model",
+            model,
             "--epochs",
             str(epochs),
             "--batch",
             str(batch),
             "--imgsz",
             str(imgsz),
-            "--weight",
-            model if (model.endswith(".pt") or os.path.isfile(model)) else "",
         ]
-        if model.endswith(".yaml"):
-            args += ["--yaml", model]
         if project_dir:
             args += ["--project", project_dir]
         if run_name:
             args += ["--name", str(run_name)]
         if device:
             args += ["--device", str(device)]
-        return ExternalRunSpec(script_path=str(repo / "train.py"), args=args, env_overrides={})
+        return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "mfel-yolo":
         launcher = Path(__file__).resolve().parent / "launchers" / "mfel_train_launcher.py"
@@ -165,51 +168,76 @@ def build_external_infer_spec(
     conf: float,
     imgsz: int,
     device: str | None = None,
+    target_dir: str | None = None,
+    run_name: str | None = None,
 ) -> ExternalRunSpec:
     repo = Path(repo_path).expanduser().resolve()
     pid = provider_id.strip().lower()
     if pid in ("dr-yolo", "leaf-yolo"):
+        launcher = Path(__file__).resolve().parent / "launchers" / "mp_infer_launcher.py"
         args = [
-            "--weights",
+            "--repo",
+            str(repo),
+            "--model",
             model_path,
             "--source",
             source_path,
             "--conf",
-            str(conf),
-            "--img-size",
-            str(imgsz),
-        ]
-        if device:
-            args += ["--device", str(device)]
-        return ExternalRunSpec(script_path=str(repo / "detect.py"), args=args, env_overrides={})
-
-    if pid == "ssdm-yolo":
-        args = [
-            "--weights",
-            model_path,
-            "--source",
-            source_path,
-            "--conf-thres",
             str(conf),
             "--imgsz",
             str(imgsz),
         ]
         if device:
             args += ["--device", str(device)]
-        return ExternalRunSpec(script_path=str(repo / "detect.py"), args=args, env_overrides={})
+        if target_dir:
+            args += ["--project", str(target_dir)]
+        if run_name:
+            args += ["--name", str(run_name)]
+        return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
-    if pid == "enhanced-yolov8":
+    if pid == "ssdm-yolo":
+        launcher = Path(__file__).resolve().parent / "launchers" / "mp_infer_launcher.py"
         args = [
-            "--weight",
+            "--repo",
+            str(repo),
+            "--model",
             model_path,
             "--source",
             source_path,
             "--conf",
             str(conf),
+            "--imgsz",
+            str(imgsz),
         ]
         if device:
             args += ["--device", str(device)]
-        return ExternalRunSpec(script_path=str(repo / "detect.py"), args=args, env_overrides={})
+        if target_dir:
+            args += ["--project", str(target_dir)]
+        if run_name:
+            args += ["--name", str(run_name)]
+        return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
+
+    if pid == "enhanced-yolov8":
+        launcher = Path(__file__).resolve().parent / "launchers" / "mp_infer_launcher.py"
+        args = [
+            "--repo",
+            str(repo),
+            "--model",
+            model_path,
+            "--source",
+            source_path,
+            "--conf",
+            str(conf),
+            "--imgsz",
+            str(imgsz),
+        ]
+        if device:
+            args += ["--device", str(device)]
+        if target_dir:
+            args += ["--project", str(target_dir)]
+        if run_name:
+            args += ["--name", str(run_name)]
+        return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "mfel-yolo":
         launcher = Path(__file__).resolve().parent / "launchers" / "mfel_infer_launcher.py"
@@ -227,6 +255,10 @@ def build_external_infer_spec(
         ]
         if device:
             args += ["--device", str(device)]
+        if target_dir:
+            args += ["--project", str(target_dir)]
+        if run_name:
+            args += ["--name", str(run_name)]
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "mp-yolo":
@@ -245,6 +277,10 @@ def build_external_infer_spec(
         ]
         if device:
             args += ["--device", str(device)]
+        if target_dir:
+            args += ["--project", str(target_dir)]
+        if run_name:
+            args += ["--name", str(run_name)]
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     raise ValueError(f"Unsupported provider for infer adapter: {provider_id}")

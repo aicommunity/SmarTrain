@@ -193,7 +193,11 @@ def cmd_info(
         typer.echo("Supported train models (external providers):")
         for pid in ext_ids:
             typer.echo(f"Model source: {pid}")
-            ext_aliases = tuple(f"{pid}:{a}" for a in aliases)
+            rec = next((x for x in records if str(x.get("provider_id", "")).strip() == pid), None)
+            repo_path = str(rec.get("repo_path", "")).strip() if isinstance(rec, dict) else ""
+            ext_catalog = TrainModelCatalog(provider=pid, provider_repo_path=repo_path or None)
+            ext_base_aliases = tuple(a for a in ext_catalog.supported_aliases() if _is_detection_model_alias(a))
+            ext_aliases = tuple(f"{pid}:{a}" for a in ext_base_aliases)
             for row in _format_columns(ext_aliases):
                 typer.echo(row)
     typer.echo("")

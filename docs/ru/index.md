@@ -15,11 +15,22 @@
 - [Обзор команд](cli/overview.md)
 - [Датасеты: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`](cli/datasets.md)
 - [Обучение и тест: `train`, `clearml-upload`](cli/training.md)
+- [Внешние провайдеры: `providers`, алиасы моделей, интеграция train/inference](cli/providers.md)
 - [Очередь: `queue`, `queue-run`](cli/queue.md)
 - [Аналитика: `analyze` (включая `pr-curves`, `inference-benchmark`, `inference-plot`, `test-metrics-plot`)](cli/analyze.md)
 - [Реестр моделей: `registry`](cli/registry.md)
 - [CVAT 1.1: `cvat`](cli/cvat.md)
 - [Инференс-инструменты: `sahi`, `heatmap`](cli/inference-tools.md)
+
+## 2.1) Профили провайдеров
+
+- [Обзор провайдеров](providers/overview.md)
+- [Провайдер DR-YOLO](providers/dr-yolo.md)
+- [Провайдер LEAF-YOLO](providers/leaf-yolo.md)
+- [Провайдер MFEL-YOLO](providers/mfel-yolo.md)
+- [Провайдер MP-YOLO](providers/mp-yolo.md)
+- [Провайдер SSDM-YOLO](providers/ssdm-yolo.md)
+- [Провайдер Enhanced YOLOv8](providers/enhanced-yolov8.md)
 
 ## 3) Reference
 
@@ -32,6 +43,7 @@
 - [Архитектура и диаграммы](development/architecture.md)
 - [Тестирование](development/testing.md)
 - [Расширение проекта](development/extension-guide.md)
+- [Разработка новых внешних провайдеров](development/provider-development.md)
 
 ## 5) Migration
 

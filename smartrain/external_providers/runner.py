@@ -47,6 +47,8 @@ def run_external_infer(
     conf: float,
     imgsz: int,
     device: str | None = None,
+    target_dir: str | None = None,
+    run_name: str | None = None,
 ) -> int:
     spec = build_external_infer_spec(
         provider_id,
@@ -56,6 +58,8 @@ def run_external_infer(
         conf=conf,
         imgsz=imgsz,
         device=device,
+        target_dir=target_dir,
+        run_name=run_name,
     )
     return _run_python_script(spec.script_path, repo_path, venv_path, spec.args, spec.env_overrides)
 

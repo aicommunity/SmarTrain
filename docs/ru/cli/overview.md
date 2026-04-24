@@ -8,6 +8,7 @@
 
 - Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `inference`, `hash`, `stats`, `report dataset`
 - Обучение: `train`, `clearml-upload`
+- Провайдеры: `providers`
 - Инфо: `info`
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
@@ -42,7 +43,7 @@ smartrain model convert --help
 Особенности `smartrain info`:
 
 - Печатает секцию `Supported train models` с алиасами, которые можно копировать напрямую в `smartrain train --model ...`.
-- Текущий список алиасов формируется для backend по умолчанию.
+- Включает алиасы backend по умолчанию и провайдер-специфичные алиасы установленных внешних провайдеров.
 
 Особенности `model convert`:
 

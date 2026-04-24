@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -495,6 +496,34 @@ def test_train_main_unknown_provider_in_model_returns_error(
     assert "Unknown external provider in model ref" in out
 
 
+def test_train_main_rejects_unsupported_model_for_external_provider(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "ds_a"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / "data.yaml").write_text("train: train/images\nval: val/images\n", encoding="utf-8")
+    rc = mtm.main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--data",
+            str(dataset_dir),
+            "--target-path",
+            str(tmp_path / "target"),
+            "--external-provider",
+            "dr-yolo",
+            "--external-repo",
+            str(tmp_path / "ext-repo"),
+            "--model",
+            "yolov7",
+        ]
+    )
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "is not supported by external provider" in out
+
+
 def test_train_main_external_layout_normalized_to_train_subdir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -507,6 +536,7 @@ def test_train_main_external_layout_normalized_to_train_subdir(
 
     monkeypatch.setattr(mtm, "calculate_dataset_hash", lambda _p: "abc12345")
     monkeypatch.setattr(mtm, "_build_run_name", lambda *a, **k: "run-fixed")
+    called = {"test": False}
 
     def _fake_run_external_train(provider_id: str, repo_path: str, venv_path: str, **kwargs):
         run_dir = target_root / "ds_a" / "run-fixed"
@@ -516,7 +546,16 @@ def test_train_main_external_layout_normalized_to_train_subdir(
         (run_dir / "weights" / "best.pt").write_bytes(b"fake")
         return 0
 
+    def _fake_test_yolo(*args, **kwargs):
+        called["test"] = True
+        run_dir = target_root / "ds_a" / "run-fixed"
+        (run_dir / "test").mkdir(parents=True, exist_ok=True)
+        (run_dir / "test_metrics.csv").write_text("metric,value\nmap50,0.1\n", encoding="utf-8")
+        now = datetime.now()
+        return now, now, {"imgsz": 640, "iou": 0.7}
+
     monkeypatch.setattr(mtm, "run_external_train", _fake_run_external_train)
+    monkeypatch.setattr(mtm, "test_yolo", _fake_test_yolo)
     rc = mtm.main(
         [
             "--workspace",
@@ -539,7 +578,58 @@ def test_train_main_external_layout_normalized_to_train_subdir(
     )
     assert rc == 0
     run_dir = target_root / "ds_a" / "run-fixed"
+    assert called["test"] is True
     assert (run_dir / "train" / "args.yaml").is_file()
     assert (run_dir / "train" / "weights" / "best.pt").is_file()
     assert (run_dir / "training_metadata.json").is_file()
+    payload = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))
+    assert payload["status"]["testing"]["success"] is True
+
+
+def test_train_main_external_best_pt_moved_to_contract_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "ds_a"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / "data.yaml").write_text("train: train/images\nval: val/images\n", encoding="utf-8")
+    target_root = tmp_path / "target"
+    target_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(mtm, "_build_run_name", lambda *a, **k: "run-fixed")
+
+    def _fake_run_external_train(provider_id: str, repo_path: str, venv_path: str, **kwargs):
+        run_dir = target_root / "ds_a" / "run-fixed"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "best.pt").write_bytes(b"fake-root-best")
+        return 0
+
+    def _fake_test_yolo(*args, **kwargs):
+        now = datetime.now()
+        return now, now, {}
+
+    monkeypatch.setattr(mtm, "run_external_train", _fake_run_external_train)
+    monkeypatch.setattr(mtm, "test_yolo", _fake_test_yolo)
+    rc = mtm.main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--data",
+            str(dataset_dir),
+            "--target-path",
+            str(target_root),
+            "--external-provider",
+            "dr-yolo",
+            "--external-repo",
+            str(tmp_path / "ext-repo"),
+            "--epochs",
+            "1",
+            "--batch",
+            "2",
+            "--img-size",
+            "640",
+        ]
+    )
+    assert rc == 0
+    run_dir = target_root / "ds_a" / "run-fixed"
+    assert (run_dir / "train" / "weights" / "best.pt").is_file()
 

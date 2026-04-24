@@ -35,18 +35,18 @@ def test_run_external_train_invokes_python_script(monkeypatch, tmp_path: Path) -
     assert rc == 0
     assert calls
     assert calls[0][0][0] == "/tmp/venv/bin/python"
-    assert calls[0][0][1].endswith("train.py")
+    assert calls[0][0][1].endswith("mp_train_launcher.py")
 
 
 @pytest.mark.parametrize(
     "provider_id,expected_script",
     [
-        ("dr-yolo", "train.py"),
-        ("leaf-yolo", "train.py"),
+        ("dr-yolo", "mp_train_launcher.py"),
+        ("leaf-yolo", "mp_train_launcher.py"),
         ("mfel-yolo", "mfel_train_launcher.py"),
         ("mp-yolo", "mp_train_launcher.py"),
-        ("ssdm-yolo", "train.py"),
-        ("enhanced-yolov8", "train.py"),
+        ("ssdm-yolo", "mp_train_launcher.py"),
+        ("enhanced-yolov8", "mp_train_launcher.py"),
     ],
 )
 def test_run_external_train_supported_providers(monkeypatch, tmp_path: Path, provider_id: str, expected_script: str) -> None:
@@ -82,12 +82,12 @@ def test_run_external_train_supported_providers(monkeypatch, tmp_path: Path, pro
 @pytest.mark.parametrize(
     "provider_id,expected_script",
     [
-        ("dr-yolo", "detect.py"),
-        ("leaf-yolo", "detect.py"),
+        ("dr-yolo", "mp_infer_launcher.py"),
+        ("leaf-yolo", "mp_infer_launcher.py"),
         ("mfel-yolo", "mfel_infer_launcher.py"),
         ("mp-yolo", "mp_infer_launcher.py"),
-        ("ssdm-yolo", "detect.py"),
-        ("enhanced-yolov8", "detect.py"),
+        ("ssdm-yolo", "mp_infer_launcher.py"),
+        ("enhanced-yolov8", "mp_infer_launcher.py"),
     ],
 )
 def test_run_external_infer_supported_providers(monkeypatch, tmp_path: Path, provider_id: str, expected_script: str) -> None:

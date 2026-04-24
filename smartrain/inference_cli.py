@@ -28,6 +28,7 @@ from smartrain.provider_global_index import get_provider_location
 from smartrain.external_providers.runner import run_external_infer
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.external_providers.registry import list_provider_specs
+from smartrain.train_model_catalog import is_supported_external_provider_model, TrainModelCatalog
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -687,6 +688,26 @@ def main(argv: list[str] | None = None) -> None:
         if not venv_path:
             print(f"[ERROR] Missing venv for external provider {ext_provider!r}.", file=sys.stderr)
             raise SystemExit(1)
+        raw_model_value = str(getattr(args, "weights", "") or "")
+        maybe_file = Path(raw_model_value).expanduser()
+        if not maybe_file.is_file():
+            is_supported = is_supported_external_provider_model(
+                ext_provider,
+                raw_model_value,
+                provider_repo_path=repo_path or None,
+            )
+            if not is_supported:
+                aliases = TrainModelCatalog(
+                    provider=ext_provider,
+                    provider_repo_path=repo_path or None,
+                ).supported_aliases()
+                known = ", ".join(aliases) if aliases else "<none>"
+                print(
+                    f"[ERROR] Model {raw_model_value!r} is not supported by external provider "
+                    f"{ext_provider!r}. Supported aliases: {known}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
         source_for_external = _resolve_external_source(args, layout)
         source_short = (
             os.path.basename(os.path.abspath(os.path.expanduser(str(args.source_dir))).rstrip(os.sep)) or "folder"
