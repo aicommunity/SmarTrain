@@ -3,6 +3,8 @@ import json
 import os
 import argparse
 import re
+import shutil
+import subprocess
 import sys
 import traceback
 import gc
@@ -34,6 +36,15 @@ from smartrain.train_profile import (
     resolve_profile_data_path,
     task_to_metadata_task_type,
 )
+from smartrain.train_model_catalog import (
+    TrainModelCatalog,
+    is_supported_external_provider_model,
+)
+from smartrain.train_model_resolver import TrainModelResolver
+from smartrain.provider_global_index import get_provider_location, list_provider_records
+from smartrain.external_providers.runner import run_external_infer, run_external_train
+from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
+from smartrain.external_providers.registry import list_provider_specs
 from smartrain.path_portable import relativize_if_under
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
@@ -67,6 +78,7 @@ _ULTRALYTICS_YAML_IGNORED_KEYS = frozenset(
         "workspace",
     }
 )
+_MANUAL_MODEL_ENTRY = "<manual>"
 
 
 def build_train_arg_parser() -> argparse.ArgumentParser:
@@ -124,6 +136,18 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
             f"Model (default {MODEL_VERSION} or from profile --config). "
             "Specify full alias/weights including scale (n/s/m/l/x), e.g. yolo11x.pt."
         ),
+    )
+    parser.add_argument(
+        "--external-provider",
+        type=str,
+        default=None,
+        help="Use external provider id for training (runs via isolated provider venv).",
+    )
+    parser.add_argument(
+        "--external-repo",
+        type=str,
+        default=None,
+        help="Override external provider repository path.",
     )
 
     parser.add_argument(
@@ -418,6 +442,141 @@ def _prompt_dataset_name(available: list[str]) -> str:
     return prompt_choice("Dataset", available, default=available[0])
 
 
+def _train_model_picker_options(default_model: str) -> list[str]:
+    catalog = TrainModelCatalog()
+    options = list(catalog.supported_aliases())
+    external_records = _installed_external_provider_records()
+    if external_records:
+        # Copy-paste friendly aliases for external providers.
+        for rec in external_records:
+            pid = str(rec.get("provider_id", "")).strip().lower()
+            if not pid:
+                continue
+            repo_path = str(rec.get("repo_path", "")).strip() or None
+            ext_catalog = TrainModelCatalog(provider=pid, provider_repo_path=repo_path)
+            options.extend(f"{pid}:{alias}" for alias in ext_catalog.supported_aliases())
+    if default_model and default_model not in options:
+        options.append(default_model)
+    options.append(_MANUAL_MODEL_ENTRY)
+    dedup: list[str] = []
+    seen: set[str] = set()
+    for item in options:
+        if item in seen:
+            continue
+        seen.add(item)
+        dedup.append(item)
+    return dedup
+
+
+def _installed_external_provider_ids() -> list[str]:
+    return [str(r.get("provider_id", "")).strip().lower() for r in _installed_external_provider_records()]
+
+
+def _installed_external_provider_records() -> list[dict[str, Any]]:
+    recs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for rec in list_provider_records():
+        if str(rec.get("install_state", "")).strip().lower() != "installed":
+            continue
+        pid = str(rec.get("provider_id", "")).strip().lower()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        recs.append(rec)
+    recs.sort(key=lambda x: str(x.get("provider_id", "")).strip().lower())
+    return recs
+
+
+def _get_installed_external_provider_record(provider_id: str) -> dict[str, Any] | None:
+    key = str(provider_id or "").strip().lower()
+    if not key:
+        return None
+    for rec in _installed_external_provider_records():
+        pid = str(rec.get("provider_id", "")).strip().lower()
+        if pid == key:
+            return rec
+    return None
+
+
+def _apply_external_provider_defaults(args) -> None:
+    provider = str(getattr(args, "external_provider", "") or "").strip().lower()
+    if not provider:
+        return
+    if not hasattr(args, "model"):
+        rec = _get_installed_external_provider_record(provider)
+        repo_path = str(rec.get("repo_path", "")).strip() if isinstance(rec, dict) else None
+        aliases = TrainModelCatalog(provider=provider, provider_repo_path=repo_path or None).supported_aliases()
+        if aliases:
+            args.model = aliases[0]
+    if not hasattr(args, "epochs"):
+        args.epochs = 70
+    if not hasattr(args, "batch"):
+        args.batch = 8
+    if not hasattr(args, "img_size"):
+        args.img_size = 640
+
+
+def _model_matches_task(alias: str, task: str) -> bool:
+    low = alias.lower()
+    if ":" in low:
+        _, low = low.split(":", 1)
+    task_low = (task or "").strip().lower()
+    if task_low == "segment":
+        return "-seg" in low
+    if task_low == "classify":
+        return "-cls" in low
+    if task_low == "pose":
+        return "-pose" in low
+    if task_low == "obb":
+        return "-obb" in low
+    # detect by default: hide non-detection heads
+    return all(marker not in low for marker in ("-seg", "-cls", "-pose", "-obb"))
+
+
+def _format_numbered_columns(items: list[str], *, columns: int = 4) -> list[str]:
+    if not items:
+        return []
+    indexed = [f"{idx + 1}) {name}" for idx, name in enumerate(items)]
+    term_w = shutil.get_terminal_size(fallback=(120, 20)).columns
+    col_width = max(len(x) for x in indexed) + 2
+    cols = max(1, min(columns, max(1, term_w // col_width)))
+    rows = (len(indexed) + cols - 1) // cols
+    lines: list[str] = []
+    for row in range(rows):
+        parts: list[str] = []
+        for col in range(cols):
+            pos = col * rows + row
+            if pos >= len(indexed):
+                continue
+            cell = indexed[pos]
+            if col < cols - 1:
+                parts.append(cell.ljust(col_width))
+            else:
+                parts.append(cell)
+        lines.append("".join(parts).rstrip())
+    return lines
+
+
+def _pick_model_interactive(options: list[str], default_alias: str) -> str:
+    print("[INFO] Model options:")
+    for line in _format_numbered_columns(options, columns=4):
+        print(f"  {line}")
+    while True:
+        raw = _prompt_input(
+            "Model (--model, number/value): ",
+            default=default_alias,
+        ).strip()
+        if not raw:
+            return default_alias
+        if raw in options:
+            return raw
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(options):
+                return options[idx - 1]
+        print(f"[ERROR] Incorrect selection: {raw!r}")
+
+
 def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     runs_root = Path(layout.runs)
@@ -496,6 +655,11 @@ def _run_interactive_train_setup(args) -> bool:
     from prompt_toolkit.completion import WordCompleter
 
     print("[INFO] Interactive train mode (Enter = default).")
+    installed_external = [r for r in list_provider_records() if str(r.get("install_state", "")) == "installed"]
+    if installed_external:
+        print("[INFO] Installed external providers:")
+        for rec in installed_external:
+            print(f"  - {rec.get('provider_id')}: {rec.get('repo_path')}")
 
     try:
         ws = resolve_workspace_root(getattr(args, "workspace", None))
@@ -588,14 +752,34 @@ def _run_interactive_train_setup(args) -> bool:
             str(_get_interactive_default(args, "model", MODEL_VERSION, baseline_u_cfg, "model")),
             add_pt_when_missing=True,
         )
-        args.model = (
-            _prompt_input(
-                "Model (--model): ",
-                default=model_default,
-            ).strip()
-            or model_default
-        )
-        args.model = _normalize_model_spec(args.model, add_pt_when_missing=True)
+        all_options = _train_model_picker_options(model_default.replace(".pt", ""))
+        task_options = [opt for opt in all_options if (opt == _MANUAL_MODEL_ENTRY or _model_matches_task(opt, args.task))]
+        options = task_options or all_options
+        default_alias = model_default.replace(".pt", "")
+        if default_alias not in options:
+            default_alias = options[0]
+        model_choice = _pick_model_interactive(options, default_alias)
+        if model_choice == _MANUAL_MODEL_ENTRY:
+            model_choice = (
+                _prompt_input(
+                    "Manual model alias/path (--model): ",
+                    default=model_default,
+                ).strip()
+                or model_default
+            )
+        selected_external_provider = None
+        if ":" in model_choice:
+            provider_part, model_part = model_choice.split(":", 1)
+            known_external = set(_installed_external_provider_ids())
+            if provider_part in known_external and model_part:
+                selected_external_provider = provider_part
+                model_choice = model_part
+        if selected_external_provider:
+            args.external_provider = selected_external_provider
+            print(f"[INFO] External provider selected from model alias: {selected_external_provider}")
+        else:
+            args.external_provider = None
+        args.model = _normalize_model_spec(model_choice, add_pt_when_missing=True)
     print(f"[INFO] Final model for launch: {args.model}")
     if "epochs" in ultra_u_cfg:
         args.epochs = int(ultra_u_cfg["epochs"])
@@ -891,18 +1075,12 @@ def _load_ultralytics_yaml(path: str | None) -> dict[str, Any]:
 
 
 def _normalize_model_spec(spec: Any, *, add_pt_when_missing: bool = False) -> str:
-    value = str(spec or "").strip()
-    if not value:
-        value = MODEL_VERSION
-    if (
-        add_pt_when_missing
-        and Path(value).suffix == ""
-        and "/" not in value
-        and "\\" not in value
-        and value.lower().startswith("yolo")
-    ):
-        value = f"{value}.pt"
-    return value
+    resolver = TrainModelResolver()
+    return resolver.resolve(
+        None if spec is None else str(spec),
+        default_model=MODEL_VERSION,
+        add_pt_when_missing=add_pt_when_missing,
+    ).normalized
 
 
 def _extract_effective_loaded_model(model: Any, fallback: str) -> str:
@@ -928,6 +1106,160 @@ def _extract_model_family_scale(spec: str) -> tuple[str, str] | None:
     if not m:
         return None
     return m.group(1), m.group(2)
+
+
+def _build_run_name(
+    provider_id: str,
+    model_version: str,
+    epochs: int,
+    batch: int,
+    dataset_hash: str | None,
+    *,
+    timestamp: datetime | None = None,
+) -> str:
+    ts = timestamp or datetime.now()
+    timestamp_str = ts.strftime("%Y-%m-%d_%H-%M")
+    provider = str(provider_id or "ultralytics").strip().lower().replace(" ", "-")
+    model_token = Path(str(model_version)).name
+    if model_token.endswith(".pt"):
+        model_token = model_token[:-3]
+    if model_token.endswith(".yaml"):
+        model_token = model_token[:-5]
+    model_token = re.sub(r"[^a-zA-Z0-9._+-]+", "-", model_token).strip("-") or "model"
+    folder_name = f"{timestamp_str}_{provider}_{model_token}_{epochs}epochs_b{batch}"
+    if dataset_hash:
+        folder_name = f"{folder_name}-{dataset_hash}"
+    return folder_name
+
+
+def _normalize_external_run_layout(run_dir: str) -> None:
+    root = Path(run_dir).expanduser().resolve()
+    if not root.is_dir():
+        return
+    train_dir = root / "train"
+    train_dir.mkdir(parents=True, exist_ok=True)
+    for entry in list(root.iterdir()):
+        if entry.name in {"train", "training_metadata.json"}:
+            continue
+        target = train_dir / entry.name
+        if target.exists():
+            continue
+        entry.rename(target)
+
+
+def _find_external_best_checkpoint(run_dir: str) -> str | None:
+    root = Path(run_dir).expanduser().resolve()
+    if not root.is_dir():
+        return None
+    preferred = root / "train" / "weights" / "best.pt"
+    if preferred.is_file():
+        return str(preferred)
+    candidates = [
+        root / "weights" / "best.pt",
+        root / "train" / "best.pt",
+        root / "best.pt",
+    ]
+    for cand in candidates:
+        if cand.is_file():
+            return str(cand)
+    for cand in root.rglob("best.pt"):
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
+def _ensure_external_best_checkpoint_layout(run_dir: str) -> str | None:
+    root = Path(run_dir).expanduser().resolve()
+    if not root.is_dir():
+        return None
+    target = root / "train" / "weights" / "best.pt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_file():
+        return str(target)
+    src = _find_external_best_checkpoint(run_dir)
+    if not src:
+        return None
+    src_path = Path(src).expanduser().resolve()
+    if src_path == target:
+        return str(target)
+    if not target.exists():
+        src_path.rename(target)
+    return str(target)
+
+
+def _resolve_external_eval_source(dataset_path: str) -> str:
+    root = Path(dataset_path).expanduser().resolve()
+    candidates = [
+        root / "test" / "images",
+        root / "val" / "images",
+        root / "test",
+        root / "val",
+    ]
+    for cand in candidates:
+        if cand.is_dir():
+            return str(cand)
+    return str(root)
+
+
+def _write_external_fallback_metrics(model_dir: str, *, provider_id: str, rc: int) -> str:
+    test_dir = os.path.join(model_dir, "test")
+    os.makedirs(test_dir, exist_ok=True)
+    marker = os.path.join(test_dir, "fallback_infer.txt")
+    with open(marker, "w", encoding="utf-8") as f:
+        f.write("external infer fallback was used for test stage\n")
+    csv_path = os.path.join(model_dir, "test_metrics.csv")
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write("provider,test_mode,return_code\n")
+        f.write(f"{provider_id},external_infer_fallback,{int(rc)}\n")
+    return csv_path
+
+
+def _run_mfel_external_val_fallback(
+    *,
+    repo_path: str,
+    venv_path: str,
+    model_path: str,
+    data_yaml: str,
+    model_dir: str,
+    imgsz: int,
+    conf: float | None,
+    iou: float | None,
+    batch: int | None,
+    device: str | None,
+) -> int:
+    python_bin = os.path.join(venv_path, "Scripts" if os.name == "nt" else "bin", "python")
+    launcher = (
+        Path(__file__).resolve().parent
+        / "external_providers"
+        / "launchers"
+        / "mfel_val_launcher.py"
+    )
+    cmd = [
+        python_bin,
+        str(launcher),
+        "--repo",
+        repo_path,
+        "--model",
+        model_path,
+        "--data",
+        data_yaml,
+        "--imgsz",
+        str(int(imgsz)),
+        "--project",
+        model_dir,
+        "--name",
+        "test",
+    ]
+    if conf is not None:
+        cmd.extend(["--conf", str(float(conf))])
+    if iou is not None:
+        cmd.extend(["--iou", str(float(iou))])
+    if batch is not None:
+        cmd.extend(["--batch", str(int(batch))])
+    if device:
+        cmd.extend(["--device", str(device)])
+    proc = subprocess.run(cmd, cwd=repo_path)
+    return int(proc.returncode)
 
 
 def _merge_sources_with_priority(
@@ -1001,10 +1333,15 @@ def train_yolo(
         print(f"[WARNING] Failed to calculate dataset hash: {e}")
         dataset_hash = None
 
-    timestamp_str = training_start_time.strftime("%Y-%m-%d_%H-%M")
-    folder_name = f"{timestamp_str}_{model_version.replace('.pt', '')}_{epochs}epochs"
-    if dataset_hash:
-        folder_name = f"{folder_name}-{dataset_hash}"
+    batch = int(ultralytics_cfg.get("batch", BATCH))
+    folder_name = _build_run_name(
+        "ultralytics",
+        model_version,
+        epochs,
+        batch,
+        dataset_hash,
+        timestamp=training_start_time,
+    )
 
     model_dir = os.path.join(target_dir, dataset_name, folder_name)
 
@@ -1272,6 +1609,8 @@ def save_training_metadata(
     task_type=None,
     ultralytics_train_summary=None,
     onnx_relative=None,
+    training_provider: str = "ultralytics",
+    external_provider_id: str | None = None,
 ):
     ds_abs = os.path.abspath(dataset_path)
     dataset_block: dict[str, Any] = {
@@ -1292,7 +1631,11 @@ def save_training_metadata(
 
     metadata = {
         "training_info": {
-            "framework": "ultralytics",
+            "framework": "ultralytics" if training_provider == "ultralytics" else "external",
+            "provider": {
+                "type": "builtin" if training_provider == "ultralytics" else "external",
+                "id": external_provider_id if training_provider != "ultralytics" else "ultralytics",
+            },
             "task_type": task_type or "detection",
             "model": model_version,
             "dataset": dataset_block,
@@ -1443,6 +1786,20 @@ def main(argv=None):
     if argv and argv[0] == "resume":
         return _run_resume_command(argv[1:])
     args = parse_args(argv)
+    _apply_external_provider_defaults(args)
+    known_provider_ids = {spec.id for spec in list_provider_specs()}
+    try:
+        parsed_ref = validate_external_model_ref(
+            parse_external_model_ref(getattr(args, "model", None)),
+            known_provider_ids=known_provider_ids,
+        )
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return 2
+    if parsed_ref.is_external and parsed_ref.provider_id and not getattr(args, "external_provider", None):
+        args.external_provider = parsed_ref.provider_id
+        args.model = parsed_ref.model_ref
+        print(f"[INFO] External provider inferred from --model: {parsed_ref.provider_id}")
     parser = build_train_arg_parser()
     interactive_mode = is_interactive_allowed(argv)
     replay_cmd = None
@@ -1508,6 +1865,197 @@ def main(argv=None):
     except (TypeError, ValueError):
         img_size = IMG_SIZE
 
+    external_provider = str(getattr(args, "external_provider", "") or "").strip()
+    if external_provider:
+        rec = _get_installed_external_provider_record(external_provider)
+        repo_for_catalog = str(rec.get("repo_path", "")).strip() if isinstance(rec, dict) else None
+        requested_model = str(getattr(args, "model", "") or model_version)
+        if not os.path.isfile(requested_model):
+            is_supported = is_supported_external_provider_model(
+                external_provider,
+                requested_model,
+                provider_repo_path=repo_for_catalog or None,
+            )
+            if not is_supported:
+                ext_aliases = TrainModelCatalog(
+                    provider=external_provider,
+                    provider_repo_path=repo_for_catalog or None,
+                ).supported_aliases()
+                known = ", ".join(ext_aliases) if ext_aliases else "<none>"
+                print(
+                    f"[ERROR] Model {requested_model!r} is not supported by external provider "
+                    f"{external_provider!r}. Supported aliases: {known}"
+                )
+                return 2
+        training_start_time = datetime.now()
+        location = get_provider_location(external_provider)
+        if location is None and not getattr(args, "external_repo", None):
+            print(
+                f"[ERROR] External provider {external_provider!r} is not installed. "
+                "Use `smartrain providers install` or pass --external-repo."
+            )
+            return 1
+        repo_path = str(getattr(args, "external_repo", "") or "").strip() or (location.repo_path if location else "")
+        venv_path = location.venv_path if location else os.path.join(repo_path, "venv")
+        if not venv_path:
+            print(f"[ERROR] Missing venv for external provider {external_provider!r}. Reinstall provider.")
+            return 1
+        try:
+            dataset_hash = calculate_dataset_hash(data)
+        except Exception:
+            dataset_hash = None
+        run_name = _build_run_name(external_provider, model_version, epochs, batch, dataset_hash)
+        print(f"[INFO] External run name: {run_name}")
+        rc = run_external_train(
+            external_provider,
+            repo_path,
+            venv_path,
+            dataset_path=data,
+            model=model_version,
+            epochs=epochs,
+            batch=batch,
+            imgsz=img_size,
+            device=str(u_cfg.get("device")) if u_cfg.get("device") is not None else None,
+            target_dir=target_dir,
+            run_name=run_name,
+        )
+        training_end_time = datetime.now()
+        dataset_name = os.path.basename(os.path.normpath(data))
+        external_run_dir = os.path.join(target_dir, dataset_name, run_name)
+        os.makedirs(external_run_dir, exist_ok=True)
+        _normalize_external_run_layout(external_run_dir)
+        _ensure_external_best_checkpoint_layout(external_run_dir)
+        test_success = False
+        test_error = None
+        test_start_time = None
+        test_end_time = None
+        inference_info = None
+        if rc == 0:
+            try:
+                _maybe_free_cuda_memory()
+                val_batch = args.val_batch if args.val_batch is not None else batch
+                test_start_time, test_end_time, inference_info = test_yolo(
+                    external_run_dir,
+                    data,
+                    training_start_time=training_start_time,
+                    training_end_time=training_end_time,
+                    train_img_size=img_size,
+                    val_imgsz=args.val_imgsz,
+                    val_conf=args.val_conf,
+                    val_iou=args.val_iou,
+                    val_batch=val_batch,
+                )
+                test_success = True
+            except Exception as e:
+                test_error = f"{str(e)}\n{traceback.format_exc()}"
+                print(f"[ERROR] Error during external provider testing: {e}")
+                best_model = _ensure_external_best_checkpoint_layout(external_run_dir)
+                if best_model:
+                    fallback_start = datetime.now()
+                    fallback_source = _resolve_external_eval_source(data)
+                    fallback_conf = float(args.val_conf) if args.val_conf is not None else 0.25
+                    fallback_imgsz = int(args.val_imgsz) if args.val_imgsz is not None else int(img_size)
+                    if external_provider == "mfel-yolo":
+                        fallback_rc = _run_mfel_external_val_fallback(
+                            repo_path=repo_path,
+                            venv_path=venv_path,
+                            model_path=best_model,
+                            data_yaml=os.path.join(data, "data.yaml"),
+                            model_dir=external_run_dir,
+                            imgsz=fallback_imgsz,
+                            conf=args.val_conf,
+                            iou=args.val_iou,
+                            batch=args.val_batch if args.val_batch is not None else batch,
+                            device=str(u_cfg.get("device")) if u_cfg.get("device") is not None else None,
+                        )
+                    else:
+                        fallback_rc = run_external_infer(
+                            external_provider,
+                            repo_path,
+                            venv_path,
+                            model_path=best_model,
+                            source_path=fallback_source,
+                            conf=fallback_conf,
+                            imgsz=fallback_imgsz,
+                            device=str(u_cfg.get("device")) if u_cfg.get("device") is not None else None,
+                            target_dir=external_run_dir,
+                            run_name="test",
+                        )
+                    fallback_end = datetime.now()
+                    if fallback_rc == 0:
+                        if external_provider == "mfel-yolo":
+                            # keep test metrics contract in run root
+                            test_results_csv = os.path.join(external_run_dir, "test", "results.csv")
+                            if os.path.isfile(test_results_csv):
+                                shutil.copy2(
+                                    test_results_csv, os.path.join(external_run_dir, "test_metrics.csv")
+                                )
+                            else:
+                                _write_external_fallback_metrics(
+                                    external_run_dir, provider_id=external_provider, rc=fallback_rc
+                                )
+                        else:
+                            _write_external_fallback_metrics(
+                                external_run_dir, provider_id=external_provider, rc=fallback_rc
+                            )
+                        test_start_time = fallback_start
+                        test_end_time = fallback_end
+                        inference_info = {
+                            "imgsz": fallback_imgsz,
+                            "conf": fallback_conf,
+                            "mode": "external_infer_fallback",
+                        }
+                        test_success = True
+                        test_error = None
+                    else:
+                        test_success = False
+                        test_error = (
+                            f"{test_error}\nExternal infer fallback failed with return code {fallback_rc}"
+                        )
+                else:
+                    test_success = False
+        save_training_metadata(
+            model_dir=external_run_dir,
+            dataset_path=data,
+            model_version=model_version.replace(".pt", ""),
+            training_start_time=training_start_time,
+            training_end_time=training_end_time,
+            test_start_time=test_start_time,
+            test_end_time=test_end_time,
+            epochs=epochs,
+            batch=batch,
+            img_size=img_size,
+            training_success=(rc == 0),
+            training_error=None if rc == 0 else f"external provider returned code {rc}",
+            test_success=test_success if rc == 0 else False,
+            test_error=test_error if rc == 0 else "test skipped because external train failed",
+            dataset_hash=dataset_hash,
+            inference=inference_info,
+            workspace_root=workspace_root,
+            task_type=task_to_metadata_task_type(u_cfg.get("task")),
+            training_provider=external_provider,
+            external_provider_id=external_provider,
+        )
+        try:
+            marker = {
+                "created_at": datetime.utcnow().isoformat() + "Z",
+                "provider": {"type": "external", "id": external_provider},
+                "model": model_version,
+                "dataset_path": data,
+                "target_dir": target_dir,
+                "run_dir": external_run_dir,
+                "repo_path": repo_path,
+                "venv_path": venv_path,
+                "return_code": int(rc),
+            }
+            marker_path = os.path.join(target_dir, "_external_train_last.json")
+            os.makedirs(target_dir, exist_ok=True)
+            with open(marker_path, "w", encoding="utf-8") as f:
+                json.dump(marker, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return rc
+
     training_success = False
     training_error = None
     test_success = True
@@ -1551,14 +2099,14 @@ def main(argv=None):
                 dataset_hash = None
             if not model_dir:
                 dataset_name = os.path.basename(os.path.normpath(data))
-                timestamp_str = (
-                    training_start_time.strftime("%Y-%m-%d_%H-%M")
-                    if training_start_time
-                    else datetime.now().strftime("%Y-%m-%d_%H-%M")
+                folder_name = _build_run_name(
+                    "ultralytics",
+                    model_version,
+                    epochs,
+                    batch,
+                    dataset_hash,
+                    timestamp=training_start_time,
                 )
-                folder_name = f"{timestamp_str}_{model_version.replace('.pt', '')}_{epochs}epochs"
-                if dataset_hash:
-                    folder_name = f"{folder_name}-{dataset_hash}"
                 model_dir = os.path.join(target_dir, dataset_name, folder_name)
                 os.makedirs(model_dir, exist_ok=True)
             meta_extras = {
@@ -1611,6 +2159,8 @@ def main(argv=None):
                 task_type=meta_extras.get("task_type") or task_to_metadata_task_type(u_cfg.get("task")),
                 ultralytics_train_summary=_json_safe_train_summary(meta_extras.get("train_kw")),
                 onnx_relative=meta_extras.get("onnx_relative"),
+                training_provider="ultralytics",
+                external_provider_id=None,
             )
     else:
         model_dir = args.model_dir
@@ -1647,6 +2197,8 @@ def main(argv=None):
                 inference=inference_info,
                 workspace_root=workspace_root,
                 task_type=task_to_metadata_task_type(u_cfg.get("task")),
+                training_provider="ultralytics",
+                external_provider_id=None,
             )
         else:
             print("[ERROR] Model path not specified")

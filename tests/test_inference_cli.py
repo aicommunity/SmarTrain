@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from PIL import Image
 
 from smartrain.inference_cli import main as inference_main
@@ -184,3 +185,96 @@ def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
     report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
     assert report["summary"]["images_processed"] == 1
     assert report["source"]["mode"] == "folder"
+
+
+def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    captured: dict[str, object] = {}
+
+    def _fake_run_external_infer(provider_id: str, repo_path: str, venv_path: str, **kwargs) -> int:
+        captured["provider_id"] = provider_id
+        captured["repo_path"] = repo_path
+        captured["venv_path"] = venv_path
+        captured["model_path"] = kwargs.get("model_path")
+        return 0
+
+    monkeypatch.setattr("smartrain.inference_cli.run_external_infer", _fake_run_external_infer)
+    with pytest.raises(SystemExit) as ex:
+        inference_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--weights",
+                "dr-yolo:yolov8n",
+                "--external-repo",
+                str(tmp_path / "dr-repo"),
+                "--data-mode",
+                "folder",
+                "--source-dir",
+                str(src),
+            ]
+        )
+    assert int(ex.value.code or 0) == 0
+    assert captured["provider_id"] == "dr-yolo"
+    assert captured["model_path"] == "yolov8n"
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["model"]["provider"]["type"] == "external"
+    assert report["model"]["provider"]["id"] == "dr-yolo"
+    assert report["external_execution"]["provider_id"] == "dr-yolo"
+
+
+def test_inference_unknown_provider_in_weights_returns_error(monkeypatch, tmp_path: Path, capsys) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+    with pytest.raises(SystemExit) as ex:
+        inference_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--weights",
+                "unknown-provider:yolov8n",
+                "--data-mode",
+                "folder",
+                "--source-dir",
+                str(src),
+            ]
+        )
+    assert int(ex.value.code or 0) == 2
+    err = capsys.readouterr().err
+    assert "Unknown external provider in model ref" in err
+
+
+def test_inference_rejects_unsupported_model_for_external_provider(monkeypatch, tmp_path: Path, capsys) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+    with pytest.raises(SystemExit) as ex:
+        inference_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--weights",
+                "dr-yolo:yolov7",
+                "--external-repo",
+                str(tmp_path / "dr-repo"),
+                "--data-mode",
+                "folder",
+                "--source-dir",
+                str(src),
+            ]
+        )
+    assert int(ex.value.code or 0) == 2
+    err = capsys.readouterr().err
+    assert "is not supported by external provider" in err
+
+

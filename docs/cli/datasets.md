@@ -46,8 +46,8 @@ smartrain hash /abs/path/to/dataset --validate a1b2c3d4
 
 ## `stats`
 
-Subcommand:
+Current behavior:
 
-- `classes`
-- `datasets`
-- `compare`
+- `smartrain stats` launches the unified statistics mode (datasets + classes in one run).
+- `smartrain stats compare` runs a dedicated two-dataset comparison mode.
+- Legacy forms `smartrain stats classes` and `smartrain stats datasets` are accepted for compatibility and map to the same unified stats mode.

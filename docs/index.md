@@ -15,11 +15,22 @@ This section reflects the current codebase and is organized by scenarios: gettin
 - [Command overview](cli/overview.md)
 - [Datasets: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`](cli/datasets.md)
 - [Training and evaluation: `train`, `clearml-upload`](cli/training.md)
+- [External providers: `providers`, provider model aliases, train/inference integration](cli/providers.md)
 - [Queue: `queue`, `queue-run`](cli/queue.md)
 - [Analytics: `analyze` (including `pr-curves`, `inference-benchmark`, `inference-plot`, `test-metrics-plot`)](cli/analyze.md)
 - [Model registry: `registry`](cli/registry.md)
 - [CVAT 1.1: `cvat`](cli/cvat.md)
 - [Inference tools: `sahi`, `heatmap`](cli/inference-tools.md)
+
+## 2.1) Provider profiles
+
+- [Providers overview](providers/overview.md)
+- [DR-YOLO provider](providers/dr-yolo.md)
+- [LEAF-YOLO provider](providers/leaf-yolo.md)
+- [MFEL-YOLO provider](providers/mfel-yolo.md)
+- [MP-YOLO provider](providers/mp-yolo.md)
+- [SSDM-YOLO provider](providers/ssdm-yolo.md)
+- [Enhanced YOLOv8 provider](providers/enhanced-yolov8.md)
 
 ## 3) Reference
 
@@ -32,6 +43,7 @@ This section reflects the current codebase and is organized by scenarios: gettin
 - [Architecture and diagrams](development/architecture.md)
 - [Testing](development/testing.md)
 - [Project extensibility](development/extension-guide.md)
+- [Developing new external providers](development/provider-development.md)
 
 ## 5) Migration
 

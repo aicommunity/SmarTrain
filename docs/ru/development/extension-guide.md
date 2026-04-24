@@ -18,3 +18,15 @@
 - `docs/reference/data-formats.md`
 - `docs/reference/training-metadata.md`
 - диаграмму контрактов в `docs/development/architecture.md`.
+
+## Добавление или изменение внешних провайдеров
+
+Используйте отдельный инженерный гайд:
+
+- `docs/ru/development/provider-development.md`
+
+При изменениях провайдерной подсистемы также обновляйте:
+
+- `docs/ru/cli/providers.md`
+- `docs/ru/providers/overview.md`
+- профильные страницы в `docs/ru/providers/`

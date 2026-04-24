@@ -49,8 +49,8 @@ smartrain hash /abs/path/to/dataset --validate a1b2c3d4
 
 ## `stats`
 
-Подкоманды:
+Текущее поведение:
 
-- `classes`
-- `datasets`
-- `compare`
+- `smartrain stats` запускает единый режим статистики (по датасетам и классам за один запуск).
+- `smartrain stats compare` запускает отдельный режим сравнения двух датасетов.
+- Legacy-формы `smartrain stats classes` и `smartrain stats datasets` приняты для совместимости и маршрутизируются в тот же единый режим stats.

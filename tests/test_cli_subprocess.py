@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +16,9 @@ from smartrain.results_analyzer import build_analyze_arg_parser
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 CLI_HELP_CASES: list[tuple[str, list[str]]] = [
+    ("info", []),
+    ("providers", ["status"]),
+    ("providers", ["doctor"]),
     ("deploy", ["--help"]),
     ("scan", ["--", "--help"]),
     ("fusion", ["--", "--help"]),
@@ -55,6 +60,7 @@ NO_ARGS_HELP_CASES: list[str] = [
     "sahi",
     "heatmap",
     "orient",
+    "providers",
 ]
 
 
@@ -197,6 +203,190 @@ def test_train_without_args_dispatches_to_interactive_flow(
     # In non-TTY subprocesses interactive train reports this message;
     # this proves we call train main([]) instead of printing argparse help.
     assert "interactive train mode requires a terminal" in out.lower()
+
+
+def test_info_prints_supported_train_models(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["info"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "Model source: ultralytics" in out
+    assert "Supported train models:" in out
+    assert "yolov8n" in out
+    assert "-seg" not in out
+    assert "-cls" not in out
+    assert "-pose" not in out
+    assert "-obb" not in out
+
+
+def test_info_unknown_provider_returns_error(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["info", "--provider", "unknown-provider"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 2, out
+    assert "Unknown training provider" in out
+
+
+def test_info_lists_installed_external_providers(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    cfg = tmp_path / "cfg"
+    idx = cfg / "smartrain" / "providers" / "index.json"
+    idx.parent.mkdir(parents=True, exist_ok=True)
+    idx.write_text(
+        """{
+  "schema_version": 1,
+  "updated_at": "2026-01-01T00:00:00+00:00",
+  "providers": [
+    {
+      "provider_id": "dr-yolo",
+      "display_name": "DR-YOLO",
+      "repo_path": "/tmp/dr-yolo",
+      "venv_path": "/tmp/dr-yolo/venv",
+      "install_root": "/tmp",
+      "install_state": "installed",
+      "detected_capabilities": {"train": true, "infer": true},
+      "repo_ref": {"remote_url": "https://example", "branch": "master", "commit": "abc"},
+      "installed_at": "2026-01-01T00:00:00+00:00",
+      "last_validated_at": "2026-01-01T00:00:00+00:00",
+      "last_error": null
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    env = dict(subprocess_env)
+    env["XDG_CONFIG_HOME"] = str(cfg)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["info"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "Installed external providers:" in out
+    assert "dr-yolo" in out
+
+
+def test_info_lists_external_provider_model_aliases(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    cfg = tmp_path / "cfg"
+    idx = cfg / "smartrain" / "providers" / "index.json"
+    idx.parent.mkdir(parents=True, exist_ok=True)
+    idx.write_text(
+        """{
+  "schema_version": 1,
+  "updated_at": "2026-01-01T00:00:00+00:00",
+  "providers": [
+    {
+      "provider_id": "dr-yolo",
+      "display_name": "DR-YOLO",
+      "repo_path": "/tmp/dr-yolo",
+      "venv_path": "/tmp/dr-yolo/venv",
+      "install_root": "/tmp",
+      "install_state": "installed",
+      "detected_capabilities": {"train": true, "infer": true},
+      "repo_ref": {"remote_url": "https://example", "branch": "master", "commit": "abc"},
+      "installed_at": "2026-01-01T00:00:00+00:00",
+      "last_validated_at": "2026-01-01T00:00:00+00:00",
+      "last_error": null
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    env = dict(subprocess_env)
+    env["XDG_CONFIG_HOME"] = str(cfg)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["info"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "Supported train models (external providers):" in out
+    assert "Model source: dr-yolo" in out
+    assert "dr-yolo:yolov7" in out
+
+
+def test_providers_doctor_reports_not_installed(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    cfg = tmp_path / "cfg"
+    env = dict(subprocess_env)
+    env["XDG_CONFIG_HOME"] = str(cfg)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["providers", "doctor"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert "Providers doctor" in out
+    assert "not_installed" in out
+
+
+def test_providers_doctor_verbose_includes_reason(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    cfg = tmp_path / "cfg"
+    env = dict(subprocess_env)
+    env["XDG_CONFIG_HOME"] = str(cfg)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["providers", "doctor", "--verbose"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert "Providers doctor" in out
+    assert "reason: no record in global providers index" in out
+
+
+def test_providers_install_enhanced_records_nested_repo_path(
+    subprocess_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    deploy_workspace(str(tmp_path))
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        """#!/usr/bin/env python3
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+if args[:1] == ["clone"]:
+    dest = Path(args[-1])
+    nested = dest / "yolov8-main-Ghost"
+    nested.mkdir(parents=True, exist_ok=True)
+    (dest / ".git").mkdir(parents=True, exist_ok=True)
+    (nested / "train.py").write_text("print('train')\\n", encoding="utf-8")
+    (nested / "detect.py").write_text("print('detect')\\n", encoding="utf-8")
+    (nested / "requirements.txt").write_text("", encoding="utf-8")
+    raise SystemExit(0)
+if args[:2] == ["rev-parse", "HEAD"]:
+    print("fakecommit")
+    raise SystemExit(0)
+raise SystemExit(0)
+""",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+
+    cfg = tmp_path / "cfg"
+    env = dict(subprocess_env)
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+    env["XDG_CONFIG_HOME"] = str(cfg)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    install_target = tmp_path / "providers-root"
+    r = _run(
+        ["providers", "install", "--provider", "enhanced-yolov8", "--target", str(install_target), "-y"],
+        cwd=tmp_path,
+        env=env,
+    )
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "[INSTALLED] enhanced-yolov8" in out
+
+    index_file = cfg / "smartrain" / "providers" / "index.json"
+    payload = json.loads(index_file.read_text(encoding="utf-8"))
+    rec = next(x for x in payload.get("providers", []) if x.get("provider_id") == "enhanced-yolov8")
+    repo_path = Path(str(rec["repo_path"]))
+    assert repo_path.name == "yolov8-main-Ghost"
+    assert (repo_path / "train.py").is_file()
+    assert (repo_path / "detect.py").is_file()
 
 
 @pytest.mark.parametrize(

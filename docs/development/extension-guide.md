@@ -18,3 +18,15 @@ When `datasets_info.json`, `training_metadata.json`, or `model_manifest.json` ch
 - `docs/reference/data-formats.md`
 - `docs/reference/training-metadata.md`
 - the contracts diagram in `docs/development/architecture.md`.
+
+## Adding or changing external providers
+
+Use the dedicated provider engineering guide:
+
+- `docs/development/provider-development.md`
+
+When provider behavior changes, also update:
+
+- `docs/cli/providers.md`
+- `docs/providers/overview.md`
+- provider profile pages in `docs/providers/`

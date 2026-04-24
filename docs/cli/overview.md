@@ -8,6 +8,8 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 
 - Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `inference`, `hash`, `stats`, `report dataset`
 - Training: `train`, `clearml-upload`
+- Providers: `providers`
+- Info: `info`
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
@@ -36,6 +38,11 @@ Unified interactive contract:
 - for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `report dataset`, `model convert`, `model release`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
+
+`smartrain info` highlights:
+
+- Prints `Supported train models` section for copy-paste use in `smartrain train --model ...`.
+- Includes default backend aliases plus provider-scoped aliases for installed external providers.
 
 Model convert highlights:
 
