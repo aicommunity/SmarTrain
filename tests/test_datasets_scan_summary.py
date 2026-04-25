@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from smartrain.datasets_json_former import main as datasets_json_main
+from smartrain.provider_global_index import list_provider_records, upsert_provider_record
 from smartrain.workspace_paths import (
     CLASS_NAMES_FILE,
     DATASETS_INFO_FILE,
@@ -209,3 +210,30 @@ def test_scan_purge_processed_raw_no_keeps_sources(tmp_path: Path, monkeypatch, 
     out = capsys.readouterr().out
     assert "removal of processed sources from raw_data cancelled".lower() in out.lower()
     assert (rd / "ds_a").is_dir()
+
+
+def test_scan_marks_provider_record_stale_when_paths_missing(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(tmp_path)
+    _flat_dataset(tmp_path / "raw_data", "ds_a")
+    cfg_root = tmp_path / "cfg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_root))
+    upsert_provider_record(
+        {
+            "provider_id": "dr-yolo",
+            "display_name": "DR-YOLO",
+            "repo_path": str(tmp_path / "missing_repo"),
+            "venv_path": str(tmp_path / "missing_venv"),
+            "install_root": str(tmp_path),
+            "install_state": "installed",
+            "detected_capabilities": {"train": True, "infer": True},
+            "repo_ref": {"remote_url": "https://example.invalid", "branch": "main", "commit": "abc"},
+            "installed_at": "2026-01-01T00:00:00+00:00",
+            "last_validated_at": "2026-01-01T00:00:00+00:00",
+            "last_error": None,
+        }
+    )
+    datasets_json_main(["--workspace", str(tmp_path)])
+    recs = list_provider_records()
+    rec = next(r for r in recs if r.get("provider_id") == "dr-yolo")
+    assert rec["install_state"] == "stale"
+    assert "missing repo_path" in str(rec.get("last_error", ""))

@@ -20,7 +20,7 @@ Work from the project root (current directory):
 smartrain deploy
 smartrain scan
 smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
-smartrain train --data 2026-01-01_12-00-00-merged -y
+smartrain train --data 2026-01-01_12-00-00-merged --device 0 -y
 ```
 
 ## What's included
@@ -83,6 +83,10 @@ pytest
 - `smartrain balance` eval splits: `--eval-coverage` is on by default (keeps `val`/`test` non-empty when possible and improves class coverage there); use `--no-eval-coverage` to disable. The interactive wizard asks for this option.
 - For `hash --validate`: `0` for a match, `1` for a mismatch, `2` for an error.
 - By default, the workspace queue uses `queue.txt` and `tmp/status.txt`.
+- Device selection in `train` and `inference`:
+  - `--device 0` to force GPU 0
+  - `--device cpu` to force CPU
+  - If `--device` is omitted, default is `GPU 0` when CUDA is available, otherwise `cpu`
 - Dependency extras:
   - `pip install -e ".[dev]"` for development and testing
   - `pip install -e ".[clearml]"` for ClearML
@@ -114,6 +118,13 @@ Quick run overview:
 ```bash
 smartrain analyze scan
 smartrain analyze export-table -o runs_summary.csv
+```
+
+Train and inference with explicit device:
+
+```bash
+smartrain train --data my_dataset --model yolo11n.pt --device 0
+smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
 ```
 
 ## Developers

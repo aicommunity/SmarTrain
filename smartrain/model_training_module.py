@@ -36,12 +36,17 @@ from smartrain.train_profile import (
     resolve_profile_data_path,
     task_to_metadata_task_type,
 )
+from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
 from smartrain.train_model_catalog import (
     TrainModelCatalog,
     is_supported_external_provider_model,
 )
 from smartrain.train_model_resolver import TrainModelResolver
-from smartrain.provider_global_index import get_provider_location, list_provider_records
+from smartrain.provider_global_index import (
+    get_provider_location,
+    list_provider_records,
+    reconcile_stale_provider_paths,
+)
 from smartrain.external_providers.runner import run_external_infer, run_external_train
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.external_providers.registry import list_provider_specs
@@ -169,6 +174,12 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=argparse.SUPPRESS,
         help=f"imgsz (default {IMG_SIZE} or from profile)",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=argparse.SUPPRESS,
+        help="Compute device for training (e.g. 0, 1, cpu). Default: GPU 0 if available, otherwise cpu.",
     )
 
     parser.add_argument(
@@ -422,6 +433,29 @@ def _prompt_optional_float(label: str, default: float | None = None) -> float | 
             print(f"[ERROR] Expecting a number or empty value, received: {raw!r}")
 
 
+def _prompt_train_device(default: str | None = None) -> str:
+    options = discover_device_options()
+    labels = [o.label for o in options]
+    by_label = {o.label: o.value for o in options}
+    effective_default = str(default).strip() if default is not None else default_device_value()
+    default_label = next((o.label for o in options if o.value == effective_default), labels[0])
+    print_numbered_options("Train devices", labels)
+    picked = _prompt_input("Train device (--device, number/value): ", default=default_label).strip()
+    if not picked:
+        return by_label[default_label]
+    if picked in by_label:
+        return by_label[picked]
+    if picked.isdigit():
+        idx = int(picked)
+        if 1 <= idx <= len(options):
+            return options[idx - 1].value
+    for option in options:
+        if picked == option.value:
+            return option.value
+    print(f"[WARNING] Unknown device {picked!r}; fallback to default {by_label[default_label]!r}")
+    return by_label[default_label]
+
+
 def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
     info_path = layout.work_datasets_info_path()
     if not os.path.isfile(info_path):
@@ -473,6 +507,7 @@ def _installed_external_provider_ids() -> list[str]:
 
 
 def _installed_external_provider_records() -> list[dict[str, Any]]:
+    reconcile_stale_provider_paths()
     recs: list[dict[str, Any]] = []
     seen: set[str] = set()
     for rec in list_provider_records():
@@ -480,6 +515,10 @@ def _installed_external_provider_records() -> list[dict[str, Any]]:
             continue
         pid = str(rec.get("provider_id", "")).strip().lower()
         if not pid or pid in seen:
+            continue
+        repo_path = Path(str(rec.get("repo_path", "")).strip()).expanduser()
+        venv_path = Path(str(rec.get("venv_path", "")).strip()).expanduser()
+        if not repo_path.is_dir() or not venv_path.is_dir():
             continue
         seen.add(pid)
         recs.append(rec)
@@ -577,11 +616,55 @@ def _pick_model_interactive(options: list[str], default_alias: str) -> str:
         print(f"[ERROR] Incorrect selection: {raw!r}")
 
 
+def _extract_run_timestamp(run_name: str, run_dir: Path) -> datetime:
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2})", run_name)
+    if m:
+        try:
+            return datetime.strptime(f"{m.group(1)}_{m.group(2)}", "%Y-%m-%d_%H-%M")
+        except ValueError:
+            pass
+    return datetime.fromtimestamp(run_dir.stat().st_mtime)
+
+
+def _base_run_summary(args_yaml: Path) -> dict[str, str]:
+    summary = {
+        "provider": "unknown",
+        "model": "unknown",
+        "task": "unknown",
+        "batch": "?",
+        "epochs": "?",
+    }
+    try:
+        payload = _load_ultralytics_yaml(str(args_yaml))
+    except Exception:
+        return summary
+    provider = (
+        str(payload.get("external_provider") or "").strip().lower()
+        if isinstance(payload, dict)
+        else ""
+    )
+    summary["provider"] = provider or "ultralytics"
+    if isinstance(payload, dict):
+        model = str(payload.get("model") or "").strip()
+        task = str(payload.get("task") or "").strip().lower()
+        batch = payload.get("batch")
+        epochs = payload.get("epochs")
+        if model:
+            summary["model"] = Path(model).name
+        if task:
+            summary["task"] = task
+        if batch is not None and str(batch).strip():
+            summary["batch"] = str(batch)
+        if epochs is not None and str(epochs).strip():
+            summary["epochs"] = str(epochs)
+    return summary
+
+
 def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str) -> list[dict[str, str]]:
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     runs_root = Path(layout.runs)
     if not runs_root.is_dir():
-        return out
+        return []
     for ds_dir in sorted(runs_root.iterdir()):
         if not ds_dir.is_dir():
             continue
@@ -598,14 +681,34 @@ def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str)
                 args_path = args_root
             if args_path is None:
                 continue
+            if not run_dir.exists() or not args_path.exists():
+                continue
+            run_ts = _extract_run_timestamp(run_dir.name, run_dir)
+            run_rel = str(run_dir.relative_to(runs_root))
+            info = _base_run_summary(args_path)
             out.append(
                 {
                     "dataset": ds_name,
                     "run_dir": str(run_dir),
                     "args_yaml": str(args_path),
+                    "run_rel": run_rel,
+                    "provider": info["provider"],
+                    "model": info["model"],
+                    "task": info["task"],
+                    "batch": info["batch"],
+                    "epochs": info["epochs"],
+                    "_sort_ts": run_ts,
                 }
             )
-    out.sort(key=lambda x: (x["dataset"] != selected_dataset, x["dataset"], x["run_dir"]))
+    out.sort(
+        key=lambda x: (
+            x["dataset"] != selected_dataset,
+            x["_sort_ts"],
+            x["run_rel"],
+        )
+    )
+    for row in out:
+        row.pop("_sort_ts", None)
     return out
 
 
@@ -613,10 +716,20 @@ def _print_available_base_runs(selected_dataset: str, runs: list[dict[str, str]]
     if not runs:
         print("[INFO] No base runs found in runs/.")
         return
-    print("[INFO] Available base runs (top - for the selected dataset):")
+    print("[INFO] Available base runs (selected dataset first, oldest first):")
+    switched_to_other = False
     for i, r in enumerate(runs, start=1):
+        if not switched_to_other and r["dataset"] != selected_dataset:
+            print("      ---- other datasets ----")
+            switched_to_other = True
         mark = " [selected-dataset]" if r["dataset"] == selected_dataset else ""
-        print(f"  {i:>3}. {r['dataset']} :: {r['run_dir']}{mark}")
+        task_part = f" task:{r['task']}" if r.get("task", "unknown") not in ("", "detect", "unknown") else ""
+        print(
+            f"  {i:>3}. {r.get('run_rel', r['run_dir'])}{mark}"
+            f" | provider:{r.get('provider', 'unknown')}"
+            f" | model:{r.get('model', 'unknown')}"
+            f" | b={r.get('batch', '?')} e={r.get('epochs', '?')}{task_part}"
+        )
 
 
 def _prompt_base_run_args_yaml(runs: list[dict[str, str]], default_path: str | None = None) -> str | None:
@@ -655,7 +768,7 @@ def _run_interactive_train_setup(args) -> bool:
     from prompt_toolkit.completion import WordCompleter
 
     print("[INFO] Interactive train mode (Enter = default).")
-    installed_external = [r for r in list_provider_records() if str(r.get("install_state", "")) == "installed"]
+    installed_external = _installed_external_provider_records()
     if installed_external:
         print("[INFO] Installed external providers:")
         for rec in installed_external:
@@ -805,6 +918,9 @@ def _run_interactive_train_setup(args) -> bool:
             "Images Size (--img-size)",
             int(_get_interactive_default(args, "img_size", IMG_SIZE, baseline_u_cfg, "imgsz")),
         )
+    args.device = _prompt_train_device(
+        str(_get_interactive_default(args, "device", default_device_value(), baseline_u_cfg, "device"))
+    )
 
     default_target = str(getattr(args, "target_path", None) or layout.runs)
     args.target_path = (_prompt_input("Run directory (--target-path): ", default=default_target).strip()
@@ -1780,6 +1896,20 @@ def _maybe_free_cuda_memory() -> None:
         pass
 
 
+def _ensure_device_available_or_raise(device: str | None) -> None:
+    if not is_cuda_device(device):
+        return
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError(f"CUDA device requested ({device}), but torch is unavailable: {exc}") from exc
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            f"CUDA device requested ({device}), but torch.cuda.is_available()=False. "
+            f"torch={getattr(torch, '__version__', 'unknown')} cuda_runtime={getattr(torch.version, 'cuda', 'unknown')}"
+        )
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -1834,12 +1964,14 @@ def main(argv=None):
         batch=getattr(args, "batch", None),
         imgsz=getattr(args, "img_size", None),
         task=getattr(args, "task", None),
+        device=getattr(args, "device", None),
         defaults={
             "model": MODEL_VERSION,
             "epochs": EPOCHS,
             "batch": BATCH,
             "imgsz": IMG_SIZE,
             "task": "detect",
+            "device": default_device_value(),
         },
     )
     apply_cli_smartrain_overrides(sm_opts, args)
@@ -1857,6 +1989,7 @@ def main(argv=None):
 
     model_version = _normalize_model_spec(u_cfg.get("model", MODEL_VERSION), add_pt_when_missing=True)
     u_cfg["model"] = model_version
+    _ensure_device_available_or_raise(str(u_cfg.get("device")) if u_cfg.get("device") is not None else None)
     epochs = int(u_cfg.get("epochs", EPOCHS))
     batch = int(u_cfg.get("batch", BATCH))
     img_size = u_cfg.get("imgsz", IMG_SIZE)
