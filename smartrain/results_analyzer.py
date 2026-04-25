@@ -209,7 +209,26 @@ def _default_relative_output(
 
 
 def _resolve_data_yaml_for_run(run_dir: str, workspace_cli: str | None) -> tuple[str | None, str | None]:
+    candidates = _collect_data_yaml_candidates_for_run(run_dir, workspace_cli)
+    if candidates:
+        return candidates[0]
+    return None, None
+
+
+def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | None) -> list[tuple[str, str]]:
     rd = os.path.abspath(run_dir)
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _add(p: str | None, src: str) -> None:
+        if not p:
+            return
+        ap = os.path.abspath(p)
+        if ap in seen or not os.path.isfile(ap):
+            return
+        seen.add(ap)
+        out.append((ap, src))
+
     args_yaml = os.path.join(rd, "train", "args.yaml")
     if os.path.isfile(args_yaml):
         try:
@@ -218,15 +237,15 @@ def _resolve_data_yaml_for_run(run_dir: str, workspace_cli: str | None) -> tuple
             if isinstance(data_val, str) and data_val.strip():
                 p = os.path.expanduser(data_val.strip())
                 if os.path.isabs(p) and os.path.isfile(p):
-                    return os.path.abspath(p), "train/args.yaml:data"
+                    _add(p, "train/args.yaml:data")
                 p_run = os.path.abspath(os.path.join(rd, p))
                 if os.path.isfile(p_run):
-                    return p_run, "train/args.yaml:data(run-relative)"
+                    _add(p_run, "train/args.yaml:data(run-relative)")
                 try:
                     ws = resolve_workspace_root(workspace_cli)
                     p_ws = os.path.abspath(os.path.join(ws, p))
                     if os.path.isfile(p_ws):
-                        return p_ws, "train/args.yaml:data(workspace-relative)"
+                        _add(p_ws, "train/args.yaml:data(workspace-relative)")
                 except ValueError:
                     pass
         except Exception:
@@ -234,12 +253,12 @@ def _resolve_data_yaml_for_run(run_dir: str, workspace_cli: str | None) -> tuple
 
     runtime_yaml = os.path.join(rd, "_runtime_data_train.yaml")
     if os.path.isfile(runtime_yaml):
-        return runtime_yaml, "_runtime_data_train.yaml"
+        _add(runtime_yaml, "_runtime_data_train.yaml")
 
     try:
         md = load_metadata(rd)
     except Exception:
-        return None, None
+        return out
     ds = (md.get("training_info") or {}).get("dataset") or {}
     try:
         ws = resolve_workspace_root(workspace_cli)
@@ -256,30 +275,50 @@ def _resolve_data_yaml_for_run(run_dir: str, workspace_cli: str | None) -> tuple
         else:
             cand = os.path.join(rd, val, "data.yaml")
         if os.path.isfile(cand):
-            return os.path.abspath(cand), f"training_metadata.dataset.{key}"
+            _add(cand, f"training_metadata.dataset.{key}")
     name = ds.get("name")
     if isinstance(name, str) and name.strip():
         cand = os.path.join(ws, "datasets", name.strip(), "data.yaml")
         if os.path.isfile(cand):
-            return os.path.abspath(cand), "training_metadata.dataset.name -> workspace/datasets"
-    return None, None
+            _add(cand, "training_metadata.dataset.name -> workspace/datasets")
+    return out
+
+
+def _has_split_dir(data_yaml_path: str, split_name: str) -> bool:
+    try:
+        with open(data_yaml_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        if not isinstance(cfg, dict):
+            return False
+        split_rel = str(cfg.get(split_name, "")).strip()
+        if not split_rel:
+            return False
+        base_dir = os.path.dirname(os.path.abspath(data_yaml_path))
+        split_path = os.path.abspath(os.path.join(base_dir, split_rel))
+        return os.path.isdir(split_path)
+    except Exception:
+        return False
 
 
 def _auto_select_data_yaml(
     baseline: str,
     others: list[str],
     workspace_cli: str | None,
+    preferred_split: str | None = None,
 ) -> str | None:
     candidates: list[str] = []
     source_by_path: dict[str, str] = {}
     for rd in [baseline] + others:
-        p, src = _resolve_data_yaml_for_run(rd, workspace_cli)
-        if p and p not in candidates:
-            candidates.append(p)
-        if p and src:
+        for p, src in _collect_data_yaml_candidates_for_run(rd, workspace_cli):
+            if p not in candidates:
+                candidates.append(p)
             source_by_path[p] = src
     if not candidates:
         return None
+    if preferred_split:
+        viable = [p for p in candidates if _has_split_dir(p, preferred_split)]
+        if viable:
+            candidates = viable
     if len(candidates) == 1:
         src = source_by_path.get(candidates[0], "unknown")
         print(f"[INFO] Auto-detected data.yaml: {candidates[0]} (source: {src})")
@@ -821,7 +860,12 @@ def cmd_interactive(args: argparse.Namespace) -> None:
     if preset in ("speed", "full"):
         data_yaml = selected_data_yaml
         if not data_yaml:
-            data_yaml = _auto_select_data_yaml(baseline, others, args.workspace)
+            data_yaml = _auto_select_data_yaml(
+                baseline,
+                others,
+                args.workspace,
+                preferred_split=str(getattr(args, "benchmark_split", "test") or "test"),
+            )
             selected_data_yaml = data_yaml
         if not data_yaml:
             print("[WARN] Preset speed/full selected but --data-yaml is missing; speed benchmark skipped.")
@@ -2089,10 +2133,10 @@ def cmd_all(args: argparse.Namespace) -> None:
     baseline = str(getattr(args, "baseline", "") or "").strip()
     others = [str(x).strip() for x in (getattr(args, "others", []) or []) if str(x).strip()]
     profile = str(getattr(args, "profile", "") or "").strip().lower()
-    if not baseline or not others or profile not in {"quality", "speed", "full"}:
+    if not baseline or profile not in {"quality", "speed", "full"}:
         if not interactive_mode:
             print(
-                "[ERROR] Non-interactive `smartrain analyze all` requires --baseline, --others and --profile.",
+                "[ERROR] Non-interactive `smartrain analyze all` requires --baseline and --profile.",
                 file=sys.stderr,
             )
             sys.exit(2)
@@ -2100,12 +2144,27 @@ def cmd_all(args: argparse.Namespace) -> None:
         if len(indexed) < 2:
             print("[ERROR] Need at least two runs for full analysis.")
             sys.exit(1)
-        print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'run_dir'}")
+        runs_root = os.path.abspath(str(args.models_root))
+
+        def _display_run_dir(path: str) -> str:
+            ap = os.path.abspath(path)
+            try:
+                rel = os.path.relpath(ap, runs_root)
+                if not rel.startswith(".."):
+                    return rel
+            except Exception:
+                pass
+            return ap
+
+        print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'run_dir (relative to runs root)'}")
         print("-" * 120)
         for i, (rd, rec) in enumerate(indexed, start=1):
-            print(f"{i:4d}  {str(rec.model or '?')[:14]:<14}  {str(rec.dataset_name or '?')[:24]:<24}  {rd}")
+            print(
+                f"{i:4d}  {str(rec.model or '?')[:14]:<14}  "
+                + f"{str(rec.dataset_name or '?')[:24]:<24}  {_display_run_dir(rd)}"
+            )
         baseline_idx = prompt_int("Baseline run number", default=1)
-        others_raw = prompt_text("Other run numbers (comma-separated)", default="2").strip()
+        others_raw = prompt_text("Other run numbers (comma-separated)", default="").strip()
         try:
             others_idx = [int(x.strip()) for x in others_raw.split(",") if x.strip()]
         except ValueError:
@@ -2116,9 +2175,6 @@ def cmd_all(args: argparse.Namespace) -> None:
             sys.exit(1)
         baseline = indexed[baseline_idx - 1][0]
         others = [indexed[i - 1][0] for i in others_idx if 1 <= i <= len(indexed) and indexed[i - 1][0] != baseline]
-        if not others:
-            print("[ERROR] Need at least one candidate run.")
-            sys.exit(1)
         profile = prompt_choice("Profile", ["quality", "speed", "full"], default="full")
     report_languages_raw = str(getattr(args, "report_languages", "ru,en") or "ru,en")
     report_languages = [x.strip() for x in report_languages_raw.split(",") if x.strip()]
@@ -2127,7 +2183,7 @@ def cmd_all(args: argparse.Namespace) -> None:
     data_yaml = str(getattr(args, "data_yaml", "") or "").strip()
     if profile in ("speed", "full"):
         if not data_yaml:
-            auto_yaml = _auto_select_data_yaml(baseline, others, args.workspace)
+            auto_yaml = _auto_select_data_yaml(baseline, others, args.workspace, preferred_split="test")
             if auto_yaml:
                 data_yaml = auto_yaml
             elif interactive_mode:
@@ -2139,28 +2195,31 @@ def cmd_all(args: argparse.Namespace) -> None:
     artifacts: list[dict[str, str]] = []
     cache_events: list[dict[str, Any]] = []
 
-    compare_csv = os.path.join(session_root, "artifacts", "compare", "compare_delta.csv")
-    compare_png = os.path.join(session_root, "artifacts", "compare", "compare_curves.png")
-    compare_insights = os.path.join(session_root, "artifacts", "compare", "compare_insights.txt")
-    cmp_ns = argparse.Namespace(
-        baseline=baseline,
-        others=others,
-        out_csv=compare_csv,
-        out_png=compare_png,
-        out_insights=compare_insights,
-        metric_column=DEFAULT_MAP_COL,
-        workspace=args.workspace,
-        analytics_session=args.analytics_session,
-        models_root=args.models_root,
-    )
-    cmd_compare(cmp_ns)
-    artifacts.extend(
-        [
-            {"role": "compare_csv", "path": os.path.relpath(compare_csv, session_root)},
-            {"role": "compare_png", "path": os.path.relpath(compare_png, session_root)},
-            {"role": "compare_insights", "path": os.path.relpath(compare_insights, session_root)},
-        ]
-    )
+    if others:
+        compare_csv = os.path.join(session_root, "artifacts", "compare", "compare_delta.csv")
+        compare_png = os.path.join(session_root, "artifacts", "compare", "compare_curves.png")
+        compare_insights = os.path.join(session_root, "artifacts", "compare", "compare_insights.txt")
+        cmp_ns = argparse.Namespace(
+            baseline=baseline,
+            others=others,
+            out_csv=compare_csv,
+            out_png=compare_png,
+            out_insights=compare_insights,
+            metric_column=DEFAULT_MAP_COL,
+            workspace=args.workspace,
+            analytics_session=args.analytics_session,
+            models_root=args.models_root,
+        )
+        cmd_compare(cmp_ns)
+        artifacts.extend(
+            [
+                {"role": "compare_csv", "path": os.path.relpath(compare_csv, session_root)},
+                {"role": "compare_png", "path": os.path.relpath(compare_png, session_root)},
+                {"role": "compare_insights", "path": os.path.relpath(compare_insights, session_root)},
+            ]
+        )
+    else:
+        print("[INFO] No candidate runs selected: compare artifacts are skipped (single-run report mode).")
 
     exp_csv = os.path.join(session_root, "artifacts", "table", "runs_summary.csv")
     exp_ns = argparse.Namespace(

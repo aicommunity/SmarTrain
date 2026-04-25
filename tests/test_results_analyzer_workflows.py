@@ -509,6 +509,67 @@ def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
     assert recompute_calls["n"] >= 1
 
 
+def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
+
+    prompt_defaults: dict[str, str] = {}
+
+    def _fake_prompt_text(label: str, default: str = "", **_kwargs) -> str:
+        prompt_defaults[label] = default
+        if label == "Other run numbers (comma-separated)":
+            return ""
+        if label == "Path to data.yaml (required for speed/full)":
+            return str(tmp_path / "datasets" / "ds_a" / "data.yaml")
+        return default
+
+    answers = iter(["1", "full"])
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", _fake_prompt_text)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    analyze_main(
+        [
+            "all",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--analytics-session",
+            "session_single_run",
+            "--no-pdf",
+            "--no-odt",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert prompt_defaults.get("Other run numbers (comma-separated)") == ""
+    assert "run_dir (relative to runs root)" in out
+    first_row = next((line for line in out.splitlines() if line.strip().startswith("1  ")), "")
+    assert "ds_a/run_a" in first_row
+    assert "/runs/" not in first_row
+    assert "No candidate runs selected: compare artifacts are skipped" in out
+
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_single_run"
+    manifest = json.loads((session_root / "session.json").read_text(encoding="utf-8"))
+    assert manifest.get("others") == []
+    compare_roles = {a.get("role") for a in manifest.get("artifacts", []) if isinstance(a, dict)}
+    assert "compare_csv" not in compare_roles
+    assert "compare_png" not in compare_roles
+    assert "compare_insights" not in compare_roles
+    assert (session_root / "ru" / "index.md").is_file()
+    assert (session_root / "en" / "index.md").is_file()
+
+
 def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path) -> None:
     from smartrain.analyze_report import write_analysis_report
 
@@ -792,6 +853,44 @@ def test_runs_with_missing_metrics_skips_prompt_without_best_pt(
         split="test",
     )
     assert missing == []
+
+
+def test_auto_select_data_yaml_prefers_candidate_with_existing_split_dir(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    (run_dir / "train").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "datasets" / "ds_a" / "test" / "images").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "datasets" / "ds_a" / "data.yaml").write_text(
+        "path: .\ntrain: train/images\nval: val/images\ntest: test/images\n",
+        encoding="utf-8",
+    )
+
+    runtime_yaml = run_dir / "_runtime_data_train.yaml"
+    runtime_yaml.write_text(
+        "path: /home/user/MarsSmarTrain/runs\ntrain: train/images\nval: val/images\ntest: test/images\n",
+        encoding="utf-8",
+    )
+    # This points to runtime yaml first; fallback candidate should come from metadata.
+    (run_dir / "train" / "args.yaml").write_text(f"data: {runtime_yaml}\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps(
+            {
+                "training_info": {
+                    "dataset": {"name": "ds_a", "path_under_workspace": "datasets/ds_a"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    selected = results_analyzer._auto_select_data_yaml(
+        str(run_dir),
+        [],
+        str(tmp_path),
+        preferred_split="test",
+    )
+    assert selected == str(tmp_path / "datasets" / "ds_a" / "data.yaml")
 
 
 def test_test_metrics_plot_saves_unresolved_status_on_recompute_exception(

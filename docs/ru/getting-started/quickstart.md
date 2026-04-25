@@ -26,7 +26,7 @@ smartrain deploy
 ```
 
 3. **Добавьте источники датасета и выполните индексацию**
-   `scan` находит датасеты, нормализует метаданные и обновляет индекс.
+   `scan` распознаёт поддерживаемые layout-источники, нормализует метаданные и обновляет индекс.
 
 Режим запуска: только non-interactive.
 
@@ -38,8 +38,17 @@ smartrain scan
 smartrain scan --dataset /data/datasets/my_dataset
 ```
 
-Поддерживаемые структуры датасетов: `split`, `flat`, `subset_flat`, `nested_split`, `darknet`, `cvat11`.  
+Поддерживаемые layout-форматы датасетов:
+
+- YOLO split directories layout
+- YOLO flat paired directories layout
+- YOLO flat with subset subfolders
+- YOLO nested split under images/labels
+- Darknet YOLO dataset layout
+- CVAT for images 1.1 layout
+
 Поддерживаемые аннотации: YOLO bbox (`class_id cx cy w h`) и полигоны сегментации.
+Точное соответствие этим названиям и internal IDs SmarTrain, а также различия layout, см. в `docs/ru/reference/data-formats.md`.
 
 4. **Запустите обучение модели на выбранном датасете**
    В `runs/...` появится run с весами, метриками и `training_metadata.json`.

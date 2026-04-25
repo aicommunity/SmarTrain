@@ -111,7 +111,7 @@ sequenceDiagram
   participant Fusion as dataset_former.py
   User->>Scan: smartrain scan
   Scan->>Access: resolve source root
-  Access-->>Scan: structure cvat11 or zip
+  Access-->>Scan: internal structure ID cvat11 (CVAT for images 1.1) or zip
   User->>Fusion: smartrain fusion ...
   Fusion->>Access: iter image and label buckets
   Access->>CVAT: temporary labels from annotations.xml
@@ -121,4 +121,4 @@ sequenceDiagram
 
 Что показывает: как CVAT/zip-источники приводятся к единому потоку для merge.
 Как читать: временные метки генерируются на этапе доступа к данным, а не как отдельный обязательный импорт.
-Практический вывод: `cvat import` нужен не всегда, так как `fusion` умеет нативно работать с `cvat11`.
+Практический вывод: `cvat import` нужен не всегда, так как `fusion` умеет нативно работать с CVAT for images 1.1 (internal ID `cvat11`).

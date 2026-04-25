@@ -26,7 +26,7 @@ smartrain deploy
 ```
 
 3. **Add dataset sources and index them**
-   `scan` discovers datasets, normalizes metadata, and updates dataset index files.
+   `scan` discovers supported source layouts, normalizes metadata, and updates dataset index files.
 
 Launch mode: non-interactive.
 
@@ -38,8 +38,17 @@ smartrain scan
 smartrain scan --dataset /data/datasets/my_dataset
 ```
 
-Supported dataset structures: `split`, `flat`, `subset_flat`, `nested_split`, `darknet`, `cvat11`.  
+Supported dataset layouts:
+
+- YOLO split directories layout
+- YOLO flat paired directories layout
+- YOLO flat with subset subfolders
+- YOLO nested split under images/labels
+- Darknet YOLO dataset layout
+- CVAT for images 1.1 layout
+
 Supported annotations: YOLO bbox (`class_id cx cy w h`) and segmentation polygons.
+For precise mapping to SmarTrain internal IDs and layout differences, see `docs/reference/data-formats.md`.
 
 4. **Train model on selected dataset**
    Produces a run with weights, metrics, and `training_metadata.json` in `runs/...`.
