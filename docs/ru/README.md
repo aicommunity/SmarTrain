@@ -115,3 +115,98 @@ smartrain queue run --no-gui
 smartrain analyze scan
 smartrain analyze export-table -o runs_summary.csv
 ```
+
+## Длительные запуски по SSH (tmux)
+
+Для долгого обучения на удаленном сервере используйте `tmux`, чтобы процесс не прерывался при обрыве SSH-соединения.
+
+Установите `tmux` один раз (пример для Ubuntu/Debian):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y tmux
+```
+
+Минимальный сценарий:
+
+```bash
+tmux new -s smartrain-train
+smartrain train --data my_dataset --model yolo11n.pt --device 0
+```
+
+- Отсоединиться от сессии без остановки обучения: `Ctrl+B`, затем `D`
+- Подключиться снова после переподключения по SSH: `tmux attach -t smartrain-train`
+- Остановить обучение в активной сессии: `Ctrl+C`
+- Удалить ненужную сессию: `tmux kill-session -t smartrain-train`
+
+Также можно использовать вспомогательные скрипты из `scripts/`:
+
+```bash
+./scripts/tmux_train_start.sh --session smartrain-train -- smartrain train --data my_dataset --model yolo11n.pt --device 0
+./scripts/tmux_train_attach.sh --session smartrain-train
+./scripts/tmux_train_stop.sh --session smartrain-train
+```
+
+Опционально: лог в файл с сохранением live-вывода в консоли:
+
+```bash
+./scripts/tmux_train_start.sh --session smartrain-train -- bash -lc 'smartrain train --data my_dataset --model yolo11n.pt --device 0 2>&1 | tee -a runs/train.log'
+```
+
+### Операционные рецепты
+
+Проверить активные tmux-сессии:
+
+```bash
+tmux ls
+```
+
+Проверить, что процесс обучения в сессии еще жив:
+
+```bash
+tmux list-panes -t smartrain-train -F '#{pane_current_command} #{pane_pid}'
+```
+
+Вернуть live-вывод после переподключения:
+
+```bash
+tmux attach -t smartrain-train
+```
+
+Если сессия уже attach в другом месте, принудительно переподключиться:
+
+```bash
+tmux attach -d -t smartrain-train
+```
+
+Корректная остановка и очистка:
+
+```bash
+./scripts/tmux_train_stop.sh --session smartrain-train
+tmux kill-session -t smartrain-train
+```
+
+### FAQ (tmux по SSH)
+
+**Сессия есть, но нового вывода не видно. Что проверить в первую очередь?**
+- Переподключиться с принудительным detach: `tmux attach -d -t smartrain-train`
+- Проверить текущую команду в pane: `tmux list-panes -t smartrain-train -F '#{pane_current_command} #{pane_pid}'`
+- Если запускали обучение с `tee`, посмотреть лог (например, `runs/train.log`).
+
+**SSH оборвался. Обучение остановилось?**
+- Обычно нет, если запуск был внутри `tmux`.
+- Подключитесь снова и выполните: `tmux ls`, затем `tmux attach -t smartrain-train`.
+
+**Ctrl+C не останавливает запуск из текущей оболочки.**
+- Сначала убедитесь, что вы attach к нужной `tmux`-сессии/окну.
+- Либо отправьте прерывание явно: `./scripts/tmux_train_stop.sh --session smartrain-train`.
+
+**Как быстро найти логи последнего запуска?**
+- Пример:
+  - `ls -lt runs | head`
+  - `tail -n 200 runs/train.log` (если использовали `tee -a runs/train.log`)
+
+**Как почистить старые tmux-сессии?**
+- Список сессий: `tmux ls`
+- Удалить одну: `tmux kill-session -t <session>`
+- Удалить все сессии tmux-сервера (осторожно): `tmux kill-server`

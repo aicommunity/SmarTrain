@@ -127,6 +127,101 @@ smartrain train --data my_dataset --model yolo11n.pt --device 0
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
 ```
 
+## Running long jobs over SSH (tmux)
+
+For long training runs on a remote server, use `tmux` so the job survives SSH disconnects.
+
+Install `tmux` once (Ubuntu/Debian example):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y tmux
+```
+
+Minimal workflow:
+
+```bash
+tmux new -s smartrain-train
+smartrain train --data my_dataset --model yolo11n.pt --device 0
+```
+
+- Detach without stopping the training: `Ctrl+B`, then `D`
+- Re-attach after reconnecting: `tmux attach -t smartrain-train`
+- Stop training gracefully from attached session: `Ctrl+C`
+- Close an unused session: `tmux kill-session -t smartrain-train`
+
+You can also use helper scripts from `scripts/`:
+
+```bash
+./scripts/tmux_train_start.sh --session smartrain-train -- smartrain train --data my_dataset --model yolo11n.pt --device 0
+./scripts/tmux_train_attach.sh --session smartrain-train
+./scripts/tmux_train_stop.sh --session smartrain-train
+```
+
+Optional: keep a file log while preserving live console output:
+
+```bash
+./scripts/tmux_train_start.sh --session smartrain-train -- bash -lc 'smartrain train --data my_dataset --model yolo11n.pt --device 0 2>&1 | tee -a runs/train.log'
+```
+
+### Operations quick recipes
+
+Check active tmux sessions:
+
+```bash
+tmux ls
+```
+
+See whether training process is still alive in session:
+
+```bash
+tmux list-panes -t smartrain-train -F '#{pane_current_command} #{pane_pid}'
+```
+
+Recover live console output after reconnect:
+
+```bash
+tmux attach -t smartrain-train
+```
+
+If already attached elsewhere, force re-attach:
+
+```bash
+tmux attach -d -t smartrain-train
+```
+
+Graceful stop and cleanup:
+
+```bash
+./scripts/tmux_train_stop.sh --session smartrain-train
+tmux kill-session -t smartrain-train
+```
+
+### FAQ (tmux over SSH)
+
+**Session exists, but no new output appears. What to check first?**
+- Re-attach with force detach: `tmux attach -d -t smartrain-train`
+- Check current pane command: `tmux list-panes -t smartrain-train -F '#{pane_current_command} #{pane_pid}'`
+- If your training wrote logs via `tee`, inspect the log file (for example `runs/train.log`).
+
+**I accidentally closed SSH. Did training stop?**
+- Usually no, if it was started inside `tmux`.
+- Reconnect and run: `tmux ls`, then `tmux attach -t smartrain-train`.
+
+**Ctrl+C does not stop the run from my current shell.**
+- Ensure you are attached to the right `tmux` session/window first.
+- Or send interrupt explicitly: `./scripts/tmux_train_stop.sh --session smartrain-train`.
+
+**How to quickly find the latest training logs?**
+- Example pattern:
+  - `ls -lt runs | head`
+  - `tail -n 200 runs/train.log` (if you used `tee -a runs/train.log`)
+
+**How to clean up stale tmux sessions?**
+- List sessions: `tmux ls`
+- Remove one: `tmux kill-session -t <session>`
+- Remove all server sessions (careful): `tmux kill-server`
+
 ## Developers
 
 - [@palexab](https://github.com/palexab)
