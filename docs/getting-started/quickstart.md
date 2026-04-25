@@ -2,40 +2,94 @@
 
 # Quick start
 
-Below is a minimal working scenario from initialization to the first analysis of runs.
+This guide assumes `smartrain` is already installed and you run commands from the workspace root.
 
-## Basic scenario
+## Main path: train on your dataset and build reports
+
+1. **Create a workspace directory (if it does not exist yet)**
+   `deploy` should be run from inside this workspace directory.
+
+Launch mode: non-interactive.
+
+```bash
+mkdir -p /path/to/my_workspace
+cd /path/to/my_workspace
+```
+
+2. **Initialize workspace layout once**
+   Creates standard folders: `raw_data/`, `datasets/`, `runs/`, `analytics/`, etc.
+
+Launch mode: non-interactive.
 
 ```bash
 smartrain deploy
+```
+
+3. **Add dataset sources and index them**
+   `scan` discovers datasets, normalizes metadata, and updates dataset index files.
+
+Launch mode: non-interactive.
+
+```bash
+# Option A: sources already in workspace/raw_data/
 smartrain scan
-smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
-smartrain train --data 2026-01-01_12-00-00-merged -y
-smartrain analyze scan
+
+# Option B: pass explicit source paths
+smartrain scan --dataset /data/datasets/my_dataset
 ```
 
-## Pipeline diagram
+Supported dataset structures: `split`, `flat`, `subset_flat`, `nested_split`, `darknet`, `cvat11`.  
+Supported annotations: YOLO bbox (`class_id cx cy w h`) and segmentation polygons.
 
-```mermaid
-flowchart LR
-    deployStep["deploy"] --> scanStep["scan"]
-    scanStep --> fusionStep["fusion"]
-    fusionStep --> trainStep["train"]
-    trainStep --> analyzeStep["analyze scan/export-table/compare"]
+4. **Train model on selected dataset**
+   Produces a run with weights, metrics, and `training_metadata.json` in `runs/...`.
+
+Launch modes:
+
+- Interactive (no args): `smartrain train`
+- Non-interactive (minimal args):
+
+```bash
+smartrain train --data my_dataset --model yolo11n.pt -y
 ```
 
-## What is important to remember
+5. **Build dataset report**
+   Generates visual/text report for dataset quality and class coverage.
 
-- `scan` synchronizes sources and updates `datasets/datasets_info.json`.
-- `fusion` creates the final dataset, usually in `datasets/<name>`.
-- To exclude classes in `fusion`, use `--exclude-classes`, for example: `smartrain fusion --dataset ds_a --dataset ds_b --exclude-classes "background,trash" --output-name ds_filtered`.
-- `train` uses `--data` as the name of the set of `datasets_info.json` or the path to the directory with `data.yaml`.
-- `analyze` additionally supports `pr-curves`, `inference-benchmark`, `inference-plot`, `test-metrics-plot`.
-- If the command runs from the workspace root, no extra global flags are required.
+Launch modes:
 
-## Next step
+- Interactive (no args): `smartrain report dataset`
+- Non-interactive (minimal args):
 
-After the basic scenario, go to:
+```bash
+smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
+```
 
-- `docs/cli/overview.md` — complete tree of CLI commands;
-- `docs/development/architecture.md` - diagrams and flow diagrams.
+6. **Build run analysis report**
+   Builds final analytical report artifacts for runs.
+
+Launch modes:
+
+- Interactive (no args): `smartrain analyze`
+- Non-interactive (minimal args):
+
+```bash
+smartrain analyze all --report-languages en,ru
+```
+
+`smartrain analyze scan` is optional and can be used as a separate pre-check, but it is not required before `smartrain analyze`/`smartrain analyze all`.
+
+## Optional steps
+
+- **Compare different training runs**
+  Launch mode: non-interactive.
+  ```bash
+  smartrain analyze compare --baseline /path/to/run_a --others /path/to/run_b /path/to/run_c
+  ```
+- **Dataset operations before training** (when needed): `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`.
+
+## Where outputs are saved
+
+- Dataset reports: `analytics/datasets-reports/<dataset>_<timestamp>/`
+- Analyze sessions: `analytics/analyze-reports/<session>/`
+- Training runs: `runs/<dataset>/<run>/`

@@ -1,0 +1,864 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+import smartrain.results_analyzer as results_analyzer
+from smartrain.results_analyzer import main as analyze_main
+
+
+def _write_run(
+    root: Path,
+    dataset: str,
+    run_name: str,
+    *,
+    model: str,
+    map5095: float,
+    box_f1: float,
+    train_ok: bool = True,
+    test_ok: bool = True,
+) -> Path:
+    run_dir = root / "runs" / dataset / run_name
+    (run_dir / "train").mkdir(parents=True, exist_ok=True)
+    md = {
+        "training_info": {"model": model, "dataset": {"name": dataset}, "hyperparameters": {"epochs": 2}},
+        "status": {"training": {"success": train_ok}, "testing": {"success": test_ok}},
+        "timestamps": {"training": {"duration_seconds": 12.0}},
+    }
+    (run_dir / "training_metadata.json").write_text(json.dumps(md), encoding="utf-8")
+    pd.DataFrame([{"mAP50-95": map5095, "Box-F1": box_f1, "avg_inference_fps": 45.0 + map5095 * 10}]).to_csv(
+        run_dir / "test_metrics.csv", index=False
+    )
+    pd.DataFrame(
+        [
+            {"epoch": 0, "metrics/mAP50-95(B)": map5095 - 0.1},
+            {"epoch": 1, "metrics/mAP50-95(B)": map5095},
+        ]
+    ).to_csv(run_dir / "train" / "results.csv", index=False)
+    return run_dir
+
+
+def _run_interactive(
+    tmp_path: Path,
+    *,
+    output_dir: Path | None = None,
+    preset: str = "quality",
+    data_yaml: str | None = None,
+    quality_metrics: str = "mAP50-95,Box-F1",
+    **extra: object,
+) -> None:
+    ns = argparse.Namespace(
+        models_root=str(tmp_path / "runs"),
+        output_dir=str(output_dir) if output_dir is not None else None,
+        metric_column="metrics/mAP50-95(B)",
+        workspace=str(tmp_path),
+        analytics_session=None,
+        preset=preset,
+        quality_metrics=quality_metrics,
+        data_yaml=data_yaml,
+        benchmark_split="test",
+        benchmark_frames=100,
+        benchmark_device="cpu",
+        benchmark_half=False,
+        speed_metric="avg_inference_ms_per_frame",
+        recompute_missing_metrics=True,
+        recompute_split="test",
+        filter_dataset=None,
+        filter_model=None,
+        filter_training_ok=None,
+        filter_testing_ok=None,
+    )
+    for k, v in extra.items():
+        setattr(ns, k, v)
+    results_analyzer.cmd_interactive(ns)
+
+
+def test_compare_writes_insights_and_delta(tmp_path: Path) -> None:
+    baseline = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    other = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    out_csv = tmp_path / "cmp.csv"
+    out_png = tmp_path / "cmp.png"
+    out_insights = tmp_path / "cmp_insights.txt"
+    analyze_main(
+        [
+            "compare",
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--baseline",
+            str(baseline),
+            "--others",
+            str(other),
+            "--out-csv",
+            str(out_csv),
+            "--out-png",
+            str(out_png),
+            "--out-insights",
+            str(out_insights),
+        ]
+    )
+    assert out_csv.is_file()
+    assert out_insights.is_file()
+    text = out_insights.read_text(encoding="utf-8")
+    assert "Baseline:" in text
+    assert "better:" in text or "worse:" in text
+
+
+def test_leaderboard_builds_composite_score(tmp_path: Path) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.62, box_f1=0.70)
+    out_csv = tmp_path / "leaderboard.csv"
+    analyze_main(
+        [
+            "leaderboard",
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--out-csv",
+            str(out_csv),
+            "--quality-metric",
+            "mAP50-95",
+            "--speed-metric",
+            "avg_inference_fps",
+        ]
+    )
+    assert out_csv.is_file()
+    df = pd.read_csv(out_csv)
+    assert "composite_score" in df.columns
+    assert len(df) == 2
+    assert float(df.iloc[0]["composite_score"]) >= float(df.iloc[1]["composite_score"])
+
+
+def test_interactive_quality_preset_end_to_end(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    out_dir = tmp_path / "out"
+    _run_interactive(tmp_path, output_dir=out_dir, preset="quality", quality_metrics="mAP50-95,Box-F1")
+
+    assert (out_dir / "compare_run_a.csv").is_file()
+    assert (out_dir / "compare_run_a.png").is_file()
+    assert (out_dir / "compare_run_a_insights.txt").is_file()
+
+    charts = sorted(out_dir.glob("test_metrics_*_*.png"))
+    assert charts, "quality preset should generate test metrics charts"
+
+
+def test_interactive_speed_preset_calls_benchmark_and_plot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    calls: list[str] = []
+
+    def _fake_benchmark(args):
+        calls.append("benchmark")
+        Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame([{"model": "run_a", "avg_inference_ms_per_frame": 10.0}]).to_csv(
+            args.out_csv, index=False
+        )
+
+    def _fake_plot(args):
+        calls.append("plot")
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fakepng")
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
+
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    out_dir = tmp_path / "out"
+    _run_interactive(
+        tmp_path,
+        output_dir=out_dir,
+        preset="speed",
+        data_yaml=str(tmp_path / "datasets" / "ds_a" / "data.yaml"),
+    )
+
+    assert "benchmark" in calls
+    assert "plot" in calls
+    assert any(p.name.startswith("inference_") and p.suffix == ".csv" for p in out_dir.iterdir())
+    assert any(p.name.startswith("inference_") and p.suffix == ".png" for p in out_dir.iterdir())
+
+
+def test_interactive_full_preset_calls_quality_speed_and_pr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    calls: list[str] = []
+
+    def _fake_benchmark(args):
+        calls.append("benchmark")
+        Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame([{"model": "run_a", "avg_inference_ms_per_frame": 10.0}]).to_csv(
+            args.out_csv, index=False
+        )
+
+    def _fake_plot(args):
+        calls.append("plot")
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fakepng")
+
+    def _fake_pr(args):
+        calls.append("pr")
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fakepng")
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
+
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    out_dir = tmp_path / "out"
+    _run_interactive(
+        tmp_path,
+        output_dir=out_dir,
+        preset="full",
+        data_yaml=str(tmp_path / "datasets" / "ds_a" / "data.yaml"),
+        quality_metrics="mAP50-95,Box-F1",
+    )
+
+    assert set(calls) >= {"benchmark", "plot", "pr"}
+    assert (out_dir / "compare_run_a_insights.txt").is_file()
+    assert sorted(out_dir.glob("test_metrics_*_*.png")), "full preset should include quality charts"
+
+
+def test_interactive_speed_without_data_yaml_skips_speed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    out_dir = tmp_path / "out"
+    _run_interactive(tmp_path, output_dir=out_dir, preset="speed")
+
+    out = capsys.readouterr().out
+    assert "speed/full selected but --data-yaml is missing" in out
+    assert (out_dir / "compare_run_a.csv").is_file()
+
+
+def test_interactive_filters_reduce_visible_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_b", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    _write_run(tmp_path, "ds_a", "run_c", model="yolo11n.pt", map5095=0.50, box_f1=0.60, test_ok=False)
+
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    out_dir = tmp_path / "out"
+    _run_interactive(
+        tmp_path,
+        output_dir=out_dir,
+        preset="quality",
+        quality_metrics="mAP50-95,Box-F1",
+        filter_dataset="ds_a",
+        filter_model="yolo11n.pt",
+    )
+
+    assert (out_dir / "compare_run_a.csv").is_file()
+
+
+def test_interactive_filters_can_leave_single_run_and_fail_cleanly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_c", model="yolo11n.pt", map5095=0.50, box_f1=0.60, test_ok=False)
+
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_interactive(
+            tmp_path,
+            preset="quality",
+            filter_dataset="ds_a",
+            filter_model="yolo11n.pt",
+            filter_testing_ok=True,
+        )
+    assert exc_info.value.code == 1
+
+
+def test_interactive_default_output_goes_to_analytics_metrics_comparison(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    _run_interactive(
+        tmp_path,
+        preset="quality",
+        quality_metrics="mAP50-95,Box-F1",
+    )
+
+    roots = sorted((tmp_path / "analytics" / "analyze-reports").glob("analyze_*"))
+    assert roots
+    out_dir = roots[-1] / "artifacts" / "compare"
+    assert (out_dir / "compare_run_a.csv").is_file()
+    assert (out_dir / "compare_run_a.png").is_file()
+    assert (out_dir / "compare_run_a_insights.txt").is_file()
+
+
+def test_compare_without_required_flags_runs_interactive_in_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    analyze_main(
+        [
+            "compare",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+        ]
+    )
+
+    roots = sorted((tmp_path / "analytics" / "analyze-reports").glob("analyze_*"))
+    assert roots
+    out_dir = roots[-1] / "artifacts" / "compare"
+    assert (out_dir / "compare_run_a.csv").is_file()
+    assert (out_dir / "compare_run_a_insights.txt").is_file()
+
+
+def test_test_metrics_plot_skips_single_bar_comparison(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
+
+    analyze_main(
+        [
+            "test-metrics-plot",
+            "--workspace",
+            str(tmp_path),
+            "--runs-group-dir",
+            str(tmp_path / "runs" / "ds_a"),
+            "--metrics",
+            "mAP50-95",
+            "--out-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+    captured = capsys.readouterr()
+    out = (captured.out or "") + (captured.err or "")
+    assert "only one run with numeric value" in out
+    assert not list((tmp_path / "out").glob("*.png"))
+
+
+def test_analyze_all_creates_session_manifest_and_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    calls: list[str] = []
+
+    def _fake_benchmark(args):
+        calls.append("benchmark")
+        Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame([{"model": "run_a", "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False)
+
+    def _fake_plot(args):
+        calls.append("plot")
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fakepng")
+
+    def _fake_pr(args):
+        calls.append("pr")
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fakepng")
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
+
+    answers = iter(
+        [
+            "1",  # baseline
+            "2",  # others
+            "full",  # profile
+            str(tmp_path / "datasets" / "ds_a" / "data.yaml"),  # data yaml
+        ]
+    )
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    analyze_main(
+        [
+            "all",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--analytics-session",
+            "session_x",
+            "--no-pdf",
+            "--no-odt",
+        ]
+    )
+
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_x"
+    assert (session_root / "session.json").is_file()
+    assert (session_root / "ru" / "index.md").is_file()
+    assert (session_root / "en" / "index.md").is_file()
+    manifest = json.loads((session_root / "session.json").read_text(encoding="utf-8"))
+    assert manifest.get("profile") == "full"
+    assert "artifacts" in manifest
+    assert "metric_sources" in manifest
+    assert "tables" in manifest
+    assert "images" in manifest
+    assert (session_root / "artifacts" / "metrics" / "metric_sources.json").is_file()
+    assert (session_root / "artifacts" / "table" / "system_profile_compare.csv").is_file()
+    assert "artifacts/table/system_profile_compare.csv" in manifest.get("tables", [])
+    assert set(calls) >= {"benchmark", "plot", "pr"}
+
+
+def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    pd.DataFrame([{"mAP50-95": 0.56}]).to_csv(run_b / "test_metrics.csv", index=False)
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
+
+    recompute_calls = {"n": 0}
+    orig_cmd_tm = results_analyzer.cmd_test_metrics_plot
+
+    def _wrapped_cmd_tm(args):
+        if getattr(args, "recompute_missing_metrics", False):
+            recompute_calls["n"] += 1
+        return orig_cmd_tm(args)
+
+    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", _wrapped_cmd_tm)
+
+    answers = iter(
+        [
+            "1",  # baseline
+            "2",  # others
+            "full",  # profile
+            str(tmp_path / "datasets" / "ds_a" / "data.yaml"),  # data yaml
+        ]
+    )
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    analyze_main(
+        [
+            "all",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--analytics-session",
+            "session_auto_recompute",
+            "--no-pdf",
+            "--no-odt",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "Found missing metrics. Recompute from best.pt + detected data.yaml?" not in out
+    assert recompute_calls["n"] >= 1
+
+
+def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path) -> None:
+    from smartrain.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "speed_quality").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "artifacts" / "compare").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"model": "a", "scatter_x_value": 10.0, "scatter_y_value": 0.61}]).to_csv(
+        tmp_path / "artifacts" / "speed_quality" / "speed_quality.csv",
+        index=False,
+    )
+    (tmp_path / "artifacts" / "compare" / "compare_curves.png").write_bytes(b"fakepng")
+
+    manifest = {
+        "session_name": "s1",
+        "profile": "full",
+        "baseline": "run_a",
+        "others": ["run_b"],
+        "tables": ["artifacts/speed_quality/speed_quality.csv"],
+        "images": ["artifacts/compare/compare_curves.png"],
+        "artifacts": [{"role": "compare_png", "path": "artifacts/compare/compare_curves.png"}],
+        "speed_quality": {"csv": "artifacts/speed_quality/speed_quality.csv"},
+        "abbreviations": {"a": "M1"},
+    }
+    out = write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    assert "md_ru" in out and "md_en" in out
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    en_md = (tmp_path / "en" / "index.md").read_text(encoding="utf-8")
+    assert "![](../artifacts/compare/compare_curves.png)" in ru_md
+    assert "Executive Summary" in en_md
+    assert "Conclusions and Actions" in en_md
+    assert "Table 1." in en_md
+    assert "Рисунок 1." in ru_md
+
+
+def test_interactive_full_auto_detects_data_yaml_from_runtime_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    runtime_yaml = run_a / "_runtime_data_train.yaml"
+    runtime_yaml.write_text("path: datasets/ds_a\ntrain: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+
+    calls: list[str] = []
+
+    def _fake_benchmark(args):
+        calls.append("benchmark")
+        assert str(args.data_yaml).endswith("_runtime_data_train.yaml")
+        Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame([{"model": "run_a", "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False)
+
+    def _fake_plot(args):
+        calls.append("plot")
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fakepng")
+
+    def _fake_pr(args):
+        calls.append("pr")
+        assert str(args.data_yaml).endswith("_runtime_data_train.yaml")
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fakepng")
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    out_dir = tmp_path / "out"
+    _run_interactive(
+        tmp_path,
+        output_dir=out_dir,
+        preset="full",
+        quality_metrics="mAP50-95,Box-F1",
+    )
+    assert set(calls) >= {"benchmark", "plot", "pr"}
+
+
+def test_auto_detect_prints_data_yaml_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    runtime_yaml = run_a / "_runtime_data_train.yaml"
+    runtime_yaml.write_text("path: datasets/ds_a\ntrain: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
+
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    _run_interactive(
+        tmp_path,
+        output_dir=(tmp_path / "out"),
+        preset="full",
+        quality_metrics="mAP50-95,Box-F1",
+    )
+    out = capsys.readouterr().out
+    assert "Auto-detected data.yaml:" in out
+    assert "source:" in out
+
+
+def test_auto_detect_multiple_candidates_prints_single_list(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_b", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    (run_a / "_runtime_data_train.yaml").write_text(
+        "path: datasets/ds_a\ntrain: train/images\nval: val/images\ntest: test/images\n",
+        encoding="utf-8",
+    )
+    (run_b / "_runtime_data_train.yaml").write_text(
+        "path: datasets/ds_b\ntrain: train/images\nval: val/images\ntest: test/images\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
+    monkeypatch.setattr(
+        "smartrain.results_analyzer.prompt_choice",
+        lambda _label, options, default=None, **_kw: default or options[0],
+    )
+
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    _run_interactive(
+        tmp_path,
+        output_dir=(tmp_path / "out"),
+        preset="full",
+        quality_metrics="mAP50-95,Box-F1",
+    )
+    out = capsys.readouterr().out
+    assert "Multiple data.yaml candidates detected:" in out
+    assert "Options for Select data.yaml" not in out
+
+
+def test_test_metrics_plot_recomputes_missing_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_a = tmp_path / "runs" / "ds_a" / "run_a"
+    run_b = tmp_path / "runs" / "ds_a" / "run_b"
+    run_a.mkdir(parents=True, exist_ok=True)
+    run_b.mkdir(parents=True, exist_ok=True)
+    (run_a / "training_metadata.json").write_text(
+        json.dumps(
+            {
+                "training_info": {
+                    "dataset": {"name": "ds_a"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_b / "training_metadata.json").write_text(
+        json.dumps(
+            {
+                "training_info": {
+                    "dataset": {"name": "ds_a"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
+    ((tmp_path / "datasets" / "ds_a") / "data.yaml").write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+    (run_a / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_b / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_a / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    (run_b / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_a / "test_metrics.csv", index=False)
+    pd.DataFrame([{"mAP50-95": 0.60, "Box-F1": 0.92}]).to_csv(run_b / "test_metrics.csv", index=False)
+
+    monkeypatch.setattr(
+        results_analyzer,
+        "_recompute_run_test_metrics",
+        lambda *_a, **_k: {"mAP50-95": 0.55, "Box-F1": 0.91},
+    )
+    analyze_main(
+        [
+            "test-metrics-plot",
+            "--workspace",
+            str(tmp_path),
+            "--runs-group-dir",
+            str(tmp_path / "runs" / "ds_a"),
+            "--metrics",
+            "mAP50-95",
+            "Box-F1",
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--recompute-missing-metrics",
+        ]
+    )
+    assert list((tmp_path / "out").glob("*.png"))
+
+
+def test_runs_with_missing_metrics_uses_run_resolved_yaml_for_unresolved_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
+
+    run_yaml = str(tmp_path / "datasets" / "ds_a" / "data.yaml")
+    session_yaml = str(tmp_path / "datasets" / "other" / "data.yaml")
+
+    monkeypatch.setattr(
+        results_analyzer,
+        "_resolve_data_yaml_for_run",
+        lambda *_a, **_k: (run_yaml, "mock"),
+    )
+
+    def _fake_load_status(_run_dir: str, data_yaml: str, _split: str, _metrics: list[str]):
+        assert data_yaml == run_yaml
+        return {"unresolved_metrics": ["Box-F1"]}
+
+    monkeypatch.setattr(results_analyzer, "_load_recompute_status", _fake_load_status)
+
+    missing = results_analyzer._runs_with_missing_metrics(
+        [str(run_dir)],
+        ["mAP50-95", "Box-F1"],
+        data_yaml=session_yaml,
+        workspace=str(tmp_path),
+        split="test",
+    )
+    assert missing == []
+
+
+def test_runs_with_missing_metrics_skips_prompt_without_resolved_data_yaml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
+
+    monkeypatch.setattr(
+        results_analyzer,
+        "_resolve_data_yaml_for_run",
+        lambda *_a, **_k: ("", "none"),
+    )
+    monkeypatch.setattr(results_analyzer, "_load_recompute_status", lambda *_a, **_k: None)
+
+    missing = results_analyzer._runs_with_missing_metrics(
+        [str(run_dir)],
+        ["mAP50-95", "Box-F1"],
+        data_yaml=None,
+        workspace=str(tmp_path),
+        split="test",
+    )
+    assert missing == []
+
+
+def test_runs_with_missing_metrics_skips_prompt_without_best_pt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
+    run_yaml = str(tmp_path / "datasets" / "ds_a" / "data.yaml")
+
+    monkeypatch.setattr(
+        results_analyzer,
+        "_resolve_data_yaml_for_run",
+        lambda *_a, **_k: (run_yaml, "mock"),
+    )
+    monkeypatch.setattr(results_analyzer, "_load_recompute_status", lambda *_a, **_k: None)
+
+    missing = results_analyzer._runs_with_missing_metrics(
+        [str(run_dir)],
+        ["mAP50-95", "Box-F1"],
+        data_yaml=run_yaml,
+        workspace=str(tmp_path),
+        split="test",
+    )
+    assert missing == []
+
+
+def test_test_metrics_plot_saves_unresolved_status_on_recompute_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"name": "ds_a"}}}),
+        encoding="utf-8",
+    )
+    pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
+    (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
+    ((tmp_path / "datasets" / "ds_a") / "data.yaml").write_text(
+        "train: train/images\nval: val/images\ntest: test/images\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        results_analyzer,
+        "_recompute_run_test_metrics",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    saved: list[dict[str, object]] = []
+
+    def _fake_save_status(
+        run_dir: str,
+        data_yaml: str,
+        split: str,
+        requested_metrics: list[str],
+        *,
+        resolved: list[str],
+        unresolved: list[str],
+        status: str,
+    ) -> None:
+        saved.append(
+            {
+                "run_dir": run_dir,
+                "data_yaml": data_yaml,
+                "split": split,
+                "requested_metrics": list(requested_metrics),
+                "resolved": list(resolved),
+                "unresolved": list(unresolved),
+                "status": status,
+            }
+        )
+
+    monkeypatch.setattr(results_analyzer, "_save_recompute_status", _fake_save_status)
+
+    analyze_main(
+        [
+            "test-metrics-plot",
+            "--workspace",
+            str(tmp_path),
+            "--runs-group-dir",
+            str(tmp_path / "runs" / "ds_a"),
+            "--metrics",
+            "mAP50-95",
+            "Box-F1",
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--recompute-missing-metrics",
+        ]
+    )
+    assert saved
+    assert any(item.get("status") == "error" and "Box-F1" in item.get("unresolved", []) for item in saved)
+

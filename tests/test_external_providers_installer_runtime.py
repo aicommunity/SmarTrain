@@ -31,6 +31,7 @@ def test_install_provider_succeeds_with_runtime_warning(monkeypatch, tmp_path: P
             (repo_dir / "requirements.txt").write_text("ultralytics\n", encoding="utf-8")
 
     monkeypatch.setattr(installer, "_run", _fake_run)
+    monkeypatch.setattr(installer, "_probe_torch_state", lambda *_a, **_k: {"installed": False, "cuda": "", "version": ""})
 
     class _FakeBuilder:
         def __init__(self, with_pip: bool):
@@ -93,6 +94,7 @@ def test_install_provider_auto_fetches_dcnv4_for_mfel(monkeypatch, tmp_path: Pat
             (dcn_dir / "setup.py").write_text("from setuptools import setup\nsetup(name='dcnv4')\n", encoding="utf-8")
 
     monkeypatch.setattr(installer, "_run", _fake_run)
+    monkeypatch.setattr(installer, "_probe_torch_state", lambda *_a, **_k: {"installed": False, "cuda": "", "version": ""})
 
     class _FakeBuilder:
         def __init__(self, with_pip: bool):
@@ -112,3 +114,52 @@ def test_install_provider_auto_fetches_dcnv4_for_mfel(monkeypatch, tmp_path: Pat
     res = installer.install_provider("mfel-yolo", str(tmp_path))
     assert res.ok is True
     assert any("OpenGVLab/DCNv4.git" in " ".join(cmd) for cmd in calls)
+
+
+def test_sync_torch_policy_installs_cu128_when_torch_absent(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(installer, "_probe_torch_state", lambda *_a, **_k: {"installed": False, "cuda": "", "version": ""})
+    monkeypatch.setattr(installer, "_run", lambda cmd, **_k: calls.append(list(cmd)))
+
+    action, message = installer._sync_torch_cuda_policy("python", cwd="/tmp")
+
+    assert action == "installed"
+    assert "cu128" in message
+    assert calls
+    cmd = calls[0]
+    assert cmd[:5] == ["python", "-m", "pip", "install", "--index-url"]
+    assert installer.TORCH_CUDA_DEFAULT_INDEX_URL in cmd
+    assert "torch" in cmd
+    assert "torchvision" in cmd
+    assert "torchaudio" in cmd
+
+
+def test_sync_torch_policy_skips_when_cuda13_already_installed(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        installer,
+        "_probe_torch_state",
+        lambda *_a, **_k: {"installed": True, "cuda": "13.0", "version": "2.8.0+cu130"},
+    )
+    monkeypatch.setattr(installer, "_run", lambda cmd, **_k: calls.append(list(cmd)))
+
+    action, message = installer._sync_torch_cuda_policy("python", cwd="/tmp")
+
+    assert action == "skipped"
+    assert "13.0" in message
+    assert calls == []
+
+
+def test_sync_torch_policy_reinstalls_when_non_cuda13_torch_present(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        installer,
+        "_probe_torch_state",
+        lambda *_a, **_k: {"installed": True, "cuda": "12.4", "version": "2.6.0+cu124"},
+    )
+    monkeypatch.setattr(installer, "_run", lambda cmd, **_k: calls.append(list(cmd)))
+
+    action, _ = installer._sync_torch_cuda_policy("python", cwd="/tmp")
+
+    assert action == "installed"
+    assert len(calls) == 1

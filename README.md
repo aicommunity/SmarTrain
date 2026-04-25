@@ -87,6 +87,10 @@ pytest
   - `--device 0` to force GPU 0
   - `--device cpu` to force CPU
   - If `--device` is omitted, default is `GPU 0` when CUDA is available, otherwise `cpu`
+- PyTorch CUDA policy:
+  - default target is CUDA 12.8 wheels (`cu128`)
+  - if current environment already has `torch` with CUDA `13.x`, `smartrain` keeps it and does not downgrade
+  - to apply policy in the current environment: `smartrain deps sync-torch`
 - Dependency extras:
   - `pip install -e ".[dev]"` for development and testing
   - `pip install -e ".[clearml]"` for ClearML

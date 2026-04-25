@@ -20,6 +20,14 @@ smartrain providers uninstall --provider dr-yolo -y
 - `status`: текущее состояние индекса (`installed`/`not_installed`) и пути репозиториев.
 - `doctor`: проверки готовности (репозиторий, entrypoints, venv, runtime-зависимости).
 
+## Политика Torch/CUDA при установке провайдеров
+
+`smartrain providers install` применяет политику torch внутри каждого venv провайдера:
+
+- целевой дефолт — PyTorch CUDA 12.8 (`cu128`);
+- если в venv уже стоит `torch` с CUDA runtime `13.x`, шаг установки torch пропускается (без downgrade);
+- политика проверяется до и после установки зависимостей провайдера, чтобы итоговое окружение соответствовало дефолту.
+
 ## Алиасы моделей провайдера в `train`/`inference`
 
 Используйте префиксный формат:

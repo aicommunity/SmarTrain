@@ -2,40 +2,94 @@
 
 # Быстрый старт
 
-Ниже приведён минимальный рабочий сценарий от инициализации до первого анализа запусков.
+Это руководство предполагает, что `smartrain` уже установлен, а команды запускаются из корня workspace.
 
-## Базовый сценарий
+## Основной путь: обучение на датасете и формирование отчетов
+
+1. **Создайте рабочую папку (если её ещё нет)**
+   `deploy` нужно запускать уже изнутри этой рабочей папки.
+
+Режим запуска: только non-interactive.
+
+```bash
+mkdir -p /path/to/my_workspace
+cd /path/to/my_workspace
+```
+
+2. **Один раз инициализируйте структуру workspace**
+   Команда создаёт стандартные директории: `raw_data/`, `datasets/`, `runs/`, `analytics/` и др.
+
+Режим запуска: только non-interactive.
 
 ```bash
 smartrain deploy
+```
+
+3. **Добавьте источники датасета и выполните индексацию**
+   `scan` находит датасеты, нормализует метаданные и обновляет индекс.
+
+Режим запуска: только non-interactive.
+
+```bash
+# Вариант A: источники уже лежат в workspace/raw_data/
 smartrain scan
-smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
-smartrain train --data 2026-01-01_12-00-00-merged -y
-smartrain analyze scan
+
+# Вариант B: передайте явный путь к источнику
+smartrain scan --dataset /data/datasets/my_dataset
 ```
 
-## Схема конвейера
+Поддерживаемые структуры датасетов: `split`, `flat`, `subset_flat`, `nested_split`, `darknet`, `cvat11`.  
+Поддерживаемые аннотации: YOLO bbox (`class_id cx cy w h`) и полигоны сегментации.
 
-```mermaid
-flowchart LR
-    deployStep["deploy"] --> scanStep["scan"]
-    scanStep --> fusionStep["fusion"]
-    fusionStep --> trainStep["train"]
-    trainStep --> analyzeStep["analyze scan/export-table/compare"]
+4. **Запустите обучение модели на выбранном датасете**
+   В `runs/...` появится run с весами, метриками и `training_metadata.json`.
+
+Режимы запуска:
+
+- Interactive (без аргументов): `smartrain train`
+- Non-interactive (минимальные аргументы):
+
+```bash
+smartrain train --data my_dataset --model yolo11n.pt -y
 ```
 
-## Что важно помнить
+5. **Сформируйте отчет по датасету**
+   Команда создаёт визуальный/текстовый отчёт по качеству и покрытию классов.
 
-- `scan` синхронизирует источники и обновляет `datasets/datasets_info.json`.
-- `fusion` создаёт итоговый датасет, обычно в `datasets/<name>`.
-- Для исключения классов в `fusion` можно использовать `--exclude-classes`, например: `smartrain fusion --dataset ds_a --dataset ds_b --exclude-classes "background,trash" --output-name ds_filtered`.
-- `train` использует `--data` как имя набора из `datasets_info.json` или путь к каталогу с `data.yaml`.
-- `analyze` дополнительно поддерживает `pr-curves`, `inference-benchmark`, `inference-plot`, `test-metrics-plot`.
-- При запуске из корня workspace дополнительные глобальные флаги не требуются.
+Режимы запуска:
 
-## Следующий шаг
+- Interactive (без аргументов): `smartrain report dataset`
+- Non-interactive (минимальные аргументы):
 
-После базового сценария переходите в:
+```bash
+smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
+```
 
-- `docs/cli/overview.md` — полное дерево CLI-команд;
-- `docs/development/architecture.md` — схемы и диаграммы потоков.
+6. **Сформируйте аналитический отчет по запускам**
+   Команда формирует итоговые аналитические артефакты по запускам.
+
+Режимы запуска:
+
+- Interactive (без аргументов): `smartrain analyze`
+- Non-interactive (минимальные аргументы):
+
+```bash
+smartrain analyze all --report-languages en,ru
+```
+
+`smartrain analyze scan` опционален как отдельная предварительная проверка, но не обязателен перед `smartrain analyze`/`smartrain analyze all`.
+
+## Опциональные шаги
+
+- **Сравнение разных запусков**
+  Режим запуска: non-interactive.
+  ```bash
+  smartrain analyze compare --baseline /path/to/run_a --others /path/to/run_b /path/to/run_c
+  ```
+- **Работа с датасетами перед обучением** (при необходимости): `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`.
+
+## Куда сохраняются результаты
+
+- Отчеты по датасету: `analytics/datasets-reports/<dataset>_<timestamp>/`
+- Сессии анализа: `analytics/analyze-reports/<session>/`
+- Обучающие запуски: `runs/<dataset>/<run>/`
