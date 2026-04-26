@@ -21,6 +21,7 @@ def _patch_train_prompts(monkeypatch: pytest.MonkeyPatch, answers: Iterator[str]
 
     monkeypatch.setattr(cli_prompts, "prompt", _one)
     monkeypatch.setattr(mtm, "_prompt_input", _one)
+    monkeypatch.setattr(mtm, "_prompt_train_device", lambda default=None: str(default or "cpu"))
 
 
 def _base_args(workspace: Path) -> argparse.Namespace:
@@ -34,6 +35,7 @@ def _base_args(workspace: Path) -> argparse.Namespace:
         epochs=mtm.EPOCHS,
         batch=mtm.BATCH,
         img_size=mtm.IMG_SIZE,
+        device=None,
         target_path=None,
         model_dir=None,
         test_only=False,
@@ -242,7 +244,7 @@ def test_train_interactive_skips_prompts_for_values_from_ultralytics_yaml(
     assert args.clearml_project == "ProjA"
 
 
-def test_collect_available_base_runs_prioritizes_selected_dataset(tmp_path: Path) -> None:
+def test_collect_available_base_runs_sorted_historically(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     (tmp_path / "runs" / "ds_a" / "run1" / "train").mkdir(parents=True, exist_ok=True)
     (tmp_path / "runs" / "ds_a" / "run1" / "train" / "args.yaml").write_text("epochs: 5\n", encoding="utf-8")
@@ -250,8 +252,8 @@ def test_collect_available_base_runs_prioritizes_selected_dataset(tmp_path: Path
     (tmp_path / "runs" / "ds_b" / "run2" / "train" / "args.yaml").write_text("epochs: 7\n", encoding="utf-8")
     runs = mtm._collect_available_base_runs(mtm.WorkspaceLayout(str(tmp_path)), "ds_b")
     assert len(runs) == 2
-    assert runs[0]["dataset"] == "ds_b"
-    assert runs[1]["dataset"] == "ds_a"
+    assert runs[0]["run_rel"] == "ds_b/run2"
+    assert runs[1]["run_rel"] == "ds_a/run1"
 
 
 def test_train_interactive_uses_selected_base_run_defaults(
@@ -304,6 +306,32 @@ def test_train_interactive_uses_selected_base_run_defaults(
     assert args.epochs == 42
     assert args.batch == 6
     assert args.img_size == 960
+
+
+def test_print_available_base_runs_compact_oldest_first(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deploy_workspace(str(tmp_path))
+    layout = mtm.WorkspaceLayout(str(tmp_path))
+    run_old = tmp_path / "runs" / "ds_a" / "2026-04-01_10-00_old"
+    run_new = tmp_path / "runs" / "ds_b" / "2026-04-02_10-00_new"
+    (run_old / "train").mkdir(parents=True, exist_ok=True)
+    (run_new / "train").mkdir(parents=True, exist_ok=True)
+    (run_old / "train" / "args.yaml").write_text(
+        "external_provider: dr-yolo\nmodel: yolov8n.pt\nepochs: 3\nbatch: 2\ntask: detect\n",
+        encoding="utf-8",
+    )
+    (run_new / "train" / "args.yaml").write_text(
+        "model: yolo11s.pt\nepochs: 9\nbatch: 4\ntask: segment\n",
+        encoding="utf-8",
+    )
+    runs = mtm._collect_available_base_runs(layout, "ds_a")
+    mtm._print_available_base_runs("ds_a", runs)
+    out = capsys.readouterr().out
+    assert "Available base runs (selected dataset first, oldest first)" in out
+    assert "1. ds_a/2026-04-01_10-00_old [selected-dataset] | provider:dr-yolo | model:yolov8n.pt | b=2 e=3" in out
+    assert "---- other datasets ----" in out
+    assert "2. ds_b/2026-04-02_10-00_new | provider:ultralytics | model:yolo11s.pt | b=4 e=9 task:segment" in out
 
 
 def test_train_interactive_model_manual_entry(
@@ -391,6 +419,9 @@ def test_train_interactive_selects_external_provider_from_prefixed_alias(
         encoding="utf-8",
     )
     args = _base_args(tmp_path)
+    repo_path = tmp_path / "providers" / "dr-yolo"
+    venv_path = repo_path / "venv"
+    venv_path.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
         mtm,
@@ -399,7 +430,8 @@ def test_train_interactive_selects_external_provider_from_prefixed_alias(
             {
                 "provider_id": "dr-yolo",
                 "install_state": "installed",
-                "repo_path": "/tmp/dr-yolo",
+                "repo_path": str(repo_path),
+                "venv_path": str(venv_path),
             }
         ],
     )

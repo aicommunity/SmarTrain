@@ -20,6 +20,14 @@ Subcommands:
 - `status`: show index state (`installed`/`not_installed`) and repo paths.
 - `doctor`: run readiness checks (repo, entrypoints, venv, runtime imports).
 
+## Torch/CUDA policy during provider install
+
+`smartrain providers install` applies torch policy inside each provider venv:
+
+- default target is PyTorch CUDA 12.8 (`cu128`);
+- if provider venv already has `torch` with CUDA runtime `13.x`, install step is skipped (no downgrade);
+- policy is checked before and after provider requirements install to keep resulting env aligned with defaults.
+
 ## Provider model aliases in `train`/`inference`
 
 Use provider-prefixed model references:

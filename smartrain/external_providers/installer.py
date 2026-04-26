@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import venv
 import zipfile
 from dataclasses import dataclass
@@ -20,6 +21,10 @@ class InstallResult:
     action: str
     ok: bool
     message: str
+
+
+TORCH_CUDA_DEFAULT_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+TORCH_CUDA_PACKAGES = ("torch", "torchvision", "torchaudio")
 
 
 def providers_root(target_dir: str | None) -> Path:
@@ -57,11 +62,13 @@ def install_provider(provider_id: str, target_dir: str | None = None, *, allow_p
             env_action = "venv-existing"
 
         py = _venv_python(venv_dir)
+        _sync_torch_cuda_policy(py, cwd=str(effective_repo_dir))
         req = effective_repo_dir / (spec.requirements_entry or "")
         if req.is_file():
             _run([py, "-m", "pip", "install", "-r", str(req)], cwd=str(effective_repo_dir))
         else:
             _run([py, "-m", "pip", "install", "ultralytics"], cwd=str(effective_repo_dir))
+        _sync_torch_cuda_policy(py, cwd=str(effective_repo_dir))
         _install_provider_runtime_deps(spec.id, effective_repo_dir, py)
 
         probe = probe_provider_repo(str(effective_repo_dir), spec, str(venv_dir))
@@ -122,10 +129,79 @@ def _venv_python(venv_dir: Path) -> str:
     return str(venv_dir / "bin" / "python")
 
 
+def sync_torch_cuda_policy_current_env(*, cwd: str | None = None) -> tuple[str, str]:
+    run_cwd = cwd or os.getcwd()
+    return _sync_torch_cuda_policy(sys.executable, cwd=run_cwd)
+
+
 def _run(cmd: list[str], *, cwd: str, timeout_sec: int | None = None) -> None:
     proc = subprocess.run(cmd, cwd=cwd, timeout=timeout_sec)
     if proc.returncode != 0:
         raise RuntimeError(f"Command failed ({proc.returncode}): {' '.join(cmd)}")
+
+
+def _sync_torch_cuda_policy(python_bin: str, *, cwd: str) -> tuple[str, str]:
+    if str(os.environ.get("SMART_TRAIN_SKIP_TORCH_POLICY", "")).strip() == "1":
+        return ("skipped", "torch policy explicitly disabled by SMART_TRAIN_SKIP_TORCH_POLICY=1")
+    state = _probe_torch_state(python_bin, cwd=cwd)
+    cuda_runtime = (state.get("cuda") or "").strip()
+    if _is_cuda13_runtime(cuda_runtime):
+        return ("skipped", f"existing torch CUDA runtime is {cuda_runtime}; keeping installed version")
+    _run(
+        [
+            python_bin,
+            "-m",
+            "pip",
+            "install",
+            "--index-url",
+            TORCH_CUDA_DEFAULT_INDEX_URL,
+            *TORCH_CUDA_PACKAGES,
+        ],
+        cwd=cwd,
+    )
+    reason = "torch not installed" if not bool(state.get("installed")) else f"torch cuda runtime is {cuda_runtime or 'none'}"
+    return ("installed", f"applied torch policy ({reason}) -> cu128")
+
+
+def _probe_torch_state(python_bin: str, *, cwd: str) -> dict[str, str | bool]:
+    snippet = (
+        "import json\n"
+        "try:\n"
+        "    import torch\n"
+        "except Exception:\n"
+        "    print(json.dumps({'installed': False, 'cuda': '', 'version': ''}))\n"
+        "else:\n"
+        "    print(json.dumps({'installed': True, 'cuda': str(getattr(torch.version, 'cuda', '') or ''), "
+        "'version': str(getattr(torch, '__version__', '') or '')}))\n"
+    )
+    proc = subprocess.run(
+        [python_bin, "-c", snippet],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    if proc.returncode != 0:
+        return {"installed": False, "cuda": "", "version": ""}
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        return {"installed": False, "cuda": "", "version": ""}
+    import json
+
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {"installed": False, "cuda": "", "version": ""}
+    return {
+        "installed": bool(parsed.get("installed")),
+        "cuda": str(parsed.get("cuda", "") or ""),
+        "version": str(parsed.get("version", "") or ""),
+    }
+
+
+def _is_cuda13_runtime(cuda_runtime: str) -> bool:
+    token = str(cuda_runtime or "").strip()
+    return token.startswith("13.")
 
 
 def _install_provider_runtime_deps(provider_id: str, repo_dir: Path, python_bin: str) -> None:

@@ -2,7 +2,7 @@
 
 # CLI: CVAT
 
-`smartrain cvat` provides conversion between CVAT 1.1 and YOLO.
+`smartrain cvat` provides conversion between CVAT for images 1.1 and YOLO.
 
 ## Commands
 
@@ -11,4 +11,5 @@ smartrain cvat import --cvat-zip /path/to/export.zip --output-dir /path/to/yolo_
 smartrain cvat export --dataset-dir /path/to/yolo_dataset --zip-path /path/to/out.cvat11.zip
 ```
 
-Also, `fusion` can work with `structure="cvat11"` directly through the temporary generation of YOLO tags.
+Also, `fusion` can work directly with CVAT for images 1.1 sources via temporary YOLO label generation.
+In SmarTrain metadata this format is represented by internal structure ID `cvat11`.

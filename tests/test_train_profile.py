@@ -32,6 +32,7 @@ def test_merge_cli_yaml_precedence_partial_cli():
         batch=8,
         imgsz=None,
         task=None,
+        device=None,
         defaults={"model": "yolov8n", "epochs": 50, "batch": 16, "imgsz": 640, "task": "detect"},
     )
     assert u["epochs"] == 300
@@ -50,6 +51,7 @@ def test_merge_cli_overrides_all_defaults():
         batch=2,
         imgsz=320,
         task="segment",
+        device="0",
         defaults={"model": "yolov8n", "epochs": 50, "batch": 16, "imgsz": 640, "task": "detect"},
     )
     assert u == {
@@ -58,6 +60,7 @@ def test_merge_cli_overrides_all_defaults():
         "batch": 2,
         "imgsz": 320,
         "task": "segment",
+        "device": "0",
     }
 
 
@@ -81,6 +84,7 @@ def test_merge_sources_priority_cli_over_ultralytics_yaml_over_config():
         batch=getattr(args, "batch", None),
         imgsz=getattr(args, "img_size", None),
         task=getattr(args, "task", None),
+        device=getattr(args, "device", None),
         defaults={"model": "yolov8n", "epochs": 50, "batch": 16, "imgsz": 640, "task": "detect"},
     )
     assert u_cfg["model"] == "ultra.pt"
@@ -126,3 +130,18 @@ def test_finalize_train_kwargs_forces_dataset_and_run_paths():
     assert out["name"] == "train"
     assert out["exist_ok"] is False
     assert out["epochs"] == 2
+
+
+def test_merge_cli_sets_default_device_when_missing():
+    u: dict = {}
+    merge_cli_into_ultralytics_cfg(
+        u,
+        model=None,
+        epochs=None,
+        batch=None,
+        imgsz=None,
+        task=None,
+        device=None,
+        defaults={"model": "yolov8n", "epochs": 50, "batch": 16, "imgsz": 640, "task": "detect", "device": "0"},
+    )
+    assert u["device"] == "0"

@@ -69,6 +69,7 @@ def merge_cli_into_ultralytics_cfg(
     batch: int | None,
     imgsz: int | None,
     task: str | None,
+    device: str | None,
     defaults: dict[str, Any],
 ) -> None:
     """
@@ -95,6 +96,10 @@ def merge_cli_into_ultralytics_cfg(
         u_cfg["task"] = task
     elif "task" not in u_cfg:
         u_cfg["task"] = defaults.get("task", "detect")
+    if device is not None:
+        u_cfg["device"] = device
+    elif "device" not in u_cfg and "device" in defaults:
+        u_cfg["device"] = defaults["device"]
 
 
 def apply_cli_smartrain_overrides(opts: dict[str, Any], args: Any) -> None:

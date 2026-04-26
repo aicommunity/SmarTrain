@@ -14,6 +14,7 @@ from typing import Annotated, Callable, Optional
 
 import typer
 from rich.console import Console
+from rich.markdown import Markdown
 
 from smartrain.interactive_contract import INTERACTIVE_ALLOWED_ENV
 from smartrain.train_backend_registry import default_train_provider
@@ -29,13 +30,38 @@ app = typer.Typer(
 )
 console = Console()
 
+
+def _print_en_quick_start() -> None:
+    """Print formatted EN quick start in terminal."""
+    quickstart_path = Path(__file__).resolve().parent.parent / "docs" / "getting-started" / "quickstart.md"
+    fallback = (
+        "# Quick start\n\n"
+        "Run from workspace root:\n\n"
+        "```bash\n"
+        "smartrain deploy\n"
+        "smartrain scan\n"
+        "smartrain train --data my_dataset --model yolo11n.pt -y\n"
+        "smartrain report dataset --dataset my_dataset -n 6 --languages en,ru\n"
+        "smartrain analyze scan\n"
+        "smartrain analyze all --report-languages en,ru\n"
+        "```\n"
+    )
+    try:
+        text = quickstart_path.read_text(encoding="utf-8")
+    except OSError:
+        text = fallback
+    console.print(Markdown(text))
+
 HELP_ANALYZE_GROUP = """Analyze training runs: summary tables, comparisons, PR curves, and inference speed.
 
 Quick start:
+  smartrain analyze
+  smartrain analyze all
   smartrain analyze scan
   smartrain analyze export-table -o runs_summary.csv
-  smartrain analyze compare --run-dir runs/ds_a/2026-01-01_00-00-00 --run-dir runs/ds_a/2026-01-02_00-00-00
+  smartrain analyze compare --baseline runs/ds_a/2026-01-01_00-00-00 --others runs/ds_a/2026-01-02_00-00-00
   smartrain analyze inference-benchmark --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml
+  smartrain analyze leaderboard -o analytics/leaderboard.csv
 
 Common patterns:
   summary CSV: analyze export-table
@@ -75,6 +101,12 @@ Quick examples:
   smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
   smartrain model convert --input models/my_model.onnx --format tensorrt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00
+"""
+
+HELP_DEPS_GROUP = """Dependency management helpers.
+
+Quick examples:
+  smartrain deps sync-torch
 """
 
 ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
@@ -851,10 +883,52 @@ app.add_typer(
 )
 
 
+deps_app = typer.Typer(
+    invoke_without_command=True,
+    help=HELP_DEPS_GROUP,
+)
+
+
+@deps_app.command("sync-torch")
+def cmd_deps_sync_torch() -> None:
+    """Apply default torch policy: prefer CUDA 12.8, keep existing CUDA 13.x."""
+    from smartrain.external_providers.installer import sync_torch_cuda_policy_current_env
+
+    action, message = sync_torch_cuda_policy_current_env()
+    prefix = "[SKIPPED]" if action == "skipped" else "[UPDATED]"
+    typer.echo(f"{prefix} {message}")
+
+
+def _deps_group_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo("Usage: smartrain deps [OPTIONS] COMMAND [ARGS]...")
+        typer.echo("")
+        typer.echo(HELP_DEPS_GROUP)
+        raise typer.Exit(0)
+
+
+app.add_typer(
+    deps_app,
+    name="deps",
+    invoke_without_command=True,
+    callback=_deps_group_callback,
+)
+
+
 analyze_app = typer.Typer(
     help=HELP_ANALYZE_GROUP,
     invoke_without_command=True,
 )
+
+
+@analyze_app.command(
+    "all",
+    short_help="Interactive full analysis orchestrator.",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def cmd_analyze_all(ctx: typer.Context) -> None:
+    """Run end-to-end analysis session and build report artifacts."""
+    _invoke_module_main("smartrain.results_analyzer", ["all", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -898,27 +972,11 @@ def cmd_analyze_compare(ctx: typer.Context) -> None:
     """Compare selected runs and generate comparison artifacts.
 
     Examples:
-      smartrain analyze compare --run-dir runs/ds/2026-01-01_00-00-00 --run-dir runs/ds/2026-01-02_00-00-00
-      smartrain analyze compare --run-dir runs/ds/2026-01-01_00-00-00 -o compare.csv --out-png compare.png
-      smartrain analyze compare --workspace /data/MarsSmarTrain --run-dir runs/ds/2026-01-01_00-00-00 --run-dir runs/ds/2026-01-02_00-00-00
+      smartrain analyze compare --baseline runs/ds/2026-01-01_00-00-00 --others runs/ds/2026-01-02_00-00-00
+      smartrain analyze compare --baseline runs/ds/2026-01-01_00-00-00 --others runs/ds/2026-01-02_00-00-00 -o compare.csv --out-png compare.png
+      smartrain analyze compare --workspace /data/MarsSmarTrain --baseline runs/ds/2026-01-01_00-00-00 --others runs/ds/2026-01-02_00-00-00
     """
     _invoke_module_main("smartrain.results_analyzer", ["compare", *list(ctx.args)])
-
-
-@analyze_app.command(
-    "interactive",
-    short_help="Interactive run picker and comparison.",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-)
-def cmd_analyze_interactive(ctx: typer.Context) -> None:
-    """Run interactive chooser and compare selected runs.
-
-    Examples:
-      smartrain analyze interactive
-      smartrain analyze interactive --output-dir analytics/compare
-      smartrain analyze interactive --metric-column metrics/mAP50(B)
-    """
-    _invoke_module_main("smartrain.results_analyzer", ["interactive", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -978,14 +1036,33 @@ def cmd_analyze_test_metrics_plot(ctx: typer.Context) -> None:
     _invoke_module_main("smartrain.results_analyzer", ["test-metrics-plot", *list(ctx.args)])
 
 
+@analyze_app.command(
+    "leaderboard",
+    short_help="Rank runs by composite score.",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def cmd_analyze_leaderboard(ctx: typer.Context) -> None:
+    """Build leaderboard CSV from run metrics.
+
+    Examples:
+      smartrain analyze leaderboard -o analytics/leaderboard.csv
+      smartrain analyze leaderboard --quality-metric mAP50-95 --speed-metric avg_inference_fps
+      smartrain analyze leaderboard --weight-quality 0.7 --weight-speed 0.2 --weight-stability 0.1
+    """
+    _invoke_module_main("smartrain.results_analyzer", ["leaderboard", *list(ctx.args)])
+
+
 def _analyze_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        from smartrain.results_analyzer import build_analyze_arg_parser
-
-        p = build_analyze_arg_parser()
-        p.prog = "smartrain analyze"
-        p.print_help()
-        raise typer.Exit(0)
+        if sys.stdin.isatty():
+            with _interactive_flag_env(True):
+                _invoke_module_main("smartrain.results_analyzer", ["all"])
+            raise typer.Exit(0)
+        console.print(
+            "[red][ERROR][/red] `smartrain analyze` без подкоманды требует интерактивный терминал (TTY). "
+            "Используйте явную подкоманду, например `smartrain analyze scan`."
+        )
+        raise typer.Exit(2)
 
 
 app.add_typer(
@@ -1076,8 +1153,8 @@ def cmd_plot(ctx: typer.Context) -> None:
 
     Examples:
       smartrain plot scan
-      smartrain plot compare --run-dir runs/ds/2026-01-01_00-00-00 --run-dir runs/ds/2026-01-02_00-00-00
-      smartrain analyze compare --run-dir runs/ds/2026-01-01_00-00-00 --run-dir runs/ds/2026-01-02_00-00-00
+      smartrain plot compare --baseline runs/ds/2026-01-01_00-00-00 --others runs/ds/2026-01-02_00-00-00
+      smartrain analyze compare --baseline runs/ds/2026-01-01_00-00-00 --others runs/ds/2026-01-02_00-00-00
 
     Notes:
       - Prefer `smartrain analyze ...` for new workflows.
@@ -1244,7 +1321,7 @@ def cmd_orient(ctx: typer.Context) -> None:
 
 def main() -> None:
     if len(sys.argv) == 1:
-        app(["--help"])
+        _print_en_quick_start()
         return
     app()
 

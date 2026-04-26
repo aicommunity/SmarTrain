@@ -127,6 +127,46 @@ def list_provider_records() -> list[dict[str, Any]]:
     return records
 
 
+def _is_existing_dir(path_value: Any) -> bool:
+    path = str(path_value or "").strip()
+    return bool(path) and Path(path).expanduser().is_dir()
+
+
+def reconcile_stale_provider_paths() -> dict[str, int]:
+    """
+    Mark installed provider records as stale when repo/venv paths disappear.
+    Returns counters for observability.
+    """
+    payload = read_index()
+    providers = list(payload.get("providers", []))
+    total = 0
+    updated = 0
+    for rec in providers:
+        if not isinstance(rec, dict):
+            continue
+        total += 1
+        state = str(rec.get("install_state", "")).strip().lower()
+        if state != "installed":
+            continue
+        repo_ok = _is_existing_dir(rec.get("repo_path"))
+        venv_ok = _is_existing_dir(rec.get("venv_path"))
+        if repo_ok and venv_ok:
+            continue
+        rec["install_state"] = "stale"
+        rec["last_validated_at"] = _utc_now()
+        reason_parts: list[str] = []
+        if not repo_ok:
+            reason_parts.append("missing repo_path")
+        if not venv_ok:
+            reason_parts.append("missing venv_path")
+        rec["last_error"] = ", ".join(reason_parts) or "missing provider paths"
+        updated += 1
+    if updated > 0:
+        payload["providers"] = providers
+        write_index(payload)
+    return {"total": total, "stale_marked": updated}
+
+
 @dataclass(frozen=True)
 class ProviderLocation:
     provider_id: str

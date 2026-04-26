@@ -2,8 +2,10 @@ import copy
 import json
 import os
 import argparse
+import platform
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import traceback
@@ -22,9 +24,12 @@ from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.train_resume import (
     RUN_STATUS_RESUMABLE_INCOMPLETE,
+    RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
     RunDiagnosis,
+    resolve_dataset_path_for_resume,
     list_incomplete_runs,
     resume_training_in_run,
+    update_resume_test_metadata,
     update_resume_metadata,
 )
 from smartrain.train_profile import (
@@ -36,12 +41,17 @@ from smartrain.train_profile import (
     resolve_profile_data_path,
     task_to_metadata_task_type,
 )
+from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
 from smartrain.train_model_catalog import (
     TrainModelCatalog,
     is_supported_external_provider_model,
 )
 from smartrain.train_model_resolver import TrainModelResolver
-from smartrain.provider_global_index import get_provider_location, list_provider_records
+from smartrain.provider_global_index import (
+    get_provider_location,
+    list_provider_records,
+    reconcile_stale_provider_paths,
+)
 from smartrain.external_providers.runner import run_external_infer, run_external_train
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.external_providers.registry import list_provider_specs
@@ -79,6 +89,207 @@ _ULTRALYTICS_YAML_IGNORED_KEYS = frozenset(
     }
 )
 _MANUAL_MODEL_ENTRY = "<manual>"
+
+
+def _bytes_to_gb(value: int | float | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        return round(float(value) / (1024.0**3), 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _linux_cpu_model_name() -> str | None:
+    cpuinfo = "/proc/cpuinfo"
+    if not os.path.isfile(cpuinfo):
+        return None
+    try:
+        with open(cpuinfo, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.lower().startswith("model name"):
+                    parts = line.split(":", 1)
+                    if len(parts) == 2:
+                        value = parts[1].strip()
+                        if value:
+                            return value
+    except Exception:
+        return None
+    return None
+
+
+def _linux_physical_core_count() -> int | None:
+    cpuinfo = "/proc/cpuinfo"
+    if not os.path.isfile(cpuinfo):
+        return None
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    try:
+        with open(cpuinfo, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line:
+                    if current:
+                        entries.append(current)
+                        current = {}
+                    continue
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                current[key.strip().lower()] = value.strip()
+        if current:
+            entries.append(current)
+    except Exception:
+        return None
+    cores: set[tuple[str, str]] = set()
+    for item in entries:
+        physical = item.get("physical id")
+        core = item.get("core id")
+        if physical is None or core is None:
+            continue
+        cores.add((physical, core))
+    if cores:
+        return len(cores)
+    cpu_cores = entries[0].get("cpu cores") if entries else None
+    if cpu_cores:
+        try:
+            n = int(cpu_cores)
+            if n > 0:
+                return n
+        except ValueError:
+            return None
+    return None
+
+
+def _linux_mem_total_bytes() -> int | None:
+    meminfo = "/proc/meminfo"
+    if not os.path.isfile(meminfo):
+        return None
+    try:
+        with open(meminfo, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        kb = int(parts[1])
+                        if kb > 0:
+                            return kb * 1024
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_mount_point(path: str) -> str:
+    cur = os.path.abspath(path)
+    while not os.path.ismount(cur):
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return cur
+
+
+def _linux_fs_type_for_mount(mount_point: str) -> str | None:
+    mounts_file = "/proc/mounts"
+    if not os.path.isfile(mounts_file):
+        return None
+    normalized = os.path.abspath(mount_point)
+    best_match = ""
+    best_fs = None
+    try:
+        with open(mounts_file, "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                mount_raw = parts[1].replace("\\040", " ")
+                fs_type = parts[2]
+                if normalized == mount_raw or normalized.startswith(mount_raw + os.sep):
+                    if len(mount_raw) > len(best_match):
+                        best_match = mount_raw
+                        best_fs = fs_type
+    except Exception:
+        return None
+    return best_fs
+
+
+def collect_system_profile(run_dir: str) -> dict[str, Any]:
+    warnings: list[str] = []
+    cpu_model = _linux_cpu_model_name() or (platform.processor() or None)
+    logical_cores = os.cpu_count()
+    physical_cores = _linux_physical_core_count()
+    if cpu_model is None:
+        warnings.append("cpu_model_unavailable")
+    if physical_cores is None:
+        warnings.append("cpu_physical_cores_unavailable")
+
+    ram_total = _linux_mem_total_bytes()
+    if ram_total is None:
+        warnings.append("ram_total_unavailable")
+
+    gpu_devices: list[dict[str, Any]] = []
+    cuda_available = False
+    try:
+        import torch
+
+        cuda_available = bool(torch.cuda.is_available())
+        if cuda_available:
+            for idx in range(torch.cuda.device_count()):
+                props = torch.cuda.get_device_properties(idx)
+                gpu_devices.append(
+                    {
+                        "index": idx,
+                        "name": torch.cuda.get_device_name(idx),
+                        "total_vram_bytes": int(getattr(props, "total_memory", 0) or 0),
+                        "total_vram_gb": _bytes_to_gb(getattr(props, "total_memory", 0) or 0),
+                    }
+                )
+    except Exception:
+        warnings.append("gpu_probe_failed")
+
+    mount_point = _resolve_mount_point(run_dir)
+    disk_usage = shutil.disk_usage(run_dir)
+    fs_type = _linux_fs_type_for_mount(mount_point)
+    if fs_type is None:
+        warnings.append("filesystem_type_unavailable")
+
+    gpu_total_bytes = sum(int(x.get("total_vram_bytes", 0) or 0) for x in gpu_devices) if gpu_devices else 0
+
+    return {
+        "cpu": {
+            "model": cpu_model,
+            "architecture": platform.machine() or None,
+            "logical_cores": int(logical_cores) if logical_cores else None,
+            "physical_cores": int(physical_cores) if physical_cores else None,
+        },
+        "ram": {
+            "total_bytes": int(ram_total) if ram_total else None,
+            "total_gb": _bytes_to_gb(ram_total),
+        },
+        "gpu": {
+            "cuda_available": cuda_available,
+            "devices": gpu_devices,
+            "total_vram_bytes": int(gpu_total_bytes) if gpu_total_bytes else 0,
+            "total_vram_gb": _bytes_to_gb(gpu_total_bytes),
+        },
+        "disk": {
+            "mount_point": mount_point,
+            "filesystem": fs_type,
+            "total_bytes": int(disk_usage.total),
+            "used_bytes": int(disk_usage.used),
+            "free_bytes": int(disk_usage.free),
+            "total_gb": _bytes_to_gb(disk_usage.total),
+            "used_gb": _bytes_to_gb(disk_usage.used),
+            "free_gb": _bytes_to_gb(disk_usage.free),
+        },
+        "platform": {
+            "os": platform.system(),
+            "os_release": platform.release(),
+            "python_version": platform.python_version(),
+            "hostname": socket.gethostname(),
+        },
+        "capture_warnings": warnings,
+    }
 
 
 def build_train_arg_parser() -> argparse.ArgumentParser:
@@ -169,6 +380,12 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=argparse.SUPPRESS,
         help=f"imgsz (default {IMG_SIZE} or from profile)",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=argparse.SUPPRESS,
+        help="Compute device for training (e.g. 0, 1, cpu). Default: GPU 0 if available, otherwise cpu.",
     )
 
     parser.add_argument(
@@ -340,19 +557,69 @@ def _run_resume_command(argv: list[str]) -> int:
         if chosen is None:
             return 1
 
-    if chosen.status != RUN_STATUS_RESUMABLE_INCOMPLETE:
+    if chosen.status not in (
+        RUN_STATUS_RESUMABLE_INCOMPLETE,
+        RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
+    ):
         print(f"[ERROR] Run is not resumable: {chosen.run_dir}")
         print(f"[INFO] Status: {chosen.status}")
         print(f"[INFO] Reasons: {', '.join(chosen.reasons)}")
         return 2
 
+    if chosen.status == RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING:
+        try:
+            from smartrain.train_resume import diagnose_run
+
+            dataset_path = resolve_dataset_path_for_resume(chosen.run_dir, workspace_root)
+            if not dataset_path:
+                raise RuntimeError(
+                    "Cannot resolve dataset path for test stage. "
+                    "Expected valid dataset in runtime yaml/metadata/workspace datasets catalog."
+                )
+            _maybe_free_cuda_memory()
+            test_yolo(chosen.run_dir, dataset_path)
+            update_resume_test_metadata(
+                chosen.run_dir,
+                success=True,
+                error=None,
+                diagnosis=diagnose_run(chosen.run_dir),
+            )
+            print(f"[OK] Missing test stage completed: {chosen.run_dir}")
+            return 0
+        except Exception as e:
+            from smartrain.train_resume import diagnose_run
+
+            update_resume_test_metadata(
+                chosen.run_dir,
+                success=False,
+                error=str(e),
+                diagnosis=diagnose_run(chosen.run_dir),
+            )
+            print(f"[ERROR] Failed to complete missing test stage: {chosen.run_dir}")
+            print(f"[ERROR] {e}")
+            return 1
+
     try:
+        from smartrain.train_resume import diagnose_run
+
         resume_training_in_run(chosen.run_dir)
-        update_resume_metadata(chosen.run_dir, success=True, error=None, diagnosis=chosen)
+        update_resume_metadata(
+            chosen.run_dir,
+            success=True,
+            error=None,
+            diagnosis=diagnose_run(chosen.run_dir),
+        )
         print(f"[OK] Resume completed: {chosen.run_dir}")
         return 0
     except Exception as e:
-        update_resume_metadata(chosen.run_dir, success=False, error=str(e), diagnosis=chosen)
+        from smartrain.train_resume import diagnose_run
+
+        update_resume_metadata(
+            chosen.run_dir,
+            success=False,
+            error=str(e),
+            diagnosis=diagnose_run(chosen.run_dir),
+        )
         print(f"[ERROR] Failed to resume run: {chosen.run_dir}")
         print(f"[ERROR] {e}")
         return 1
@@ -422,6 +689,29 @@ def _prompt_optional_float(label: str, default: float | None = None) -> float | 
             print(f"[ERROR] Expecting a number or empty value, received: {raw!r}")
 
 
+def _prompt_train_device(default: str | None = None) -> str:
+    options = discover_device_options()
+    labels = [o.label for o in options]
+    by_label = {o.label: o.value for o in options}
+    effective_default = str(default).strip() if default is not None else default_device_value()
+    default_label = next((o.label for o in options if o.value == effective_default), labels[0])
+    print_numbered_options("Train devices", labels)
+    picked = _prompt_input("Train device (--device, number/value): ", default=default_label).strip()
+    if not picked:
+        return by_label[default_label]
+    if picked in by_label:
+        return by_label[picked]
+    if picked.isdigit():
+        idx = int(picked)
+        if 1 <= idx <= len(options):
+            return options[idx - 1].value
+    for option in options:
+        if picked == option.value:
+            return option.value
+    print(f"[WARNING] Unknown device {picked!r}; fallback to default {by_label[default_label]!r}")
+    return by_label[default_label]
+
+
 def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
     info_path = layout.work_datasets_info_path()
     if not os.path.isfile(info_path):
@@ -473,6 +763,7 @@ def _installed_external_provider_ids() -> list[str]:
 
 
 def _installed_external_provider_records() -> list[dict[str, Any]]:
+    reconcile_stale_provider_paths()
     recs: list[dict[str, Any]] = []
     seen: set[str] = set()
     for rec in list_provider_records():
@@ -480,6 +771,10 @@ def _installed_external_provider_records() -> list[dict[str, Any]]:
             continue
         pid = str(rec.get("provider_id", "")).strip().lower()
         if not pid or pid in seen:
+            continue
+        repo_path = Path(str(rec.get("repo_path", "")).strip()).expanduser()
+        venv_path = Path(str(rec.get("venv_path", "")).strip()).expanduser()
+        if not repo_path.is_dir() or not venv_path.is_dir():
             continue
         seen.add(pid)
         recs.append(rec)
@@ -577,11 +872,55 @@ def _pick_model_interactive(options: list[str], default_alias: str) -> str:
         print(f"[ERROR] Incorrect selection: {raw!r}")
 
 
+def _extract_run_timestamp(run_name: str, run_dir: Path) -> datetime:
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2})", run_name)
+    if m:
+        try:
+            return datetime.strptime(f"{m.group(1)}_{m.group(2)}", "%Y-%m-%d_%H-%M")
+        except ValueError:
+            pass
+    return datetime.fromtimestamp(run_dir.stat().st_mtime)
+
+
+def _base_run_summary(args_yaml: Path) -> dict[str, str]:
+    summary = {
+        "provider": "unknown",
+        "model": "unknown",
+        "task": "unknown",
+        "batch": "?",
+        "epochs": "?",
+    }
+    try:
+        payload = _load_ultralytics_yaml(str(args_yaml))
+    except Exception:
+        return summary
+    provider = (
+        str(payload.get("external_provider") or "").strip().lower()
+        if isinstance(payload, dict)
+        else ""
+    )
+    summary["provider"] = provider or "ultralytics"
+    if isinstance(payload, dict):
+        model = str(payload.get("model") or "").strip()
+        task = str(payload.get("task") or "").strip().lower()
+        batch = payload.get("batch")
+        epochs = payload.get("epochs")
+        if model:
+            summary["model"] = Path(model).name
+        if task:
+            summary["task"] = task
+        if batch is not None and str(batch).strip():
+            summary["batch"] = str(batch)
+        if epochs is not None and str(epochs).strip():
+            summary["epochs"] = str(epochs)
+    return summary
+
+
 def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str) -> list[dict[str, str]]:
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     runs_root = Path(layout.runs)
     if not runs_root.is_dir():
-        return out
+        return []
     for ds_dir in sorted(runs_root.iterdir()):
         if not ds_dir.is_dir():
             continue
@@ -598,14 +937,34 @@ def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str)
                 args_path = args_root
             if args_path is None:
                 continue
+            if not run_dir.exists() or not args_path.exists():
+                continue
+            run_ts = _extract_run_timestamp(run_dir.name, run_dir)
+            run_rel = str(run_dir.relative_to(runs_root))
+            info = _base_run_summary(args_path)
             out.append(
                 {
                     "dataset": ds_name,
                     "run_dir": str(run_dir),
                     "args_yaml": str(args_path),
+                    "run_rel": run_rel,
+                    "provider": info["provider"],
+                    "model": info["model"],
+                    "task": info["task"],
+                    "batch": info["batch"],
+                    "epochs": info["epochs"],
+                    "_sort_ts": run_ts,
                 }
             )
-    out.sort(key=lambda x: (x["dataset"] != selected_dataset, x["dataset"], x["run_dir"]))
+    out.sort(
+        key=lambda x: (
+            x["dataset"] != selected_dataset,
+            x["_sort_ts"],
+            x["run_rel"],
+        )
+    )
+    for row in out:
+        row.pop("_sort_ts", None)
     return out
 
 
@@ -613,10 +972,20 @@ def _print_available_base_runs(selected_dataset: str, runs: list[dict[str, str]]
     if not runs:
         print("[INFO] No base runs found in runs/.")
         return
-    print("[INFO] Available base runs (top - for the selected dataset):")
+    print("[INFO] Available base runs (selected dataset first, oldest first):")
+    switched_to_other = False
     for i, r in enumerate(runs, start=1):
+        if not switched_to_other and r["dataset"] != selected_dataset:
+            print("      ---- other datasets ----")
+            switched_to_other = True
         mark = " [selected-dataset]" if r["dataset"] == selected_dataset else ""
-        print(f"  {i:>3}. {r['dataset']} :: {r['run_dir']}{mark}")
+        task_part = f" task:{r['task']}" if r.get("task", "unknown") not in ("", "detect", "unknown") else ""
+        print(
+            f"  {i:>3}. {r.get('run_rel', r['run_dir'])}{mark}"
+            f" | provider:{r.get('provider', 'unknown')}"
+            f" | model:{r.get('model', 'unknown')}"
+            f" | b={r.get('batch', '?')} e={r.get('epochs', '?')}{task_part}"
+        )
 
 
 def _prompt_base_run_args_yaml(runs: list[dict[str, str]], default_path: str | None = None) -> str | None:
@@ -655,7 +1024,7 @@ def _run_interactive_train_setup(args) -> bool:
     from prompt_toolkit.completion import WordCompleter
 
     print("[INFO] Interactive train mode (Enter = default).")
-    installed_external = [r for r in list_provider_records() if str(r.get("install_state", "")) == "installed"]
+    installed_external = _installed_external_provider_records()
     if installed_external:
         print("[INFO] Installed external providers:")
         for rec in installed_external:
@@ -805,6 +1174,9 @@ def _run_interactive_train_setup(args) -> bool:
             "Images Size (--img-size)",
             int(_get_interactive_default(args, "img_size", IMG_SIZE, baseline_u_cfg, "imgsz")),
         )
+    args.device = _prompt_train_device(
+        str(_get_interactive_default(args, "device", default_device_value(), baseline_u_cfg, "device"))
+    )
 
     default_target = str(getattr(args, "target_path", None) or layout.runs)
     args.target_path = (_prompt_input("Run directory (--target-path): ", default=default_target).strip()
@@ -1334,6 +1706,7 @@ def train_yolo(
         dataset_hash = None
 
     batch = int(ultralytics_cfg.get("batch", BATCH))
+    img_size = int(ultralytics_cfg.get("imgsz", IMG_SIZE))
     folder_name = _build_run_name(
         "ultralytics",
         model_version,
@@ -1363,6 +1736,18 @@ def train_yolo(
         os.makedirs(model_dir, exist_ok=True)
 
     train_kw = _finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
+    _ensure_initial_training_metadata(
+        model_dir=model_dir,
+        dataset_path=dataset_path,
+        model_version=model_version.replace(".pt", ""),
+        epochs=epochs,
+        batch=batch,
+        img_size=img_size,
+        training_start_time=training_start_time,
+        dataset_hash=dataset_hash,
+        workspace_root=workspace_root,
+        task_type=task_to_metadata_task_type(train_kw.get("task")),
+    )
 
     clearml_task = None
     if smartrain_opts.get("clearml"):
@@ -1588,6 +1973,131 @@ def _relative_to_workspace(path: str, workspace_root: str) -> str:
         return ap
 
 
+def _write_json_atomic(path: str, payload: dict[str, Any]) -> None:
+    out_dir = os.path.dirname(path) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    tmp_path = path + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _ensure_initial_training_metadata(
+    *,
+    model_dir: str,
+    dataset_path: str,
+    model_version: str,
+    epochs: int,
+    batch: int,
+    img_size: int,
+    training_start_time: datetime,
+    dataset_hash: str | None,
+    workspace_root: str | None,
+    task_type: str,
+) -> None:
+    metadata_file = os.path.join(model_dir, "training_metadata.json")
+    payload: dict[str, Any] = {}
+    if os.path.isfile(metadata_file):
+        try:
+            with open(metadata_file, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            if isinstance(existing, dict):
+                payload = existing
+        except Exception:
+            payload = {}
+
+    ti = payload.setdefault("training_info", {})
+    if not isinstance(ti, dict):
+        ti = {}
+        payload["training_info"] = ti
+    ti.setdefault("framework", "ultralytics")
+    provider = ti.setdefault("provider", {})
+    if not isinstance(provider, dict):
+        provider = {}
+        ti["provider"] = provider
+    provider.setdefault("type", "builtin")
+    provider.setdefault("id", "ultralytics")
+    ti.setdefault("task_type", task_type or "detection")
+    ti.setdefault("model", model_version)
+    ds = ti.setdefault("dataset", {})
+    if not isinstance(ds, dict):
+        ds = {}
+        ti["dataset"] = ds
+    ds.setdefault("name", os.path.basename(os.path.normpath(dataset_path)))
+    ds.setdefault("path_relative", _get_relative_path(dataset_path, model_dir))
+    ds.setdefault("hash", dataset_hash)
+    hp = ti.setdefault("hyperparameters", {})
+    if not isinstance(hp, dict):
+        hp = {}
+        ti["hyperparameters"] = hp
+    hp.setdefault("epochs", epochs)
+    hp.setdefault("batch_size", batch)
+    hp.setdefault("image_size", img_size)
+
+    ts = payload.setdefault("timestamps", {})
+    if not isinstance(ts, dict):
+        ts = {}
+        payload["timestamps"] = ts
+    tr_ts = ts.setdefault("training", {})
+    if not isinstance(tr_ts, dict):
+        tr_ts = {}
+        ts["training"] = tr_ts
+    tr_ts.setdefault("start", training_start_time.isoformat())
+    tr_ts.setdefault("end", None)
+    tr_ts.setdefault("duration_seconds", None)
+    te_ts = ts.setdefault("testing", {})
+    if not isinstance(te_ts, dict):
+        te_ts = {}
+        ts["testing"] = te_ts
+    te_ts.setdefault("start", None)
+    te_ts.setdefault("end", None)
+    te_ts.setdefault("duration_seconds", None)
+
+    status = payload.setdefault("status", {})
+    if not isinstance(status, dict):
+        status = {}
+        payload["status"] = status
+    tr_status = status.setdefault("training", {})
+    if not isinstance(tr_status, dict):
+        tr_status = {}
+        status["training"] = tr_status
+    tr_status.setdefault("success", None)
+    tr_status.setdefault("error", None)
+    te_status = status.setdefault("testing", {})
+    if not isinstance(te_status, dict):
+        te_status = {}
+        status["testing"] = te_status
+    te_status.setdefault("success", None)
+    te_status.setdefault("error", None)
+
+    paths = payload.setdefault("paths", {})
+    if not isinstance(paths, dict):
+        paths = {}
+        payload["paths"] = paths
+    paths.setdefault("model_directory", ".")
+    paths.setdefault("best_model", None)
+
+    if workspace_root is not None:
+        wb = payload.setdefault("workspace", {})
+        if not isinstance(wb, dict):
+            wb = {}
+            payload["workspace"] = wb
+        wb.setdefault("root", ".")
+        wb.setdefault("dataset_path_relative", _relative_to_workspace(dataset_path, workspace_root))
+        wb.setdefault("run_directory_relative", _relative_to_workspace(model_dir, workspace_root))
+
+    _write_json_atomic(metadata_file, payload)
+
+
 def save_training_metadata(
     model_dir,
     dataset_path,
@@ -1611,6 +2121,7 @@ def save_training_metadata(
     onnx_relative=None,
     training_provider: str = "ultralytics",
     external_provider_id: str | None = None,
+    system_profile: dict[str, Any] | None = None,
 ):
     ds_abs = os.path.abspath(dataset_path)
     dataset_block: dict[str, Any] = {
@@ -1693,12 +2204,13 @@ def save_training_metadata(
 
     if inference:
         metadata["inference"] = {k: v for k, v in inference.items() if v is not None}
+    if system_profile:
+        metadata["system_profile"] = system_profile
 
     metadata_file = os.path.join(model_dir, "training_metadata.json")
 
     try:
-        with open(metadata_file, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, ensure_ascii=False, indent=2)
+        _write_json_atomic(metadata_file, metadata)
         print(f"[INFO] Training metadata saved: {metadata_file}")
     except Exception as e:
         print(f"[WARNING] Failed to save metadata: {e}")
@@ -1780,6 +2292,20 @@ def _maybe_free_cuda_memory() -> None:
         pass
 
 
+def _ensure_device_available_or_raise(device: str | None) -> None:
+    if not is_cuda_device(device):
+        return
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError(f"CUDA device requested ({device}), but torch is unavailable: {exc}") from exc
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            f"CUDA device requested ({device}), but torch.cuda.is_available()=False. "
+            f"torch={getattr(torch, '__version__', 'unknown')} cuda_runtime={getattr(torch.version, 'cuda', 'unknown')}"
+        )
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -1834,12 +2360,14 @@ def main(argv=None):
         batch=getattr(args, "batch", None),
         imgsz=getattr(args, "img_size", None),
         task=getattr(args, "task", None),
+        device=getattr(args, "device", None),
         defaults={
             "model": MODEL_VERSION,
             "epochs": EPOCHS,
             "batch": BATCH,
             "imgsz": IMG_SIZE,
             "task": "detect",
+            "device": default_device_value(),
         },
     )
     apply_cli_smartrain_overrides(sm_opts, args)
@@ -1857,6 +2385,7 @@ def main(argv=None):
 
     model_version = _normalize_model_spec(u_cfg.get("model", MODEL_VERSION), add_pt_when_missing=True)
     u_cfg["model"] = model_version
+    _ensure_device_available_or_raise(str(u_cfg.get("device")) if u_cfg.get("device") is not None else None)
     epochs = int(u_cfg.get("epochs", EPOCHS))
     batch = int(u_cfg.get("batch", BATCH))
     img_size = u_cfg.get("imgsz", IMG_SIZE)
@@ -2035,6 +2564,7 @@ def main(argv=None):
             task_type=task_to_metadata_task_type(u_cfg.get("task")),
             training_provider=external_provider,
             external_provider_id=external_provider,
+            system_profile=collect_system_profile(external_run_dir),
         )
         try:
             marker = {
@@ -2161,6 +2691,7 @@ def main(argv=None):
                 onnx_relative=meta_extras.get("onnx_relative"),
                 training_provider="ultralytics",
                 external_provider_id=None,
+                system_profile=collect_system_profile(model_dir),
             )
     else:
         model_dir = args.model_dir
@@ -2199,6 +2730,7 @@ def main(argv=None):
                 task_type=task_to_metadata_task_type(u_cfg.get("task")),
                 training_provider="ultralytics",
                 external_provider_id=None,
+                system_profile=collect_system_profile(model_dir),
             )
         else:
             print("[ERROR] Model path not specified")
