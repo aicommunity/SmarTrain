@@ -30,6 +30,7 @@ from smartrain.external_model_ref import parse_external_model_ref, validate_exte
 from smartrain.external_providers.registry import list_provider_specs
 from smartrain.train_model_catalog import is_supported_external_provider_model, TrainModelCatalog
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
@@ -51,7 +52,12 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=0, help="Max images to process (0 = all).")
     p.add_argument("--conf", type=float, default=0.25, help="Confidence threshold for inference model.")
     p.add_argument("--img-size", type=int, default=None, help="Inference input resolution (imgsz).")
-    p.add_argument("--device", type=str, default="cpu", help="Ultralytics device (cpu, 0, etc).")
+    p.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Ultralytics device (cpu, 0, etc). Default: GPU 0 if available, otherwise cpu.",
+    )
     p.add_argument("--half", action="store_true", help="Enable FP16 where supported.")
     p.add_argument("--roi-pre-detect", action="store_true", help="Pre-detect ROI before inference (folder mode only).")
     p.add_argument("--roi-weights", type=str, default=None, help="ROI detector weights path (.pt/.onnx).")
@@ -473,34 +479,39 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
     img_default = inferred_imgsz if inferred_imgsz is not None else (args.img_size if args.img_size is not None else 640)
     args.img_size = int(prompt_text("Input resolution (--img-size)", default=str(img_default)).strip() or str(img_default))
     args.conf = float(prompt_text("Inference conf", default=str(args.conf)).strip() or str(args.conf))
-    args.device = _prompt_inference_device(default=str(args.device))
+    args.device = _prompt_inference_device(default=str(args.device or default_device_value()))
     args.half = prompt_yes_no("Use FP16 (--half)", default=bool(args.half))
     return True
 
 
 def _prompt_inference_device(default: str = "cpu") -> str:
-    options: list[tuple[str, str]] = [("CPU", "cpu")]
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            n = int(torch.cuda.device_count())
-            for i in range(n):
-                try:
-                    gname = torch.cuda.get_device_name(i)
-                except Exception:
-                    gname = f"GPU {i}"
-                options.append((f"GPU {i}: {gname}", str(i)))
-    except Exception:
-        pass
-
-    labels = [x[0] for x in options]
-    value_by_label = {label: value for label, value in options}
-    default_value = default if any(v == default for _l, v in options) else "cpu"
-    default_label = next((label for label, value in options if value == default_value), labels[0])
+    options = discover_device_options()
+    labels = [o.label for o in options]
+    value_by_label = {o.label: o.value for o in options}
+    default_value = default if any(o.value == default for o in options) else default_device_value()
+    default_label = next((o.label for o in options if o.value == default_value), labels[0])
     print_numbered_options("inference devices", labels)
     picked = prompt_choice("Select inference device", labels, default=default_label, show_options=False)
     return value_by_label[picked]
+
+
+def _ensure_device_available_or_exit(device: str | None) -> None:
+    if not is_cuda_device(device):
+        return
+    try:
+        import torch
+    except Exception as exc:
+        print(f"[ERROR] CUDA device requested ({device}), but torch import failed: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    if not torch.cuda.is_available():
+        print(
+            "[ERROR] CUDA device requested "
+            f"({device}), but torch.cuda.is_available()=False. "
+            f"torch={getattr(torch, '__version__', 'unknown')} "
+            f"cuda_runtime={getattr(torch.version, 'cuda', 'unknown')}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def _source_descriptor(args: argparse.Namespace, source_abs: str, source_short: str, layout: WorkspaceLayout) -> dict[str, Any]:
@@ -597,6 +608,8 @@ def main(argv: list[str] | None = None) -> None:
     argv = list(argv or [])
     parser = build_inference_arg_parser()
     args = parser.parse_args(argv)
+    if args.device is None:
+        args.device = default_device_value()
 
     try:
         workspace_root = resolve_workspace_root(args.workspace)
@@ -622,6 +635,7 @@ def main(argv: list[str] | None = None) -> None:
         print_replay_command("before launch", replay_cmd)
     else:
         _validate_non_interactive_args(parser, args)
+    _ensure_device_available_or_exit(args.device)
 
     known_provider_ids = {spec.id for spec in list_provider_specs()}
     try:

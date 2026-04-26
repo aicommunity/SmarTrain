@@ -19,7 +19,7 @@ This section reflects the current codebase and is organized by scenarios: gettin
 - [Queue: `queue`, `queue-run`](cli/queue.md)
 - [Analytics: `analyze` (including `pr-curves`, `inference-benchmark`, `inference-plot`, `test-metrics-plot`)](cli/analyze.md)
 - [Model registry: `registry`](cli/registry.md)
-- [CVAT 1.1: `cvat`](cli/cvat.md)
+- [CVAT for images 1.1: `cvat`](cli/cvat.md)
 - [Inference tools: `sahi`, `heatmap`](cli/inference-tools.md)
 
 ## 2.1) Provider profiles

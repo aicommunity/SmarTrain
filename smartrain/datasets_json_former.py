@@ -25,6 +25,7 @@ from smartrain.workspace_paths import (
     CLASS_NAMES_FILE,
     DATASETS_SCAN_SUMMARY_FILE,
 )
+from smartrain.provider_global_index import reconcile_stale_provider_paths
 
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -1472,6 +1473,14 @@ def main(argv=None):
         had_previous_datasets=bool(old_ds_keys),
         had_previous_class_names=bool(previous_cn_keys),
     )
+
+    if use_workspace:
+        reconcile_stats = reconcile_stale_provider_paths()
+        if reconcile_stats.get("stale_marked", 0) > 0:
+            print(
+                "[INFO] Provider index sync: marked stale records="
+                f"{reconcile_stats['stale_marked']}/{reconcile_stats['total']}"
+            )
 
     if use_workspace and (
         getattr(args, "repair_relative_paths", False)

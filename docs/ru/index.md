@@ -19,7 +19,7 @@
 - [Очередь: `queue`, `queue-run`](cli/queue.md)
 - [Аналитика: `analyze` (включая `pr-curves`, `inference-benchmark`, `inference-plot`, `test-metrics-plot`)](cli/analyze.md)
 - [Реестр моделей: `registry`](cli/registry.md)
-- [CVAT 1.1: `cvat`](cli/cvat.md)
+- [CVAT for images 1.1: `cvat`](cli/cvat.md)
 - [Инференс-инструменты: `sahi`, `heatmap`](cli/inference-tools.md)
 
 ## 2.1) Профили провайдеров

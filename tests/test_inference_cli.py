@@ -39,10 +39,13 @@ class _FakeResult:
 
 
 class _FakeYOLO:
+    last_predict_kwargs = None
+
     def __init__(self, _weights: str):
         self.names = {0: "obj"}
 
     def predict(self, **_kwargs):
+        _FakeYOLO.last_predict_kwargs = dict(_kwargs)
         return [_FakeResult()]
 
 
@@ -99,6 +102,39 @@ def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
     assert report["model"]["name"] == "demo_model"
     assert report["source"]["mode"] == "folder"
     assert report["images"][0]["detections"][0]["bbox_roi_xyxy"] == [10.0, 12.0, 40.0, 48.0]
+
+
+def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    monkeypatch.setattr("smartrain.inference_cli.default_device_value", lambda: "0")
+    monkeypatch.setattr("smartrain.inference_cli._ensure_device_available_or_exit", lambda _d: None)
+
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+        ]
+    )
+    assert _FakeYOLO.last_predict_kwargs is not None
+    assert _FakeYOLO.last_predict_kwargs.get("device") == "0"
 
 
 def test_inference_dataset_split(tmp_path: Path, monkeypatch) -> None:
