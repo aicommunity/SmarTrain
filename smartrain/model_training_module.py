@@ -24,9 +24,12 @@ from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.train_resume import (
     RUN_STATUS_RESUMABLE_INCOMPLETE,
+    RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
     RunDiagnosis,
+    resolve_dataset_path_for_resume,
     list_incomplete_runs,
     resume_training_in_run,
+    update_resume_test_metadata,
     update_resume_metadata,
 )
 from smartrain.train_profile import (
@@ -554,11 +557,47 @@ def _run_resume_command(argv: list[str]) -> int:
         if chosen is None:
             return 1
 
-    if chosen.status != RUN_STATUS_RESUMABLE_INCOMPLETE:
+    if chosen.status not in (
+        RUN_STATUS_RESUMABLE_INCOMPLETE,
+        RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
+    ):
         print(f"[ERROR] Run is not resumable: {chosen.run_dir}")
         print(f"[INFO] Status: {chosen.status}")
         print(f"[INFO] Reasons: {', '.join(chosen.reasons)}")
         return 2
+
+    if chosen.status == RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING:
+        try:
+            from smartrain.train_resume import diagnose_run
+
+            dataset_path = resolve_dataset_path_for_resume(chosen.run_dir, workspace_root)
+            if not dataset_path:
+                raise RuntimeError(
+                    "Cannot resolve dataset path for test stage. "
+                    "Expected valid dataset in runtime yaml/metadata/workspace datasets catalog."
+                )
+            _maybe_free_cuda_memory()
+            test_yolo(chosen.run_dir, dataset_path)
+            update_resume_test_metadata(
+                chosen.run_dir,
+                success=True,
+                error=None,
+                diagnosis=diagnose_run(chosen.run_dir),
+            )
+            print(f"[OK] Missing test stage completed: {chosen.run_dir}")
+            return 0
+        except Exception as e:
+            from smartrain.train_resume import diagnose_run
+
+            update_resume_test_metadata(
+                chosen.run_dir,
+                success=False,
+                error=str(e),
+                diagnosis=diagnose_run(chosen.run_dir),
+            )
+            print(f"[ERROR] Failed to complete missing test stage: {chosen.run_dir}")
+            print(f"[ERROR] {e}")
+            return 1
 
     try:
         from smartrain.train_resume import diagnose_run

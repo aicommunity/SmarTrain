@@ -24,7 +24,7 @@ def test_diagnose_run_marks_resumable_when_last_checkpoint_exists(tmp_path: Path
 
 def test_diagnose_run_marks_completed_from_metadata(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds" / "run2"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "test").mkdir(parents=True, exist_ok=True)
     (run_dir / "training_metadata.json").write_text(
         json.dumps({"status": {"training": {"success": True}}}, ensure_ascii=False),
         encoding="utf-8",
@@ -32,6 +32,19 @@ def test_diagnose_run_marks_completed_from_metadata(tmp_path: Path) -> None:
 
     diag = tr.diagnose_run(str(run_dir))
     assert diag.status == tr.RUN_STATUS_COMPLETED
+
+
+def test_diagnose_run_marks_training_complete_test_pending_without_test_dir(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run2_pending"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"status": {"training": {"success": True}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING
+    assert "missing_test_dir" in diag.reasons
 
 
 def test_diagnose_run_marks_incomplete_non_resumable_without_last(tmp_path: Path) -> None:
@@ -146,3 +159,84 @@ def test_resume_discover_runs_matches_run_discovery(tmp_path: Path) -> None:
     generic_runs = rd.find_run_directories(str(tmp_path / "runs"))
     assert str(run_dir) in resume_runs
     assert str(run_dir) in generic_runs
+
+
+def test_resume_runs_test_stage_when_training_complete_but_test_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds" / "run_test_pending"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data.yaml").write_text("path: .\ntrain: train/images\nval: val/images\n", encoding="utf-8")
+    (run_dir / "_runtime_data_train.yaml").write_text(f"path: {tmp_path}\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"status": {"training": {"success": True}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    called = {"test": False, "meta": False}
+
+    def _fake_test(model_dir: str, dataset_path: str, **_: object) -> tuple[None, None, dict]:
+        assert model_dir == str(run_dir)
+        assert dataset_path == str(tmp_path)
+        called["test"] = True
+        return None, None, {}
+
+    def _fake_test_meta(path: str, *, success: bool, error: str | None, diagnosis: tr.RunDiagnosis | None) -> None:
+        assert path == str(run_dir)
+        assert success is True
+        assert error is None
+        assert diagnosis is not None
+        called["meta"] = True
+
+    monkeypatch.setattr(mtm, "test_yolo", _fake_test)
+    monkeypatch.setattr(mtm, "update_resume_test_metadata", _fake_test_meta)
+    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: None)
+
+    code = mtm._run_resume_command(
+        ["--workspace", str(tmp_path), "--run-dir", str(run_dir), "-y"]
+    )
+    assert code == 0
+    assert called["test"] is True
+    assert called["meta"] is True
+
+
+def test_resolve_dataset_path_for_resume_falls_back_to_workspace_dataset_dir(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_name = "my_dataset"
+    dataset_dir = tmp_path / "datasets" / dataset_name
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / "data.yaml").write_text("path: .\ntrain: train/images\nval: val/images\n", encoding="utf-8")
+
+    run_dir = tmp_path / "runs" / dataset_name / "run_from_other_machine"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"status": {"training": {"success": True}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    resolved = tr.resolve_dataset_path_for_resume(str(run_dir), str(tmp_path))
+    assert resolved == str(dataset_dir)
+
+
+def test_resolve_dataset_path_for_resume_uses_workspace_relative_metadata_path(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "ds_rel"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / "data.yaml").write_text("path: .\ntrain: train/images\nval: val/images\n", encoding="utf-8")
+
+    run_dir = tmp_path / "runs" / "random_parent" / "run_rel"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps(
+            {
+                "training_info": {"dataset": {"path_under_workspace": "datasets/ds_rel"}},
+                "status": {"training": {"success": True}},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    resolved = tr.resolve_dataset_path_for_resume(str(run_dir), str(tmp_path))
+    assert resolved == str(dataset_dir)

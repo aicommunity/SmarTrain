@@ -16,6 +16,7 @@ from smartrain.workspace_paths import WorkspaceLayout
 
 RUN_STATUS_RESUMABLE_INCOMPLETE = "resumable_incomplete"
 RUN_STATUS_INCOMPLETE_NON_RESUMABLE = "incomplete_non_resumable"
+RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING = "training_complete_test_pending"
 RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_BROKEN = "broken"
 
@@ -30,6 +31,7 @@ class RunDiagnosis:
     has_last_pt: bool
     has_best_pt: bool
     has_metadata: bool
+    has_test_dir: bool
 
 
 def _read_json(path: str) -> dict[str, Any] | None:
@@ -72,12 +74,14 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
     last_pt = os.path.join(rd, "train", "weights", "last.pt")
     best_pt = os.path.join(rd, "train", "weights", "best.pt")
     metadata_path = os.path.join(rd, "training_metadata.json")
+    test_dir = os.path.join(rd, "test")
 
     has_args_yaml = os.path.isfile(args_yaml)
     has_results_csv = os.path.isfile(results_csv)
     has_last_pt = os.path.isfile(last_pt)
     has_best_pt = os.path.isfile(best_pt)
     has_metadata = os.path.isfile(metadata_path)
+    has_test_dir = os.path.isdir(test_dir)
 
     reasons: list[str] = []
     if has_args_yaml:
@@ -92,20 +96,36 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
         reasons.append("best_checkpoint_present")
     if has_metadata:
         reasons.append("training_metadata_present")
+    if has_test_dir:
+        reasons.append("test_dir_present")
 
     meta = _read_json(metadata_path) if has_metadata else None
     training_success = _training_success_from_metadata(meta)
     if has_metadata and training_success is True:
         reasons.append("metadata_training_success_true")
+        if has_test_dir:
+            return RunDiagnosis(
+                run_dir=rd,
+                status=RUN_STATUS_COMPLETED,
+                reasons=reasons,
+                has_args_yaml=has_args_yaml,
+                has_results_csv=has_results_csv,
+                has_last_pt=has_last_pt,
+                has_best_pt=has_best_pt,
+                has_metadata=has_metadata,
+                has_test_dir=has_test_dir,
+            )
+        reasons.append("missing_test_dir")
         return RunDiagnosis(
             run_dir=rd,
-            status=RUN_STATUS_COMPLETED,
+            status=RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
             reasons=reasons,
             has_args_yaml=has_args_yaml,
             has_results_csv=has_results_csv,
             has_last_pt=has_last_pt,
             has_best_pt=has_best_pt,
             has_metadata=has_metadata,
+            has_test_dir=has_test_dir,
         )
 
     if has_last_pt:
@@ -127,6 +147,7 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
         has_last_pt=has_last_pt,
         has_best_pt=has_best_pt,
         has_metadata=has_metadata,
+        has_test_dir=has_test_dir,
     )
 
 
@@ -159,7 +180,16 @@ def diagnose_workspace_runs(workspace_root: str) -> list[RunDiagnosis]:
 
 def list_incomplete_runs(workspace_root: str) -> list[RunDiagnosis]:
     all_runs = diagnose_workspace_runs(workspace_root)
-    return [r for r in all_runs if r.status in (RUN_STATUS_RESUMABLE_INCOMPLETE, RUN_STATUS_INCOMPLETE_NON_RESUMABLE)]
+    return [
+        r
+        for r in all_runs
+        if r.status
+        in (
+            RUN_STATUS_RESUMABLE_INCOMPLETE,
+            RUN_STATUS_INCOMPLETE_NON_RESUMABLE,
+            RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
+        )
+    ]
 
 
 def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
@@ -173,6 +203,82 @@ def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
         return str(path_val) if isinstance(path_val, str) and path_val.strip() else None
     except Exception:
         return None
+
+
+def _is_dataset_dir(path: str | None) -> bool:
+    if not path:
+        return False
+    p = os.path.abspath(os.path.expanduser(path))
+    return os.path.isdir(p) and os.path.isfile(os.path.join(p, "data.yaml"))
+
+
+def resolve_dataset_path_for_resume(run_dir: str, workspace_root: str) -> str | None:
+    rd = os.path.abspath(run_dir)
+    ws = os.path.abspath(workspace_root)
+
+    runtime_path = _load_dataset_from_runtime_yaml(rd)
+    if _is_dataset_dir(runtime_path):
+        return os.path.abspath(os.path.expanduser(str(runtime_path)))
+
+    metadata_path = os.path.join(rd, "training_metadata.json")
+    meta = _read_json(metadata_path)
+    if isinstance(meta, dict):
+        ds = ((meta.get("training_info") or {}).get("dataset") or {})
+        if isinstance(ds, dict):
+            path_under_workspace = ds.get("path_under_workspace")
+            if isinstance(path_under_workspace, str) and path_under_workspace.strip():
+                candidate = os.path.join(ws, path_under_workspace)
+                if _is_dataset_dir(candidate):
+                    return os.path.abspath(candidate)
+
+            path_relative = ds.get("path_relative")
+            if isinstance(path_relative, str) and path_relative.strip():
+                candidate = os.path.join(rd, path_relative)
+                if _is_dataset_dir(candidate):
+                    return os.path.abspath(candidate)
+
+            path_absolute = ds.get("path_absolute")
+            if _is_dataset_dir(path_absolute if isinstance(path_absolute, str) else None):
+                return os.path.abspath(os.path.expanduser(str(path_absolute)))
+
+        workspace_block = meta.get("workspace")
+        if isinstance(workspace_block, dict):
+            ds_rel = workspace_block.get("dataset_path_relative")
+            if isinstance(ds_rel, str) and ds_rel.strip():
+                candidate = os.path.join(ws, ds_rel)
+                if _is_dataset_dir(candidate):
+                    return os.path.abspath(candidate)
+
+    dataset_name = os.path.basename(os.path.dirname(rd.rstrip(os.sep)))
+    if dataset_name:
+        direct_candidate = os.path.join(WorkspaceLayout(ws).work_datasets, dataset_name)
+        if _is_dataset_dir(direct_candidate):
+            return os.path.abspath(direct_candidate)
+
+        info_path = WorkspaceLayout(ws).work_datasets_info_path()
+        info = _read_json(info_path)
+        if isinstance(info, dict):
+            entry = info.get(dataset_name)
+            if isinstance(entry, dict):
+                data_path = entry.get("data_path")
+                if isinstance(data_path, str) and data_path.strip():
+                    candidate = os.path.join(ws, data_path)
+                    if _is_dataset_dir(candidate):
+                        return os.path.abspath(candidate)
+            # Legacy fallback: scan entries by data_path suffix
+            for _, entry_val in info.items():
+                if not isinstance(entry_val, dict):
+                    continue
+                data_path = entry_val.get("data_path")
+                if not isinstance(data_path, str):
+                    continue
+                if os.path.basename(os.path.normpath(data_path)) != dataset_name:
+                    continue
+                candidate = os.path.join(ws, data_path)
+                if _is_dataset_dir(candidate):
+                    return os.path.abspath(candidate)
+
+    return None
 
 
 def update_resume_metadata(
@@ -235,6 +341,7 @@ def update_resume_metadata(
                 "has_last_pt": diagnosis.has_last_pt,
                 "has_best_pt": diagnosis.has_best_pt,
                 "has_metadata": diagnosis.has_metadata,
+                "has_test_dir": diagnosis.has_test_dir,
             },
         }
 
@@ -245,6 +352,59 @@ def update_resume_metadata(
             ds = ti.setdefault("dataset", {})
             if isinstance(ds, dict):
                 ds.setdefault("path_absolute", dataset_path)
+
+    _atomic_write_json(metadata_path, payload)
+
+
+def update_resume_test_metadata(
+    run_dir: str,
+    *,
+    success: bool,
+    error: str | None = None,
+    diagnosis: RunDiagnosis | None = None,
+) -> None:
+    metadata_path = os.path.join(run_dir, "training_metadata.json")
+    payload: dict[str, Any] = {}
+    existing = _read_json(metadata_path)
+    if isinstance(existing, dict):
+        payload = existing
+
+    status = payload.setdefault("status", {})
+    if not isinstance(status, dict):
+        status = {}
+        payload["status"] = status
+    tst = status.setdefault("testing", {})
+    if not isinstance(tst, dict):
+        tst = {}
+        status["testing"] = tst
+    tst["success"] = bool(success)
+    tst["error"] = error
+
+    ts = payload.setdefault("timestamps", {})
+    if not isinstance(ts, dict):
+        ts = {}
+        payload["timestamps"] = ts
+    testing_ts = ts.setdefault("testing", {})
+    if not isinstance(testing_ts, dict):
+        testing_ts = {}
+        ts["testing"] = testing_ts
+    testing_ts["end"] = datetime.now().isoformat()
+    if not testing_ts.get("start"):
+        testing_ts["start"] = testing_ts["end"]
+
+    if diagnosis is not None:
+        payload["diagnostics"] = {
+            "run_state": diagnosis.status,
+            "reasons": list(diagnosis.reasons),
+            "artifacts": {
+                "has_args_yaml": diagnosis.has_args_yaml,
+                "has_results_csv": diagnosis.has_results_csv,
+                "has_last_pt": diagnosis.has_last_pt,
+                "has_best_pt": diagnosis.has_best_pt,
+                "has_metadata": diagnosis.has_metadata,
+                "has_test_dir": diagnosis.has_test_dir,
+            },
+        }
 
     _atomic_write_json(metadata_path, payload)
 
