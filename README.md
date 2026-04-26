@@ -87,6 +87,10 @@ pytest
   - `--device 0` to force GPU 0
   - `--device cpu` to force CPU
   - If `--device` is omitted, default is `GPU 0` when CUDA is available, otherwise `cpu`
+- `train resume` recovery behavior:
+  - failed resume attempts are persisted in `training_metadata.json` (`resume_attempts`)
+  - if `train/weights/last.pt` is still present after failure, run remains resumable for the next retry
+  - run discovery for `resume`/`analyze`/`registry` includes runs with core train artifacts even when metadata is missing
 - PyTorch CUDA policy:
   - default target is CUDA 12.8 wheels (`cu128`)
   - if current environment already has `torch` with CUDA `13.x`, `smartrain` keeps it and does not downgrade

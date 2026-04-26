@@ -561,12 +561,26 @@ def _run_resume_command(argv: list[str]) -> int:
         return 2
 
     try:
+        from smartrain.train_resume import diagnose_run
+
         resume_training_in_run(chosen.run_dir)
-        update_resume_metadata(chosen.run_dir, success=True, error=None, diagnosis=chosen)
+        update_resume_metadata(
+            chosen.run_dir,
+            success=True,
+            error=None,
+            diagnosis=diagnose_run(chosen.run_dir),
+        )
         print(f"[OK] Resume completed: {chosen.run_dir}")
         return 0
     except Exception as e:
-        update_resume_metadata(chosen.run_dir, success=False, error=str(e), diagnosis=chosen)
+        from smartrain.train_resume import diagnose_run
+
+        update_resume_metadata(
+            chosen.run_dir,
+            success=False,
+            error=str(e),
+            diagnosis=diagnose_run(chosen.run_dir),
+        )
         print(f"[ERROR] Failed to resume run: {chosen.run_dir}")
         print(f"[ERROR] {e}")
         return 1

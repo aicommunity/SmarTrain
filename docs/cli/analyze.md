@@ -82,7 +82,12 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
 
 ## Contracts
 
-- Run is considered valid when directory contains `training_metadata.json`.
+- Run is considered discoverable when directory contains at least one run artifact:
+  - `training_metadata.json`, or
+  - `train/args.yaml`, or
+  - `train/results.csv`, or
+  - `train/weights/last.pt` / `train/weights/best.pt`.
+- For summary/metrics extraction, `analyze` still requires readable metadata/metrics files depending on subcommand.
 - `export-table` reads:
   - `training_metadata.json`
   - latest `test_metrics*.csv` (first row)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 import yaml
 from ultralytics import YOLO
 
+from smartrain.run_discovery import find_run_directories
 from smartrain.workspace_paths import WorkspaceLayout
 
 RUN_STATUS_RESUMABLE_INCOMPLETE = "resumable_incomplete"
@@ -130,17 +132,25 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
 
 def discover_runs(workspace_root: str) -> list[str]:
     runs_root = WorkspaceLayout(workspace_root).runs
-    out: list[str] = []
-    if not os.path.isdir(runs_root):
-        return out
-    for dirpath, _, filenames in os.walk(runs_root):
-        fset = set(filenames)
-        if "training_metadata.json" in fset:
-            out.append(dirpath)
-            continue
-        if "args.yaml" in fset and os.path.basename(dirpath) == "train":
-            out.append(os.path.dirname(dirpath))
-    return sorted(set(os.path.abspath(x) for x in out))
+    return sorted(set(os.path.abspath(x) for x in find_run_directories(runs_root)))
+
+
+def _atomic_write_json(path: str, payload: dict[str, Any]) -> None:
+    out_dir = os.path.dirname(path) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=".tmp_training_metadata_", suffix=".json", dir=out_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 def diagnose_workspace_runs(workspace_root: str) -> list[RunDiagnosis]:
@@ -188,6 +198,8 @@ def update_resume_metadata(
         status["training"] = tr
     tr["success"] = bool(success)
     tr["error"] = error
+    tr["last_resume_attempt_success"] = bool(success)
+    tr["last_resume_attempt_error"] = error
 
     ts = payload.setdefault("timestamps", {})
     if not isinstance(ts, dict):
@@ -200,6 +212,18 @@ def update_resume_metadata(
     training_ts["end"] = datetime.now().isoformat()
     if not training_ts.get("start"):
         training_ts["start"] = training_ts["end"]
+
+    attempts = payload.setdefault("resume_attempts", [])
+    if not isinstance(attempts, list):
+        attempts = []
+        payload["resume_attempts"] = attempts
+    attempts.append(
+        {
+            "at": training_ts["end"],
+            "success": bool(success),
+            "error": error,
+        }
+    )
 
     if diagnosis is not None:
         payload["diagnostics"] = {
@@ -222,8 +246,7 @@ def update_resume_metadata(
             if isinstance(ds, dict):
                 ds.setdefault("path_absolute", dataset_path)
 
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    _atomic_write_json(metadata_path, payload)
 
 
 def resume_training_in_run(run_dir: str) -> None:

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from smartrain import model_training_module as mtm
+from smartrain import run_discovery as rd
 from smartrain import train_resume as tr
 from smartrain.workspace_paths import deploy_workspace
 
@@ -93,3 +94,55 @@ def test_resume_run_dir_success_calls_resume_and_updates_metadata(
     assert code == 0
     assert called["resume"] is True
     assert called["metadata"] is True
+
+
+def test_run_discovery_finds_run_without_metadata_by_train_artifacts(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds" / "run_without_metadata"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "args.yaml").write_text("epochs: 20\n", encoding="utf-8")
+    (run_dir / "train" / "weights" / "last.pt").write_text("bin", encoding="utf-8")
+
+    runs = rd.find_run_directories(str(tmp_path / "runs"))
+    assert str(run_dir) in runs
+    assert rd.is_run_directory(str(run_dir)) is True
+
+
+def test_resume_failed_before_epoch_stays_resumable_and_tracks_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds" / "run_failed_resume"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "args.yaml").write_text("epochs: 30\n", encoding="utf-8")
+    (run_dir / "train" / "weights" / "last.pt").write_text("bin", encoding="utf-8")
+
+    def _raise_resume(_: str) -> None:
+        raise RuntimeError("ssh disconnected")
+
+    monkeypatch.setattr(mtm, "resume_training_in_run", _raise_resume)
+    code = mtm._run_resume_command(
+        ["--workspace", str(tmp_path), "--run-dir", str(run_dir), "-y"]
+    )
+    assert code == 1
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_RESUMABLE_INCOMPLETE
+
+    metadata = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))
+    attempts = metadata.get("resume_attempts")
+    assert isinstance(attempts, list) and attempts
+    assert attempts[-1]["success"] is False
+    assert "ssh disconnected" in str(attempts[-1]["error"])
+
+
+def test_resume_discover_runs_matches_run_discovery(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds" / "run_discover_consistency"
+    (run_dir / "train").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "results.csv").write_text("epoch,loss\n1,1.0\n", encoding="utf-8")
+
+    resume_runs = tr.discover_runs(str(tmp_path))
+    generic_runs = rd.find_run_directories(str(tmp_path / "runs"))
+    assert str(run_dir) in resume_runs
+    assert str(run_dir) in generic_runs
