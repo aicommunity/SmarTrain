@@ -1308,14 +1308,15 @@ def _collect_ultralytics_test_artifacts(
         run_info: dict[str, Any] = {}
         machine_info: dict[str, Any] = {}
         try:
-            rec = build_run_record(rd)
+            md = load_metadata(rd)
+            flat = flatten_metadata(md, rd)
             run_info = {
-                "model": rec.model,
-                "dataset_name": rec.dataset_name,
-                "epochs": rec.epochs,
-                "batch_size": rec.batch_size,
-                "train_image_size": rec.train_image_size,
-                "val_imgsz": rec.val_imgsz,
+                "model": flat.get("model"),
+                "dataset_name": flat.get("dataset_name"),
+                "epochs": flat.get("epochs"),
+                "batch_size": flat.get("batch_size"),
+                "train_image_size": flat.get("train_image_size"),
+                "val_imgsz": flat.get("val_imgsz"),
             }
         except Exception:
             run_info = {}

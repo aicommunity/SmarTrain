@@ -696,7 +696,10 @@ def test_analyze_report_per_class_headers_and_human_readable_ultralytics_caption
         "ultralytics_test": [
             {
                 "run_code": "R1",
-                "csv": {},
+                "csv": {
+                    "pr.csv": "artifacts/ultralytics-test/R1/pr.csv",
+                    "pr_per_class.csv": "artifacts/ultralytics-test/R1/pr_per_class.csv",
+                },
                 "images": ["artifacts/ultralytics-test/R1/BoxPR_curve.png"],
                 "run_info": {
                     "model": "yolo26x",
@@ -725,8 +728,40 @@ def test_analyze_report_per_class_headers_and_human_readable_ultralytics_caption
     assert "*Figure" in en_md
     assert "BoxPR_curve.png*" not in en_md
     assert "### 5.1 Run R1" in en_md
-    assert "Run config: model=yolo26x, epochs=300, batch=4, imgsz_train=1280, imgsz_val=1280." in en_md
+    assert "Run config: model=yolo26x, dataset=-, epochs=300, batch=4, imgsz_train=1280, imgsz_val=1280." in en_md
     assert "Machine: CPU=AMD EPYC (32 cores), RAM=128 GB, GPU=NVIDIA RTX (24 GB), OS=Ubuntu 22.04" in en_md
+    assert "Data source for PR-curve table (precision/recall across confidence thresholds): `artifacts/ultralytics-test/R1/pr.csv`" in en_md
+    assert "Data source for per-class PR table: `artifacts/ultralytics-test/R1/pr_per_class.csv`" in en_md
+    assert "R1: data source pr.csv" not in en_md
+
+
+def test_analyze_report_hides_empty_run_machine_lines_in_ultralytics_section(tmp_path: Path) -> None:
+    from smartrain.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "ultralytics-test" / "R1").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "artifacts" / "ultralytics-test" / "R1" / "BoxPR_curve.png").write_bytes(b"fakepng")
+    manifest = {
+        "session_name": "s4",
+        "profile": "full",
+        "baseline": "run_a",
+        "others": [],
+        "tables": [],
+        "images": ["artifacts/ultralytics-test/R1/BoxPR_curve.png"],
+        "artifacts": [],
+        "ultralytics_test": [
+            {
+                "run_code": "R1",
+                "csv": {},
+                "images": ["artifacts/ultralytics-test/R1/BoxPR_curve.png"],
+                "run_info": {},
+                "machine_info": {},
+            }
+        ],
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "модель=-" not in ru_md
+    assert "CPU=-" not in ru_md
 
 
 def test_interactive_full_auto_detects_data_yaml_from_runtime_file(

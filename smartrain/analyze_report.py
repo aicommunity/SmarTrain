@@ -5,6 +5,9 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Any
 
@@ -97,7 +100,7 @@ def _try_pandoc_odt_analyze(report_root: str, lang: str) -> bool:
             [
                 exe,
                 "-f",
-                "markdown+pipe_tables+grid_tables+table_captions",
+                "markdown+pipe_tables+grid_tables+table_captions+fenced_divs+attributes+raw_attribute+bracketed_spans",
                 rel_md,
                 "-o",
                 rel_odt,
@@ -147,6 +150,182 @@ def _try_pdf_from_odt(report_root: str, lang: str) -> bool:
         except Exception:
             pass
     return False
+
+
+def _postprocess_odt_layout(odt_path: str) -> bool:
+    if not os.path.isfile(odt_path):
+        return False
+    ns = {
+        "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+        "style": "urn:oasis:names:tc:opendocument:xmlns:style:1.0",
+        "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+        "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
+        "fo": "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0",
+        "draw": "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0",
+    }
+    for pfx, uri in ns.items():
+        ET.register_namespace(pfx, uri)
+    changed = False
+    try:
+        with zipfile.ZipFile(odt_path, "r") as zin:
+            blobs = {n: zin.read(n) for n in zin.namelist()}
+        if "styles.xml" in blobs:
+            st_root = ET.fromstring(blobs["styles.xml"])
+            auto_styles = st_root.find("office:automatic-styles", ns)
+            if auto_styles is None:
+                auto_styles = ET.SubElement(st_root, f"{{{ns['office']}}}automatic-styles")
+            st_name = "SmarTrainBody"
+            body_style = None
+            for s in auto_styles.findall("style:style", ns):
+                if s.attrib.get(f"{{{ns['style']}}}name") == st_name:
+                    body_style = s
+                    break
+            if body_style is None:
+                body_style = ET.SubElement(
+                    auto_styles,
+                    f"{{{ns['style']}}}style",
+                    {
+                        f"{{{ns['style']}}}name": st_name,
+                        f"{{{ns['style']}}}family": "paragraph",
+                    },
+                )
+            pp = body_style.find("style:paragraph-properties", ns)
+            if pp is None:
+                pp = ET.SubElement(body_style, f"{{{ns['style']}}}paragraph-properties")
+            pp.set(f"{{{ns['fo']}}}text-align", "justify")
+            pp.set(f"{{{ns['fo']}}}text-indent", "1cm")
+            # Make all paragraph styles justified/indented except headings.
+            for s in st_root.findall(".//style:style", ns):
+                if s.attrib.get(f"{{{ns['style']}}}family") != "paragraph":
+                    continue
+                parent_name = str(s.attrib.get(f"{{{ns['style']}}}parent-style-name") or "")
+                style_name = str(s.attrib.get(f"{{{ns['style']}}}name") or "")
+                if parent_name.startswith("Heading") or style_name.startswith("Heading"):
+                    continue
+                spp = s.find("style:paragraph-properties", ns)
+                if spp is None:
+                    spp = ET.SubElement(s, f"{{{ns['style']}}}paragraph-properties")
+                if style_name != "SmarTrainCenter":
+                    spp.set(f"{{{ns['fo']}}}text-align", "justify")
+                    spp.set(f"{{{ns['fo']}}}text-indent", "1cm")
+            blobs["styles.xml"] = ET.tostring(st_root, encoding="utf-8", xml_declaration=True)
+            changed = True
+        if "content.xml" in blobs:
+            ct_root = ET.fromstring(blobs["content.xml"])
+            auto_styles = ct_root.find("office:automatic-styles", ns)
+            if auto_styles is None:
+                auto_styles = ET.SubElement(ct_root, f"{{{ns['office']}}}automatic-styles")
+            center_style_name = "SmarTrainCenter"
+            body_style_name = "SmarTrainBody"
+            has_center = any(
+                s.attrib.get(f"{{{ns['style']}}}name") == center_style_name for s in auto_styles.findall("style:style", ns)
+            )
+            if not has_center:
+                cs = ET.SubElement(
+                    auto_styles,
+                    f"{{{ns['style']}}}style",
+                    {
+                        f"{{{ns['style']}}}name": center_style_name,
+                        f"{{{ns['style']}}}family": "paragraph",
+                    },
+                )
+                cpp = ET.SubElement(cs, f"{{{ns['style']}}}paragraph-properties")
+                cpp.set(f"{{{ns['fo']}}}text-align", "center")
+            table_text_style_name = "SmarTrainTableCell"
+            has_table_text = any(
+                s.attrib.get(f"{{{ns['style']}}}name") == table_text_style_name for s in auto_styles.findall("style:style", ns)
+            )
+            if not has_table_text:
+                ts = ET.SubElement(
+                    auto_styles,
+                    f"{{{ns['style']}}}style",
+                    {
+                        f"{{{ns['style']}}}name": table_text_style_name,
+                        f"{{{ns['style']}}}family": "paragraph",
+                    },
+                )
+                tpp = ET.SubElement(ts, f"{{{ns['style']}}}paragraph-properties")
+                tpp.set(f"{{{ns['fo']}}}text-align", "start")
+                tpp.set(f"{{{ns['fo']}}}text-indent", "0cm")
+            body = ct_root.find("office:body", ns)
+            text_root = body.find("office:text", ns) if body is not None else None
+            if text_root is not None:
+                table_paragraphs = set(text_root.findall(".//table:table-cell//text:p", ns))
+                for p in text_root.iterfind(".//text:p", ns):
+                    raw = "".join(p.itertext()).strip()
+                    if p in table_paragraphs:
+                        p.set(f"{{{ns['text']}}}style-name", table_text_style_name)
+                        changed = True
+                        continue
+                    if raw.startswith(("Рисунок ", "Figure ", "Таблица ", "Table ")):
+                        p.set(f"{{{ns['text']}}}style-name", center_style_name)
+                        changed = True
+                        continue
+                    if p.find("draw:frame", ns) is not None:
+                        p.set(f"{{{ns['text']}}}style-name", center_style_name)
+                        changed = True
+                        continue
+                    if raw and not raw.startswith("- "):
+                        p.set(f"{{{ns['text']}}}style-name", body_style_name)
+                        changed = True
+                for tbl in text_root.iterfind(".//table:table", ns):
+                    tbl.set(f"{{{ns['table']}}}align", "center")
+                    changed = True
+                # Force blank line before table captions and after figure captions.
+                for parent in text_root.iter():
+                    children = list(parent)
+                    i = 0
+                    while i < len(children):
+                        node = children[i]
+                        if node.tag != f"{{{ns['text']}}}p":
+                            i += 1
+                            continue
+                        raw = "".join(node.itertext()).strip()
+                        is_table_caption = raw.startswith("Таблица ") or raw.startswith("Table ")
+                        is_figure_caption = raw.startswith("Рисунок ") or raw.startswith("Figure ")
+                        if is_table_caption:
+                            prev = children[i - 1] if i > 0 else None
+                            prev_txt = "".join(prev.itertext()).strip() if prev is not None and prev.tag == f"{{{ns['text']}}}p" else ""
+                            if prev is None or prev.tag != f"{{{ns['text']}}}p" or prev_txt:
+                                empty_before = ET.Element(f"{{{ns['text']}}}p")
+                                empty_before.set(f"{{{ns['text']}}}style-name", "SmarTrainCenter")
+                                parent.insert(i, empty_before)
+                                children.insert(i, empty_before)
+                                i += 1
+                                changed = True
+                        if is_figure_caption:
+                            nxt = children[i + 1] if i + 1 < len(children) else None
+                            nxt_txt = "".join(nxt.itertext()).strip() if nxt is not None and nxt.tag == f"{{{ns['text']}}}p" else ""
+                            if nxt is None or nxt.tag != f"{{{ns['text']}}}p" or nxt_txt:
+                                empty_after = ET.Element(f"{{{ns['text']}}}p")
+                                empty_after.set(f"{{{ns['text']}}}style-name", "SmarTrainCenter")
+                                parent.insert(i + 1, empty_after)
+                                children.insert(i + 1, empty_after)
+                                changed = True
+                                i += 1
+                        i += 1
+            blobs["content.xml"] = ET.tostring(ct_root, encoding="utf-8", xml_declaration=True)
+        if not changed:
+            return False
+        fd, tmp_path = tempfile.mkstemp(suffix=".odt")
+        os.close(fd)
+        try:
+            with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                if "mimetype" in blobs:
+                    zi = zipfile.ZipInfo("mimetype")
+                    zi.compress_type = zipfile.ZIP_STORED
+                    zout.writestr(zi, blobs["mimetype"])
+                for name, data in blobs.items():
+                    if name == "mimetype":
+                        continue
+                    zout.writestr(name, data)
+            shutil.move(tmp_path, odt_path)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        return True
+    except Exception:
+        return False
 
 
 def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
@@ -318,6 +497,38 @@ def _quality_metric_comments(df: pd.DataFrame, is_ru: bool) -> list[str]:
         else:
             lines.append(f"- {metric}: best run **{best_run}** ({best_val:.4f}), worst **{worst_run}** ({worst_val:.4f}).")
     return lines
+
+
+def _justify_block(text: str) -> list[str]:
+    t = str(text or "").strip()
+    if not t:
+        return []
+    return ['::: {style="text-align:justify; text-indent:1cm;"}', t, ":::", ""]
+
+
+def _center_open() -> list[str]:
+    return ['::: {style="text-align:center;"}']
+
+
+def _center_close() -> list[str]:
+    return [":::", ""]
+
+
+def _csv_source_label(csv_key: str, is_ru: bool) -> str:
+    key = str(csv_key or "").strip().lower()
+    if key == "pr.csv":
+        return (
+            "Источник таблицы PR-кривой (precision/recall по порогам confidence)"
+            if is_ru
+            else "Data source for PR-curve table (precision/recall across confidence thresholds)"
+        )
+    if key == "pr_per_class.csv":
+        return (
+            "Источник таблицы PR по классам"
+            if is_ru
+            else "Data source for per-class PR table"
+        )
+    return ("Источник данных" if is_ru else "Data source")
 
 
 def _table_title(rel: str, is_ru: bool) -> str:
@@ -553,8 +764,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append(_sec("context"))
     lines.append("")
     if tpl.get("INTRO"):
-        lines.append(tpl["INTRO"])
-        lines.append("")
+        lines.extend(_justify_block(tpl["INTRO"]))
     baseline = str(manifest.get("baseline", "") or "")
     baseline_name = os.path.basename(baseline.rstrip("/")) if baseline else ""
     baseline_abbr = abbreviations.get(baseline_name, "")
@@ -588,8 +798,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append(_sec("quality"))
     lines.append("")
     if tpl.get("QUALITY"):
-        lines.append(tpl["QUALITY"])
-        lines.append("")
+        lines.extend(_justify_block(tpl["QUALITY"]))
     report_root = manifest.get("_report_root") or ""
     tables = manifest.get("tables") or []
     table_no = 1
@@ -607,6 +816,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         if "pr_per_class" in rel:
             # raw long-format table is too noisy; use aggregated class metrics below
             continue
+        lines.extend(_center_open())
+        lines.append("")
         lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(rel, is_ru)}**")
         lines.append("")
         table_no += 1
@@ -630,7 +841,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         ("_Источник данных:_ " if is_ru else "_Data source:_ ")
                         + f"`{rel}`"
                     )
-                    lines.append("")
+                    lines.extend(_center_close())
                     continue
                 df = _abbrev_df(df, abbreviations)
                 lines.extend(_md_table_from_df(df, abbreviations, limit=None))
@@ -643,13 +854,14 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
         else:
             lines.append(f"- {('Файл не найден' if is_ru else 'File not found')}")
-        lines.append("")
+        lines.extend(_center_close())
         if "runs_summary" in rel.lower():
             try:
                 full_df = pd.read_csv(abs_path)
                 full_df = _filter_runs_summary_for_selection(full_df, manifest)
                 test_summary = _build_test_metrics_summary(full_df, abbreviations)
                 if len(test_summary) > 0:
+                    lines.extend(_center_open())
                     lines.append(
                         f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
                         + ("Сводка test-метрик Ultralytics" if is_ru else "Ultralytics test metrics summary")
@@ -667,28 +879,29 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     lines.extend(comments)
                     if comments:
                         lines.append("")
+                    lines.extend(_center_close())
                     table_no += 1
             except Exception:
                 pass
     lines.append(_sec("speed"))
     lines.append("")
     if tpl.get("SPEED"):
-        lines.append(tpl["SPEED"])
-        lines.append("")
+        lines.extend(_justify_block(tpl["SPEED"]))
     images = manifest.get("images") or []
     for rel in images:
         if isinstance(rel, str):
             if not any(k in rel for k in ("compare", "inference", "speed_quality")):
                 continue
+            lines.extend(_center_open())
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
             lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
             figure_no += 1
             lines.append("")
+            lines.extend(_center_close())
     lines.append(_sec("per_class"))
     lines.append("")
     if tpl.get("PER_CLASS"):
-        lines.append(tpl["PER_CLASS"])
-        lines.append("")
+        lines.extend(_justify_block(tpl["PER_CLASS"]))
     pr_csv_rel = str(((manifest.get("pr_per_class") or {}) if isinstance(manifest.get("pr_per_class"), dict) else {}).get("csv") or "")
     if pr_csv_rel:
         pr_abs = os.path.join(report_root, pr_csv_rel)
@@ -697,6 +910,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 pr_df = pd.read_csv(pr_abs)
                 pr_sum = _build_pr_per_class_summary(pr_df)
                 if len(pr_sum) > 0:
+                    lines.extend(_center_open())
+                    lines.append("")
                     lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(pr_csv_rel, is_ru)}**")
                     lines.append("")
                     pr_sum = _abbrev_df(pr_sum, abbreviations)
@@ -706,21 +921,25 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         ("_Источник данных:_ " if is_ru else "_Data source:_ ")
                         + f"`{pr_csv_rel}`"
                     )
-                    lines.append("")
+                    lines.extend(_center_close())
                     table_no += 1
             except Exception:
                 pass
     for rel in images:
         if isinstance(rel, str) and rel.endswith("artifacts/pr/pr_all_classes.png"):
+            lines.extend(_center_open())
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
             lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
             figure_no += 1
             lines.append("")
+            lines.extend(_center_close())
         if isinstance(rel, str) and "artifacts/pr/per_class/" in rel and rel.endswith(".png"):
+            lines.extend(_center_open())
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
             lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
             figure_no += 1
             lines.append("")
+            lines.extend(_center_close())
     lines.append(_sec("ultra"))
     lines.append("")
     ultra_rows = manifest.get("ultralytics_test") or []
@@ -738,15 +957,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 }
             )
         if table_rows:
-            lines.append(
-                f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-                + ("Артефакты Ultralytics test по запускам" if is_ru else "Per-run Ultralytics test artifacts")
-                + "**"
-            )
-            lines.append("")
-            lines.extend(_md_table_from_df(pd.DataFrame(table_rows), abbreviations, limit=None))
-            lines.append("")
-            table_no += 1
+            # Keep Ultralytics section compact: no generic summary table.
+            pass
         for run_pos, item in enumerate(ultra_rows, start=1):
             if not isinstance(item, dict):
                 continue
@@ -757,26 +969,25 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             run_info = item.get("run_info") or {}
             if isinstance(run_info, dict):
                 model = str(run_info.get("model") or "").strip()
+                dataset_name = str(run_info.get("dataset_name") or "").strip()
                 epochs = run_info.get("epochs")
                 batch = run_info.get("batch_size")
                 train_img = run_info.get("train_image_size")
                 val_img = run_info.get("val_imgsz")
-                if any([model, epochs is not None, batch is not None, train_img is not None, val_img is not None]):
+                if any([model, dataset_name, epochs is not None, batch is not None, train_img is not None, val_img is not None]):
                     if is_ru:
                         lines.append(
                             "- Параметры запуска: "
-                            + f"модель={model or '-'}, epochs={epochs if epochs is not None else '-'}, "
-                            + f"batch={batch if batch is not None else '-'}, "
-                            + f"imgsz_train={train_img if train_img is not None else '-'}, "
-                            + f"imgsz_val={val_img if val_img is not None else '-'}."
+                            + f"модель={model or '-'}, датасет={_abbrev_value(dataset_name, abbreviations) if dataset_name else '-'}, "
+                            + f"epochs={epochs if epochs is not None else '-'}, batch={batch if batch is not None else '-'}, "
+                            + f"imgsz_train={train_img if train_img is not None else '-'}, imgsz_val={val_img if val_img is not None else '-'}."
                         )
                     else:
                         lines.append(
                             "- Run config: "
-                            + f"model={model or '-'}, epochs={epochs if epochs is not None else '-'}, "
-                            + f"batch={batch if batch is not None else '-'}, "
-                            + f"imgsz_train={train_img if train_img is not None else '-'}, "
-                            + f"imgsz_val={val_img if val_img is not None else '-'}."
+                            + f"model={model or '-'}, dataset={_abbrev_value(dataset_name, abbreviations) if dataset_name else '-'}, "
+                            + f"epochs={epochs if epochs is not None else '-'}, batch={batch if batch is not None else '-'}, "
+                            + f"imgsz_train={train_img if train_img is not None else '-'}, imgsz_val={val_img if val_img is not None else '-'}."
                         )
             machine_info = item.get("machine_info") or {}
             if isinstance(machine_info, dict):
@@ -811,8 +1022,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     if rel:
                         lines.append(
                             "- "
-                            + (f"{run_code}: источник {key}: " if is_ru else f"{run_code}: data source {key}: ")
-                            + f"`{rel}`"
+                            + _csv_source_label(key, is_ru)
+                            + f": `{rel}`"
                         )
             if lines and not lines[-1] == "":
                 lines.append("")
@@ -820,25 +1031,26 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 rel = str(rel)
                 if not rel:
                     continue
+                lines.extend(_center_open())
                 lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
                 lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
                 figure_no += 1
                 lines.append("")
+                lines.extend(_center_close())
     else:
         lines.append("- " + ("Артефакты Ultralytics test не обнаружены." if is_ru else "No Ultralytics test artifacts found."))
         lines.append("")
     lines.append(_sec("conclusion"))
     lines.append("")
     if tpl.get("CONCLUSION"):
-        lines.append(tpl["CONCLUSION"])
+        lines.extend(_justify_block(tpl["CONCLUSION"]))
     else:
         lines.append("- " + ("Рекомендуется использовать выводы выше для выбора trade-off качества/скорости." if is_ru else "Use the findings above to select the quality/speed trade-off."))
     lines.append("")
     lines.append(_sec("exec"))
     lines.append("")
     if tpl.get("EXECUTIVE_SUMMARY"):
-        lines.append(tpl["EXECUTIVE_SUMMARY"])
-        lines.append("")
+        lines.extend(_justify_block(tpl["EXECUTIVE_SUMMARY"]))
     lines.extend(_insights_from_manifest(manifest, lang))
     lines.append("")
     lines.append("")
@@ -874,7 +1086,9 @@ def write_analysis_report(
                 or _export_odt_odfpy(lang, report_root, "analyze", {}, {})
                 or _export_odt_builtin_zip(lang, report_root, "analyze", {}, {})
             ):
-                out[f"odt_{lang}"] = os.path.join(report_root, f"report-{lang}.odt")
+                odt_out = os.path.join(report_root, f"report-{lang}.odt")
+                _postprocess_odt_layout(odt_out)
+                out[f"odt_{lang}"] = odt_out
         if not no_pdf:
             if _try_pdf_from_odt(report_root, lang) or _try_pandoc_pdf(report_root, lang) or _export_pdf_fpdf2(lang, report_root, "analyze", {}, {}):
                 out[f"pdf_{lang}"] = os.path.join(report_root, f"report-{lang}.pdf")
