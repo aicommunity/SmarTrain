@@ -406,9 +406,9 @@ def cmd_scan(args: argparse.Namespace) -> None:
     for i, rd in enumerate(runs, start=1):
         try:
             md = load_metadata(rd)
-            ti = md.get("training_info") or {}
-            m = ti.get("model") or "?"
-            ds = (ti.get("dataset") or {}).get("name") or "?"
+            flat = flatten_metadata(md, rd)
+            m = flat.get("model") or "?"
+            ds = flat.get("dataset_name") or "?"
             print(f"{i:4d}  {str(m)[:14]:<14}  {str(ds)[:24]:<24}  {rd}")
         except OSError as e:
             print(f"{i:4d}  {'?':<14}  {'?':<24}  {rd}  [error: {e}]")

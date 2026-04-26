@@ -205,6 +205,85 @@ def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
         return None
 
 
+def _load_train_args_yaml(run_dir: str) -> dict[str, Any]:
+    args_yaml = os.path.join(run_dir, "train", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        return {}
+    try:
+        with open(args_yaml, "r", encoding="utf-8") as f:
+            payload = yaml.safe_load(f) or {}
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _infer_model_from_args(run_dir: str) -> str | None:
+    payload = _load_train_args_yaml(run_dir)
+    raw_model = payload.get("model")
+    if not isinstance(raw_model, str) or not raw_model.strip():
+        return None
+    token = os.path.basename(raw_model.strip())
+    if token.endswith(".pt"):
+        token = token[:-3]
+    if token.endswith(".yaml"):
+        token = token[:-5]
+    return token or None
+
+
+def _infer_dataset_name_from_run_dir(run_dir: str) -> str | None:
+    name = os.path.basename(os.path.dirname(os.path.abspath(run_dir)))
+    return name or None
+
+
+def _infer_workspace_root_from_run_dir(run_dir: str) -> str | None:
+    cur = os.path.abspath(run_dir)
+    while True:
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        if os.path.basename(parent) == "runs":
+            return os.path.dirname(parent)
+        cur = parent
+
+
+def _hydrate_training_info(payload: dict[str, Any], run_dir: str) -> None:
+    ti = payload.setdefault("training_info", {})
+    if not isinstance(ti, dict):
+        ti = {}
+        payload["training_info"] = ti
+
+    model = _infer_model_from_args(run_dir)
+    if model:
+        ti.setdefault("model", model)
+
+    ds = ti.setdefault("dataset", {})
+    if not isinstance(ds, dict):
+        ds = {}
+        ti["dataset"] = ds
+
+    dataset_name = _infer_dataset_name_from_run_dir(run_dir)
+    if dataset_name:
+        ds.setdefault("name", dataset_name)
+
+    dataset_path = _load_dataset_from_runtime_yaml(run_dir)
+    if dataset_path:
+        ds.setdefault("path_absolute", dataset_path)
+
+    workspace_root = _infer_workspace_root_from_run_dir(run_dir)
+    if workspace_root:
+        workspace_block = payload.setdefault("workspace", {})
+        if not isinstance(workspace_block, dict):
+            workspace_block = {}
+            payload["workspace"] = workspace_block
+        workspace_block.setdefault("root", ".")
+        try:
+            workspace_block.setdefault("run_directory_relative", os.path.relpath(run_dir, workspace_root))
+            if dataset_path and os.path.abspath(dataset_path).startswith(os.path.abspath(workspace_root) + os.sep):
+                workspace_block.setdefault("dataset_path_relative", os.path.relpath(dataset_path, workspace_root))
+                ds.setdefault("path_under_workspace", os.path.relpath(dataset_path, workspace_root))
+        except Exception:
+            pass
+
 def _is_dataset_dir(path: str | None) -> bool:
     if not path:
         return False
@@ -345,13 +424,7 @@ def update_resume_metadata(
             },
         }
 
-    dataset_path = _load_dataset_from_runtime_yaml(run_dir)
-    if dataset_path:
-        ti = payload.setdefault("training_info", {})
-        if isinstance(ti, dict):
-            ds = ti.setdefault("dataset", {})
-            if isinstance(ds, dict):
-                ds.setdefault("path_absolute", dataset_path)
+    _hydrate_training_info(payload, run_dir)
 
     _atomic_write_json(metadata_path, payload)
 
@@ -405,6 +478,8 @@ def update_resume_test_metadata(
                 "has_test_dir": diagnosis.has_test_dir,
             },
         }
+
+    _hydrate_training_info(payload, run_dir)
 
     _atomic_write_json(metadata_path, payload)
 

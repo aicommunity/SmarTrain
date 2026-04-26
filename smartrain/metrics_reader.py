@@ -6,10 +6,38 @@ from glob import glob
 from typing import Any
 
 import pandas as pd
+import yaml
 
 from smartrain.analyze_models import RunRecord
 
 DEFAULT_MAP_COL = "metrics/mAP50-95(B)"
+
+
+def _infer_model_from_args_yaml(run_dir: str) -> str | None:
+    args_yaml = os.path.join(run_dir, "train", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        return None
+    try:
+        with open(args_yaml, "r", encoding="utf-8") as f:
+            payload = yaml.safe_load(f) or {}
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    raw_model = payload.get("model")
+    if not isinstance(raw_model, str) or not raw_model.strip():
+        return None
+    token = os.path.basename(raw_model.strip())
+    if token.endswith(".pt"):
+        token = token[:-3]
+    if token.endswith(".yaml"):
+        token = token[:-5]
+    return token or None
+
+
+def _infer_dataset_name_from_run_dir(run_dir: str) -> str | None:
+    parent = os.path.basename(os.path.dirname(os.path.abspath(run_dir)))
+    return parent or None
 
 
 def load_metadata(run_dir: str) -> dict[str, Any]:
@@ -42,8 +70,14 @@ def pick_map_column(df: pd.DataFrame) -> str | None:
 def flatten_metadata(md: dict[str, Any], run_dir: str) -> dict[str, Any]:
     row: dict[str, Any] = {"run_dir": run_dir}
     ti = md.get("training_info") or {}
-    row["model"] = ti.get("model")
-    row["dataset_name"] = (ti.get("dataset") or {}).get("name")
+    model = ti.get("model")
+    if not model:
+        model = _infer_model_from_args_yaml(run_dir)
+    row["model"] = model
+    dataset_name = (ti.get("dataset") or {}).get("name")
+    if not dataset_name:
+        dataset_name = _infer_dataset_name_from_run_dir(run_dir)
+    row["dataset_name"] = dataset_name
     row["dataset_hash"] = (ti.get("dataset") or {}).get("hash")
     hp = ti.get("hyperparameters") or {}
     row["epochs"] = hp.get("epochs")

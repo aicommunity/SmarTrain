@@ -2072,8 +2072,12 @@ def save_training_metadata(
     metadata_file = os.path.join(model_dir, "training_metadata.json")
 
     try:
-        with open(metadata_file, "w", encoding="utf-8") as f:
+        metadata_tmp = metadata_file + ".tmp"
+        with open(metadata_tmp, "w", encoding="utf-8") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(metadata_tmp, metadata_file)
         print(f"[INFO] Training metadata saved: {metadata_file}")
     except Exception as e:
         print(f"[WARNING] Failed to save metadata: {e}")

@@ -240,3 +240,17 @@ def test_resolve_dataset_path_for_resume_uses_workspace_relative_metadata_path(t
 
     resolved = tr.resolve_dataset_path_for_resume(str(run_dir), str(tmp_path))
     assert resolved == str(dataset_dir)
+
+
+def test_update_resume_metadata_hydrates_training_info_when_missing(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_hydrate" / "run_hydrate"
+    (run_dir / "train").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "args.yaml").write_text("model: /old/path/yolo11x.pt\n", encoding="utf-8")
+    (run_dir / "_runtime_data_train.yaml").write_text(f"path: {tmp_path}\n", encoding="utf-8")
+    (tmp_path / "data.yaml").write_text("path: .\ntrain: train/images\nval: val/images\n", encoding="utf-8")
+
+    tr.update_resume_metadata(str(run_dir), success=False, error="x", diagnosis=tr.diagnose_run(str(run_dir)))
+    metadata = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))
+
+    assert metadata.get("training_info", {}).get("model") == "yolo11x"
+    assert metadata.get("training_info", {}).get("dataset", {}).get("name") == "dataset_hydrate"
