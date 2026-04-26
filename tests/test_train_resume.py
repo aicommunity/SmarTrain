@@ -254,3 +254,35 @@ def test_update_resume_metadata_hydrates_training_info_when_missing(tmp_path: Pa
 
     assert metadata.get("training_info", {}).get("model") == "yolo11x"
     assert metadata.get("training_info", {}).get("dataset", {}).get("name") == "dataset_hydrate"
+
+
+def test_update_resume_metadata_hydrates_model_from_run_name_when_args_is_last(tmp_path: Path) -> None:
+    run_dir = (
+        tmp_path
+        / "runs"
+        / "dataset_hydrate2"
+        / "2026-04-24_19-13_yolo26x_300epochs-eb38791f"
+    )
+    (run_dir / "train").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "args.yaml").write_text(
+        "model: /old/path/train/weights/last.pt\n", encoding="utf-8"
+    )
+
+    tr.update_resume_metadata(str(run_dir), success=False, error="x", diagnosis=tr.diagnose_run(str(run_dir)))
+    metadata = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))
+
+    assert metadata.get("training_info", {}).get("model") == "yolo26x"
+
+
+def test_update_resume_metadata_replaces_null_model(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_null" / "2026-04-24_19-13_yolo11x_300epochs-abcd"
+    (run_dir / "train").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "args.yaml").write_text("model: yolo11x.pt\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"model": None, "dataset": {"name": "dataset_null"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    tr.update_resume_metadata(str(run_dir), success=False, error="x", diagnosis=tr.diagnose_run(str(run_dir)))
+    metadata = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))
+    assert metadata.get("training_info", {}).get("model") == "yolo11x"

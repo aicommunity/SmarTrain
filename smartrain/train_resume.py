@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -227,6 +228,12 @@ def _infer_model_from_args(run_dir: str) -> str | None:
         token = token[:-3]
     if token.endswith(".yaml"):
         token = token[:-5]
+    token = token.strip().lower()
+    if token in {"last", "best"}:
+        run_name = os.path.basename(os.path.abspath(run_dir))
+        m = re.search(r"(yolo[a-z0-9]*[nslmx](?:-(?:seg|cls|pose|obb))?)", run_name, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).lower()
     return token or None
 
 
@@ -254,7 +261,9 @@ def _hydrate_training_info(payload: dict[str, Any], run_dir: str) -> None:
 
     model = _infer_model_from_args(run_dir)
     if model:
-        ti.setdefault("model", model)
+        cur_model = ti.get("model")
+        if not isinstance(cur_model, str) or not cur_model.strip():
+            ti["model"] = model
 
     ds = ti.setdefault("dataset", {})
     if not isinstance(ds, dict):
@@ -263,11 +272,15 @@ def _hydrate_training_info(payload: dict[str, Any], run_dir: str) -> None:
 
     dataset_name = _infer_dataset_name_from_run_dir(run_dir)
     if dataset_name:
-        ds.setdefault("name", dataset_name)
+        cur_name = ds.get("name")
+        if not isinstance(cur_name, str) or not cur_name.strip():
+            ds["name"] = dataset_name
 
     dataset_path = _load_dataset_from_runtime_yaml(run_dir)
     if dataset_path:
-        ds.setdefault("path_absolute", dataset_path)
+        cur_abs = ds.get("path_absolute")
+        if not isinstance(cur_abs, str) or not cur_abs.strip():
+            ds["path_absolute"] = dataset_path
 
     workspace_root = _infer_workspace_root_from_run_dir(run_dir)
     if workspace_root:

@@ -1706,6 +1706,7 @@ def train_yolo(
         dataset_hash = None
 
     batch = int(ultralytics_cfg.get("batch", BATCH))
+    img_size = int(ultralytics_cfg.get("imgsz", IMG_SIZE))
     folder_name = _build_run_name(
         "ultralytics",
         model_version,
@@ -1735,6 +1736,18 @@ def train_yolo(
         os.makedirs(model_dir, exist_ok=True)
 
     train_kw = _finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
+    _ensure_initial_training_metadata(
+        model_dir=model_dir,
+        dataset_path=dataset_path,
+        model_version=model_version.replace(".pt", ""),
+        epochs=epochs,
+        batch=batch,
+        img_size=img_size,
+        training_start_time=training_start_time,
+        dataset_hash=dataset_hash,
+        workspace_root=workspace_root,
+        task_type=task_to_metadata_task_type(train_kw.get("task")),
+    )
 
     clearml_task = None
     if smartrain_opts.get("clearml"):
@@ -1960,6 +1973,131 @@ def _relative_to_workspace(path: str, workspace_root: str) -> str:
         return ap
 
 
+def _write_json_atomic(path: str, payload: dict[str, Any]) -> None:
+    out_dir = os.path.dirname(path) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    tmp_path = path + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _ensure_initial_training_metadata(
+    *,
+    model_dir: str,
+    dataset_path: str,
+    model_version: str,
+    epochs: int,
+    batch: int,
+    img_size: int,
+    training_start_time: datetime,
+    dataset_hash: str | None,
+    workspace_root: str | None,
+    task_type: str,
+) -> None:
+    metadata_file = os.path.join(model_dir, "training_metadata.json")
+    payload: dict[str, Any] = {}
+    if os.path.isfile(metadata_file):
+        try:
+            with open(metadata_file, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            if isinstance(existing, dict):
+                payload = existing
+        except Exception:
+            payload = {}
+
+    ti = payload.setdefault("training_info", {})
+    if not isinstance(ti, dict):
+        ti = {}
+        payload["training_info"] = ti
+    ti.setdefault("framework", "ultralytics")
+    provider = ti.setdefault("provider", {})
+    if not isinstance(provider, dict):
+        provider = {}
+        ti["provider"] = provider
+    provider.setdefault("type", "builtin")
+    provider.setdefault("id", "ultralytics")
+    ti.setdefault("task_type", task_type or "detection")
+    ti.setdefault("model", model_version)
+    ds = ti.setdefault("dataset", {})
+    if not isinstance(ds, dict):
+        ds = {}
+        ti["dataset"] = ds
+    ds.setdefault("name", os.path.basename(os.path.normpath(dataset_path)))
+    ds.setdefault("path_relative", _get_relative_path(dataset_path, model_dir))
+    ds.setdefault("hash", dataset_hash)
+    hp = ti.setdefault("hyperparameters", {})
+    if not isinstance(hp, dict):
+        hp = {}
+        ti["hyperparameters"] = hp
+    hp.setdefault("epochs", epochs)
+    hp.setdefault("batch_size", batch)
+    hp.setdefault("image_size", img_size)
+
+    ts = payload.setdefault("timestamps", {})
+    if not isinstance(ts, dict):
+        ts = {}
+        payload["timestamps"] = ts
+    tr_ts = ts.setdefault("training", {})
+    if not isinstance(tr_ts, dict):
+        tr_ts = {}
+        ts["training"] = tr_ts
+    tr_ts.setdefault("start", training_start_time.isoformat())
+    tr_ts.setdefault("end", None)
+    tr_ts.setdefault("duration_seconds", None)
+    te_ts = ts.setdefault("testing", {})
+    if not isinstance(te_ts, dict):
+        te_ts = {}
+        ts["testing"] = te_ts
+    te_ts.setdefault("start", None)
+    te_ts.setdefault("end", None)
+    te_ts.setdefault("duration_seconds", None)
+
+    status = payload.setdefault("status", {})
+    if not isinstance(status, dict):
+        status = {}
+        payload["status"] = status
+    tr_status = status.setdefault("training", {})
+    if not isinstance(tr_status, dict):
+        tr_status = {}
+        status["training"] = tr_status
+    tr_status.setdefault("success", None)
+    tr_status.setdefault("error", None)
+    te_status = status.setdefault("testing", {})
+    if not isinstance(te_status, dict):
+        te_status = {}
+        status["testing"] = te_status
+    te_status.setdefault("success", None)
+    te_status.setdefault("error", None)
+
+    paths = payload.setdefault("paths", {})
+    if not isinstance(paths, dict):
+        paths = {}
+        payload["paths"] = paths
+    paths.setdefault("model_directory", ".")
+    paths.setdefault("best_model", None)
+
+    if workspace_root is not None:
+        wb = payload.setdefault("workspace", {})
+        if not isinstance(wb, dict):
+            wb = {}
+            payload["workspace"] = wb
+        wb.setdefault("root", ".")
+        wb.setdefault("dataset_path_relative", _relative_to_workspace(dataset_path, workspace_root))
+        wb.setdefault("run_directory_relative", _relative_to_workspace(model_dir, workspace_root))
+
+    _write_json_atomic(metadata_file, payload)
+
+
 def save_training_metadata(
     model_dir,
     dataset_path,
@@ -2072,12 +2210,7 @@ def save_training_metadata(
     metadata_file = os.path.join(model_dir, "training_metadata.json")
 
     try:
-        metadata_tmp = metadata_file + ".tmp"
-        with open(metadata_tmp, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(metadata_tmp, metadata_file)
+        _write_json_atomic(metadata_file, metadata)
         print(f"[INFO] Training metadata saved: {metadata_file}")
     except Exception as e:
         print(f"[WARNING] Failed to save metadata: {e}")

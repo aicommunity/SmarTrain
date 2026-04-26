@@ -2471,7 +2471,6 @@ def cmd_all(args: argparse.Namespace) -> None:
         print(f"[OK] Report {key}: {path}")
     replay_parts = [
         "smartrain", "analyze", "all",
-        "--workspace", str(args.workspace),
         "--baseline", baseline,
         "--profile", profile,
         "--report-languages", ",".join(report_languages),
@@ -2481,6 +2480,9 @@ def cmd_all(args: argparse.Namespace) -> None:
         "--val-imgsz", str(int(getattr(args, "val_imgsz", 640))),
         "--recompute-missing-metrics", ("yes" if recompute_missing_metrics else "no"),
     ]
+    workspace_val = getattr(args, "workspace", None)
+    if workspace_val is not None and str(workspace_val).strip().lower() not in {"", "none"}:
+        replay_parts.extend(["--workspace", str(workspace_val)])
     for item in others:
         replay_parts.extend(["--others", item])
     if data_yaml:

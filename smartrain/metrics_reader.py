@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from glob import glob
 from typing import Any
 
@@ -11,6 +12,12 @@ import yaml
 from smartrain.analyze_models import RunRecord
 
 DEFAULT_MAP_COL = "metrics/mAP50-95(B)"
+
+
+def _infer_model_from_run_dir_name(run_dir: str) -> str | None:
+    run_name = os.path.basename(os.path.abspath(run_dir))
+    m = re.search(r"(yolo[a-z0-9]*[nslmx](?:-(?:seg|cls|pose|obb))?)", run_name, flags=re.IGNORECASE)
+    return m.group(1).lower() if m else None
 
 
 def _infer_model_from_args_yaml(run_dir: str) -> str | None:
@@ -32,6 +39,9 @@ def _infer_model_from_args_yaml(run_dir: str) -> str | None:
         token = token[:-3]
     if token.endswith(".yaml"):
         token = token[:-5]
+    token = token.strip().lower()
+    if token in {"last", "best"}:
+        return _infer_model_from_run_dir_name(run_dir)
     return token or None
 
 
