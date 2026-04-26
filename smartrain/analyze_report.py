@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 import pandas as pd
+import numpy as np
 
 from smartrain.dataset_report import _export_odt_builtin_zip, _export_odt_odfpy, _export_pdf_fpdf2, _try_pandoc_odt, _try_pandoc_pdf
 
@@ -236,6 +237,56 @@ def _build_pr_per_class_summary(df: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values("ap_gap", ascending=False)
 
 
+def _should_hide_system_profile_table(df: pd.DataFrame) -> bool:
+    sys_cols = [c for c in df.columns if str(c).startswith("sys_")]
+    if not sys_cols:
+        return False
+    scoped = df[sys_cols].copy()
+    scoped = scoped.replace("", np.nan)
+    total = int(scoped.size)
+    if total <= 0:
+        return False
+    empty = int(scoped.isna().sum().sum())
+    return (empty / float(total)) > 0.70
+
+
+def _build_test_metrics_summary(df: pd.DataFrame, abbreviations: dict[str, str]) -> pd.DataFrame:
+    metric_cols = ["test_mAP50-95", "test_mAP50", "test_Box-F1", "test_Box-P", "test_Box-R"]
+    present = [c for c in metric_cols if c in df.columns]
+    if not present:
+        return pd.DataFrame()
+    run_col = "run_name" if "run_name" in df.columns else ("run_dir" if "run_dir" in df.columns else None)
+    if not run_col:
+        return pd.DataFrame()
+    out = df[[run_col] + present].copy()
+    out = out.rename(columns={run_col: "run"})
+    out = _abbrev_df(out, abbreviations)
+    for c in present:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    return out
+
+
+def _quality_metric_comments(df: pd.DataFrame, is_ru: bool) -> list[str]:
+    lines: list[str] = []
+    if len(df) == 0 or "run" not in df.columns:
+        return lines
+    for metric in [c for c in df.columns if c != "run"]:
+        s = pd.to_numeric(df[metric], errors="coerce")
+        if s.notna().sum() < 2:
+            continue
+        best_idx = int(s.idxmax())
+        worst_idx = int(s.idxmin())
+        best_run = str(df.loc[best_idx, "run"])
+        worst_run = str(df.loc[worst_idx, "run"])
+        best_val = float(s.loc[best_idx])
+        worst_val = float(s.loc[worst_idx])
+        if is_ru:
+            lines.append(f"- {metric}: лучший запуск **{best_run}** ({best_val:.4f}), худший **{worst_run}** ({worst_val:.4f}).")
+        else:
+            lines.append(f"- {metric}: best run **{best_run}** ({best_val:.4f}), worst **{worst_run}** ({worst_val:.4f}).")
+    return lines
+
+
 def _table_title(rel: str, is_ru: bool) -> str:
     low = rel.lower()
     if "compare_delta" in low:
@@ -417,6 +468,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         "quality": "Анализ качества" if is_ru else "Quality Analysis",
         "speed": "Анализ скорости" if is_ru else "Speed Analysis",
         "per_class": "Анализ по классам" if is_ru else "Per-class Analysis",
+        "ultra": "Результаты Ultralytics test" if is_ru else "Ultralytics Test Results",
         "conclusion": "Заключение и рекомендации" if is_ru else "Conclusions and Actions",
     }
     lines: list[str] = ["# " + ("Аналитический отчёт" if is_ru else "Analyze report"), ""]
@@ -464,7 +516,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         if not isinstance(rel, str):
             continue
         abs_path = os.path.join(report_root, rel) if report_root else ""
-        if not any(k in rel for k in ("compare", "leaderboard", "metrics", "speed_quality", "pr_per_class")):
+        if not any(
+            k in rel
+            for k in ("compare", "leaderboard", "metrics", "speed_quality", "pr_per_class", "system_profile", "runs_summary")
+        ):
             continue
         title = os.path.basename(rel)
         if "pr_per_class" in rel:
@@ -477,6 +532,22 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             try:
                 df = pd.read_csv(abs_path)
                 df = _select_table_columns(rel, df)
+                if "system_profile" in rel.lower() and _should_hide_system_profile_table(df):
+                    lines.append(
+                        "- "
+                        + (
+                            "Системный профиль не показан: в данных слишком много пропусков по полям hardware/os."
+                            if is_ru
+                            else "System profile table hidden: data is too sparse in hardware/os fields."
+                        )
+                    )
+                    lines.append("")
+                    lines.append(
+                        ("_Источник данных:_ " if is_ru else "_Data source:_ ")
+                        + f"`{rel}`"
+                    )
+                    lines.append("")
+                    continue
                 df = _abbrev_df(df, abbreviations)
                 lines.extend(_md_table_from_df(df, abbreviations, limit=None))
                 lines.append("")
@@ -489,6 +560,31 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         else:
             lines.append(f"- {('Файл не найден' if is_ru else 'File not found')}")
         lines.append("")
+        if "runs_summary" in rel.lower():
+            try:
+                full_df = pd.read_csv(abs_path)
+                test_summary = _build_test_metrics_summary(full_df, abbreviations)
+                if len(test_summary) > 0:
+                    lines.append(
+                        f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                        + ("Сводка test-метрик Ultralytics" if is_ru else "Ultralytics test metrics summary")
+                        + "**"
+                    )
+                    lines.append("")
+                    lines.extend(_md_table_from_df(test_summary, abbreviations, limit=None))
+                    lines.append("")
+                    lines.append(
+                        ("_Источник данных:_ " if is_ru else "_Data source:_ ")
+                        + f"`{rel}`"
+                    )
+                    lines.append("")
+                    comments = _quality_metric_comments(test_summary, is_ru)
+                    lines.extend(comments)
+                    if comments:
+                        lines.append("")
+                    table_no += 1
+            except Exception:
+                pass
     lines.append("## " + section_titles["speed"])
     lines.append("")
     if tpl.get("SPEED"):
@@ -530,11 +626,67 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             except Exception:
                 pass
     for rel in images:
+        if isinstance(rel, str) and rel.endswith("artifacts/pr/pr_all_classes.png"):
+            lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
+            lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
+            figure_no += 1
+            lines.append("")
         if isinstance(rel, str) and "artifacts/pr/per_class/" in rel and rel.endswith(".png"):
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
             lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
             figure_no += 1
             lines.append("")
+    lines.append("## " + section_titles["ultra"])
+    lines.append("")
+    ultra_rows = manifest.get("ultralytics_test") or []
+    if isinstance(ultra_rows, list) and ultra_rows:
+        table_rows: list[dict[str, Any]] = []
+        for item in ultra_rows:
+            if not isinstance(item, dict):
+                continue
+            table_rows.append(
+                {
+                    "run": item.get("run_code") or os.path.basename(str(item.get("run_name") or "")),
+                    "pr.csv": "yes" if (item.get("csv") or {}).get("pr.csv") else "no",
+                    "pr_per_class.csv": "yes" if (item.get("csv") or {}).get("pr_per_class.csv") else "no",
+                    "images_count": len(item.get("images") or []),
+                }
+            )
+        if table_rows:
+            lines.append(
+                f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                + ("Артефакты Ultralytics test по запускам" if is_ru else "Per-run Ultralytics test artifacts")
+                + "**"
+            )
+            lines.append("")
+            lines.extend(_md_table_from_df(pd.DataFrame(table_rows), abbreviations, limit=None))
+            lines.append("")
+            table_no += 1
+        for item in ultra_rows:
+            if not isinstance(item, dict):
+                continue
+            run_code = str(item.get("run_code") or item.get("run_name") or "")
+            csv_map = item.get("csv") or {}
+            if isinstance(csv_map, dict):
+                for key in ("pr.csv", "pr_per_class.csv"):
+                    rel = str(csv_map.get(key) or "")
+                    if rel:
+                        lines.append(
+                            "- "
+                            + (f"{run_code}: источник {key}: " if is_ru else f"{run_code}: data source {key}: ")
+                            + f"`{rel}`"
+                        )
+            for rel in item.get("images") or []:
+                rel = str(rel)
+                if not rel:
+                    continue
+                lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
+                lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
+                figure_no += 1
+                lines.append("")
+    else:
+        lines.append("- " + ("Артефакты Ultralytics test не обнаружены." if is_ru else "No Ultralytics test artifacts found."))
+        lines.append("")
     lines.append("## " + section_titles["conclusion"])
     lines.append("")
     if tpl.get("CONCLUSION"):

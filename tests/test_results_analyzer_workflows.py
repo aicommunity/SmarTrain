@@ -575,22 +575,45 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
 
     (tmp_path / "artifacts" / "speed_quality").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "compare").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "artifacts" / "pr").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
     pd.DataFrame([{"model": "a", "scatter_x_value": 10.0, "scatter_y_value": 0.61}]).to_csv(
         tmp_path / "artifacts" / "speed_quality" / "speed_quality.csv",
         index=False,
     )
+    pd.DataFrame(
+        [
+            {
+                "run_dir": "runs/ds_a/run_a",
+                "run_name": "run_a",
+                "test_mAP50-95": 0.61,
+                "test_mAP50": 0.72,
+                "test_Box-F1": 0.80,
+                "test_Box-P": 0.81,
+                "test_Box-R": 0.79,
+            }
+        ]
+    ).to_csv(tmp_path / "artifacts" / "table" / "runs_summary.csv", index=False)
     (tmp_path / "artifacts" / "compare" / "compare_curves.png").write_bytes(b"fakepng")
+    (tmp_path / "artifacts" / "pr" / "pr_all_classes.png").write_bytes(b"fakepng")
 
     manifest = {
         "session_name": "s1",
         "profile": "full",
         "baseline": "run_a",
         "others": ["run_b"],
-        "tables": ["artifacts/speed_quality/speed_quality.csv"],
-        "images": ["artifacts/compare/compare_curves.png"],
+        "tables": ["artifacts/speed_quality/speed_quality.csv", "artifacts/table/runs_summary.csv"],
+        "images": ["artifacts/compare/compare_curves.png", "artifacts/pr/pr_all_classes.png"],
         "artifacts": [{"role": "compare_png", "path": "artifacts/compare/compare_curves.png"}],
         "speed_quality": {"csv": "artifacts/speed_quality/speed_quality.csv"},
-        "abbreviations": {"a": "M1"},
+        "abbreviations": {"a": "M1", "ds_a": "D1"},
+        "ultralytics_test": [
+            {
+                "run_code": "R1",
+                "csv": {"pr.csv": "artifacts/ultralytics-test/R1/pr.csv"},
+                "images": ["artifacts/pr/pr_all_classes.png"],
+            }
+        ],
     }
     out = write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
     assert "md_ru" in out and "md_en" in out
@@ -601,6 +624,42 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     assert "Conclusions and Actions" in en_md
     assert "Table 1." in en_md
     assert "Рисунок 1." in ru_md
+    assert "PR-кривые (все классы)" in ru_md
+    assert "Ultralytics Test Results" in en_md
+    assert "Ultralytics test metrics summary" in en_md
+
+
+def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> None:
+    from smartrain.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "run_name": "run_a",
+                "model": "yolo",
+                "dataset_name": "very_long_dataset_name_a",
+                "sys_cpu_model": None,
+                "sys_cpu_logical_cores": None,
+                "sys_ram_total_gb": None,
+                "sys_gpu_0_name": None,
+            }
+        ]
+    ).to_csv(tmp_path / "artifacts" / "table" / "system_profile_compare.csv", index=False)
+    manifest = {
+        "session_name": "s2",
+        "profile": "quality",
+        "baseline": "run_a",
+        "others": [],
+        "tables": ["artifacts/table/system_profile_compare.csv"],
+        "images": [],
+        "artifacts": [],
+        "abbreviations": {"very_long_dataset_name_a": "D1"},
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "Системный профиль не показан" in ru_md
+    assert "very_long_dataset_name_a" not in ru_md
 
 
 def test_interactive_full_auto_detects_data_yaml_from_runtime_file(

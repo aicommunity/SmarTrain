@@ -1270,17 +1270,99 @@ def _save_recompute_status(
 
 def _build_abbreviations_for_report(run_dirs: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
+    dataset_to_idx: dict[str, int] = {}
+    dataset_counter = 1
     for idx, rd in enumerate(run_dirs, start=1):
         run_name = os.path.basename(rd.rstrip(os.sep))
         if len(run_name) > 22:
             out[run_name] = f"R{idx}"
         try:
-            model = str((build_run_record(rd).model or "")).strip()
+            rec = build_run_record(rd)
+            model = str((rec.model or "")).strip()
+            dataset_name = str((rec.dataset_name or "")).strip()
         except Exception:
             model = ""
+            dataset_name = ""
         if model and len(model) > 16:
             out[model] = f"M{idx}"
+        if dataset_name:
+            if dataset_name not in dataset_to_idx:
+                dataset_to_idx[dataset_name] = dataset_counter
+                dataset_counter += 1
+            out.setdefault(dataset_name, f"D{dataset_to_idx[dataset_name]}")
     return out
+
+
+def _collect_ultralytics_test_artifacts(
+    session_root: str,
+    run_dirs: list[str],
+    abbreviations: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    rows: list[dict[str, Any]] = []
+    artifacts: list[dict[str, str]] = []
+    out_root = os.path.join(session_root, "artifacts", "ultralytics-test")
+    for rd in run_dirs:
+        run_name = os.path.basename(rd.rstrip(os.sep))
+        run_code = abbreviations.get(run_name, run_name)
+        test_dir = os.path.join(rd, "test")
+        row: dict[str, Any] = {
+            "run_dir": rd,
+            "run_name": run_name,
+            "run_code": run_code,
+            "test_dir": test_dir,
+            "exists": os.path.isdir(test_dir),
+            "files": [],
+            "csv": {},
+            "images": [],
+        }
+        if not os.path.isdir(test_dir):
+            rows.append(row)
+            continue
+        safe_code = re.sub(r"[^\w.\-+]+", "_", str(run_code), flags=re.UNICODE).strip("._") or "run"
+        dst_dir = os.path.join(out_root, safe_code)
+        os.makedirs(dst_dir, exist_ok=True)
+        csv_names = ("pr.csv", "pr_per_class.csv")
+        image_patterns = (
+            "PR_curve.png",
+            "BoxPR_curve.png",
+            "F1_curve.png",
+            "BoxF1_curve.png",
+            "P_curve.png",
+            "BoxP_curve.png",
+            "R_curve.png",
+            "BoxR_curve.png",
+            "confusion_matrix.png",
+            "confusion_matrix_normalized.png",
+            "val_batch0_pred.jpg",
+            "val_batch0_labels.jpg",
+        )
+        for name in csv_names:
+            src = os.path.join(test_dir, name)
+            if not os.path.isfile(src):
+                continue
+            dst = os.path.join(dst_dir, name)
+            try:
+                shutil.copy2(src, dst)
+                rel = os.path.relpath(dst, session_root)
+                row["csv"][name] = rel
+                artifacts.append({"role": f"ultralytics_test_{name.replace('.', '_')}", "path": rel})
+            except Exception:
+                pass
+        for name in image_patterns:
+            src = os.path.join(test_dir, name)
+            if not os.path.isfile(src):
+                continue
+            dst = os.path.join(dst_dir, name)
+            try:
+                shutil.copy2(src, dst)
+                rel = os.path.relpath(dst, session_root)
+                row["images"].append(rel)
+                artifacts.append({"role": "ultralytics_test_image", "path": rel})
+            except Exception:
+                pass
+        row["files"] = sorted(os.listdir(test_dir))
+        rows.append(row)
+    return rows, artifacts
 
 
 def _resolve_pr_output_png(
@@ -2407,12 +2489,24 @@ def cmd_all(args: argparse.Namespace) -> None:
         pr_per_class_csv = os.path.join(session_root, "artifacts", "pr", "per_class", "pr_per_class.csv")
         if os.path.isfile(pr_per_class_csv):
             artifacts.append({"role": "pr_per_class_csv", "path": os.path.relpath(pr_per_class_csv, session_root)})
+        pr_per_class_dir = os.path.join(session_root, "artifacts", "pr", "per_class")
+        if os.path.isdir(pr_per_class_dir):
+            for p in sorted(glob(os.path.join(pr_per_class_dir, "*.png"))):
+                artifacts.append({"role": "pr_per_class_png", "path": os.path.relpath(p, session_root)})
         pr_cache_stats = os.path.join(session_root, "artifacts", "pr", "cache_stats.json")
         if os.path.isfile(pr_cache_stats):
             try:
                 cache_events.extend(json.load(open(pr_cache_stats, "r", encoding="utf-8")).get("cache", []))
             except Exception:
                 pass
+
+    abbreviations = _build_abbreviations_for_report([baseline] + others)
+    ultralytics_test_rows, ultralytics_test_artifacts = _collect_ultralytics_test_artifacts(
+        session_root,
+        [baseline] + others,
+        abbreviations,
+    )
+    artifacts.extend(ultralytics_test_artifacts)
 
     manifest = {
         "session_name": os.path.basename(session_root),
@@ -2434,8 +2528,10 @@ def cmd_all(args: argparse.Namespace) -> None:
             "per_class_analysis",
             "conclusion",
         ],
-        "abbreviations": _build_abbreviations_for_report([baseline] + others),
+        "abbreviations": abbreviations,
     }
+    if ultralytics_test_rows:
+        manifest["ultralytics_test"] = ultralytics_test_rows
     if metric_sources_payload is not None:
         manifest["metric_sources"] = metric_sources_payload
     if cache_events:
