@@ -224,9 +224,9 @@ def _build_pr_per_class_summary(df: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "class_name": class_name,
-                "best_model": best_model,
+                "best_run": best_model,
                 "best_ap": best_ap,
-                "worst_model": worst_model,
+                "worst_run": worst_model,
                 "worst_ap": worst_ap,
                 "ap_gap": best_ap - worst_ap,
             }
@@ -266,6 +266,39 @@ def _build_test_metrics_summary(df: pd.DataFrame, abbreviations: dict[str, str])
     return out
 
 
+def _selected_run_identity(manifest: dict[str, Any]) -> tuple[set[str], set[str]]:
+    selected_dirs: set[str] = set()
+    selected_names: set[str] = set()
+    for p in [manifest.get("baseline")] + list(manifest.get("others") or []):
+        sp = str(p or "").strip()
+        if not sp:
+            continue
+        selected_dirs.add(sp)
+        selected_names.add(os.path.basename(sp.rstrip("/")))
+    return selected_dirs, selected_names
+
+
+def _filter_runs_summary_for_selection(df: pd.DataFrame, manifest: dict[str, Any]) -> pd.DataFrame:
+    if len(df) == 0:
+        return df
+    selected_dirs, selected_names = _selected_run_identity(manifest)
+    work = df.copy()
+    keep = pd.Series([False] * len(work), index=work.index)
+    if "run_dir" in work.columns:
+        run_dir_abs = work["run_dir"].astype(str).str.strip()
+        keep = keep | run_dir_abs.isin(selected_dirs)
+    if "run_name" in work.columns:
+        run_name = work["run_name"].astype(str).str.strip()
+        keep = keep | run_name.isin(selected_names)
+    if "run_dir" in work.columns:
+        run_dir_base = work["run_dir"].astype(str).str.rstrip("/").str.split("/").str[-1]
+        keep = keep | run_dir_base.isin(selected_names)
+    filtered = work[keep].copy()
+    if len(filtered) == 0:
+        return work
+    return filtered
+
+
 def _quality_metric_comments(df: pd.DataFrame, is_ru: bool) -> list[str]:
     lines: list[str] = []
     if len(df) == 0 or "run" not in df.columns:
@@ -297,6 +330,12 @@ def _table_title(rel: str, is_ru: bool) -> str:
         return "Соотношение скорости и качества" if is_ru else "Speed-quality trade-off"
     if "pr_per_class" in low:
         return "Сводка AP по классам" if is_ru else "Per-class AP summary"
+    if "runs_summary" in low:
+        return (
+            "Сводка параметров и метрик выбранных запусков"
+            if is_ru
+            else "Selected runs metrics and configuration summary"
+        )
     if "system_profile" in low:
         return (
             "Сравнение окружения обучения (железо)"
@@ -317,8 +356,37 @@ def _figure_title(rel: str, is_ru: bool) -> str:
     if "pr_all_classes" in low:
         return "PR-кривые (все классы)" if is_ru else "PR curves (all classes)"
     if "pr_class_" in low:
+        m = re.search(r"pr_class_\d+_(.+)\.png$", os.path.basename(rel), flags=re.IGNORECASE)
+        cls = m.group(1).replace("_", " ") if m else ""
+        if cls:
+            return (
+                f"PR-кривая по классу: {cls}"
+                if is_ru
+                else f"Per-class PR curve: {cls}"
+            )
         return "PR-кривая по классу" if is_ru else "Per-class PR curve"
-    return os.path.basename(rel)
+    bn = os.path.basename(rel).lower()
+    if "boxpr_curve" in bn or bn == "pr_curve.png":
+        return "PR-кривая" if is_ru else "Precision-Recall curve"
+    if "boxf1_curve" in bn or bn == "f1_curve.png":
+        return "F1-кривая" if is_ru else "F1 curve"
+    if "boxp_curve" in bn or bn == "p_curve.png":
+        return "Кривая precision" if is_ru else "Precision curve"
+    if "boxr_curve" in bn or bn == "r_curve.png":
+        return "Кривая recall" if is_ru else "Recall curve"
+    if bn == "confusion_matrix.png":
+        return "Матрица ошибок" if is_ru else "Confusion matrix"
+    if bn == "confusion_matrix_normalized.png":
+        return "Нормализованная матрица ошибок" if is_ru else "Normalized confusion matrix"
+    m_pred = re.match(r"val_batch(\d+)_pred\.jpg$", bn)
+    if m_pred:
+        n = int(m_pred.group(1))
+        return f"Пример предсказаний (batch {n})" if is_ru else f"Prediction sample (batch {n})"
+    m_lbl = re.match(r"val_batch(\d+)_labels\.jpg$", bn)
+    if m_lbl:
+        n = int(m_lbl.group(1))
+        return f"Пример разметки (batch {n})" if is_ru else f"Label sample (batch {n})"
+    return "Иллюстрация результатов" if is_ru else "Result illustration"
 
 
 def _build_run_model_abbreviations(manifest: dict[str, Any], abbreviations: dict[str, str]) -> dict[str, str]:
@@ -471,6 +539,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         "ultra": "Результаты Ultralytics test" if is_ru else "Ultralytics Test Results",
         "conclusion": "Заключение и рекомендации" if is_ru else "Conclusions and Actions",
     }
+    section_order = ["context", "quality", "speed", "per_class", "ultra", "conclusion", "exec"]
+    section_index = {k: i + 1 for i, k in enumerate(section_order)}
+    def _sec(key: str) -> str:
+        return f"## {section_index[key]}. {section_titles[key]}"
     lines: list[str] = ["# " + ("Аналитический отчёт" if is_ru else "Analyze report"), ""]
     workspace_root = str(manifest.get("workspace_root") or os.getcwd())
     lines.append(f"- {('Сгенерировано' if is_ru else 'Generated')}: {datetime.now().isoformat(timespec='seconds')}")
@@ -478,7 +550,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append(f"- {('Профиль' if is_ru else 'Profile')}: `{manifest.get('profile', '')}`")
     lines.append(f"- {('Рабочая папка' if is_ru else 'Workspace root')}: `{workspace_root}`")
     lines.append("")
-    lines.append("## " + section_titles["context"])
+    lines.append(_sec("context"))
     lines.append("")
     if tpl.get("INTRO"):
         lines.append(tpl["INTRO"])
@@ -502,8 +574,18 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append(f"- {('Кандидат' if is_ru else 'Candidate')} ({item_abbr}): `{item_display}`")
             else:
                 lines.append(f"- {('Кандидат' if is_ru else 'Candidate')}: `{item_display}`")
+    dataset_pairs: list[str] = []
+    for k, v in abbreviations.items():
+        if str(v).startswith("D"):
+            dataset_pairs.append(f"{v} = {k}")
+    if dataset_pairs:
+        lines.append(
+            "- "
+            + ("Датасеты: " if is_ru else "Datasets: ")
+            + "; ".join(sorted(dataset_pairs))
+        )
     lines.append("")
-    lines.append("## " + section_titles["quality"])
+    lines.append(_sec("quality"))
     lines.append("")
     if tpl.get("QUALITY"):
         lines.append(tpl["QUALITY"])
@@ -531,6 +613,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         if abs_path and os.path.isfile(abs_path):
             try:
                 df = pd.read_csv(abs_path)
+                if "runs_summary" in rel.lower():
+                    df = _filter_runs_summary_for_selection(df, manifest)
                 df = _select_table_columns(rel, df)
                 if "system_profile" in rel.lower() and _should_hide_system_profile_table(df):
                     lines.append(
@@ -563,6 +647,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         if "runs_summary" in rel.lower():
             try:
                 full_df = pd.read_csv(abs_path)
+                full_df = _filter_runs_summary_for_selection(full_df, manifest)
                 test_summary = _build_test_metrics_summary(full_df, abbreviations)
                 if len(test_summary) > 0:
                     lines.append(
@@ -585,7 +670,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     table_no += 1
             except Exception:
                 pass
-    lines.append("## " + section_titles["speed"])
+    lines.append(_sec("speed"))
     lines.append("")
     if tpl.get("SPEED"):
         lines.append(tpl["SPEED"])
@@ -599,7 +684,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
             figure_no += 1
             lines.append("")
-    lines.append("## " + section_titles["per_class"])
+    lines.append(_sec("per_class"))
     lines.append("")
     if tpl.get("PER_CLASS"):
         lines.append(tpl["PER_CLASS"])
@@ -636,7 +721,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
             figure_no += 1
             lines.append("")
-    lines.append("## " + section_titles["ultra"])
+    lines.append(_sec("ultra"))
     lines.append("")
     ultra_rows = manifest.get("ultralytics_test") or []
     if isinstance(ultra_rows, list) and ultra_rows:
@@ -662,10 +747,63 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.extend(_md_table_from_df(pd.DataFrame(table_rows), abbreviations, limit=None))
             lines.append("")
             table_no += 1
-        for item in ultra_rows:
+        for run_pos, item in enumerate(ultra_rows, start=1):
             if not isinstance(item, dict):
                 continue
             run_code = str(item.get("run_code") or item.get("run_name") or "")
+            ultra_sub_idx = section_index["ultra"]
+            lines.append(f"### {ultra_sub_idx}.{run_pos} {('Запуск' if is_ru else 'Run')} {run_code}")
+            lines.append("")
+            run_info = item.get("run_info") or {}
+            if isinstance(run_info, dict):
+                model = str(run_info.get("model") or "").strip()
+                epochs = run_info.get("epochs")
+                batch = run_info.get("batch_size")
+                train_img = run_info.get("train_image_size")
+                val_img = run_info.get("val_imgsz")
+                if any([model, epochs is not None, batch is not None, train_img is not None, val_img is not None]):
+                    if is_ru:
+                        lines.append(
+                            "- Параметры запуска: "
+                            + f"модель={model or '-'}, epochs={epochs if epochs is not None else '-'}, "
+                            + f"batch={batch if batch is not None else '-'}, "
+                            + f"imgsz_train={train_img if train_img is not None else '-'}, "
+                            + f"imgsz_val={val_img if val_img is not None else '-'}."
+                        )
+                    else:
+                        lines.append(
+                            "- Run config: "
+                            + f"model={model or '-'}, epochs={epochs if epochs is not None else '-'}, "
+                            + f"batch={batch if batch is not None else '-'}, "
+                            + f"imgsz_train={train_img if train_img is not None else '-'}, "
+                            + f"imgsz_val={val_img if val_img is not None else '-'}."
+                        )
+            machine_info = item.get("machine_info") or {}
+            if isinstance(machine_info, dict):
+                cpu = str(machine_info.get("sys_cpu_model") or "").strip()
+                cores = machine_info.get("sys_cpu_logical_cores")
+                ram = machine_info.get("sys_ram_total_gb")
+                gpu = str(machine_info.get("sys_gpu_0_name") or "").strip()
+                vram = machine_info.get("sys_gpu_0_vram_gb")
+                os_name = str(machine_info.get("sys_os") or "").strip()
+                os_rel = str(machine_info.get("sys_os_release") or "").strip()
+                if any([cpu, cores is not None, ram is not None, gpu, vram is not None, os_name, os_rel]):
+                    if is_ru:
+                        lines.append(
+                            "- Машина: "
+                            + f"CPU={cpu or '-'} ({cores if cores is not None else '-'} cores), "
+                            + f"RAM={ram if ram is not None else '-'} GB, "
+                            + f"GPU={gpu or '-'} ({vram if vram is not None else '-'} GB), "
+                            + f"OS={os_name or '-'} {os_rel}".strip()
+                        )
+                    else:
+                        lines.append(
+                            "- Machine: "
+                            + f"CPU={cpu or '-'} ({cores if cores is not None else '-'} cores), "
+                            + f"RAM={ram if ram is not None else '-'} GB, "
+                            + f"GPU={gpu or '-'} ({vram if vram is not None else '-'} GB), "
+                            + f"OS={os_name or '-'} {os_rel}".strip()
+                        )
             csv_map = item.get("csv") or {}
             if isinstance(csv_map, dict):
                 for key in ("pr.csv", "pr_per_class.csv"):
@@ -676,6 +814,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             + (f"{run_code}: источник {key}: " if is_ru else f"{run_code}: data source {key}: ")
                             + f"`{rel}`"
                         )
+            if lines and not lines[-1] == "":
+                lines.append("")
             for rel in item.get("images") or []:
                 rel = str(rel)
                 if not rel:
@@ -687,14 +827,14 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     else:
         lines.append("- " + ("Артефакты Ultralytics test не обнаружены." if is_ru else "No Ultralytics test artifacts found."))
         lines.append("")
-    lines.append("## " + section_titles["conclusion"])
+    lines.append(_sec("conclusion"))
     lines.append("")
     if tpl.get("CONCLUSION"):
         lines.append(tpl["CONCLUSION"])
     else:
         lines.append("- " + ("Рекомендуется использовать выводы выше для выбора trade-off качества/скорости." if is_ru else "Use the findings above to select the quality/speed trade-off."))
     lines.append("")
-    lines.append("## " + section_titles["exec"])
+    lines.append(_sec("exec"))
     lines.append("")
     if tpl.get("EXECUTIVE_SUMMARY"):
         lines.append(tpl["EXECUTIVE_SUMMARY"])

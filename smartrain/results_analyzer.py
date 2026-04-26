@@ -1305,12 +1305,42 @@ def _collect_ultralytics_test_artifacts(
         run_name = os.path.basename(rd.rstrip(os.sep))
         run_code = abbreviations.get(run_name, run_name)
         test_dir = os.path.join(rd, "test")
+        run_info: dict[str, Any] = {}
+        machine_info: dict[str, Any] = {}
+        try:
+            rec = build_run_record(rd)
+            run_info = {
+                "model": rec.model,
+                "dataset_name": rec.dataset_name,
+                "epochs": rec.epochs,
+                "batch_size": rec.batch_size,
+                "train_image_size": rec.train_image_size,
+                "val_imgsz": rec.val_imgsz,
+            }
+        except Exception:
+            run_info = {}
+        try:
+            md = load_metadata(rd)
+            flat = flatten_metadata(md, rd)
+            machine_info = {
+                "sys_cpu_model": flat.get("sys_cpu_model"),
+                "sys_cpu_logical_cores": flat.get("sys_cpu_logical_cores"),
+                "sys_ram_total_gb": flat.get("sys_ram_total_gb"),
+                "sys_gpu_0_name": flat.get("sys_gpu_0_name"),
+                "sys_gpu_0_vram_gb": flat.get("sys_gpu_0_vram_gb"),
+                "sys_os": flat.get("sys_os"),
+                "sys_os_release": flat.get("sys_os_release"),
+            }
+        except Exception:
+            machine_info = {}
         row: dict[str, Any] = {
             "run_dir": rd,
             "run_name": run_name,
             "run_code": run_code,
             "test_dir": test_dir,
             "exists": os.path.isdir(test_dir),
+            "run_info": run_info,
+            "machine_info": machine_info,
             "files": [],
             "csv": {},
             "images": [],

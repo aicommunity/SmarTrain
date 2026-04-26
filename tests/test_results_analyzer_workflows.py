@@ -627,6 +627,11 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     assert "PR-кривые (все классы)" in ru_md
     assert "Ultralytics Test Results" in en_md
     assert "Ultralytics test metrics summary" in en_md
+    assert "## 1. Comparison Context" in en_md
+    assert "## 2. Quality Analysis" in en_md
+    assert "## 7. Executive Summary" in en_md
+    assert "Datasets: D1 = ds_a" in en_md
+    assert "### 5.1 Run R1" in en_md
 
 
 def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> None:
@@ -659,7 +664,69 @@ def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> Non
     write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
     assert "Системный профиль не показан" in ru_md
-    assert "very_long_dataset_name_a" not in ru_md
+    assert "| run_name | model | dataset_name |" not in ru_md
+
+
+def test_analyze_report_per_class_headers_and_human_readable_ultralytics_captions(tmp_path: Path) -> None:
+    from smartrain.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "pr" / "per_class").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "artifacts" / "ultralytics-test" / "R1").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"model": "run_a", "class_name": "aluminium", "ap": 0.9},
+            {"model": "run_b", "class_name": "aluminium", "ap": 0.7},
+        ]
+    ).to_csv(tmp_path / "artifacts" / "pr" / "per_class" / "pr_per_class.csv", index=False)
+    (tmp_path / "artifacts" / "pr" / "per_class" / "pr_class_0_aluminium.png").write_bytes(b"fakepng")
+    (tmp_path / "artifacts" / "ultralytics-test" / "R1" / "BoxPR_curve.png").write_bytes(b"fakepng")
+    manifest = {
+        "session_name": "s3",
+        "profile": "full",
+        "baseline": "run_a",
+        "others": ["run_b"],
+        "tables": ["artifacts/pr/per_class/pr_per_class.csv"],
+        "images": [
+            "artifacts/pr/per_class/pr_class_0_aluminium.png",
+            "artifacts/ultralytics-test/R1/BoxPR_curve.png",
+        ],
+        "artifacts": [],
+        "abbreviations": {"run_a": "R1", "run_b": "R2"},
+        "pr_per_class": {"csv": "artifacts/pr/per_class/pr_per_class.csv"},
+        "ultralytics_test": [
+            {
+                "run_code": "R1",
+                "csv": {},
+                "images": ["artifacts/ultralytics-test/R1/BoxPR_curve.png"],
+                "run_info": {
+                    "model": "yolo26x",
+                    "epochs": 300,
+                    "batch_size": 4,
+                    "train_image_size": 1280,
+                    "val_imgsz": 1280,
+                },
+                "machine_info": {
+                    "sys_cpu_model": "AMD EPYC",
+                    "sys_cpu_logical_cores": 32,
+                    "sys_ram_total_gb": 128,
+                    "sys_gpu_0_name": "NVIDIA RTX",
+                    "sys_gpu_0_vram_gb": 24,
+                    "sys_os": "Ubuntu",
+                    "sys_os_release": "22.04",
+                },
+            }
+        ],
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    en_md = (tmp_path / "en" / "index.md").read_text(encoding="utf-8")
+    assert "| class_name | best_run | best_ap | worst_run | worst_ap | ap_gap |" in en_md
+    assert "Per-class PR curve: aluminium" in en_md
+    assert "Precision-Recall curve" in en_md
+    assert "*Figure" in en_md
+    assert "BoxPR_curve.png*" not in en_md
+    assert "### 5.1 Run R1" in en_md
+    assert "Run config: model=yolo26x, epochs=300, batch=4, imgsz_train=1280, imgsz_val=1280." in en_md
+    assert "Machine: CPU=AMD EPYC (32 cores), RAM=128 GB, GPU=NVIDIA RTX (24 GB), OS=Ubuntu 22.04" in en_md
 
 
 def test_interactive_full_auto_detects_data_yaml_from_runtime_file(
