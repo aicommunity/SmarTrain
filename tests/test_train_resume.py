@@ -286,3 +286,106 @@ def test_update_resume_metadata_replaces_null_model(tmp_path: Path) -> None:
     tr.update_resume_metadata(str(run_dir), success=False, error="x", diagnosis=tr.diagnose_run(str(run_dir)))
     metadata = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))
     assert metadata.get("training_info", {}).get("model") == "yolo11x"
+
+
+def test_calc_confidence_non_interactive_processes_all_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    deploy_workspace(str(tmp_path))
+    run_a = tmp_path / "runs" / "ds" / "run_a"
+    run_b = tmp_path / "runs" / "ds" / "run_b"
+    (run_a / "train").mkdir(parents=True, exist_ok=True)
+    (run_b / "train").mkdir(parents=True, exist_ok=True)
+    (run_a / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run_b / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    called: list[tuple[str, int]] = []
+
+    def _fake_ensure(run_dir: str, workspace_root: str, val_batch: int = 1) -> None:
+        assert workspace_root == str(tmp_path)
+        called.append((run_dir, val_batch))
+
+    monkeypatch.setattr(mtm, "_ensure_resume_confidence_recommendations", _fake_ensure)
+    monkeypatch.setattr(mtm, "recommendations_complete", lambda _payload: True)
+    monkeypatch.setattr(
+        mtm,
+        "read_recommendation_file",
+        lambda _path: {
+            "objectives": {
+                "A": {"global": {"threshold": 0.2}},
+                "B": {"global": {"threshold": 0.2}},
+                "C": {"global": {"threshold": 0.2}},
+            }
+        },
+    )
+
+    rc = mtm.main(["calc-confidence", "--workspace", str(tmp_path), "-y"])
+    assert rc == 0
+    assert sorted(called) == sorted([(str(run_a), 1), (str(run_b), 1)])
+
+
+def test_calc_confidence_non_interactive_with_run_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    deploy_workspace(str(tmp_path))
+    run_a = tmp_path / "runs" / "ds" / "run_a"
+    (run_a / "train").mkdir(parents=True, exist_ok=True)
+    (run_a / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    called: list[tuple[str, int]] = []
+
+    def _fake_ensure(run_dir: str, workspace_root: str, val_batch: int = 1) -> None:
+        assert workspace_root == str(tmp_path)
+        called.append((run_dir, val_batch))
+
+    monkeypatch.setattr(mtm, "_ensure_resume_confidence_recommendations", _fake_ensure)
+    monkeypatch.setattr(mtm, "recommendations_complete", lambda _payload: True)
+    monkeypatch.setattr(
+        mtm,
+        "read_recommendation_file",
+        lambda _path: {
+            "objectives": {
+                "A": {"global": {"threshold": 0.2}},
+                "B": {"global": {"threshold": 0.2}},
+                "C": {"global": {"threshold": 0.2}},
+            }
+        },
+    )
+
+    rc = mtm.main(["calc-confidence", "--workspace", str(tmp_path), "--run-dir", "ds/run_a", "-y"])
+    assert rc == 0
+    assert called == [(str(run_a), 1)]
+
+
+def test_calc_confidence_passes_val_batch_to_recompute(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    deploy_workspace(str(tmp_path))
+    run_a = tmp_path / "runs" / "ds" / "run_a"
+    (run_a / "train").mkdir(parents=True, exist_ok=True)
+    (run_a / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    called: list[tuple[str, str, int]] = []
+
+    def _fake_ensure(run_dir: str, workspace_root: str, val_batch: int = 1) -> None:
+        called.append((run_dir, workspace_root, val_batch))
+
+    monkeypatch.setattr(mtm, "_ensure_resume_confidence_recommendations", _fake_ensure)
+    monkeypatch.setattr(mtm, "recommendations_complete", lambda _payload: True)
+    monkeypatch.setattr(
+        mtm,
+        "read_recommendation_file",
+        lambda _path: {
+            "objectives": {
+                "A": {"global": {"threshold": 0.2}},
+                "B": {"global": {"threshold": 0.2}},
+                "C": {"global": {"threshold": 0.2}},
+            }
+        },
+    )
+
+    rc = mtm.main(
+        ["calc-confidence", "--workspace", str(tmp_path), "--run-dir", "ds/run_a", "--val-batch", "2", "-y"]
+    )
+    assert rc == 0
+    assert called == [(str(run_a), str(tmp_path), 2)]

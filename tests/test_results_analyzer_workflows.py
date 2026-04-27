@@ -764,6 +764,135 @@ def test_analyze_report_hides_empty_run_machine_lines_in_ultralytics_section(tmp
     assert "CPU=-" not in ru_md
 
 
+def test_analyze_report_confidence_tables_titles_columns_and_per_run_split(tmp_path: Path) -> None:
+    from smartrain.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "confidence").mkdir(parents=True, exist_ok=True)
+    rows_a = [
+        {
+            "run_name": "run_a",
+            "split": "test",
+            "objective": "A",
+            "level": "global",
+            "class_id": -1,
+            "class_name": "all",
+            "recommended_conf": 0.42,
+            "target_metric": 0.81,
+            "precision": 0.83,
+            "recall": 0.79,
+            "f1": 0.81,
+            "status": "ok",
+        },
+        {
+            "run_name": "run_a",
+            "split": "test",
+            "objective": "A",
+            "level": "class",
+            "class_id": 0,
+            "class_name": "metal",
+            "recommended_conf": 0.44,
+            "target_metric": 0.82,
+            "precision": 0.84,
+            "recall": 0.80,
+            "f1": 0.82,
+            "status": "ok",
+        },
+        {
+            "run_name": "run_b",
+            "split": "test",
+            "objective": "A",
+            "level": "class",
+            "class_id": 0,
+            "class_name": "metal",
+            "recommended_conf": 0.47,
+            "target_metric": 0.79,
+            "precision": 0.81,
+            "recall": 0.77,
+            "f1": 0.79,
+            "status": "ok",
+        },
+    ]
+    rows_b = [
+        {
+            "run_name": "run_a",
+            "split": "test",
+            "objective": "B",
+            "level": "global",
+            "class_id": -1,
+            "class_name": "all",
+            "recommended_conf": 0.31,
+            "target_metric": 0.78,
+            "precision": 0.75,
+            "recall": 0.82,
+            "f1": 0.78,
+            "status": "ok",
+        }
+    ]
+    rows_c = [
+        {
+            "run_name": "run_a",
+            "split": "test",
+            "objective": "C",
+            "level": "global",
+            "class_id": -1,
+            "class_name": "all",
+            "recommended_conf": 0.58,
+            "target_metric": 0.76,
+            "precision": 0.88,
+            "recall": 0.67,
+            "f1": 0.76,
+            "status": "ok",
+        }
+    ]
+    pd.DataFrame(rows_a).to_csv(
+        tmp_path / "artifacts" / "confidence" / "confidence_recommendations_A.csv",
+        index=False,
+    )
+    pd.DataFrame(rows_b).to_csv(
+        tmp_path / "artifacts" / "confidence" / "confidence_recommendations_B.csv",
+        index=False,
+    )
+    pd.DataFrame(rows_c).to_csv(
+        tmp_path / "artifacts" / "confidence" / "confidence_recommendations_C.csv",
+        index=False,
+    )
+
+    manifest = {
+        "session_name": "s_conf",
+        "profile": "full",
+        "baseline": "run_a",
+        "others": ["run_b"],
+        "tables": [
+            "artifacts/confidence/confidence_recommendations_A.csv",
+            "artifacts/confidence/confidence_recommendations_B.csv",
+            "artifacts/confidence/confidence_recommendations_C.csv",
+        ],
+        "images": [],
+        "artifacts": [],
+        "confidence_recommendations": {
+            "A": "artifacts/confidence/confidence_recommendations_A.csv",
+            "B": "artifacts/confidence/confidence_recommendations_B.csv",
+            "C": "artifacts/confidence/confidence_recommendations_C.csv",
+        },
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+
+    assert "Рекомендации confidence (A: максимум F1)" in ru_md
+    assert "Рекомендации confidence (B: F-beta (приоритет Recall))" in ru_md
+    assert "Рекомендации confidence (C: F-beta (приоритет Precision))" in ru_md
+
+    # quality confidence tables: no objective/level/class_id/class_name
+    assert "| split | recommended_conf | target_metric | precision | recall | f1 | status |" in ru_md
+    assert "| objective |" not in ru_md
+    assert "| level |" not in ru_md
+
+    # per-class confidence tables split by run and class_name first
+    assert "Рекомендации confidence (A: максимум F1) — run run_a" in ru_md
+    assert "Рекомендации confidence (A: максимум F1) — run run_b" in ru_md
+    assert "| class_name | split | class_id | recommended_conf | target_metric | precision | recall | f1 | status |" in ru_md
+
+
 def test_interactive_full_auto_detects_data_yaml_from_runtime_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

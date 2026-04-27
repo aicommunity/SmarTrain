@@ -54,6 +54,7 @@ from smartrain.metrics_reader import (
 )
 from smartrain.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.confidence_recommendation import recommendation_file_path, read_recommendation_file
 
 
 def _clear_gpu_memory() -> None:
@@ -1030,6 +1031,105 @@ def _extract_pr_curve_per_class_from_metrics(metrics_obj: Any) -> tuple[np.ndarr
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^\w.\-+]+", "_", value, flags=re.UNICODE).strip("._") or "class"
+
+
+def _collect_confidence_recommendation_tables(run_dirs: list[str], out_dir: str) -> dict[str, str]:
+    rows_by_objective: dict[str, list[dict[str, Any]]] = {"A": [], "B": [], "C": []}
+    for run_dir in run_dirs:
+        md = {}
+        try:
+            md = load_metadata(run_dir)
+        except Exception:
+            md = {}
+        model_name = (
+            md.get("training_info", {}).get("model")
+            if isinstance(md, dict)
+            else None
+        ) or os.path.basename(run_dir.rstrip(os.sep))
+        dataset_name = (
+            md.get("training_info", {}).get("dataset", {}).get("name")
+            if isinstance(md, dict)
+            else None
+        ) or os.path.basename(os.path.dirname(run_dir.rstrip(os.sep)))
+
+        for split in ("val", "test"):
+            payload = read_recommendation_file(recommendation_file_path(run_dir, split))
+            if not isinstance(payload, dict):
+                continue
+            objectives = payload.get("objectives")
+            if not isinstance(objectives, dict):
+                continue
+            for objective in ("A", "B", "C"):
+                item = objectives.get(objective)
+                if not isinstance(item, dict):
+                    continue
+                beta = item.get("beta")
+                global_row = item.get("global")
+                if isinstance(global_row, dict):
+                    rows_by_objective[objective].append(
+                        {
+                            "run_dir": run_dir,
+                            "run_name": os.path.basename(run_dir.rstrip(os.sep)),
+                            "model": model_name,
+                            "dataset": dataset_name,
+                            "split": split,
+                            "objective": objective,
+                            "beta": beta,
+                            "level": "global",
+                            "class_id": -1,
+                            "class_name": "all",
+                            "recommended_conf": global_row.get("threshold"),
+                            "target_metric": global_row.get("metric_value"),
+                            "precision": global_row.get("precision"),
+                            "recall": global_row.get("recall"),
+                            "f1": global_row.get("f1"),
+                            "support_instances": None,
+                            "status": global_row.get("status") or payload.get("status"),
+                            "reason": global_row.get("reason") or payload.get("reason"),
+                        }
+                    )
+                per_class = item.get("per_class")
+                if isinstance(per_class, list):
+                    for row in per_class:
+                        if not isinstance(row, dict):
+                            continue
+                        rows_by_objective[objective].append(
+                            {
+                                "run_dir": run_dir,
+                                "run_name": os.path.basename(run_dir.rstrip(os.sep)),
+                                "model": model_name,
+                                "dataset": dataset_name,
+                                "split": split,
+                                "objective": objective,
+                                "beta": beta,
+                                "level": "class",
+                                "class_id": row.get("class_id"),
+                                "class_name": row.get("class_name"),
+                                "recommended_conf": row.get("threshold"),
+                                "target_metric": row.get("metric_value"),
+                                "precision": row.get("precision"),
+                                "recall": row.get("recall"),
+                                "f1": row.get("f1"),
+                                "support_instances": row.get("support_instances"),
+                                "status": row.get("status") or payload.get("status"),
+                                "reason": row.get("reason") or payload.get("reason"),
+                            }
+                        )
+
+    out: dict[str, str] = {}
+    os.makedirs(out_dir, exist_ok=True)
+    sort_cols = ["run_name", "split", "level", "class_id"]
+    for objective in ("A", "B", "C"):
+        rows = rows_by_objective.get(objective) or []
+        if not rows:
+            continue
+        df = pd.DataFrame(rows)
+        if set(sort_cols).issubset(df.columns):
+            df = df.sort_values(sort_cols, ascending=[True, True, True, True])
+        out_path = os.path.join(out_dir, f"confidence_recommendations_{objective}.csv")
+        df.to_csv(out_path, index=False, encoding="utf-8")
+        out[objective] = out_path
+    return out
 
 
 def _write_speed_quality_artifacts(
@@ -2603,6 +2703,19 @@ def cmd_all(args: argparse.Namespace) -> None:
         abbreviations,
     )
     artifacts.extend(ultralytics_test_artifacts)
+    conf_tables = _collect_confidence_recommendation_tables(
+        [baseline] + others,
+        os.path.join(session_root, "artifacts", "confidence"),
+    )
+    for objective in ("A", "B", "C"):
+        p = conf_tables.get(objective)
+        if p and os.path.isfile(p):
+            artifacts.append(
+                {
+                    "role": f"confidence_recommendations_{objective.lower()}_csv",
+                    "path": os.path.relpath(p, session_root),
+                }
+            )
 
     manifest = {
         "session_name": os.path.basename(session_root),
@@ -2628,6 +2741,10 @@ def cmd_all(args: argparse.Namespace) -> None:
     }
     if ultralytics_test_rows:
         manifest["ultralytics_test"] = ultralytics_test_rows
+    if conf_tables:
+        manifest["confidence_recommendations"] = {
+            key: os.path.relpath(path, session_root) for key, path in conf_tables.items()
+        }
     if metric_sources_payload is not None:
         manifest["metric_sources"] = metric_sources_payload
     if cache_events:

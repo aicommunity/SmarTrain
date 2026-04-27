@@ -360,6 +360,20 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
         ]
     elif "pr_per_class" in lower:
         preferred = ["model", "class_id", "class_name", "ap", "recall", "precision"]
+    elif "confidence_recommendations_" in lower:
+        preferred = [
+            "run_name",
+            "split",
+            "level",
+            "class_id",
+            "class_name",
+            "recommended_conf",
+            "target_metric",
+            "precision",
+            "recall",
+            "f1",
+            "status",
+        ]
     elif "system_profile" in lower:
         preferred = [
             "run_name",
@@ -562,6 +576,25 @@ def _table_title(rel: str, is_ru: bool) -> str:
         return "Соотношение скорости и качества" if is_ru else "Speed-quality trade-off"
     if "pr_per_class" in low:
         return "Сводка AP по классам" if is_ru else "Per-class AP summary"
+    if "confidence_recommendations_" in low:
+        m = re.search(r"confidence_recommendations_([abc])\.csv$", low)
+        suffix = m.group(1).upper() if m else "?"
+        objective_map_ru = {
+            "A": "A: максимум F1",
+            "B": "B: F-beta (приоритет Recall)",
+            "C": "C: F-beta (приоритет Precision)",
+        }
+        objective_map_en = {
+            "A": "A: max F1",
+            "B": "B: F-beta (recall-priority)",
+            "C": "C: F-beta (precision-priority)",
+        }
+        objective_label = objective_map_ru.get(suffix, suffix) if is_ru else objective_map_en.get(suffix, suffix)
+        return (
+            f"Рекомендации confidence ({objective_label})"
+            if is_ru
+            else f"Confidence recommendations ({objective_label})"
+        )
     if "runs_summary" in low:
         return (
             "Сводка параметров и метрик выбранных запусков"
@@ -832,7 +865,11 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             k in rel
             for k in ("compare", "leaderboard", "metrics", "speed_quality", "pr_per_class", "system_profile", "runs_summary")
         ):
-            continue
+            if "confidence_recommendations_" not in rel:
+                continue
+        if "confidence_recommendations_" in rel:
+            # In quality section show only global rows.
+            pass
         title = os.path.basename(rel)
         if "pr_per_class" in rel:
             # raw long-format table is too noisy; use aggregated class metrics below
@@ -850,6 +887,13 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     df = _filter_runs_summary_for_selection(df, manifest)
                 elif any(k in rel_lower for k in ("leaderboard", "speed_quality", "pr_per_class")):
                     df = _filter_generic_table_for_selection(df, manifest)
+                elif "confidence_recommendations_" in rel_lower:
+                    df = _filter_generic_table_for_selection(df, manifest)
+                    if "level" in df.columns:
+                        df = df[df["level"].astype(str) == "global"].copy()
+                    for col in ("level", "class_id", "class_name"):
+                        if col in df.columns:
+                            df = df.drop(columns=[col])
                 df = _select_table_columns(rel, df)
                 if "system_profile" in rel.lower() and _should_hide_system_profile_table(df):
                     lines.append(
@@ -950,6 +994,73 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     table_no += 1
             except Exception:
                 pass
+    conf_map = (
+        manifest.get("confidence_recommendations")
+        if isinstance(manifest.get("confidence_recommendations"), dict)
+        else {}
+    )
+    for objective in ("A", "B", "C"):
+        rel = str(conf_map.get(objective) or "")
+        if not rel:
+            continue
+        abs_path = os.path.join(report_root, rel) if report_root else ""
+        if not abs_path or not os.path.isfile(abs_path):
+            continue
+        try:
+            cdf = pd.read_csv(abs_path)
+            cdf = _filter_generic_table_for_selection(cdf, manifest)
+            if "level" in cdf.columns:
+                cdf = cdf[cdf["level"].astype(str) == "class"].copy()
+            if len(cdf) == 0:
+                continue
+            group_col = "run_name" if "run_name" in cdf.columns else None
+            grouped_items: list[tuple[str, pd.DataFrame]]
+            if group_col:
+                grouped_items = []
+                for run_name, gdf in cdf.groupby(group_col, dropna=False):
+                    grouped_items.append((str(run_name), gdf.copy()))
+            else:
+                grouped_items = [("-", cdf.copy())]
+
+            for run_name, run_df in grouped_items:
+                local_df = run_df.copy()
+                for col in ("run_name", "objective", "level"):
+                    if col in local_df.columns:
+                        local_df = local_df.drop(columns=[col])
+                preferred_pc = [
+                    "class_name",
+                    "split",
+                    "class_id",
+                    "recommended_conf",
+                    "target_metric",
+                    "precision",
+                    "recall",
+                    "f1",
+                    "status",
+                ]
+                chosen_pc = [c for c in preferred_pc if c in local_df.columns]
+                if chosen_pc:
+                    local_df = local_df[chosen_pc]
+                local_df = _abbrev_df(local_df, abbreviations)
+                lines.extend(_center_open())
+                lines.append("")
+                objective_title = _table_title(rel, is_ru)
+                if is_ru:
+                    full_title = f"{objective_title} — run {run_name}"
+                else:
+                    full_title = f"{objective_title} — run {run_name}"
+                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {full_title}**")
+                lines.append("")
+                lines.extend(_md_table_from_df(local_df, abbreviations, limit=None))
+                lines.append("")
+                lines.append(
+                    ("_Источник данных:_ " if is_ru else "_Data source:_ ")
+                    + f"`{rel}`"
+                )
+                lines.extend(_center_close())
+                table_no += 1
+        except Exception:
+            pass
     for rel in images:
         if isinstance(rel, str) and rel.endswith("artifacts/pr/pr_all_classes.png"):
             lines.extend(_center_open())

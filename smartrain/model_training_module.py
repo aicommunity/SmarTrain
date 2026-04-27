@@ -56,6 +56,14 @@ from smartrain.external_providers.runner import run_external_infer, run_external
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.external_providers.registry import list_provider_specs
 from smartrain.path_portable import relativize_if_under
+from smartrain.confidence_recommendation import (
+    compute_confidence_recommendations,
+    recommendation_file_path,
+    recommendations_complete,
+    read_recommendation_file,
+    write_not_available_recommendations,
+    write_recommendation_file,
+)
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -63,6 +71,7 @@ from smartrain.workspace_paths import (
     resolve_dataset_root,
     DATASETS_INFO_FILE,
 )
+from smartrain.run_discovery import find_run_directories
 
 
 MODEL_VERSION = "yolov8n"
@@ -440,6 +449,29 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Batch for val/test (by default: as a training batch; for --test-only it is taken from training_metadata.json if available)",
     )
+    parser.add_argument(
+        "--conf-rec-beta-recall",
+        type=float,
+        default=2.0,
+        help="Beta for objective B (recall-priority F-beta) in confidence recommendations.",
+    )
+    parser.add_argument(
+        "--conf-rec-beta-precision",
+        type=float,
+        default=0.5,
+        help="Beta for objective C (precision-priority F-beta) in confidence recommendations.",
+    )
+    parser.add_argument(
+        "--conf-rec-fallback",
+        type=float,
+        default=0.25,
+        help="Fallback confidence value when recommendations cannot be computed.",
+    )
+    parser.add_argument(
+        "--conf-rec-disable",
+        action="store_true",
+        help="Disable confidence threshold recommendation computation.",
+    )
 
     parser.add_argument(
         "--weighted-sampling",
@@ -493,6 +525,44 @@ def build_train_resume_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_train_calc_confidence_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(
+        prog="smartrain train calc-confidence",
+        description="Calculate confidence recommendations for existing runs",
+    )
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR})",
+    )
+    parser.add_argument(
+        "--run-dir",
+        action="append",
+        default=[],
+        help="Absolute or workspace-relative run directory. Can be used multiple times.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process all discovered run directories.",
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        dest="non_interactive",
+        help="Non-interactive mode. If no --run-dir is given, all runs are processed.",
+    )
+    parser.add_argument(
+        "--val-batch",
+        type=int,
+        default=None,
+        help="Batch size for val/test recompute in calc-confidence (default: 1).",
+    )
+    return parser
+
+
 def _resume_display_value(diag: RunDiagnosis) -> str:
     dataset_name = os.path.basename(os.path.dirname(diag.run_dir.rstrip(os.sep)))
     run_name = os.path.basename(diag.run_dir.rstrip(os.sep))
@@ -513,6 +583,139 @@ def _select_resume_candidate_interactive(candidates: list[RunDiagnosis]) -> RunD
             if 1 <= idx <= len(candidates):
                 return candidates[idx - 1]
         print(f"[ERROR] Incorrect selection: {raw!r}")
+
+
+def _select_runs_for_calc_confidence_interactive(run_dirs: list[str]) -> list[str]:
+    if not run_dirs:
+        return []
+    print("\n[INFO] Available runs:")
+    for idx, rd in enumerate(run_dirs, start=1):
+        print(f"  {idx}. {rd}")
+    raw = prompt_text(
+        "Select runs by numbers (comma-separated) or 'all'",
+        default="all",
+    ).strip()
+    if not raw or raw.lower() == "all":
+        return run_dirs
+    selected: list[str] = []
+    seen: set[str] = set()
+    for token in raw.split(","):
+        t = token.strip()
+        if not t:
+            continue
+        if not t.isdigit():
+            raise ValueError(f"Invalid token {t!r}. Expected numbers or 'all'.")
+        pos = int(t)
+        if pos < 1 or pos > len(run_dirs):
+            raise ValueError(f"Selection {pos} out of range 1..{len(run_dirs)}.")
+        item = run_dirs[pos - 1]
+        if item not in seen:
+            seen.add(item)
+            selected.append(item)
+    return selected
+
+
+def _resolve_run_dirs_for_calc_confidence(
+    workspace_root: str,
+    run_dir_args: list[str],
+    select_all: bool,
+    non_interactive: bool,
+) -> list[str]:
+    discovered = sorted(set(os.path.abspath(x) for x in find_run_directories(WorkspaceLayout(workspace_root).runs)))
+    if run_dir_args:
+        out: list[str] = []
+        for raw in run_dir_args:
+            rd = str(raw).strip()
+            if not rd:
+                continue
+            if not os.path.isabs(rd):
+                rd = os.path.join(WorkspaceLayout(workspace_root).runs, rd)
+            out.append(os.path.abspath(rd))
+        return sorted(set(out))
+    if select_all or non_interactive:
+        return discovered
+    if not sys.stdin.isatty():
+        raise RuntimeError("Interactive mode requires a terminal (TTY).")
+    return _select_runs_for_calc_confidence_interactive(discovered)
+
+
+def _run_calc_confidence_command(argv: list[str]) -> int:
+    args = build_train_calc_confidence_arg_parser().parse_args(argv)
+    try:
+        workspace_root = resolve_workspace_root(args.workspace)
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return 1
+    try:
+        run_dirs = _resolve_run_dirs_for_calc_confidence(
+            workspace_root=workspace_root,
+            run_dir_args=list(getattr(args, "run_dir", []) or []),
+            select_all=bool(getattr(args, "all", False)),
+            non_interactive=bool(getattr(args, "non_interactive", False)),
+        )
+    except Exception as e:
+        print(f"[ERROR] {e}")
+        return 2
+    if not run_dirs:
+        print("[INFO] No runs selected.")
+        return 0
+    val_batch = getattr(args, "val_batch", None)
+    if val_batch is None:
+        if bool(getattr(args, "non_interactive", False)) or not sys.stdin.isatty():
+            val_batch = 1
+        else:
+            raw_batch = prompt_text(
+                "Val/Test batch for confidence recompute",
+                default="1",
+            ).strip()
+            try:
+                val_batch = int(raw_batch) if raw_batch else 1
+            except ValueError:
+                print(f"[ERROR] Invalid --val-batch value: {raw_batch!r}")
+                return 2
+    if int(val_batch) <= 0:
+        print(f"[ERROR] --val-batch must be > 0, got: {val_batch}")
+        return 2
+
+    processed = 0
+    updated = 0
+    skipped = 0
+    failed = 0
+    for run_dir in run_dirs:
+        processed += 1
+        before_test = recommendations_complete(
+            read_recommendation_file(recommendation_file_path(run_dir, "test"))
+        )
+        before_val = recommendations_complete(
+            read_recommendation_file(recommendation_file_path(run_dir, "val"))
+        )
+        try:
+            _ensure_resume_confidence_recommendations(run_dir, workspace_root, val_batch=int(val_batch))
+        except Exception as e:
+            failed += 1
+            print(f"[ERROR] {run_dir}: {e}")
+            continue
+        after_test = recommendations_complete(
+            read_recommendation_file(recommendation_file_path(run_dir, "test"))
+        )
+        after_val = recommendations_complete(
+            read_recommendation_file(recommendation_file_path(run_dir, "val"))
+        )
+        if after_test and after_val and (not (before_test and before_val)):
+            updated += 1
+            print(f"[OK] {run_dir}: confidence recommendations computed.")
+        elif before_test and before_val:
+            skipped += 1
+            print(f"[INFO] {run_dir}: recommendations already present.")
+        else:
+            skipped += 1
+            print(f"[WARN] {run_dir}: recommendations still incomplete.")
+
+    print(
+        f"[INFO] calc-confidence summary: processed={processed}, "
+        f"updated={updated}, skipped={skipped}, failed={failed}"
+    )
+    return 1 if failed > 0 else 0
 
 
 def _run_resume_command(argv: list[str]) -> int:
@@ -592,6 +795,7 @@ def _run_resume_command(argv: list[str]) -> int:
         from smartrain.train_resume import diagnose_run
 
         resume_training_in_run(chosen.run_dir)
+        _ensure_resume_confidence_recommendations(chosen.run_dir, workspace_root)
         update_resume_metadata(
             chosen.run_dir,
             success=True,
@@ -612,6 +816,39 @@ def _run_resume_command(argv: list[str]) -> int:
         print(f"[ERROR] Failed to resume run: {chosen.run_dir}")
         print(f"[ERROR] {e}")
         return 1
+
+
+def _ensure_resume_confidence_recommendations(
+    run_dir: str,
+    workspace_root: str,
+    val_batch: int = 1,
+) -> None:
+    test_payload = read_recommendation_file(recommendation_file_path(run_dir, "test"))
+    val_payload = read_recommendation_file(recommendation_file_path(run_dir, "val"))
+    if recommendations_complete(test_payload) and recommendations_complete(val_payload):
+        return
+
+    best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+    if not os.path.isfile(best_pt):
+        print(
+            "[WARN] Resume post-check: recommendations missing but best.pt is absent; "
+            "cannot recompute confidence recommendations."
+        )
+        return
+
+    dataset_path = resolve_dataset_path_for_resume(run_dir, workspace_root)
+    if not dataset_path:
+        print(
+            "[WARN] Resume post-check: recommendations missing but dataset path is unresolved; "
+            "cannot recompute confidence recommendations."
+        )
+        return
+
+    print("[INFO] Resume post-check: recomputing missing confidence recommendations (val/test).")
+    _maybe_free_cuda_memory()
+    # Recompute path is primarily for backfilling recommendations on existing runs.
+    # Keep val/test memory profile conservative to avoid OOM on small GPUs.
+    test_yolo(run_dir, dataset_path, val_batch=max(1, int(val_batch)))
 
 
 def _prompt_input(label: str, default: str = "", completer=None, show_default_hint: bool = True) -> str:
@@ -1830,6 +2067,10 @@ def test_yolo(
     val_conf=None,
     val_iou=None,
     val_batch=None,
+    conf_rec_disable: bool = False,
+    conf_rec_beta_recall: float = 2.0,
+    conf_rec_beta_precision: float = 0.5,
+    conf_rec_fallback: float = 0.25,
 ):
     test_start_time = datetime.now()
 
@@ -1875,6 +2116,21 @@ def test_yolo(
     try:
         result = trained_model.val(**val_kwargs)
 
+        if not conf_rec_disable:
+            _ensure_confidence_recommendations(
+                trained_model=trained_model,
+                primary_test_result=result,
+                model_dir=model_dir,
+                data_yaml=data_yaml,
+                imgsz=imgsz,
+                val_conf=val_conf,
+                val_iou=val_iou,
+                val_batch=val_batch,
+                beta_recall=conf_rec_beta_recall,
+                beta_precision=conf_rec_beta_precision,
+                fallback_confidence=conf_rec_fallback,
+            )
+
         test_end_time = datetime.now()
         csv_file = save_metrics_csv(result, model_dir)
 
@@ -1891,6 +2147,94 @@ def test_yolo(
         raise
 
     return test_start_time, test_end_time, inference_record
+
+
+def _recommendation_summary_for_metadata(model_dir: str) -> dict[str, Any] | None:
+    out: dict[str, Any] = {"files": {}, "status": {}}
+    found = False
+    for split in ("val", "test"):
+        p = recommendation_file_path(model_dir, split)
+        payload = read_recommendation_file(p)
+        if not isinstance(payload, dict):
+            continue
+        found = True
+        out["files"][split] = os.path.basename(p)
+        out["status"][split] = payload.get("status")
+    return out if found else None
+
+
+def _ensure_confidence_recommendations(
+    *,
+    trained_model: Any,
+    primary_test_result: Any,
+    model_dir: str,
+    data_yaml: str,
+    imgsz: int | None,
+    val_conf: float | None,
+    val_iou: float | None,
+    val_batch: int | None,
+    beta_recall: float,
+    beta_precision: float,
+    fallback_confidence: float,
+) -> None:
+    test_path = recommendation_file_path(model_dir, "test")
+    val_path = recommendation_file_path(model_dir, "val")
+    has_test = recommendations_complete(read_recommendation_file(test_path))
+    has_val = recommendations_complete(read_recommendation_file(val_path))
+    if has_test and has_val:
+        print("[INFO] Confidence recommendations already exist (val/test), skipping recompute.")
+        return
+
+    if not has_test:
+        test_payload = compute_confidence_recommendations(
+            primary_test_result,
+            split="test",
+            beta_recall=float(beta_recall),
+            beta_precision=float(beta_precision),
+            fallback_confidence=float(fallback_confidence),
+        )
+        write_recommendation_file(test_path, test_payload)
+        print(f"[OK] Confidence recommendations (test): {test_path}")
+
+    if has_val:
+        return
+
+    val_kwargs: dict[str, Any] = {
+        "data": data_yaml,
+        "split": "val",
+        "plots": False,
+        "save": False,
+        "verbose": False,
+    }
+    if imgsz is not None:
+        val_kwargs["imgsz"] = imgsz
+    if val_conf is not None:
+        val_kwargs["conf"] = val_conf
+    if val_iou is not None:
+        val_kwargs["iou"] = val_iou
+    if val_batch is not None:
+        val_kwargs["batch"] = int(val_batch)
+    try:
+        val_result = trained_model.val(**val_kwargs)
+        val_payload = compute_confidence_recommendations(
+            val_result,
+            split="val",
+            beta_recall=float(beta_recall),
+            beta_precision=float(beta_precision),
+            fallback_confidence=float(fallback_confidence),
+        )
+        write_recommendation_file(val_path, val_payload)
+        print(f"[OK] Confidence recommendations (val): {val_path}")
+    except Exception as exc:
+        write_not_available_recommendations(
+            model_dir=model_dir,
+            split="val",
+            reason=f"val_split_failed: {exc}",
+            beta_recall=float(beta_recall),
+            beta_precision=float(beta_precision),
+            fallback_confidence=float(fallback_confidence),
+        )
+        print(f"[WARN] Failed to compute val confidence recommendations: {exc}")
 
 
 def save_metrics_csv(test_result, model_dir):
@@ -2067,6 +2411,7 @@ def save_training_metadata(
     training_provider: str = "ultralytics",
     external_provider_id: str | None = None,
     system_profile: dict[str, Any] | None = None,
+    confidence_recommendation_config: dict[str, Any] | None = None,
 ):
     ds_abs = os.path.abspath(dataset_path)
     dataset_block: dict[str, Any] = {
@@ -2149,6 +2494,11 @@ def save_training_metadata(
         metadata["inference"] = {k: v for k, v in inference.items() if v is not None}
     if system_profile:
         metadata["system_profile"] = system_profile
+    rec_summary = _recommendation_summary_for_metadata(model_dir)
+    if rec_summary:
+        if confidence_recommendation_config:
+            rec_summary["config"] = confidence_recommendation_config
+        metadata["recommendations"] = {"confidence": rec_summary}
 
     metadata_file = os.path.join(model_dir, "training_metadata.json")
 
@@ -2254,6 +2604,8 @@ def main(argv=None):
         argv = sys.argv[1:]
     if argv and argv[0] == "resume":
         return _run_resume_command(argv[1:])
+    if argv and argv[0] == "calc-confidence":
+        return _run_calc_confidence_command(argv[1:])
     args = parse_args(argv)
     _apply_external_provider_defaults(args)
     known_provider_ids = {spec.id for spec in list_provider_specs()}
@@ -2413,6 +2765,10 @@ def main(argv=None):
                     val_conf=args.val_conf,
                     val_iou=args.val_iou,
                     val_batch=val_batch,
+                    conf_rec_disable=bool(getattr(args, "conf_rec_disable", False)),
+                    conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
                 )
                 test_success = True
             except Exception as e:
@@ -2474,6 +2830,23 @@ def main(argv=None):
                             "conf": fallback_conf,
                             "mode": "external_infer_fallback",
                         }
+                        reason = "external_fallback_without_ultralytics_val_metrics"
+                        write_not_available_recommendations(
+                            model_dir=external_run_dir,
+                            split="test",
+                            reason=reason,
+                            beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                            beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                            fallback_confidence=float(getattr(args, "conf_rec_fallback", 0.25)),
+                        )
+                        write_not_available_recommendations(
+                            model_dir=external_run_dir,
+                            split="val",
+                            reason=reason,
+                            beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                            beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                            fallback_confidence=float(getattr(args, "conf_rec_fallback", 0.25)),
+                        )
                         test_success = True
                         test_error = None
                     else:
@@ -2505,6 +2878,12 @@ def main(argv=None):
             training_provider=external_provider,
             external_provider_id=external_provider,
             system_profile=collect_system_profile(external_run_dir),
+            confidence_recommendation_config={
+                "enabled": not bool(getattr(args, "conf_rec_disable", False)),
+                "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                "beta_precision": float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                "fallback_confidence": float(getattr(args, "conf_rec_fallback", 0.25)),
+            },
         )
         try:
             marker = {
@@ -2599,6 +2978,10 @@ def main(argv=None):
                     val_conf=args.val_conf,
                     val_iou=args.val_iou,
                     val_batch=val_batch,
+                    conf_rec_disable=bool(getattr(args, "conf_rec_disable", False)),
+                    conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
                 )
             except Exception as e:
                 test_success = False
@@ -2631,6 +3014,12 @@ def main(argv=None):
                 training_provider="ultralytics",
                 external_provider_id=None,
                 system_profile=collect_system_profile(model_dir),
+                confidence_recommendation_config={
+                    "enabled": not bool(getattr(args, "conf_rec_disable", False)),
+                    "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    "beta_precision": float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    "fallback_confidence": float(getattr(args, "conf_rec_fallback", 0.25)),
+                },
             )
     else:
         model_dir = args.model_dir
@@ -2649,6 +3038,10 @@ def main(argv=None):
                     val_conf=args.val_conf,
                     val_iou=args.val_iou,
                     val_batch=val_batch,
+                    conf_rec_disable=bool(getattr(args, "conf_rec_disable", False)),
+                    conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
                 )
             except Exception as e:
                 test_success = False
@@ -2670,6 +3063,12 @@ def main(argv=None):
                 training_provider="ultralytics",
                 external_provider_id=None,
                 system_profile=collect_system_profile(model_dir),
+                confidence_recommendation_config={
+                    "enabled": not bool(getattr(args, "conf_rec_disable", False)),
+                    "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    "beta_precision": float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    "fallback_confidence": float(getattr(args, "conf_rec_fallback", 0.25)),
+                },
             )
         else:
             print("[ERROR] Model path not specified")
