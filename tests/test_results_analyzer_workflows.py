@@ -932,6 +932,110 @@ def test_test_metrics_plot_recomputes_missing_metrics(
     assert list((tmp_path / "out").glob("*.png"))
 
 
+def test_test_metrics_plot_respects_selected_run_scope_and_writes_scope_payload(
+    tmp_path: Path,
+) -> None:
+    run_a = tmp_path / "runs" / "ds_a" / "run_a"
+    run_b = tmp_path / "runs" / "ds_a" / "run_b"
+    run_c = tmp_path / "runs" / "ds_a" / "run_c"
+    run_a.mkdir(parents=True, exist_ok=True)
+    run_b.mkdir(parents=True, exist_ok=True)
+    run_c.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_a / "test_metrics.csv", index=False)
+    pd.DataFrame([{"mAP50-95": 0.60}]).to_csv(run_b / "test_metrics.csv", index=False)
+    pd.DataFrame([{"mAP50-95": 0.10}]).to_csv(run_c / "test_metrics.csv", index=False)
+    out_dir = tmp_path / "out"
+    sources_path = out_dir / "metric_sources.json"
+
+    results_analyzer.cmd_test_metrics_plot(
+        argparse.Namespace(
+            runs_group_dir=str(tmp_path / "runs" / "ds_a"),
+            selected_run_dirs=[str(run_a), str(run_b)],
+            metrics=["mAP50-95"],
+            out_dir=str(out_dir),
+            workspace=str(tmp_path),
+            recompute_missing_metrics=False,
+            recompute_split="test",
+            metric_sources_out=str(sources_path),
+            val_batch=1,
+            val_imgsz=640,
+            val_half=True,
+            gpu_only_val=True,
+        )
+    )
+
+    payload = json.loads(sources_path.read_text(encoding="utf-8"))
+    scoped_sources = payload.get("sources", {})
+    assert set(scoped_sources.keys()) == {str(run_a), str(run_b)}
+    assert payload.get("scope", {}).get("mode") == "selected_runs"
+    assert sorted(payload.get("scope", {}).get("selected_run_dirs", [])) == sorted([str(run_a), str(run_b)])
+
+
+def test_inference_and_pr_respect_selected_run_scope_in_analyze_all(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    captured: dict[str, list[str]] = {"benchmark": [], "pr": []}
+
+    def _fake_benchmark(args):
+        captured["benchmark"] = list(getattr(args, "selected_run_dirs", []) or [])
+        Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(
+            [
+                {"model": "run_a", "run_dir": str(run_a), "avg_inference_ms_per_frame": 10.0},
+                {"model": "run_b", "run_dir": str(run_b), "avg_inference_ms_per_frame": 11.0},
+            ]
+        ).to_csv(args.out_csv, index=False)
+
+    def _fake_plot(args):
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fakepng")
+
+    def _fake_pr(args):
+        captured["pr"] = list(getattr(args, "selected_run_dirs", []) or [])
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fakepng")
+
+    def _fake_leaderboard(args):
+        captured["leaderboard"] = list(getattr(args, "selected_run_dirs", []) or [])
+        Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame([{"model": "run_a", "composite_score": 1.0, "run_dir": str(run_a)}]).to_csv(args.out_csv, index=False)
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
+    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt"}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(results_analyzer, "cmd_leaderboard", _fake_leaderboard)
+    monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+
+    answers = iter(["1", "2", "full", str(tmp_path / "datasets" / "ds_a" / "data.yaml")])
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    analyze_main(
+        [
+            "all",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--analytics-session",
+            "session_scope",
+            "--no-pdf",
+            "--no-odt",
+        ]
+    )
+    assert sorted(captured["benchmark"]) == sorted([str(run_a), str(run_b)])
+    assert sorted(captured["pr"]) == sorted([str(run_a), str(run_b)])
+    assert sorted(captured["leaderboard"]) == sorted([str(run_a), str(run_b)])
+
+
 def test_runs_with_missing_metrics_uses_run_resolved_yaml_for_unresolved_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

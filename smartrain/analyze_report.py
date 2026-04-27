@@ -478,6 +478,27 @@ def _filter_runs_summary_for_selection(df: pd.DataFrame, manifest: dict[str, Any
     return filtered
 
 
+def _filter_generic_table_for_selection(df: pd.DataFrame, manifest: dict[str, Any]) -> pd.DataFrame:
+    if len(df) == 0:
+        return df
+    selected_dirs, selected_names = _selected_run_identity(manifest)
+    if not selected_dirs and not selected_names:
+        return df
+    work = df.copy()
+    keep = pd.Series([False] * len(work), index=work.index)
+    candidate_cols = ["run_dir", "run_name", "model", "baseline", "other", "best_run", "worst_run"]
+    for col in candidate_cols:
+        if col not in work.columns:
+            continue
+        values = work[col].astype(str).str.strip()
+        keep = keep | values.isin(selected_dirs) | values.isin(selected_names)
+        keep = keep | values.str.rstrip("/").str.split("/").str[-1].isin(selected_names)
+    filtered = work[keep].copy()
+    if len(filtered) == 0:
+        return work
+    return filtered
+
+
 def _quality_metric_comments(df: pd.DataFrame, is_ru: bool) -> list[str]:
     lines: list[str] = []
     if len(df) == 0 or "run" not in df.columns:
@@ -824,8 +845,11 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         if abs_path and os.path.isfile(abs_path):
             try:
                 df = pd.read_csv(abs_path)
-                if "runs_summary" in rel.lower():
+                rel_lower = rel.lower()
+                if "runs_summary" in rel_lower:
                     df = _filter_runs_summary_for_selection(df, manifest)
+                elif any(k in rel_lower for k in ("leaderboard", "speed_quality", "pr_per_class")):
+                    df = _filter_generic_table_for_selection(df, manifest)
                 df = _select_table_columns(rel, df)
                 if "system_profile" in rel.lower() and _should_hide_system_profile_table(df):
                     lines.append(
@@ -908,6 +932,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         if os.path.isfile(pr_abs):
             try:
                 pr_df = pd.read_csv(pr_abs)
+                pr_df = _filter_generic_table_for_selection(pr_df, manifest)
                 pr_sum = _build_pr_per_class_summary(pr_df)
                 if len(pr_sum) > 0:
                     lines.extend(_center_open())

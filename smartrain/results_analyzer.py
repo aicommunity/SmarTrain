@@ -908,6 +908,14 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
     if not getattr(args, "speed_metric", None) and sys.stdin.isatty():
         args.speed_metric = prompt_text("Speed metric", default="avg_inference_fps").strip() or "avg_inference_fps"
     runs = find_run_directories(args.models_root)
+    selected_norm = {
+        os.path.abspath(os.path.expanduser(str(p)))
+        for p in (getattr(args, "selected_run_dirs", None) or [])
+        if str(p).strip()
+    }
+    if selected_norm:
+        runs = [r for r in runs if os.path.abspath(r) in selected_norm]
+        print(f"[INFO] Leaderboard scope: {len(runs)} run(s) selected")
     records = []
     for run_dir in runs:
         try:
@@ -1434,6 +1442,27 @@ def _is_cuda_oom_error(exc: Exception) -> bool:
     return "cuda out of memory" in msg or ("out of memory" in msg and "cuda" in msg)
 
 
+def _resolve_selected_run_dirs(
+    runs_group_dir: str,
+    selected_run_dirs: list[str] | tuple[str, ...] | None,
+) -> list[str]:
+    all_run_dirs = sorted(
+        d for d in glob(os.path.join(runs_group_dir, "*"))
+        if os.path.isdir(d)
+    )
+    if not all_run_dirs:
+        return []
+    selected_norm = {
+        os.path.abspath(os.path.expanduser(str(p)))
+        for p in (selected_run_dirs or [])
+        if str(p).strip()
+    }
+    if not selected_norm:
+        return all_run_dirs
+    scoped = [d for d in all_run_dirs if os.path.abspath(d) in selected_norm]
+    return scoped
+
+
 def cmd_pr_curves(args: argparse.Namespace) -> None:
     if (not getattr(args, "runs_group_dir", None) or not getattr(args, "data_yaml", None)) and sys.stdin.isatty():
         args.runs_group_dir = prompt_text("Runs group dir", default=str(args.models_root)).strip() or str(args.models_root)
@@ -1459,13 +1488,14 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
         print(f"[ERROR] Failed to import ultralytics: {e}", file=sys.stderr)
         sys.exit(1)
 
-    run_dirs = sorted(
-        d for d in glob(os.path.join(runs_group_dir, "*"))
-        if os.path.isdir(d)
+    run_dirs = _resolve_selected_run_dirs(
+        runs_group_dir,
+        getattr(args, "selected_run_dirs", None),
     )
     if not run_dirs:
-        print(f"[ERROR] No run directories found in: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] No run directories found for scope in: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
+    print(f"[INFO] PR scope: {len(run_dirs)} run(s) selected")
 
     curves: list[tuple[str, np.ndarray, np.ndarray]] = []
     per_class_rows: list[dict[str, Any]] = []
@@ -1723,10 +1753,14 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
         print("[ERROR] No images found for inference.", file=sys.stderr)
         sys.exit(1)
 
-    run_dirs = sorted(d for d in glob(os.path.join(runs_group_dir, "*")) if os.path.isdir(d))
+    run_dirs = _resolve_selected_run_dirs(
+        runs_group_dir,
+        getattr(args, "selected_run_dirs", None),
+    )
     if not run_dirs:
-        print(f"[ERROR] No run directories found in: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] No run directories found for scope in: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
+    print(f"[INFO] Benchmark scope: {len(run_dirs)} run(s) selected")
 
     rows: list[dict[str, Any]] = []
     cache_stats: list[dict[str, Any]] = []
@@ -1991,10 +2025,14 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
         print(f"[ERROR] Models directory not found: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
 
-    run_dirs = sorted(d for d in glob(os.path.join(runs_group_dir, "*")) if os.path.isdir(d))
+    run_dirs = _resolve_selected_run_dirs(
+        runs_group_dir,
+        getattr(args, "selected_run_dirs", None),
+    )
     if not run_dirs:
-        print(f"[ERROR] No run directories found in: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] No run directories found for scope in: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
+    print(f"[INFO] Test-metrics scope: {len(run_dirs)} run(s) selected")
 
     recompute_enabled = bool(getattr(args, "recompute_missing_metrics", False))
     rows: list[dict[str, Any]] = []
@@ -2235,7 +2273,24 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
     if sources_out:
         out_path = os.path.abspath(os.path.expanduser(sources_out))
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-        payload = {"requested_metrics": requested_metrics, "sources": metric_sources}
+        selected_scope = [os.path.abspath(d) for d in run_dirs]
+        recomputed_runs = sorted(
+            [
+                run_dir
+                for run_dir, by_metric in metric_sources.items()
+                if any(str(v) == "recomputed" for v in (by_metric or {}).values())
+            ]
+        )
+        payload = {
+            "requested_metrics": requested_metrics,
+            "scope": {
+                "mode": "selected_runs" if bool(getattr(args, "selected_run_dirs", None)) else "runs_group",
+                "runs_group_dir": runs_group_dir,
+                "selected_run_dirs": selected_scope,
+            },
+            "recomputed_runs": recomputed_runs,
+            "sources": metric_sources,
+        }
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         print(f"[OK] Metric sources: {out_path}")
@@ -2307,6 +2362,12 @@ def cmd_all(args: argparse.Namespace) -> None:
     session_root = _session_root(args.workspace, args.analytics_session)
     artifacts: list[dict[str, str]] = []
     cache_events: list[dict[str, Any]] = []
+    selected_run_dirs = [baseline] + others
+    selected_labels = [os.path.basename(x.rstrip(os.sep)) for x in selected_run_dirs]
+    print("[INFO] Selected compare runs:")
+    for idx, (run_dir, label) in enumerate(zip(selected_run_dirs, selected_labels), start=1):
+        role = "baseline" if idx == 1 else "other"
+        print(f"[INFO]  - {role}: {label} ({run_dir})")
 
     if others:
         compare_csv = os.path.join(session_root, "artifacts", "compare", "compare_delta.csv")
@@ -2353,6 +2414,7 @@ def cmd_all(args: argparse.Namespace) -> None:
     lb_csv = os.path.join(session_root, "artifacts", "leaderboard", "leaderboard.csv")
     lb_ns = argparse.Namespace(
         out_csv=lb_csv,
+        selected_run_dirs=selected_run_dirs,
         quality_metric="mAP50-95",
         speed_metric="avg_inference_fps",
         weight_quality=0.6,
@@ -2420,6 +2482,7 @@ def cmd_all(args: argparse.Namespace) -> None:
                 )
         tm_ns = argparse.Namespace(
             runs_group_dir=runs_group_dir,
+            selected_run_dirs=selected_run_dirs,
             metrics=["mAP50-95", "Box-F1"],
             out_dir=os.path.join(session_root, "artifacts", "metrics"),
             workspace=args.workspace,
@@ -2448,6 +2511,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         inf_png = os.path.join(session_root, "artifacts", "inference", "benchmark_bars.png")
         ib_ns = argparse.Namespace(
             runs_group_dir=runs_group_dir,
+            selected_run_dirs=selected_run_dirs,
             data_yaml=data_yaml,
             split="test",
             frames=100,
@@ -2502,6 +2566,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         pr_png = os.path.join(session_root, "artifacts", "pr", "pr_all_classes.png")
         pr_ns = argparse.Namespace(
             runs_group_dir=runs_group_dir,
+            selected_run_dirs=selected_run_dirs,
             data_yaml=data_yaml,
             out_png=pr_png,
             workspace=args.workspace,
