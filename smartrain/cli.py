@@ -98,8 +98,8 @@ HELP_MODEL_GROUP = """Model conversion tools.
 
 Quick examples:
   smartrain model convert --input models/best.pt --format onnx
-  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
-  smartrain model convert --input models/my_model.onnx --format tensorrt
+  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/weights/best.pt --format tensorrt-engine --precision fp16
+  smartrain model convert --input models/my_model.onnx --format tensorrt-trt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00
 """
 
@@ -1088,8 +1088,8 @@ def cmd_model_convert(ctx: typer.Context) -> None:
 
     Examples:
       smartrain model convert --input models/best.pt --format onnx
-      smartrain model convert --input runs/my_dataset/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
-      smartrain model convert --input models/my_model.onnx --format tensorrt
+      smartrain model convert --input runs/my_dataset/2026-01-01_00-00-00/weights/best.pt --format tensorrt-engine --precision fp16
+      smartrain model convert --input models/my_model.onnx --format tensorrt-trt
       smartrain model convert
     """
     from smartrain.model_convert_cli import build_model_convert_arg_parser
