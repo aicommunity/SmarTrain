@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from smartrain.cli_argparse import CliArgumentParser
-from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_int, prompt_text
+from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_int, prompt_text, prompt_yes_no
 from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.model_context import infer_img_size_with_source
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
 
 
@@ -21,6 +22,9 @@ class ConvertStats:
     ok: int = 0
     failed: int = 0
     skipped: int = 0
+    artifacts_ok: int = 0
+    artifacts_failed: int = 0
+    artifacts_skipped: int = 0
 
 
 def build_model_convert_arg_parser() -> argparse.ArgumentParser:
@@ -64,20 +68,32 @@ def build_model_convert_arg_parser() -> argparse.ArgumentParser:
         type=str,
         choices=["fp32", "fp16", "int8"],
         default="fp32",
-        help="Export precision profile",
+        help="TensorRT precision profile (used only for TensorRT export)",
     )
     p.add_argument(
         "--imgsz",
         type=str,
-        default="640",
+        default=None,
         help="Image size: single value (640) or H,W",
     )
-    p.add_argument("--opset", type=int, default=None, help="ONNX opset")
+    p.add_argument("--opset", type=int, default=17, help="ONNX opset")
     p.add_argument(
         "--simplify",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Simplify ONNX graph",
+    )
+    p.add_argument(
+        "--half",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="ONNX export dtype: FP16 when enabled, FP32 by default",
+    )
+    p.add_argument(
+        "--nms",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Include NMS/postprocess into exported ONNX graph",
     )
     p.add_argument(
         "--workspace-gib",
@@ -117,22 +133,39 @@ def _parse_imgsz(value: str) -> int | tuple[int, int]:
     return int(parts[0]), int(parts[1])
 
 
+def _format_imgsz(value: int | tuple[int, int]) -> str:
+    if isinstance(value, int):
+        return str(value)
+    return f"{value[0]},{value[1]}"
+
+
+def _resolve_imgsz_from_args_and_model(args: argparse.Namespace, model_path: Path) -> tuple[int | tuple[int, int], str]:
+    if args.imgsz is not None and str(args.imgsz).strip():
+        return _parse_imgsz(str(args.imgsz)), "cli"
+    inferred, source = infer_img_size_with_source(model_path)
+    if inferred is not None:
+        return int(inferred), source
+    return 640, "fallback_640"
+
+
 def _discover_models(workspace_root: Path) -> list[tuple[str, Path]]:
     found: list[tuple[str, Path]] = []
     models_dir = workspace_root / "models"
     runs_dir = workspace_root / "runs"
-    allowed = {".pt", ".onnx"}
-    if models_dir.exists():
-        for p in sorted(models_dir.rglob("*")):
-            if p.is_file():
-                if p.suffix.lower() in allowed:
-                    found.append(("models", p))
-    if runs_dir.exists():
-        for p in sorted(runs_dir.rglob("*")):
-            if not p.is_file():
-                continue
-            if p.suffix.lower() in allowed:
-                found.append(("runs", p))
+    formats_order = (".pt", ".onnx")
+
+    def _append_group(root: Path, source: str) -> None:
+        if not root.exists():
+            return
+        files = [p for p in sorted(root.rglob("*")) if p.is_file()]
+        for suffix in formats_order:
+            for p in files:
+                if p.suffix.lower() == suffix:
+                    found.append((source, p))
+
+    # Preserve outer grouping: models first, then runs.
+    _append_group(models_dir, "models")
+    _append_group(runs_dir, "runs")
     return found
 
 
@@ -175,7 +208,42 @@ def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
     batch_mode = prompt_choice("Batch mode", ["static", "dynamic"], default="static")
     args.dynamic = batch_mode == "dynamic"
     args.batch = prompt_int("Batch size", default=1)
-    args.precision = prompt_choice("Precision", ["fp32", "fp16", "int8"], default="fp32")
+    if args.format in {"tensorrt", "both"}:
+        args.precision = prompt_choice(
+            "TensorRT precision (--precision)",
+            ["fp32", "fp16", "int8"],
+            default="fp32",
+        )
+    else:
+        args.precision = "fp32"
+    if args.format in {"onnx", "both"}:
+        args.opset = prompt_int("ONNX opset", default=int(getattr(args, "opset", 17) or 17))
+        args.simplify = prompt_yes_no("Simplify ONNX graph (--simplify)", default=bool(getattr(args, "simplify", True)))
+        args.half = prompt_yes_no("Use FP16 for ONNX (--half)", default=bool(getattr(args, "half", False)))
+        print("[INFO] Note: for end2end models Ultralytics may force --nms to False during export.")
+        args.nms = prompt_yes_no("Include NMS in ONNX graph (--nms)", default=False)
+    imgsz_mode = prompt_choice(
+        "Image size mode",
+        ["auto", "manual", "force-640"],
+        default="auto",
+    )
+    args._imgsz_mode = imgsz_mode
+    args.imgsz = None
+    if imgsz_mode == "manual":
+        default_manual = "640"
+        try:
+            probe_input = Path(str(args.input)).expanduser()
+            if not probe_input.is_absolute():
+                probe_input = (workspace_root / probe_input).resolve()
+            probe_models = _collect_input_models(probe_input)
+            if probe_models:
+                auto_imgsz, _ = _resolve_imgsz_from_args_and_model(args, probe_models[0])
+                default_manual = _format_imgsz(auto_imgsz)
+        except Exception:
+            pass
+        args.imgsz = prompt_text("Image size (N or H,W)", default=default_manual).strip() or default_manual
+    elif imgsz_mode == "force-640":
+        args.imgsz = "640"
     args.output_dir = prompt_text("Output directory (empty = source model dir)", default="").strip() or None
 
 
@@ -194,14 +262,18 @@ def _validate_args(
             )
     if args.batch < 1:
         parser.error("--batch must be >= 1")
-    try:
-        _ = _parse_imgsz(args.imgsz)
-    except Exception as e:
-        parser.error(f"invalid --imgsz: {e}")
-    if args.precision == "int8" and args.format == "onnx":
-        parser.error("INT8 precision is not supported for ONNX export in this command. Use fp32/fp16 or TensorRT.")
-    if args.precision in {"fp16", "int8"} and str(args.device).strip().lower() == "cpu":
+    if args.imgsz is not None and str(args.imgsz).strip():
+        try:
+            _ = _parse_imgsz(args.imgsz)
+        except Exception as e:
+            parser.error(f"invalid --imgsz: {e}")
+    trt_requested = args.format in {"tensorrt", "both"}
+    if trt_requested and args.precision in {"fp16", "int8"} and str(args.device).strip().lower() == "cpu":
         parser.error(f"--precision {args.precision} is incompatible with --device cpu")
+    if args.format in {"onnx", "both"} and bool(getattr(args, "half", False)) and str(args.device).strip().lower() == "cpu":
+        parser.error("--half is incompatible with --device cpu for ONNX export. Use --no-half or GPU device.")
+    if args.opset is not None and int(args.opset) <= 0:
+        parser.error("--opset must be > 0")
 
 
 def _precision_kwargs(args: argparse.Namespace, target: str) -> dict[str, Any]:
@@ -303,40 +375,89 @@ def _trtexec_export_from_onnx(
     return True, "ok"
 
 
+def _validate_onnx_export(onnx_path: Path) -> tuple[bool, str]:
+    try:
+        import onnx  # type: ignore
+
+        model = onnx.load(str(onnx_path))
+        onnx.checker.check_model(model)
+    except Exception as e:
+        return False, f"onnx checker failed: {e}"
+    return True, "ok"
+
+
 def _maybe_move_output(exported: Path, target: Path, force: bool) -> tuple[bool, str]:
+    # Handle same-path exports first: Ultralytics can already write directly to
+    # the final target location. In this case, do not unlink on --force.
+    if exported.resolve() == target.resolve():
+        if target.exists():
+            return True, "same-path"
+        return False, "missing-after-export"
     if target.exists():
         if not force:
             return False, "exists"
         target.unlink()
     target.parent.mkdir(parents=True, exist_ok=True)
-    if exported.resolve() == target.resolve():
-        return True, "same-path"
     shutil.move(str(exported), str(target))
     return True, "moved"
 
 
-def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, bool]:
+def _collect_existing_output_conflicts(models: list[Path], args: argparse.Namespace) -> list[Path]:
+    conflicts: list[Path] = []
+    for source_path in models:
+        source_ext = source_path.suffix.lower()
+        out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else source_path.parent
+        if args.format in {"onnx", "both"} and source_ext == ".pt":
+            onnx_target = out_dir / f"{source_path.stem}.onnx"
+            if onnx_target.exists():
+                conflicts.append(onnx_target)
+        # ONNX->ONNX does not produce a new artifact, but users still expect
+        # explicit confirmation when the "output" file already exists.
+        if args.format == "onnx" and source_ext == ".onnx":
+            conflicts.append(source_path)
+        if args.format in {"tensorrt", "both"}:
+            engine_target = out_dir / f"{source_path.stem}.engine"
+            if engine_target.exists():
+                conflicts.append(engine_target)
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for path in conflicts:
+        rp = path.resolve()
+        if rp in seen:
+            continue
+        seen.add(rp)
+        deduped.append(rp)
+    return deduped
+
+
+def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, bool, int, int, int]:
     """
-    Returns tuple: (ok_any, failed_any, skipped_any).
+    Returns tuple: (ok_any, failed_any, skipped_any, artifacts_ok, artifacts_failed, artifacts_skipped).
     """
     source_path = pt_path
     source_ext = source_path.suffix.lower()
     if source_ext not in {".pt", ".onnx"}:
         print(f"[ERROR] Unsupported input extension for {source_path}. Expected .pt or .onnx")
-        return False, True, False
+        return False, True, False, 0, 1, 0
 
     out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else source_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
-    imgsz = _parse_imgsz(args.imgsz)
+    imgsz, imgsz_source = _resolve_imgsz_from_args_and_model(args, source_path)
+    print(f"[INFO] Resolved image size: {_format_imgsz(imgsz)} (source: {imgsz_source})")
+    if imgsz_source == "fallback_640":
+        print("[WARN] Training image size not found. Using fallback 640. Set --imgsz to override.")
     do_onnx = args.format in {"onnx", "both"} and source_ext == ".pt"
     do_trt = args.format in {"tensorrt", "both"}
     ok_any = False
     failed_any = False
     skipped_any = False
+    artifacts_ok = 0
+    artifacts_failed = 0
+    artifacts_skipped = 0
 
     if source_ext == ".onnx" and args.format == "onnx":
         print(f"[WARN] Skip ONNX export for {source_path}: input is already ONNX.")
-        return False, False, True
+        return False, False, True, 0, 0, 1
 
     if source_ext == ".onnx" and args.format == "both":
         print(f"[INFO] Input is ONNX, `both` acts as TensorRT-only for: {source_path}")
@@ -360,29 +481,46 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
             model = YOLO(str(source_path))
         onnx_target = out_dir / f"{source_path.stem}.onnx"
         if onnx_target.exists() and not args.force:
-            print(f"[WARN] Skip ONNX (exists): {onnx_target}")
+            print(f"[WARN] Skip ONNX (exists): {onnx_target}. Use --force to rebuild.")
             skipped_any = True
+            artifacts_skipped += 1
         else:
             onnx_kw = {
                 **base_common,
-                **_precision_kwargs(args, "onnx"),
                 "format": "onnx",
                 "simplify": bool(args.simplify),
+                "opset": int(args.opset),
+                "half": bool(getattr(args, "half", False)),
+                "nms": bool(getattr(args, "nms", False)),
             }
-            if args.opset is not None:
-                onnx_kw["opset"] = int(args.opset)
+            print(
+                f"[INFO] ONNX export profile: opset={onnx_kw['opset']} simplify={onnx_kw['simplify']} "
+                f"half={onnx_kw['half']} nms={onnx_kw['nms']}"
+            )
             try:
                 exported = Path(str(model.export(**onnx_kw))).expanduser().resolve()
                 ok_move, reason = _maybe_move_output(exported, onnx_target, args.force)
                 if ok_move:
-                    print(f"[OK] ONNX: {onnx_target}")
-                    ok_any = True
+                    valid_onnx, validation_reason = _validate_onnx_export(onnx_target)
+                    if valid_onnx:
+                        print(f"[OK] ONNX: {onnx_target}")
+                        print(
+                            "[INFO] ONNX post-check passed. PyTorch export warnings (e.g. aten::index) are treated as non-fatal unless validation fails."
+                        )
+                        ok_any = True
+                        artifacts_ok += 1
+                    else:
+                        print(f"[ERROR] ONNX validation failed for {onnx_target}: {validation_reason}")
+                        failed_any = True
+                        artifacts_failed += 1
                 else:
                     print(f"[WARN] Skip ONNX ({reason}): {onnx_target}")
                     skipped_any = True
+                    artifacts_skipped += 1
             except Exception as e:
                 print(f"[ERROR] ONNX export failed for {source_path}: {e}")
                 failed_any = True
+                artifacts_failed += 1
 
     if do_trt:
         ready, reason = _check_tensorrt_ready()
@@ -392,8 +530,9 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
         else:
             engine_target = out_dir / f"{source_path.stem}.engine"
             if engine_target.exists() and not args.force:
-                print(f"[WARN] Skip TensorRT (exists): {engine_target}")
+                print(f"[WARN] Skip TensorRT (exists): {engine_target}. Use --force to rebuild.")
                 skipped_any = True
+                artifacts_skipped += 1
             elif source_ext == ".onnx":
                 if args.force and engine_target.exists():
                     engine_target.unlink()
@@ -401,9 +540,11 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                 if ok_trt:
                     print(f"[OK] TensorRT: {engine_target}")
                     ok_any = True
+                    artifacts_ok += 1
                 else:
                     print(f"[ERROR] TensorRT export failed for {source_path}: {trt_reason}")
                     failed_any = True
+                    artifacts_failed += 1
             else:
                 if model is None:
                     try:
@@ -432,14 +573,17 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                     if ok_move:
                         print(f"[OK] TensorRT: {engine_target}")
                         ok_any = True
+                        artifacts_ok += 1
                     else:
                         print(f"[WARN] Skip TensorRT ({move_reason}): {engine_target}")
                         skipped_any = True
+                        artifacts_skipped += 1
                 except Exception as e:
                     print(f"[ERROR] TensorRT export failed for {source_path}: {e}")
                     failed_any = True
+                    artifacts_failed += 1
 
-    return ok_any, failed_any, skipped_any
+    return ok_any, failed_any, skipped_any, artifacts_ok, artifacts_failed, artifacts_skipped
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -462,11 +606,25 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[ERROR] No .pt/.onnx models found by input path: {input_path}")
         raise SystemExit(2)
 
+    if interactive_used:
+        preview_imgsz, preview_source = _resolve_imgsz_from_args_and_model(args, models[0])
+        print(f"[INFO] Interactive summary: imgsz={_format_imgsz(preview_imgsz)} (source: {preview_source})")
+        if args.imgsz is None:
+            args.imgsz = _format_imgsz(preview_imgsz)
+        if not args.force:
+            conflicts = _collect_existing_output_conflicts(models, args)
+            if conflicts:
+                preview = ", ".join(str(p) for p in conflicts[:3])
+                if len(conflicts) > 3:
+                    preview += f", ... (+{len(conflicts) - 3} more)"
+                print(f"[WARN] Existing output files detected: {preview}")
+                args.force = prompt_yes_no("Overwrite existing output files (--force)?", default=False)
+
     stats = ConvertStats(total=len(models))
     print(f"[INFO] Found {len(models)} model(s) for conversion.")
     for model_path in models:
         print(f"[INFO] Convert: {model_path}")
-        ok_any, failed_any, skipped_any = _convert_one(model_path, args)
+        ok_any, failed_any, skipped_any, artifacts_ok, artifacts_failed, artifacts_skipped = _convert_one(model_path, args)
         if ok_any:
             stats.ok += 1
         if failed_any:
@@ -475,11 +633,20 @@ def main(argv: list[str] | None = None) -> None:
                 break
         if skipped_any and not ok_any and not failed_any:
             stats.skipped += 1
+        stats.artifacts_ok += artifacts_ok
+        stats.artifacts_failed += artifacts_failed
+        stats.artifacts_skipped += artifacts_skipped
 
     print(
-        f"[INFO] Done. total={stats.total} ok={stats.ok} failed={stats.failed} skipped={stats.skipped}"
+        f"[INFO] Done. total={stats.total} ok={stats.ok} failed={stats.failed} skipped={stats.skipped} "
+        f"(artifacts: ok={stats.artifacts_ok} failed={stats.artifacts_failed} skipped={stats.artifacts_skipped})"
     )
+    if stats.ok == 0 and stats.failed == 0 and stats.skipped > 0:
+        print("[INFO] All conversions were skipped because output artifacts already exist. Use --force to rebuild.")
     if interactive_used:
+        if args.imgsz is None and models:
+            resolved_imgsz, _ = _resolve_imgsz_from_args_and_model(args, models[0])
+            args.imgsz = _format_imgsz(resolved_imgsz)
         replay_cmd = build_non_interactive_command("model convert", parser, args)
         print_replay_command("model convert", replay_cmd)
 

@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import yaml
 from PIL import Image
 from tqdm import tqdm
 
@@ -31,6 +30,7 @@ from smartrain.external_providers.registry import list_provider_specs
 from smartrain.train_model_catalog import is_supported_external_provider_model, TrainModelCatalog
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
+from smartrain.model_context import infer_img_size_from_model_context
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
@@ -186,107 +186,8 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
     raise ValueError("Specify one of --model-name, --run or --weights.")
 
 
-def _extract_img_size_from_obj(obj: Any) -> int | None:
-    if isinstance(obj, dict):
-        # Most useful locations first.
-        ti = obj.get("training_info")
-        if isinstance(ti, dict):
-            hp = ti.get("hyperparameters")
-            if isinstance(hp, dict):
-                for k in ("image_size", "imgsz", "img_size"):
-                    v = hp.get(k)
-                    if isinstance(v, (int, float)) and int(v) > 0:
-                        return int(v)
-        inf = obj.get("inference")
-        if isinstance(inf, dict):
-            v = inf.get("imgsz")
-            if isinstance(v, (int, float)) and int(v) > 0:
-                return int(v)
-        uts = obj.get("ultralytics_train_summary")
-        if isinstance(uts, dict):
-            for k in ("imgsz", "img_size", "image_size"):
-                v = uts.get(k)
-                if isinstance(v, (int, float)) and int(v) > 0:
-                    return int(v)
-        for k in ("imgsz", "img_size", "image_size"):
-            v = obj.get(k)
-            if isinstance(v, (int, float)) and int(v) > 0:
-                return int(v)
-        # Deep fallback.
-        for v in obj.values():
-            found = _extract_img_size_from_obj(v)
-            if found is not None:
-                return found
-    elif isinstance(obj, list):
-        for x in obj:
-            found = _extract_img_size_from_obj(x)
-            if found is not None:
-                return found
-    return None
-
-
-def _read_img_size_from_meta_file(path: Path) -> int | None:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except Exception:
-        return None
-    try:
-        if path.suffix.lower() == ".json":
-            payload = json.loads(text)
-        else:
-            payload = yaml.safe_load(text)
-    except Exception:
-        return None
-    return _extract_img_size_from_obj(payload)
-
-
 def _infer_img_size_from_model_context(model_path: Path) -> int | None:
-    """
-    Try to infer default imgsz from nearby training/testing metadata files.
-    """
-    mp = model_path.resolve()
-    candidates: list[Path] = []
-
-    # Typical run layout: .../<run>/train/weights/best.pt
-    parts = [p.lower() for p in mp.parts]
-    if "weights" in parts:
-        try:
-            i = parts.index("weights")
-            run_dir = Path(*mp.parts[:i]).resolve().parent if i >= 1 else None
-        except Exception:
-            run_dir = None
-        if run_dir and run_dir.is_dir():
-            candidates.extend(
-                [
-                    run_dir / "training_metadata.json",
-                    run_dir / "train" / "args.yaml",
-                    run_dir / "train" / "args.yml",
-                    run_dir / "_runtime_data_test.yaml",
-                ]
-            )
-
-    # Nearest context: model dir + one level deeper where release artifacts may live.
-    model_dir = mp.parent
-    if model_dir.is_dir():
-        for p in sorted(model_dir.iterdir()):
-            if p.is_file() and p.suffix.lower() in {".json", ".yaml", ".yml"}:
-                candidates.append(p)
-        for p in sorted(model_dir.rglob("*")):
-            if p.is_file() and p.suffix.lower() in {".json", ".yaml", ".yml"}:
-                rel_parts = p.relative_to(model_dir).parts
-                if len(rel_parts) <= 2:
-                    candidates.append(p)
-
-    seen: set[Path] = set()
-    for c in candidates:
-        cp = c.resolve()
-        if cp in seen or not cp.is_file():
-            continue
-        seen.add(cp)
-        val = _read_img_size_from_meta_file(cp)
-        if val is not None:
-            return val
-    return None
+    return infer_img_size_from_model_context(model_path)
 
 
 def _load_catalog(layout: WorkspaceLayout) -> dict[str, Any]:

@@ -48,6 +48,7 @@ Model convert highlights:
 
 - `smartrain model convert` exports `.pt` to `onnx`, `tensorrt`, or `both`, and also supports direct `.onnx -> tensorrt` conversion.
 - Defaults: static batch mode, `--batch 1`, `--precision fp32`.
+- ONNX export options are configured in `model convert` (`--opset`, `--simplify/--no-simplify`, `--half/--no-half`).
 - Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows selection by number or manual path input.
 
 Model release highlights:

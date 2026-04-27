@@ -448,17 +448,6 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "--export-onnx",
-        action="store_true",
-        help="After successful training, export best.pt to ONNX",
-    )
-    parser.add_argument(
-        "--export-onnx-fp32",
-        action="store_true",
-        help="With --export-onnx, do not use half=True",
-    )
-
-    parser.add_argument(
         "--clearml",
         action="store_true",
         help="Logging hyperparameters in ClearML (need pip install clearml)",
@@ -1214,23 +1203,6 @@ def _run_interactive_train_setup(args) -> bool:
             "Enable weighted sampling (--weighted-sampling)?",
             default=bool(_get_interactive_default(args, "weighted_sampling", False, baseline_sm_opts, "weighted_sampling")),
         )
-    if "export_onnx" in ultra_sm_opts:
-        args.export_onnx = bool(ultra_sm_opts["export_onnx"])
-    else:
-        args.export_onnx = _prompt_yes_no(
-            "Export ONNX after training (--export-onnx)?",
-            default=bool(_get_interactive_default(args, "export_onnx", False, baseline_sm_opts, "export_onnx")),
-        )
-    if "export_onnx_half" in ultra_sm_opts:
-        args.export_onnx_fp32 = not bool(ultra_sm_opts["export_onnx_half"])
-    else:
-        default_fp32 = bool(getattr(args, "export_onnx_fp32", False))
-        if "export_onnx_half" in baseline_sm_opts:
-            default_fp32 = not bool(baseline_sm_opts["export_onnx_half"])
-        args.export_onnx_fp32 = _prompt_yes_no(
-            "Use FP32 for ONNX (--export-onnx-fp32)?",
-            default=default_fp32,
-        )
     if "clearml" in ultra_sm_opts:
         args.clearml = bool(ultra_sm_opts["clearml"])
     else:
@@ -1814,7 +1786,6 @@ def train_yolo(
         register_weighted_sampling_callback(model)
 
     training_end_time = None
-    onnx_rel = None
     best_path = os.path.join(model_dir, "train", "weights", "best.pt")
     try:
         model.train(**train_kw)
@@ -1824,30 +1795,6 @@ def train_yolo(
         if os.path.exists(model_path):
             print("[OK] Training complete.")
             print(f"[INFO] Model saved at path:\n{model_path}")
-        if smartrain_opts.get("export_onnx") and os.path.exists(model_path):
-            half = bool(smartrain_opts.get("export_onnx_half", True))
-            simplify = bool(smartrain_opts.get("export_onnx_simplify", True))
-            opset = smartrain_opts.get("export_onnx_opset", 17)
-            dynamic = bool(smartrain_opts.get("export_onnx_dynamic", False))
-            try:
-                ex = model.export(
-                    format="onnx",
-                    dynamic=dynamic,
-                    simplify=simplify,
-                    opset=int(opset),
-                    half=half,
-                )
-                if ex:
-                    onnx_abs = str(ex) if isinstance(ex, (str, Path)) else str(getattr(ex, "path", ex))
-                    if os.path.isfile(onnx_abs):
-                        onnx_rel = os.path.relpath(onnx_abs, model_dir)
-                    else:
-                        cand = os.path.join(model_dir, "train", "weights", "best.onnx")
-                        if os.path.isfile(cand):
-                            onnx_rel = os.path.relpath(cand, model_dir)
-                print(f"[INFO] ONNX export completed: {onnx_rel or '(see weights directory)'}")
-            except Exception as ex_err:
-                print(f"[WARNING] ONNX export failed: {ex_err}")
     except Exception as e:
         training_end_time = datetime.now()
         print(
@@ -1864,7 +1811,6 @@ def train_yolo(
     meta_extras = {
         "train_kw": {k: v for k, v in train_kw.items() if k != "data"},
         "task_type": task_to_metadata_task_type(train_kw.get("task")),
-        "onnx_relative": onnx_rel,
         "training_ok": os.path.isfile(best_path),
     }
     return model_dir, training_start_time, training_end_time, dataset_hash, workspace_root, meta_extras
@@ -2118,7 +2064,6 @@ def save_training_metadata(
     workspace_root=None,
     task_type=None,
     ultralytics_train_summary=None,
-    onnx_relative=None,
     training_provider: str = "ultralytics",
     external_provider_id: str | None = None,
     system_profile: dict[str, Any] | None = None,
@@ -2192,8 +2137,6 @@ def save_training_metadata(
 
     if ultralytics_train_summary:
         metadata["training_info"]["ultralytics_train"] = ultralytics_train_summary
-    if onnx_relative:
-        metadata["paths"]["onnx"] = onnx_relative
 
     if workspace_root is not None:
         metadata["workspace"] = {
@@ -2371,9 +2314,6 @@ def main(argv=None):
         },
     )
     apply_cli_smartrain_overrides(sm_opts, args)
-
-    if getattr(args, "export_onnx_fp32", False):
-        sm_opts["export_onnx_half"] = False
 
     try:
         workspace_root, data, target_dir = _resolve_cli_paths_with_profile(args, u_cfg)
@@ -2688,7 +2628,6 @@ def main(argv=None):
                 workspace_root=workspace_root,
                 task_type=meta_extras.get("task_type") or task_to_metadata_task_type(u_cfg.get("task")),
                 ultralytics_train_summary=_json_safe_train_summary(meta_extras.get("train_kw")),
-                onnx_relative=meta_extras.get("onnx_relative"),
                 training_provider="ultralytics",
                 external_provider_id=None,
                 system_profile=collect_system_profile(model_dir),
