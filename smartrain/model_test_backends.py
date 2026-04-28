@@ -19,6 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from ultralytics import YOLO
+from ultralytics.utils.metrics import ap_per_class
 
 from smartrain.confidence_recommendation import (
     compute_confidence_recommendations,
@@ -451,6 +452,151 @@ def _build_pr_payload(
     return pr_df, pr_per_class_df, ap_by_class, curves
 
 
+def _build_ultralytics_style_stats(
+    preds: list[_Pred],
+    gt_rows: list[_Gt],
+    iouv: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    by_image_gt: dict[str, list[_Gt]] = {}
+    by_image_pred: dict[str, list[_Pred]] = {}
+    for gt in gt_rows:
+        by_image_gt.setdefault(gt.image_path, []).append(gt)
+    for pred in preds:
+        by_image_pred.setdefault(pred.image_path, []).append(pred)
+
+    all_images = sorted(set(by_image_gt) | set(by_image_pred))
+    correct_rows: list[np.ndarray] = []
+    conf_rows: list[float] = []
+    pred_cls_rows: list[int] = []
+    target_cls_rows: list[int] = []
+
+    for image_path in all_images:
+        img_gts = by_image_gt.get(image_path, [])
+        img_preds = by_image_pred.get(image_path, [])
+        if img_gts:
+            target_cls_rows.extend([int(g.cls_id) for g in img_gts])
+        if not img_preds:
+            continue
+
+        pred_boxes = np.asarray([[p.x1, p.y1, p.x2, p.y2] for p in img_preds], dtype=np.float32)
+        pred_cls = np.asarray([int(p.cls_id) for p in img_preds], dtype=np.int32)
+        pred_conf = np.asarray([float(p.conf) for p in img_preds], dtype=np.float32)
+        gt_boxes = np.asarray([[g.x1, g.y1, g.x2, g.y2] for g in img_gts], dtype=np.float32) if img_gts else np.zeros((0, 4), dtype=np.float32)
+        gt_cls = np.asarray([int(g.cls_id) for g in img_gts], dtype=np.int32) if img_gts else np.zeros((0,), dtype=np.int32)
+
+        correct = np.zeros((len(img_preds), len(iouv)), dtype=bool)
+        if len(img_gts):
+            iou_mat = np.zeros((len(img_gts), len(img_preds)), dtype=np.float32)
+            for gi in range(len(img_gts)):
+                iou_mat[gi, :] = _box_iou_np(gt_boxes[gi], pred_boxes)
+            class_mask = gt_cls[:, None] == pred_cls[None, :]
+            iou_mat = iou_mat * class_mask
+            for ti, thr in enumerate(iouv.tolist()):
+                matches = np.argwhere(iou_mat >= float(thr))
+                if matches.size == 0:
+                    continue
+                if len(matches) > 1:
+                    vals = iou_mat[matches[:, 0], matches[:, 1]]
+                    order = np.argsort(-vals)
+                    matches = matches[order]
+                    _, keep_pred = np.unique(matches[:, 1], return_index=True)
+                    matches = matches[keep_pred]
+                    _, keep_gt = np.unique(matches[:, 0], return_index=True)
+                    matches = matches[keep_gt]
+                correct[matches[:, 1].astype(int), ti] = True
+
+        correct_rows.append(correct)
+        conf_rows.extend(pred_conf.tolist())
+        pred_cls_rows.extend(pred_cls.tolist())
+
+    tp = np.concatenate(correct_rows, axis=0) if correct_rows else np.zeros((0, len(iouv)), dtype=bool)
+    conf = np.asarray(conf_rows, dtype=np.float32) if conf_rows else np.zeros((0,), dtype=np.float32)
+    pred_cls = np.asarray(pred_cls_rows, dtype=np.int32) if pred_cls_rows else np.zeros((0,), dtype=np.int32)
+    target_cls = np.asarray(target_cls_rows, dtype=np.int32) if target_cls_rows else np.zeros((0,), dtype=np.int32)
+    return tp, conf, pred_cls, target_cls
+
+
+def _compute_ultralytics_style_payload(
+    preds: list[_Pred],
+    gt_rows: list[_Gt],
+    names: list[str],
+) -> dict[str, Any]:
+    iouv = np.linspace(0.5, 0.95, 10, dtype=np.float32)
+    tp, conf, pred_cls, target_cls = _build_ultralytics_style_stats(preds, gt_rows, iouv)
+    names_map = {idx: name for idx, name in enumerate(names)}
+    (
+        _tp_cnt,
+        _fp_cnt,
+        p_cls,
+        r_cls,
+        f1_cls,
+        ap,
+        unique_classes,
+        p_curve,
+        r_curve,
+        f1_curve,
+        x,
+        prec_values,
+    ) = ap_per_class(
+        tp=tp,
+        conf=conf,
+        pred_cls=pred_cls,
+        target_cls=target_cls,
+        plot=False,
+        names=names_map,
+    )
+
+    ap50_by_class: dict[int, float] = {}
+    ap5095_by_class: dict[int, float] = {}
+    pr_rows: list[dict[str, Any]] = []
+    per_class_rows: list[dict[str, Any]] = []
+    for idx, cls_id in enumerate(unique_classes.tolist() if isinstance(unique_classes, np.ndarray) else []):
+        ap50_val = float(ap[idx, 0]) if ap.ndim == 2 and idx < ap.shape[0] else 0.0
+        ap5095_val = float(ap[idx].mean()) if ap.ndim == 2 and idx < ap.shape[0] else 0.0
+        ap50_by_class[int(cls_id)] = ap50_val
+        ap5095_by_class[int(cls_id)] = ap5095_val
+        pr_rows.append({"class_id": int(cls_id), "class_name": names_map.get(int(cls_id), str(cls_id)), "ap": ap50_val})
+        for xr, pv in zip(x.tolist(), prec_values[idx].tolist() if idx < len(prec_values) else []):
+            per_class_rows.append(
+                {
+                    "class_id": int(cls_id),
+                    "class_name": names_map.get(int(cls_id), str(cls_id)),
+                    "recall": float(xr),
+                    "precision": float(pv),
+                    "ap": ap50_val,
+                }
+            )
+
+    mp = float(np.mean(p_cls)) if len(p_cls) else 0.0
+    mr = float(np.mean(r_cls)) if len(r_cls) else 0.0
+    mf1 = float(np.mean(f1_cls)) if len(f1_cls) else 0.0
+    map50 = float(ap[:, 0].mean()) if isinstance(ap, np.ndarray) and ap.size else 0.0
+    map5095 = float(ap.mean()) if isinstance(ap, np.ndarray) and ap.size else 0.0
+
+    # Curves on confidence grid (1000 points) like Ultralytics.
+    p2d = np.asarray(p_curve, dtype=np.float32) if isinstance(p_curve, np.ndarray) else np.zeros((0, 1000), dtype=np.float32)
+    r2d = np.asarray(r_curve, dtype=np.float32) if isinstance(r_curve, np.ndarray) else np.zeros((0, 1000), dtype=np.float32)
+    f1_2d = np.asarray(f1_curve, dtype=np.float32) if isinstance(f1_curve, np.ndarray) else np.zeros((0, 1000), dtype=np.float32)
+    thresholds = np.asarray(x, dtype=np.float32) if isinstance(x, np.ndarray) else np.linspace(0.0, 1.0, 1000, dtype=np.float32)
+    return {
+        "pr_df": pd.DataFrame(pr_rows),
+        "pr_per_class_df": pd.DataFrame(per_class_rows),
+        "map50": map50,
+        "map5095": map5095,
+        "box_p": mp,
+        "box_r": mr,
+        "box_f1": mf1,
+        "thresholds": thresholds,
+        "p2d": p2d,
+        "r2d": r2d,
+        "f1_2d": f1_2d,
+        "pr_recall": np.asarray(x, dtype=np.float32) if isinstance(x, np.ndarray) else np.linspace(0.0, 1.0, 1000, dtype=np.float32),
+        "pr_precision_mean": np.asarray(prec_values, dtype=np.float32).mean(axis=0)
+        if isinstance(prec_values, np.ndarray) and prec_values.size
+        else np.zeros((1000,), dtype=np.float32),
+    }
+
+
 def _compute_global_stats(preds: list[_Pred], gt_rows: list[_Gt], names: list[str], iou_thr: float) -> dict[str, float]:
     total_tp = 0.0
     total_fp = 0.0
@@ -659,18 +805,19 @@ def _write_native_eval_artifacts(
     test_dir = format_test_dir(root_dir, format_name)
     if split == "test":
         os.makedirs(test_dir, exist_ok=True)
-    pr_df, pr_per_class_df, ap_by_class, curves = _build_pr_payload(preds, gt_rows, names, iou_thr)
-    global_stats = _compute_global_stats(preds, gt_rows, names, iou_thr)
-    map50 = float(np.mean(list(ap_by_class.values()))) if ap_by_class else 0.0
-    map5095 = _compute_map5095(preds, gt_rows, names)
+    metrics_payload = _compute_ultralytics_style_payload(preds, gt_rows, names)
+    pr_df = metrics_payload["pr_df"]
+    pr_per_class_df = metrics_payload["pr_per_class_df"]
+    map50 = float(metrics_payload["map50"])
+    map5095 = float(metrics_payload["map5095"])
     metrics_df = pd.DataFrame(
         [
             {
                 "mAP50-95": map5095,
                 "mAP50": map50,
-                "Box-F1": global_stats["Box-F1"],
-                "Box-P": global_stats["Box-P"],
-                "Box-R": global_stats["Box-R"],
+                "Box-F1": float(metrics_payload["box_f1"]),
+                "Box-P": float(metrics_payload["box_p"]),
+                "Box-R": float(metrics_payload["box_r"]),
             }
         ]
     )
@@ -678,21 +825,21 @@ def _write_native_eval_artifacts(
     if split == "test":
         if len(pr_per_class_df) > 0:
             pr_per_class_df.to_csv(os.path.join(test_dir, "pr_per_class.csv"), index=False, encoding="utf-8")
-        recall_grid = np.linspace(0.0, 1.0, 101)
-        mean_precision = np.zeros_like(recall_grid)
-        if curves:
-            stacked = np.vstack([curves[idx][1] for idx in sorted(curves)])
-            mean_precision = np.mean(stacked, axis=0)
+        recall_grid = np.asarray(metrics_payload["pr_recall"], dtype=np.float32)
+        mean_precision = np.asarray(metrics_payload["pr_precision_mean"], dtype=np.float32)
         pd.DataFrame({"recall": recall_grid, "precision": mean_precision}).to_csv(
             os.path.join(test_dir, "pr.csv"),
             index=False,
             encoding="utf-8",
         )
         _save_curve_plot(recall_grid, mean_precision, os.path.join(test_dir, "BoxPR_curve.png"), "PR curve", "Recall", "Precision")
-    thresholds, p2d, r2d = _compute_threshold_curves(preds, gt_rows, names, iou_thr)
+    thresholds = np.asarray(metrics_payload["thresholds"], dtype=np.float32)
+    p2d = np.asarray(metrics_payload["p2d"], dtype=np.float32)
+    r2d = np.asarray(metrics_payload["r2d"], dtype=np.float32)
+    f1_2d = np.asarray(metrics_payload["f1_2d"], dtype=np.float32)
     p_mean = np.mean(p2d, axis=0) if p2d.size else np.zeros_like(thresholds)
     r_mean = np.mean(r2d, axis=0) if r2d.size else np.zeros_like(thresholds)
-    f1_mean = np.where((p_mean + r_mean) > 0.0, 2.0 * p_mean * r_mean / np.maximum(p_mean + r_mean, 1e-9), 0.0)
+    f1_mean = np.mean(f1_2d, axis=0) if f1_2d.size else np.zeros_like(thresholds)
     if split == "test":
         _save_curve_plot(thresholds, f1_mean, os.path.join(test_dir, "BoxF1_curve.png"), "F1 vs confidence", "Confidence", "F1")
         _save_curve_plot(thresholds, p_mean, os.path.join(test_dir, "BoxP_curve.png"), "Precision vs confidence", "Confidence", "Precision")

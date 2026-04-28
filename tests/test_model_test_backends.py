@@ -211,3 +211,24 @@ def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path
     assert (root_dir / "confidence_recommendations_test_engine.json").is_file()
     manifest = json.loads((root_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
     assert manifest["formats"]["engine"]["status"] == "ok"
+
+
+def test_ultralytics_style_metrics_payload_is_stable() -> None:
+    from smartrain.model_test_backends import _Gt, _Pred, _compute_ultralytics_style_payload
+
+    names = ["obj"]
+    preds = [
+        _Pred("im1.jpg", 0, 0.95, 10.0, 10.0, 30.0, 30.0),
+        _Pred("im2.jpg", 0, 0.90, 10.0, 10.0, 30.0, 30.0),
+    ]
+    gts = [
+        _Gt("im1.jpg", 0, 10.0, 10.0, 30.0, 30.0),
+        _Gt("im2.jpg", 0, 10.0, 10.0, 30.0, 30.0),
+    ]
+
+    payload = _compute_ultralytics_style_payload(preds, gts, names)
+    assert float(payload["map50"]) > 0.99
+    assert float(payload["map5095"]) > 0.99
+    assert float(payload["box_p"]) > 0.99
+    assert float(payload["box_r"]) > 0.99
+    assert float(payload["box_f1"]) > 0.99
