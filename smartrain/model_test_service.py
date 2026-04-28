@@ -13,7 +13,7 @@ import yaml
 from smartrain.confidence_recommendation import read_recommendation_file, recommendations_complete
 
 TEST_ARTIFACTS_MANIFEST = "test_artifacts_manifest.json"
-SUPPORTED_TEST_FORMATS = ("pt", "onnx", "engine", "trt")
+SUPPORTED_TEST_FORMATS = ("pt", "pt_uni", "onnx", "engine", "trt")
 _RICH_TEST_FILES = (
     "args.yaml",
     "pr.csv",
@@ -51,6 +51,7 @@ class TestArtifactsStatus:
     confidence_test_complete: bool
     confidence_val_complete: bool
     rich_artifacts_complete: bool
+    val_metrics_exists: bool
     missing: list[str]
 
     @property
@@ -82,6 +83,15 @@ def format_test_dir(root_dir: str, format_name: str | None = "pt") -> str:
 
 def format_metrics_path(root_dir: str, format_name: str | None = "pt") -> str:
     return os.path.join(root_dir, f"test_metrics{format_suffix(format_name)}.csv")
+
+
+def format_metrics_path_for_split(root_dir: str, split: str, format_name: str | None = "pt") -> str:
+    split_name = str(split).strip().lower()
+    if split_name == "test":
+        return format_metrics_path(root_dir, format_name)
+    if split_name == "val":
+        return os.path.join(root_dir, f"val_metrics{format_suffix(format_name)}.csv")
+    raise ValueError(f"Unsupported split: {split}")
 
 
 def format_recommendation_path(root_dir: str, split: str, format_name: str | None = "pt") -> str:
@@ -135,11 +145,13 @@ def _existing_rich_files(test_dir: str) -> list[str]:
 def get_test_artifacts_status(root_dir: str, format_name: str | None = "pt") -> TestArtifactsStatus:
     fmt = _normalize_format_name(format_name)
     metrics_csv = format_metrics_path(root_dir, fmt)
+    val_metrics_csv = format_metrics_path_for_split(root_dir, "val", fmt)
     test_dir = format_test_dir(root_dir, fmt)
     test_json = format_recommendation_path(root_dir, "test", fmt)
     val_json = format_recommendation_path(root_dir, "val", fmt)
 
     metrics_exists = os.path.isfile(metrics_csv)
+    val_metrics_exists = os.path.isfile(val_metrics_csv)
     test_dir_exists = os.path.isdir(test_dir)
     confidence_test_complete = recommendations_complete(read_recommendation_file(test_json))
     confidence_val_complete = recommendations_complete(read_recommendation_file(val_json))
@@ -148,6 +160,22 @@ def get_test_artifacts_status(root_dir: str, format_name: str | None = "pt") -> 
     missing: list[str] = []
     if not metrics_exists:
         missing.append("metrics_csv")
+    dataset_yaml_guess = _read_dataset_yaml_from_test_args(root_dir, fmt)
+    if not dataset_yaml_guess:
+        manifest = load_test_artifacts_manifest(root_dir)
+        formats = manifest.get("formats") if isinstance(manifest, dict) else {}
+        entry = formats.get(fmt, {}) if isinstance(formats, dict) else {}
+        if isinstance(entry, dict):
+            dataset_yaml_guess = entry.get("dataset_yaml")
+    dataset_yaml_abs = _normalize_compare_path(root_dir, dataset_yaml_guess)
+    if fmt == "pt" and dataset_yaml_abs and os.path.isfile(dataset_yaml_abs):
+        try:
+            payload = yaml.safe_load(Path(dataset_yaml_abs).read_text(encoding="utf-8")) or {}
+            if isinstance(payload, dict) and isinstance(payload.get("val"), str) and payload.get("val").strip():
+                if not val_metrics_exists:
+                    missing.append("val_metrics_csv")
+        except Exception:
+            pass
     if not confidence_test_complete:
         missing.append("confidence_test")
     if not confidence_val_complete:
@@ -164,6 +192,7 @@ def get_test_artifacts_status(root_dir: str, format_name: str | None = "pt") -> 
         confidence_test_complete=confidence_test_complete,
         confidence_val_complete=confidence_val_complete,
         rich_artifacts_complete=rich_artifacts_complete,
+        val_metrics_exists=val_metrics_exists,
         missing=missing,
     )
 
@@ -346,12 +375,38 @@ def _read_dataset_yaml_from_test_args(root_dir: str, format_name: str) -> str | 
     return str(value).strip() if value is not None and str(value).strip() else None
 
 
+def _read_inference_params_from_test_args(root_dir: str, format_name: str) -> dict[str, float | int | None]:
+    args_yaml = Path(format_test_dir(root_dir, format_name)) / "args.yaml"
+    if not args_yaml.is_file():
+        return {"imgsz": None, "conf": None, "iou": None, "batch": None}
+    try:
+        payload = yaml.safe_load(args_yaml.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {"imgsz": None, "conf": None, "iou": None, "batch": None}
+    if not isinstance(payload, dict):
+        return {"imgsz": None, "conf": None, "iou": None, "batch": None}
+    out: dict[str, float | int | None] = {}
+    for key in ("imgsz", "conf", "iou", "batch"):
+        value = payload.get(key)
+        if value is None:
+            out[key] = None
+        else:
+            try:
+                out[key] = int(value) if key in {"imgsz", "batch"} else float(value)
+            except Exception:
+                out[key] = None
+    return out
+
+
 def has_matching_test_artifacts(
     root_dir: str,
     *,
     format_name: str,
     target_path: str,
     dataset_yaml: str,
+    imgsz: int | None = None,
+    conf: float | None = None,
+    iou: float | None = None,
 ) -> bool:
     fmt = _normalize_format_name(format_name)
     if not has_complete_test_artifacts(root_dir, fmt):
@@ -372,7 +427,20 @@ def has_matching_test_artifacts(
     recorded_dataset = _normalize_compare_path(root_dir, recorded_dataset_raw)
     expected_target = _normalize_compare_path(root_dir, target_path)
     expected_dataset = _normalize_compare_path(root_dir, dataset_yaml)
-    return bool(recorded_target and recorded_dataset and recorded_target == expected_target and recorded_dataset == expected_dataset)
+    if not (recorded_target and recorded_dataset and recorded_target == expected_target and recorded_dataset == expected_dataset):
+        return False
+    recorded = _read_inference_params_from_test_args(root_dir, fmt)
+    expected = {
+        "imgsz": int(imgsz) if imgsz is not None else None,
+        "conf": float(conf) if conf is not None else None,
+        "iou": float(iou) if iou is not None else None,
+    }
+    for key, value in expected.items():
+        if value is None:
+            continue
+        if recorded.get(key) != value:
+            return False
+    return True
 
 
 def complete_missing_test_artifacts(

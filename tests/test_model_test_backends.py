@@ -143,6 +143,43 @@ def test_run_native_onnx_backend_without_test_split_marks_unavailable(monkeypatc
     assert "data.yaml has no split='test'" in str(manifest["formats"]["onnx"]["error"])
 
 
+def test_run_native_onnx_backend_retries_after_cuda_oom(monkeypatch, tmp_path: Path, capsys) -> None:
+    _install_fake_onnxruntime(monkeypatch)
+    root_dir = tmp_path / "run_onnx_retry"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.onnx"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_onnx_retry", with_test=True)
+
+    calls = {"n": 0}
+
+    def _flaky_onnx_infer(*_args, **_kwargs):
+        from smartrain.model_test_backends import _Pred
+
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("CUDA out of memory while running onnxruntime")
+        return [_Pred(image_path=str(ds / "test" / "images" / "a.jpg"), cls_id=0, conf=0.9, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
+
+    monkeypatch.setattr("smartrain.model_test_backends._infer_with_onnx_session", _flaky_onnx_infer)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="onnx",
+        imgsz=640,
+        val_conf=0.25,
+        val_iou=0.5,
+        val_batch=1,
+    )
+
+    out = capsys.readouterr().out
+    assert result.success is True
+    assert "CUDA OOM during test on attempt 1/3" in out
+    assert (root_dir / "test_metrics_onnx.csv").is_file()
+
+
 def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path: Path) -> None:
     root_dir = tmp_path / "run_trt"
     root_dir.mkdir(parents=True, exist_ok=True)

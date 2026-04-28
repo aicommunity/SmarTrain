@@ -364,14 +364,23 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
     elif "format_metrics_compare" in lower:
         preferred = [
             "run_name",
+            "split",
             "format",
-            "artifact_status",
             "backend_status",
             "mAP50-95",
             "mAP50",
             "Box-F1",
             "Box-P",
             "Box-R",
+        ]
+    elif "format_eval_settings" in lower:
+        preferred = [
+            "run_name",
+            "split",
+            "format",
+            "eval_imgsz",
+            "eval_conf",
+            "eval_iou",
         ]
     elif "pr_per_class" in lower:
         preferred = ["model", "class_id", "class_name", "ap", "recall", "precision"]
@@ -589,8 +598,16 @@ def _table_title(rel: str, is_ru: bool) -> str:
         return "Рейтинг моделей" if is_ru else "Model leaderboard"
     if "speed_quality" in low:
         return "Соотношение скорости и качества" if is_ru else "Speed-quality trade-off"
+    if "format_metrics_compare_test" in low:
+        return "Сравнение метрик по форматам (test)" if is_ru else "Format metrics comparison (test)"
+    if "format_metrics_compare_val" in low:
+        return "Сравнение метрик по форматам (val)" if is_ru else "Format metrics comparison (val)"
+    if "format_metrics_compare_pt_uni" in low:
+        return "Сравнение PT и PT-uni (test/val)" if is_ru else "PT vs PT-uni comparison (test/val)"
+    if "format_eval_settings" in low:
+        return "Параметры расчета метрик по форматам" if is_ru else "Metric calculation settings by format"
     if "format_metrics_compare" in low:
-        return "Сравнение test-метрик по форматам" if is_ru else "Format-wise test metrics comparison"
+        return "Сравнение метрик по форматам" if is_ru else "Format metrics comparison"
     if "pr_per_class" in low:
         return "Сводка AP по классам" if is_ru else "Per-class AP summary"
     if "confidence_recommendations_" in low:
@@ -878,6 +895,9 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     for rel in tables:
         if not isinstance(rel, str):
             continue
+        if "format_metrics_compare" in rel.lower() or "format_eval_settings" in rel.lower():
+            # Format-comparison tables/settings are rendered in section 4 only.
+            continue
         abs_path = os.path.join(report_root, rel) if report_root else ""
         if not any(
             k in rel
@@ -987,8 +1007,47 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append(_sec("format_compare"))
     lines.append("")
     fmt_cmp = manifest.get("format_comparison") if isinstance(manifest.get("format_comparison"), dict) else {}
-    fmt_csv_rel = str(fmt_cmp.get("csv") or "")
-    if fmt_csv_rel:
+    issues_rel = str(fmt_cmp.get("issues_json") or "")
+    if issues_rel:
+        issues_abs = os.path.join(report_root, issues_rel)
+        if os.path.isfile(issues_abs):
+            try:
+                with open(issues_abs, "r", encoding="utf-8") as f:
+                    issues_payload = json.load(f)
+            except Exception:
+                issues_payload = []
+            if isinstance(issues_payload, list) and issues_payload:
+                lines.append(
+                    (
+                        "- Непосчитанные форматы и причины (агрегировано):"
+                        if is_ru
+                        else "- Uncomputed formats and reasons (aggregated):"
+                    )
+                )
+                for item in issues_payload:
+                    if not isinstance(item, dict):
+                        continue
+                    run_name = str(item.get("run_name") or "-")
+                    split_name = str(item.get("split") or "-")
+                    fmt = str(item.get("format") or "-")
+                    status = str(item.get("status") or "-")
+                    reason = str(item.get("reason") or "-").replace("\n", " ").strip()
+                    lines.append(f"- {run_name} / {split_name} / {fmt}: {status} ({reason})")
+                lines.append("")
+    eval_rel = str(fmt_cmp.get("eval_csv") or "")
+    if eval_rel:
+        lines.append(
+            (
+                "- Параметры расчета (`imgsz/conf/iou`) вынесены в отдельную справочную таблицу ниже."
+                if is_ru
+                else "- Calculation parameters (`imgsz/conf/iou`) are provided in a separate reference table below."
+            )
+        )
+        lines.append("")
+    for key in ("test_csv", "val_csv", "pt_uni_csv", "csv"):
+        fmt_csv_rel = str(fmt_cmp.get(key) or "")
+        if not fmt_csv_rel:
+            continue
         fmt_csv_abs = os.path.join(report_root, fmt_csv_rel)
         if os.path.isfile(fmt_csv_abs):
             try:
@@ -1006,6 +1065,48 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     ("_Источник данных:_ " if is_ru else "_Data source:_ ")
                     + f"`{fmt_csv_rel}`"
                 )
+                lines.extend(_center_close())
+                table_no += 1
+            except Exception as e:
+                lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
+    if eval_rel:
+        eval_abs = os.path.join(report_root, eval_rel)
+        if os.path.isfile(eval_abs):
+            try:
+                eval_df = pd.read_csv(eval_abs)
+                eval_df = _filter_generic_table_for_selection(eval_df, manifest)
+                eval_df = _select_table_columns(eval_rel, eval_df)
+                eval_df = _abbrev_df(eval_df, abbreviations)
+                lines.extend(_center_open())
+                lines.append("")
+                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(eval_rel, is_ru)}**")
+                lines.append("")
+                lines.extend(_md_table_from_df(eval_df, abbreviations, limit=None))
+                lines.append("")
+                if all(c in eval_df.columns for c in ("eval_imgsz", "eval_conf", "eval_iou")):
+                    eval_clean = eval_df.dropna(subset=["eval_imgsz", "eval_conf", "eval_iou"], how="any")
+                    if len(eval_clean) == 0:
+                        lines.append(
+                            (
+                                "- Часть параметров расчета не найдена; сопоставимость проверяется по доступным данным."
+                                if is_ru
+                                else "- Some calculation parameters are missing; comparability is evaluated using available data."
+                            )
+                        )
+                    else:
+                        uniq = eval_clean[["eval_imgsz", "eval_conf", "eval_iou"]].drop_duplicates()
+                        if len(uniq) > 1:
+                            lines.append(
+                                (
+                                    "- **Обнаружены расхождения параметров расчета метрик (`imgsz/conf/iou`) между форматами. "
+                                    "Сравнение значений может быть методически несопоставимым.**"
+                                    if is_ru
+                                    else "- **Metric calculation parameter mismatches (`imgsz/conf/iou`) were detected across formats. "
+                                         "Comparisons may be methodologically inconsistent.**"
+                                )
+                            )
+                lines.append("")
+                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{eval_rel}`"))
                 lines.extend(_center_close())
                 table_no += 1
             except Exception as e:

@@ -75,6 +75,7 @@ from smartrain.run_discovery import find_run_directories
 from smartrain.model_test_service import (
     complete_missing_test_artifacts,
     format_metrics_path,
+    format_metrics_path_for_split,
     persist_target_test_artifacts_state,
     sync_test_artifacts_manifest,
 )
@@ -2209,6 +2210,11 @@ def _ensure_confidence_recommendations(
         val_kwargs["batch"] = int(val_batch)
     try:
         val_result = trained_model.val(**val_kwargs)
+        try:
+            with open(format_metrics_path_for_split(model_dir, "val", "pt"), "w", encoding="utf-8") as f:
+                f.write(val_result.to_csv())
+        except Exception:
+            pass
         val_payload = compute_confidence_recommendations(
             val_result,
             split="val",
@@ -2231,14 +2237,7 @@ def _ensure_confidence_recommendations(
 
 
 def save_metrics_csv(test_result, model_dir):
-    base_name = "test_metrics"
-    ext = ".csv"
-    csv_file = os.path.join(model_dir, base_name + ext)
-
-    counter = 1
-    while os.path.exists(csv_file):
-        csv_file = os.path.join(model_dir, f"{base_name}_{counter}{ext}")
-        counter += 1
+    csv_file = os.path.join(model_dir, "test_metrics.csv")
 
     csv_data = test_result.to_csv()
     with open(csv_file, "w", encoding="utf-8") as f:

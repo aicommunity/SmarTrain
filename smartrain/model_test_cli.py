@@ -37,7 +37,7 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--model-name", type=str, default=None, help="Promoted model directory name from workspace/models.")
     p.add_argument("--weights", type=str, default=None, help="Explicit weights path (.pt/.onnx/.engine/.trt).")
     p.add_argument("--data", type=str, default=None, help="Dataset directory or path to data.yaml.")
-    p.add_argument("--formats", type=str, default="pt", help="Comma-separated formats: pt,onnx,engine,trt")
+    p.add_argument("--formats", type=str, default="pt", help="Comma-separated formats: pt,pt_uni,onnx,engine,trt")
     p.add_argument("--missing-only", action="store_true", help="Only build artifacts that are currently missing.")
     p.add_argument("--force", action="store_true", help="Force re-test even if matching artifacts already exist.")
     p.add_argument("--imgsz", type=int, default=None, help="Validation image size.")
@@ -62,7 +62,7 @@ def _parse_formats(raw: str) -> list[str]:
 
 
 def _format_options() -> list[str]:
-    return ["pt", "onnx", "engine", "trt"]
+    return ["pt", "pt_uni", "onnx", "engine", "trt"]
 
 
 def _parse_format_tokens(raw: str) -> list[str]:
@@ -84,7 +84,7 @@ def _parse_format_tokens(raw: str) -> list[str]:
     return out or ["pt"]
 
 
-def _prompt_formats_interactive(default: str = "pt,onnx,engine,trt") -> list[str]:
+def _prompt_formats_interactive(default: str = "pt,pt_uni,onnx,engine,trt") -> list[str]:
     opts = _format_options()
     print_numbered_options("formats", opts)
     raw = prompt_text(
@@ -117,7 +117,7 @@ def _resolve_existing_artifact(
     target_kind: str,
 ) -> str:
     fmt = str(format_name).strip().lower()
-    if fmt == "pt":
+    if fmt in {"pt", "pt_uni"}:
         return primary_path
     ext_map = {"onnx": ".onnx", "engine": ".engine", "trt": ".trt"}
     ext = ext_map.get(fmt)
@@ -254,6 +254,40 @@ def _print_test_plan(
     print(f"  formats: {', '.join(formats)}")
 
 
+def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | None]:
+    defaults: dict[str, int | float | None] = {"imgsz": None, "conf": None, "iou": None, "batch": None}
+    metadata_path = Path(root_dir) / "training_metadata.json"
+    if metadata_path.is_file():
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+            inf = payload.get("inference")
+            if isinstance(inf, dict):
+                for key in ("imgsz", "conf", "iou", "batch"):
+                    if inf.get(key) is not None:
+                        defaults[key] = inf.get(key)
+        except Exception:
+            pass
+    train_args = Path(root_dir) / "train" / "args.yaml"
+    if train_args.is_file():
+        try:
+            payload = json.loads(json.dumps(__import__("yaml").safe_load(train_args.read_text(encoding="utf-8")) or {}))
+            if defaults["imgsz"] is None and payload.get("imgsz") is not None:
+                defaults["imgsz"] = payload.get("imgsz")
+            if defaults["iou"] is None and payload.get("iou") is not None:
+                defaults["iou"] = payload.get("iou")
+            if defaults["batch"] is None and payload.get("batch") is not None:
+                defaults["batch"] = payload.get("batch")
+        except Exception:
+            pass
+    if defaults["imgsz"] is None:
+        defaults["imgsz"] = 640
+    if defaults["conf"] is None:
+        defaults["conf"] = 0.001
+    if defaults["iou"] is None:
+        defaults["iou"] = 0.45
+    return defaults
+
+
 def _should_rerun_existing_match(
     *,
     interactive: bool,
@@ -262,15 +296,32 @@ def _should_rerun_existing_match(
     format_name: str,
     target_path: str,
     dataset_yaml: str,
+    imgsz: int | None,
+    conf: float | None,
+    iou: float | None,
 ) -> bool:
     if force:
         return True
-    if not has_matching_test_artifacts(
+    matches = has_matching_test_artifacts(
         root_dir,
         format_name=format_name,
         target_path=target_path,
         dataset_yaml=dataset_yaml,
-    ):
+        imgsz=imgsz,
+        conf=conf,
+        iou=iou,
+    )
+    if not matches:
+        if has_complete_test_artifacts(root_dir, format_name):
+            if any(v is not None for v in (imgsz, conf, iou, batch)):
+                print(
+                    f"[INFO] {format_name}: existing artifacts found, but model/dataset/params differ "
+                    f"(imgsz={imgsz}, conf={conf}, iou={iou}). Recomputing."
+                )
+            else:
+                print(
+                    f"[INFO] {format_name}: existing artifacts found, but model or dataset differs. Recomputing."
+                )
         return True
     if interactive:
         return prompt_yes_no(
@@ -348,12 +399,15 @@ def main(argv: list[str] | None = None) -> None:
     interactive = is_interactive_allowed(bool(getattr(args, "non_interactive", False)))
     workspace_root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(workspace_root)
+    requested_imgsz = args.imgsz
+    requested_conf = args.conf
+    requested_iou = args.iou
 
     if not any((args.run, args.model_name, args.weights)):
         if not interactive:
             parser.error("Specify one of --run, --model-name or --weights in non-interactive mode.")
         root_dir, primary_path, target_kind, target_label = _pick_interactive_target(layout)
-        formats = _prompt_formats_interactive(default="pt,onnx,engine,trt")
+        formats = _prompt_formats_interactive(default="pt,pt_uni,onnx,engine,trt")
         default_data_yaml: str | None = None
         try:
             default_data_yaml = _resolve_data_yaml_for_target(
@@ -371,6 +425,11 @@ def main(argv: list[str] | None = None) -> None:
             layout=layout,
             data_cli=(raw_data or default_data_yaml),
         )
+        defaults = _resolve_default_inference_params(root_dir)
+        args.imgsz = int(defaults["imgsz"]) if defaults["imgsz"] is not None else None
+        args.conf = float(defaults["conf"]) if defaults["conf"] is not None else None
+        args.iou = float(defaults["iou"]) if defaults["iou"] is not None else None
+        args.batch = int(defaults["batch"]) if defaults["batch"] is not None else None
         args.run = None
         args.model_name = None
         args.weights = None
@@ -386,6 +445,15 @@ def main(argv: list[str] | None = None) -> None:
         root_dir, primary_path, target_kind, target_label = _resolve_target(args, layout)
         formats = _parse_formats(args.formats)
         data_yaml = _resolve_data_yaml_for_target(target_kind=target_kind, root_dir=root_dir, layout=layout, data_cli=args.data)
+        defaults = _resolve_default_inference_params(root_dir)
+        if args.imgsz is None:
+            args.imgsz = int(defaults["imgsz"]) if defaults["imgsz"] is not None else None
+        if args.conf is None:
+            args.conf = float(defaults["conf"]) if defaults["conf"] is not None else None
+        if args.iou is None:
+            args.iou = float(defaults["iou"]) if defaults["iou"] is not None else None
+        if args.batch is None and defaults["batch"] is not None:
+            args.batch = int(defaults["batch"])
 
     replay = build_non_interactive_command("test", parser, args)
     results: list[tuple[str, bool, str | None]] = []
@@ -408,6 +476,9 @@ def main(argv: list[str] | None = None) -> None:
                 format_name="pt",
                 target_path=primary_path,
                 dataset_yaml=data_yaml,
+                imgsz=requested_imgsz,
+                conf=requested_conf,
+                iou=requested_iou,
             ):
                 results.append(("pt", True, None))
             else:
@@ -440,6 +511,9 @@ def main(argv: list[str] | None = None) -> None:
                 format_name="pt",
                 target_path=primary_path,
                 dataset_yaml=data_yaml,
+                imgsz=requested_imgsz,
+                conf=requested_conf,
+                iou=requested_iou,
             ):
                 results.append(("pt", True, None))
             else:
@@ -455,7 +529,7 @@ def main(argv: list[str] | None = None) -> None:
                 )
                 results.append(("pt", pt_result.success, pt_result.error))
 
-    for fmt in ("onnx", "engine", "trt"):
+    for fmt in ("pt_uni", "onnx", "engine", "trt"):
         if fmt not in formats:
             continue
         if args.missing_only and has_complete_test_artifacts(root_dir, fmt):
@@ -475,6 +549,9 @@ def main(argv: list[str] | None = None) -> None:
                 format_name=fmt,
                 target_path=artifact_path,
                 dataset_yaml=data_yaml,
+                imgsz=requested_imgsz,
+                conf=requested_conf,
+                iou=requested_iou,
             ):
                 results.append((fmt, True, None))
                 continue

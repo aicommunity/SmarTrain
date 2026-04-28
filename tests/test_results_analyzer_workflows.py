@@ -451,10 +451,10 @@ def test_analyze_all_creates_session_manifest_and_report(
     assert "tables" in manifest
     assert "images" in manifest
     assert "format_comparison" in manifest
-    assert "artifacts/format_compare/format_metrics_compare.csv" in manifest.get("tables", [])
+    assert "artifacts/format_compare/format_metrics_compare_test.csv" in manifest.get("tables", [])
     assert (session_root / "artifacts" / "metrics" / "metric_sources.json").is_file()
     assert (session_root / "artifacts" / "table" / "system_profile_compare.csv").is_file()
-    assert (session_root / "artifacts" / "format_compare" / "format_metrics_compare.csv").is_file()
+    assert (session_root / "artifacts" / "format_compare" / "format_metrics_compare_test.csv").is_file()
     assert "artifacts/table/system_profile_compare.csv" in manifest.get("tables", [])
     assert set(calls) >= {"benchmark", "plot", "pr"}
 
@@ -513,18 +513,17 @@ def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
     assert recompute_calls["n"] >= 1
 
 
-def test_format_compare_falls_back_statuses_for_legacy_pt_metrics(tmp_path: Path) -> None:
+def test_format_compare_falls_back_backend_for_legacy_pt_metrics(tmp_path: Path) -> None:
     run_dir = _write_run(tmp_path, "ds_a", "run_legacy_pt", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
     session_root = tmp_path / "analytics" / "analyze-reports" / "session_legacy"
     session_root.mkdir(parents=True, exist_ok=True)
 
     out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
     assert out is not None
-    out_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare.csv"
+    out_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare_test.csv"
     assert out_csv.is_file()
     df = pd.read_csv(out_csv)
     row_pt = df[df["format"] == "pt"].iloc[0]
-    assert row_pt["artifact_status"] == "ok"
     assert row_pt["backend_status"] == "ultralytics"
 
 
@@ -535,7 +534,7 @@ def test_format_compare_omits_rows_when_format_model_missing(tmp_path: Path) -> 
 
     out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
     assert out is not None
-    out_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare.csv"
+    out_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare_test.csv"
     df = pd.read_csv(out_csv)
     assert set(df["format"].tolist()) == {"pt"}
 
@@ -550,7 +549,7 @@ def test_format_compare_does_not_use_onnx_csv_as_pt_source(tmp_path: Path) -> No
 
     out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
     assert out is not None
-    out_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare.csv"
+    out_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare_test.csv"
     df = pd.read_csv(out_csv)
     row_onnx = df[df["format"] == "onnx"].iloc[0]
     assert float(row_onnx["mAP50-95"]) == 0.4
@@ -655,7 +654,7 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
                 "mAP50-95": 0.61,
             }
         ]
-    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare.csv", index=False)
+    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare_test.csv", index=False)
     (tmp_path / "artifacts" / "compare" / "compare_curves.png").write_bytes(b"fakepng")
     (tmp_path / "artifacts" / "pr" / "pr_all_classes.png").write_bytes(b"fakepng")
 
@@ -667,12 +666,12 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
         "tables": [
             "artifacts/speed_quality/speed_quality.csv",
             "artifacts/table/runs_summary.csv",
-            "artifacts/format_compare/format_metrics_compare.csv",
+            "artifacts/format_compare/format_metrics_compare_test.csv",
         ],
         "images": ["artifacts/compare/compare_curves.png", "artifacts/pr/pr_all_classes.png"],
         "artifacts": [{"role": "compare_png", "path": "artifacts/compare/compare_curves.png"}],
         "speed_quality": {"csv": "artifacts/speed_quality/speed_quality.csv"},
-        "format_comparison": {"csv": "artifacts/format_compare/format_metrics_compare.csv"},
+        "format_comparison": {"test_csv": "artifacts/format_compare/format_metrics_compare_test.csv"},
         "abbreviations": {"a": "M1", "ds_a": "D1"},
         "ultralytics_test": [
             {
@@ -716,16 +715,16 @@ def test_analyze_report_replaces_nan_with_dash_in_tables(tmp_path: Path) -> None
                 "mAP50-95": 0.61,
             }
         ]
-    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare.csv", index=False)
+    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare_test.csv", index=False)
     manifest = {
         "session_name": "s_nan",
         "profile": "quality",
         "baseline": "run_a",
         "others": [],
-        "tables": ["artifacts/format_compare/format_metrics_compare.csv"],
+        "tables": ["artifacts/format_compare/format_metrics_compare_test.csv"],
         "images": [],
         "artifacts": [],
-        "format_comparison": {"csv": "artifacts/format_compare/format_metrics_compare.csv"},
+        "format_comparison": {"test_csv": "artifacts/format_compare/format_metrics_compare_test.csv"},
         "abbreviations": {},
     }
     write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)

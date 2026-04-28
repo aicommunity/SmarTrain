@@ -53,6 +53,7 @@ from smartrain.metrics_reader import (
     read_test_metrics_row,
     results_csv_path,
     read_test_metrics_by_format,
+    read_metrics_by_format_for_split,
 )
 from smartrain.model_test_service import load_test_artifacts_manifest
 from smartrain.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
@@ -1512,16 +1513,16 @@ def _collect_ultralytics_test_artifacts(
 
 
 def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> dict[str, str] | None:
-    rows: list[dict[str, Any]] = []
-    metrics_sources: list[dict[str, Any]] = []
     backend_fallback = {
         "pt": "ultralytics",
+        "pt_uni": "unified_pt",
         "onnx": "onnxruntime",
         "engine": "tensorrt",
         "trt": "tensorrt",
     }
     ext_by_format = {
         "pt": ".pt",
+        "pt_uni": ".pt",
         "onnx": ".onnx",
         "engine": ".engine",
         "trt": ".trt",
@@ -1533,76 +1534,234 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
             candidate = target if os.path.isabs(target) else os.path.join(run_dir, target)
             if os.path.isfile(candidate):
                 return True
-        if fmt == "pt":
+        if fmt in {"pt", "pt_uni"}:
             return os.path.isfile(canonical_run_model_path(run_dir, ".pt"))
         ext = ext_by_format.get(fmt)
         if not ext:
             return False
         return any(os.path.isfile(p) for p in glob(os.path.join(run_dir, "**", f"*{ext}"), recursive=True))
 
-    for run_dir in run_dirs:
-        run_name = os.path.basename(run_dir.rstrip(os.sep))
-        manifest = load_test_artifacts_manifest(run_dir)
-        formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
-        metrics_paths = read_test_metrics_by_format(run_dir)
-        pt_source = metrics_paths.get("pt")
-        if isinstance(pt_source, str) and os.path.isfile(pt_source):
-            bn = os.path.basename(pt_source).lower()
-            if bn.startswith("test_metrics_") and bn != "test_metrics.csv":
-                print(f"[WARN] analyze: invalid pt metrics source ignored for {run_name}: {pt_source}")
-                metrics_paths.pop("pt", None)
-        for fmt in ("pt", "onnx", "engine", "trt"):
-            entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
-            if not isinstance(entry, dict):
-                entry = {}
-            metrics_path = metrics_paths.get(fmt)
-            metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
-            if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
-                continue
-            row: dict[str, Any] = {
-                "run_dir": run_dir,
-                "run_name": run_name,
-                "format": fmt,
-                "artifact_status": entry.get("status"),
-                "backend_status": entry.get("backend"),
-                "target_path": entry.get("target_path"),
-                "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
-            }
-            metrics_sources.append(
-                {
+    def _read_eval_args(run_dir: str, fmt: str) -> dict[str, Any]:
+        args_yaml = os.path.join(run_dir, "test" if fmt == "pt" else f"test_{fmt}", "args.yaml")
+        if not os.path.isfile(args_yaml):
+            if fmt != "pt":
+                return {}
+            metadata_path = os.path.join(run_dir, "training_metadata.json")
+            try:
+                with open(metadata_path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception:
+                payload = {}
+            inf = payload.get("inference") if isinstance(payload, dict) else {}
+            if isinstance(inf, dict):
+                return {
+                    "imgsz": inf.get("imgsz"),
+                    "conf": inf.get("conf", 0.001 if inf.get("conf") is None else inf.get("conf")),
+                    "iou": inf.get("iou"),
+                }
+            return {}
+        try:
+            with open(args_yaml, "r", encoding="utf-8") as f:
+                payload = yaml.safe_load(f) or {}
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+
+    def _read_metric_row(metrics_path: str | None) -> dict[str, Any]:
+        if not metrics_path or not os.path.isfile(metrics_path):
+            return {}
+        try:
+            mdf = pd.read_csv(metrics_path)
+            if len(mdf) == 0:
+                return {}
+            return dict(mdf.iloc[0].to_dict())
+        except Exception:
+            return {}
+
+    def _build_format_rows(
+        split_name: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        rows: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
+        eval_rows: list[dict[str, Any]] = []
+        issues: list[dict[str, Any]] = []
+        for run_dir in run_dirs:
+            run_name = os.path.basename(run_dir.rstrip(os.sep))
+            manifest = load_test_artifacts_manifest(run_dir)
+            formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
+            metrics_paths = read_metrics_by_format_for_split(run_dir, split_name)
+            for fmt in ("pt", "onnx", "engine", "trt"):
+                entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
+                if not isinstance(entry, dict):
+                    entry = {}
+                metrics_path = metrics_paths.get(fmt)
+                metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
+                if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
+                    continue
+                metric_row = _read_metric_row(metrics_path)
+                row: dict[str, Any] = {
                     "run_dir": run_dir,
                     "run_name": run_name,
+                    "split": split_name,
                     "format": fmt,
-                    "metrics_source": row.get("metrics_source"),
+                    "backend_status": entry.get("backend"),
+                    "target_path": entry.get("target_path"),
+                    "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
+                    "mAP50-95": metric_row.get("mAP50-95"),
+                    "mAP50": metric_row.get("mAP50"),
+                    "Box-F1": metric_row.get("Box-F1"),
+                    "Box-P": metric_row.get("Box-P"),
+                    "Box-R": metric_row.get("Box-R"),
                 }
-            )
-            if metrics_exists and metrics_path:
-                try:
-                    metrics_df = pd.read_csv(metrics_path)
-                    if len(metrics_df) > 0:
-                        metric_row = metrics_df.iloc[0].to_dict()
-                        row["mAP50-95"] = metric_row.get("mAP50-95")
-                        row["mAP50"] = metric_row.get("mAP50")
-                        row["Box-F1"] = metric_row.get("Box-F1")
-                        row["Box-P"] = metric_row.get("Box-P")
-                        row["Box-R"] = metric_row.get("Box-R")
-                        if not row.get("artifact_status"):
-                            row["artifact_status"] = "ok"
+                eval_args = _read_eval_args(run_dir, fmt)
+                eval_rows.append(
+                    {
+                        "run_dir": run_dir,
+                        "run_name": run_name,
+                        "split": split_name,
+                        "format": fmt,
+                        "eval_imgsz": eval_args.get("imgsz"),
+                        "eval_conf": eval_args.get("conf"),
+                        "eval_iou": eval_args.get("iou"),
+                    }
+                )
+                if metrics_exists:
+                    if not row.get("backend_status"):
+                        row["backend_status"] = backend_fallback.get(fmt)
+                else:
+                    status_raw = str(entry.get("status") or "").strip() if isinstance(entry, dict) else ""
+                    err_raw = str(entry.get("error") or "").strip() if isinstance(entry, dict) else ""
+                    if status_raw or err_raw:
+                        issues.append(
+                            {
+                                "run_name": run_name,
+                                "split": split_name,
+                                "format": fmt,
+                                "status": status_raw or "unknown",
+                                "reason": err_raw or "metrics missing",
+                            }
+                        )
+                rows.append(row)
+                sources.append(
+                    {
+                        "run_dir": run_dir,
+                        "run_name": run_name,
+                        "split": split_name,
+                        "format": fmt,
+                        "metrics_source": row.get("metrics_source"),
+                    }
+                )
+        return rows, sources, eval_rows, issues
+
+    def _build_pt_uni_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        rows: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
+        eval_rows: list[dict[str, Any]] = []
+        issues: list[dict[str, Any]] = []
+        for split_name in ("test", "val"):
+            for run_dir in run_dirs:
+                run_name = os.path.basename(run_dir.rstrip(os.sep))
+                manifest = load_test_artifacts_manifest(run_dir)
+                formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
+                metrics_paths = read_metrics_by_format_for_split(run_dir, split_name)
+                for fmt in ("pt", "pt_uni"):
+                    entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
+                    if not isinstance(entry, dict):
+                        entry = {}
+                    metrics_path = metrics_paths.get(fmt)
+                    metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
+                    if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
+                        continue
+                    metric_row = _read_metric_row(metrics_path)
+                    row: dict[str, Any] = {
+                        "run_dir": run_dir,
+                        "run_name": run_name,
+                        "split": split_name,
+                        "format": fmt,
+                        "backend_status": entry.get("backend"),
+                        "target_path": entry.get("target_path"),
+                        "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
+                        "mAP50-95": metric_row.get("mAP50-95"),
+                        "mAP50": metric_row.get("mAP50"),
+                        "Box-F1": metric_row.get("Box-F1"),
+                        "Box-P": metric_row.get("Box-P"),
+                        "Box-R": metric_row.get("Box-R"),
+                    }
+                    eval_args = _read_eval_args(run_dir, fmt)
+                    eval_rows.append(
+                        {
+                            "run_dir": run_dir,
+                            "run_name": run_name,
+                            "split": split_name,
+                            "format": fmt,
+                            "eval_imgsz": eval_args.get("imgsz"),
+                            "eval_conf": eval_args.get("conf"),
+                            "eval_iou": eval_args.get("iou"),
+                        }
+                    )
+                    if metrics_exists:
                         if not row.get("backend_status"):
                             row["backend_status"] = backend_fallback.get(fmt)
-                except Exception:
-                    pass
-            rows.append(row)
-    if not rows:
+                    else:
+                        status_raw = str(entry.get("status") or "").strip() if isinstance(entry, dict) else ""
+                        err_raw = str(entry.get("error") or "").strip() if isinstance(entry, dict) else ""
+                        if status_raw or err_raw:
+                            issues.append(
+                                {
+                                    "run_name": run_name,
+                                    "split": split_name,
+                                    "format": fmt,
+                                    "status": status_raw or "unknown",
+                                    "reason": err_raw or "metrics missing",
+                                }
+                            )
+                    rows.append(row)
+                    sources.append(
+                        {
+                            "run_dir": run_dir,
+                            "run_name": run_name,
+                            "split": split_name,
+                            "format": fmt,
+                            "metrics_source": row.get("metrics_source"),
+                        }
+                    )
+        return rows, sources, eval_rows, issues
+
+    test_rows, test_sources, test_eval_rows, test_issues = _build_format_rows("test")
+    val_rows, val_sources, val_eval_rows, val_issues = _build_format_rows("val")
+    pt_uni_rows, pt_uni_sources, pt_uni_eval_rows, pt_uni_issues = _build_pt_uni_rows()
+    if not test_rows and not val_rows and not pt_uni_rows:
         return None
     out_dir = os.path.join(session_root, "artifacts", "format_compare")
     os.makedirs(out_dir, exist_ok=True)
-    out_csv = os.path.join(out_dir, "format_metrics_compare.csv")
-    pd.DataFrame(rows).to_csv(out_csv, index=False, encoding="utf-8")
+    out: dict[str, str] = {}
+    if test_rows:
+        out_csv = os.path.join(out_dir, "format_metrics_compare_test.csv")
+        pd.DataFrame(test_rows).to_csv(out_csv, index=False, encoding="utf-8")
+        out["test_csv"] = os.path.relpath(out_csv, session_root)
+    if val_rows:
+        out_csv = os.path.join(out_dir, "format_metrics_compare_val.csv")
+        pd.DataFrame(val_rows).to_csv(out_csv, index=False, encoding="utf-8")
+        out["val_csv"] = os.path.relpath(out_csv, session_root)
+    if pt_uni_rows:
+        out_csv = os.path.join(out_dir, "format_metrics_compare_pt_uni.csv")
+        pd.DataFrame(pt_uni_rows).to_csv(out_csv, index=False, encoding="utf-8")
+        out["pt_uni_csv"] = os.path.relpath(out_csv, session_root)
+    eval_rows = test_eval_rows + val_eval_rows + pt_uni_eval_rows
+    if eval_rows:
+        eval_csv = os.path.join(out_dir, "format_eval_settings.csv")
+        pd.DataFrame(eval_rows).drop_duplicates().to_csv(eval_csv, index=False, encoding="utf-8")
+        out["eval_csv"] = os.path.relpath(eval_csv, session_root)
+    issues = test_issues + val_issues + pt_uni_issues
+    if issues:
+        issues_json = os.path.join(out_dir, "format_compare_issues.json")
+        with open(issues_json, "w", encoding="utf-8") as f:
+            json.dump(issues, f, ensure_ascii=False, indent=2)
+        out["issues_json"] = os.path.relpath(issues_json, session_root)
     out_sources = os.path.join(out_dir, "format_metrics_sources.json")
     with open(out_sources, "w", encoding="utf-8") as f:
-        json.dump(metrics_sources, f, ensure_ascii=False, indent=2)
-    return {"csv": os.path.relpath(out_csv, session_root)}
+        json.dump(test_sources + val_sources + pt_uni_sources, f, ensure_ascii=False, indent=2)
+    return out
 
 
 def _resolve_pr_output_png(
@@ -2872,6 +3031,10 @@ def cmd_all(args: argparse.Namespace) -> None:
         }
     if format_compare:
         manifest["format_comparison"] = format_compare
+        for key in ("test_csv", "val_csv", "pt_uni_csv", "eval_csv", "csv"):
+            rel = str(format_compare.get(key) or "")
+            if rel and rel not in manifest["tables"]:
+                manifest["tables"].append(rel)
     manifest_path = os.path.join(session_root, "session.json")
     write_manifest(manifest_path, manifest)
     report_files = write_analysis_report(

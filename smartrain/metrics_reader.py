@@ -12,6 +12,7 @@ from smartrain.analyze_models import RunRecord
 from smartrain.model_test_service import (
     SUPPORTED_TEST_FORMATS,
     format_metrics_path,
+    format_metrics_path_for_split,
     load_test_artifacts_manifest,
 )
 
@@ -87,6 +88,18 @@ def read_test_metrics_by_format(run_dir: str) -> dict[str, str]:
         p = latest_test_metrics_path(run_dir, fmt)
         if p and os.path.isfile(p):
             out.setdefault(fmt, p)
+    return out
+
+
+def read_metrics_by_format_for_split(run_dir: str, split: str) -> dict[str, str]:
+    split_name = str(split).strip().lower()
+    if split_name == "test":
+        return read_test_metrics_by_format(run_dir)
+    out: dict[str, str] = {}
+    for fmt in SUPPORTED_TEST_FORMATS:
+        p = format_metrics_path_for_split(run_dir, split_name, fmt)
+        if os.path.isfile(p):
+            out[fmt] = p
     return out
 
 

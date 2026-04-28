@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sys
+import gc
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +27,7 @@ from smartrain.confidence_recommendation import (
 )
 from smartrain.model_test_service import (
     format_metrics_path,
+    format_metrics_path_for_split,
     format_recommendation_path,
     format_test_dir,
     persist_target_test_artifacts_state,
@@ -239,7 +242,9 @@ def _box_iou_np(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
     box_area = np.maximum(0.0, (box[2] - box[0]) * (box[3] - box[1]))
     boxes_area = np.maximum(0.0, (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1]))
     union = box_area + boxes_area - inter
-    return np.where(union > 0.0, inter / union, 0.0)
+    out = np.zeros_like(union, dtype=np.float32)
+    np.divide(inter, union, out=out, where=union > 0.0)
+    return out
 
 
 def _nms_classwise(boxes: np.ndarray, scores: np.ndarray, cls_ids: np.ndarray, iou_thr: float) -> list[int]:
@@ -652,7 +657,8 @@ def _write_native_eval_artifacts(
     batch: int | None,
 ) -> dict[str, Any]:
     test_dir = format_test_dir(root_dir, format_name)
-    os.makedirs(test_dir, exist_ok=True)
+    if split == "test":
+        os.makedirs(test_dir, exist_ok=True)
     pr_df, pr_per_class_df, ap_by_class, curves = _build_pr_payload(preds, gt_rows, names, iou_thr)
     global_stats = _compute_global_stats(preds, gt_rows, names, iou_thr)
     map50 = float(np.mean(list(ap_by_class.values()))) if ap_by_class else 0.0
@@ -668,52 +674,52 @@ def _write_native_eval_artifacts(
             }
         ]
     )
-    metrics_df.to_csv(format_metrics_path(root_dir, format_name), index=False, encoding="utf-8")
-    if len(pr_per_class_df) > 0:
-        pr_per_class_df.to_csv(os.path.join(test_dir, "pr_per_class.csv"), index=False, encoding="utf-8")
-    recall_grid = np.linspace(0.0, 1.0, 101)
-    mean_precision = np.zeros_like(recall_grid)
-    if curves:
-        stacked = np.vstack([curves[idx][1] for idx in sorted(curves)])
-        mean_precision = np.mean(stacked, axis=0)
-    pd.DataFrame({"recall": recall_grid, "precision": mean_precision}).to_csv(
-        os.path.join(test_dir, "pr.csv"),
-        index=False,
-        encoding="utf-8",
-    )
-    _save_curve_plot(recall_grid, mean_precision, os.path.join(test_dir, "BoxPR_curve.png"), "PR curve", "Recall", "Precision")
+    metrics_df.to_csv(format_metrics_path_for_split(root_dir, split, format_name), index=False, encoding="utf-8")
+    if split == "test":
+        if len(pr_per_class_df) > 0:
+            pr_per_class_df.to_csv(os.path.join(test_dir, "pr_per_class.csv"), index=False, encoding="utf-8")
+        recall_grid = np.linspace(0.0, 1.0, 101)
+        mean_precision = np.zeros_like(recall_grid)
+        if curves:
+            stacked = np.vstack([curves[idx][1] for idx in sorted(curves)])
+            mean_precision = np.mean(stacked, axis=0)
+        pd.DataFrame({"recall": recall_grid, "precision": mean_precision}).to_csv(
+            os.path.join(test_dir, "pr.csv"),
+            index=False,
+            encoding="utf-8",
+        )
+        _save_curve_plot(recall_grid, mean_precision, os.path.join(test_dir, "BoxPR_curve.png"), "PR curve", "Recall", "Precision")
     thresholds, p2d, r2d = _compute_threshold_curves(preds, gt_rows, names, iou_thr)
     p_mean = np.mean(p2d, axis=0) if p2d.size else np.zeros_like(thresholds)
     r_mean = np.mean(r2d, axis=0) if r2d.size else np.zeros_like(thresholds)
     f1_mean = np.where((p_mean + r_mean) > 0.0, 2.0 * p_mean * r_mean / np.maximum(p_mean + r_mean, 1e-9), 0.0)
-    _save_curve_plot(thresholds, f1_mean, os.path.join(test_dir, "BoxF1_curve.png"), "F1 vs confidence", "Confidence", "F1")
-    _save_curve_plot(thresholds, p_mean, os.path.join(test_dir, "BoxP_curve.png"), "Precision vs confidence", "Confidence", "Precision")
-    _save_curve_plot(thresholds, r_mean, os.path.join(test_dir, "BoxR_curve.png"), "Recall vs confidence", "Confidence", "Recall")
-    _save_confusion_matrix(
-        preds,
-        gt_rows,
-        names,
-        conf_thr,
-        iou_thr,
-        os.path.join(test_dir, "confusion_matrix.png"),
-        os.path.join(test_dir, "confusion_matrix_normalized.png"),
-    )
-    _write_test_args_yaml(
-        test_dir,
-        backend=backend_name,
-        format_name=format_name,
-        weights_path=weights_path,
-        data_yaml_path=data_yaml_path,
-        imgsz=imgsz,
-        conf=conf_thr,
-        iou=iou_thr,
-        batch=batch,
-    )
+    if split == "test":
+        _save_curve_plot(thresholds, f1_mean, os.path.join(test_dir, "BoxF1_curve.png"), "F1 vs confidence", "Confidence", "F1")
+        _save_curve_plot(thresholds, p_mean, os.path.join(test_dir, "BoxP_curve.png"), "Precision vs confidence", "Confidence", "Precision")
+        _save_curve_plot(thresholds, r_mean, os.path.join(test_dir, "BoxR_curve.png"), "Recall vs confidence", "Confidence", "Recall")
+        _save_confusion_matrix(
+            preds,
+            gt_rows,
+            names,
+            conf_thr,
+            iou_thr,
+            os.path.join(test_dir, "confusion_matrix.png"),
+            os.path.join(test_dir, "confusion_matrix_normalized.png"),
+        )
+        _write_test_args_yaml(
+            test_dir,
+            backend=backend_name,
+            format_name=format_name,
+            weights_path=weights_path,
+            data_yaml_path=data_yaml_path,
+            imgsz=imgsz,
+            conf=conf_thr,
+            iou=iou_thr,
+            batch=batch,
+        )
     metrics_stub = _build_confidence_metrics_stub(names, thresholds, p2d, r2d)
-    test_payload = compute_confidence_recommendations(metrics_stub, split=split)
-    write_recommendation_file(format_recommendation_path(root_dir, split, format_name), test_payload)
-    val_payload = compute_confidence_recommendations(metrics_stub, split="val")
-    write_recommendation_file(format_recommendation_path(root_dir, "val", format_name), val_payload)
+    split_payload = compute_confidence_recommendations(metrics_stub, split=split)
+    write_recommendation_file(format_recommendation_path(root_dir, split, format_name), split_payload)
     return {"imgsz": imgsz, "conf": conf_thr, "iou": iou_thr, "batch": batch}
 
 
@@ -732,6 +738,118 @@ def _infer_with_onnx_session(session: Any, image_path: str, input_hw: tuple[int,
         gain=gain,
         pad=pad,
     )
+
+
+def _is_onnx_cuda_oom_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return ("cuda" in msg and "out of memory" in msg) or "cudamalloc" in msg
+
+
+def _release_cuda_memory_best_effort() -> None:
+    gc.collect()
+    try:
+        import torch  # type: ignore
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except Exception:
+        pass
+
+
+def _build_onnx_session_with_retry(ort: Any, weights_path: str, providers: list[str]) -> Any:
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            if attempt > 1:
+                print(f"[WARN] onnx: retrying session initialization ({attempt}/3).")
+            return ort.InferenceSession(weights_path, providers=providers or None)
+        except Exception as exc:
+            last_error = exc
+            if _is_onnx_cuda_oom_error(exc):
+                sleep_s = 0.5 * (2 ** (attempt - 1))
+                print(f"[WARN] onnx: session init failed due to CUDA OOM (attempt {attempt}/3).")
+                _release_cuda_memory_best_effort()
+                time.sleep(sleep_s)
+                continue
+            raise
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("onnxruntime session init failed for unknown reason")
+
+
+def _run_onnx_split_with_retry(
+    *,
+    split_name: str,
+    image_paths: list[str],
+    session: Any,
+    input_hw: tuple[int, int],
+    conf_thr: float,
+    iou_thr: float,
+    names: list[str],
+    format_name: str,
+    weights_path: str,
+) -> list[_Pred]:
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        preds: list[_Pred] = []
+        try:
+            print(f"[INFO] {format_name}: running native {split_name} on {len(image_paths)} images with {weights_path}")
+            for image_path in tqdm(image_paths, desc=f"{format_name}:{split_name}", unit="img", file=sys.stdout):
+                preds.extend(_infer_with_onnx_session(session, image_path, input_hw, conf_thr, iou_thr, names))
+            print(f"[INFO] {format_name}: native {split_name} completed ({len(image_paths)}/{len(image_paths)} images).")
+            return preds
+        except Exception as exc:
+            last_error = exc
+            if _is_onnx_cuda_oom_error(exc) and attempt < 3:
+                sleep_s = 0.5 * (2 ** (attempt - 1))
+                print(
+                    f"[WARN] {format_name}: CUDA OOM during {split_name} on attempt {attempt}/3. "
+                    "Retrying split from start."
+                )
+                _release_cuda_memory_best_effort()
+                time.sleep(sleep_s)
+                continue
+            raise
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"onnxruntime {split_name} inference failed for unknown reason")
+
+
+def _infer_with_pt_model(model: Any, image_path: str, input_hw: tuple[int, int], conf_thr: float, iou_thr: float) -> list[_Pred]:
+    out: list[_Pred] = []
+    try:
+        results = model.predict(
+            source=image_path,
+            imgsz=int(input_hw[0]),
+            conf=float(conf_thr),
+            iou=float(iou_thr),
+            verbose=False,
+        )
+        if not results:
+            return out
+        r0 = results[0]
+        boxes = getattr(r0, "boxes", None)
+        if boxes is None:
+            return out
+        xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, "cpu") else np.asarray(boxes.xyxy)
+        confs = boxes.conf.cpu().numpy() if hasattr(boxes.conf, "cpu") else np.asarray(boxes.conf)
+        clss = boxes.cls.cpu().numpy() if hasattr(boxes.cls, "cpu") else np.asarray(boxes.cls)
+        for b, c, k in zip(xyxy, confs, clss):
+            out.append(
+                _Pred(
+                    image_path=image_path,
+                    cls_id=int(k),
+                    conf=float(c),
+                    x1=float(b[0]),
+                    y1=float(b[1]),
+                    x2=float(b[2]),
+                    y2=float(b[3]),
+                )
+            )
+    except Exception:
+        return out
+    return out
 
 
 def _trt_volume(shape: tuple[int, ...]) -> int:
@@ -884,6 +1002,12 @@ def _ensure_confidence_recommendations_for_explicit_artifact(
         val_kwargs["batch"] = int(val_batch)
     try:
         val_result = model.val(**val_kwargs)
+        try:
+            val_csv = format_metrics_path_for_split(root_dir, "val", format_name)
+            with open(val_csv, "w", encoding="utf-8") as f:
+                f.write(val_result.to_csv())
+        except Exception:
+            pass
         val_payload = compute_confidence_recommendations(
             val_result,
             split="val",
@@ -1004,7 +1128,7 @@ def run_native_format_backend(
     val_iou: float | None = None,
     val_batch: int | None = None,
 ) -> BackendRunResult:
-    backend_name = "onnxruntime" if format_name == "onnx" else "tensorrt"
+    backend_name = "onnxruntime" if format_name == "onnx" else ("unified_pt" if format_name == "pt_uni" else "tensorrt")
     try:
         if format_name == "onnx":
             import onnxruntime as ort  # type: ignore
@@ -1015,9 +1139,12 @@ def run_native_format_backend(
             if "CPUExecutionProvider" in available:
                 providers.append("CPUExecutionProvider")
             try:
-                session = ort.InferenceSession(weights_path, providers=providers or None)
-            except Exception:
+                session = _build_onnx_session_with_retry(ort, weights_path, providers)
+            except Exception as primary_exc:
                 cpu_only = ["CPUExecutionProvider"] if "CPUExecutionProvider" in available else None
+                if not cpu_only:
+                    raise primary_exc
+                print("[WARN] onnx: switching to CPUExecutionProvider after repeated initialization failures.")
                 session = ort.InferenceSession(weights_path, providers=cpu_only)
             input_meta = session.get_inputs()[0]
             names = _load_names(dataset_yaml_path)
@@ -1025,11 +1152,17 @@ def run_native_format_backend(
             input_hw = _resolve_imgsz_from_onnx(session, imgsz)
             conf_thr = float(val_conf if val_conf is not None else 0.25)
             iou_thr = float(val_iou if val_iou is not None else 0.45)
-            preds: list[_Pred] = []
-            total_images = len(image_paths)
-            print(f"[INFO] {format_name}: running native test on {total_images} images with {weights_path}")
-            for image_path in tqdm(image_paths, desc=f"{format_name}:test", unit="img", file=sys.stdout):
-                preds.extend(_infer_with_onnx_session(session, image_path, input_hw, conf_thr, iou_thr, names))
+            preds = _run_onnx_split_with_retry(
+                split_name="test",
+                image_paths=image_paths,
+                session=session,
+                input_hw=input_hw,
+                conf_thr=conf_thr,
+                iou_thr=iou_thr,
+                names=names,
+                format_name=format_name,
+                weights_path=weights_path,
+            )
             inference = _write_native_eval_artifacts(
                 root_dir=root_dir,
                 format_name=format_name,
@@ -1045,6 +1178,36 @@ def run_native_format_backend(
                 imgsz=input_hw[0],
                 batch=val_batch,
             )
+            try:
+                gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
+                preds_val = _run_onnx_split_with_retry(
+                    split_name="val",
+                    image_paths=image_paths_val,
+                    session=session,
+                    input_hw=input_hw,
+                    conf_thr=conf_thr,
+                    iou_thr=iou_thr,
+                    names=names,
+                    format_name=format_name,
+                    weights_path=weights_path,
+                )
+                _write_native_eval_artifacts(
+                    root_dir=root_dir,
+                    format_name=format_name,
+                    backend_name=backend_name,
+                    weights_path=weights_path,
+                    data_yaml_path=dataset_yaml_path,
+                    split="val",
+                    preds=preds_val,
+                    gt_rows=gt_rows_val,
+                    names=names,
+                    conf_thr=conf_thr,
+                    iou_thr=iou_thr,
+                    imgsz=input_hw[0],
+                    batch=val_batch,
+                )
+            except Exception:
+                pass
             persist_target_test_artifacts_state(
                 root_dir,
                 format_name=format_name,
@@ -1062,17 +1225,22 @@ def run_native_format_backend(
                 inference=inference,
                 target_path=weights_path,
             )
-        elif format_name in {"engine", "trt"}:
+        elif format_name in {"engine", "trt", "pt_uni"}:
             names = _load_names(dataset_yaml_path)
             gt_rows, _by_image_gt, image_paths = _collect_gt(dataset_yaml_path, "test")
             conf_thr = float(val_conf if val_conf is not None else 0.25)
             iou_thr = float(val_iou if val_iou is not None else 0.45)
             input_hw = (int(imgsz or 640), int(imgsz or 640))
+            pt_model = YOLO(weights_path) if format_name == "pt_uni" else None
             preds: list[_Pred] = []
             total_images = len(image_paths)
             print(f"[INFO] {format_name}: running native test on {total_images} images with {weights_path}")
             for image_path in tqdm(image_paths, desc=f"{format_name}:test", unit="img", file=sys.stdout):
-                preds.extend(_infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names))
+                if format_name == "pt_uni" and pt_model is not None:
+                    preds.extend(_infer_with_pt_model(pt_model, image_path, input_hw, conf_thr, iou_thr))
+                else:
+                    preds.extend(_infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names))
+            print(f"[INFO] {format_name}: native test completed ({total_images}/{total_images} images).")
             inference = _write_native_eval_artifacts(
                 root_dir=root_dir,
                 format_name=format_name,
@@ -1088,6 +1256,33 @@ def run_native_format_backend(
                 imgsz=input_hw[0],
                 batch=val_batch,
             )
+            try:
+                gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
+                preds_val: list[_Pred] = []
+                print(f"[INFO] {format_name}: running native val on {len(image_paths_val)} images with {weights_path}")
+                for image_path in tqdm(image_paths_val, desc=f"{format_name}:val", unit="img", file=sys.stdout):
+                    if format_name == "pt_uni" and pt_model is not None:
+                        preds_val.extend(_infer_with_pt_model(pt_model, image_path, input_hw, conf_thr, iou_thr))
+                    else:
+                        preds_val.extend(_infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names))
+                print(f"[INFO] {format_name}: native val completed ({len(image_paths_val)}/{len(image_paths_val)} images).")
+                _write_native_eval_artifacts(
+                    root_dir=root_dir,
+                    format_name=format_name,
+                    backend_name=backend_name,
+                    weights_path=weights_path,
+                    data_yaml_path=dataset_yaml_path,
+                    split="val",
+                    preds=preds_val,
+                    gt_rows=gt_rows_val,
+                    names=names,
+                    conf_thr=conf_thr,
+                    iou_thr=iou_thr,
+                    imgsz=input_hw[0],
+                    batch=val_batch,
+                )
+            except Exception:
+                pass
             persist_target_test_artifacts_state(
                 root_dir,
                 format_name=format_name,
