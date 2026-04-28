@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import yaml
 from PIL import Image
 from tqdm import tqdm
 

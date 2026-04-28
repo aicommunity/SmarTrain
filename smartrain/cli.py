@@ -97,10 +97,21 @@ Quick examples:
 HELP_MODEL_GROUP = """Model conversion tools.
 
 Quick examples:
+  smartrain model convert
   smartrain model convert --input models/best.pt --format onnx
   smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/weights/best.pt --format tensorrt-engine --precision fp16
   smartrain model convert --input models/my_model.onnx --format tensorrt-trt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00
+
+Interactive convert:
+  - choose source model type: pt or onnx
+  - select a file (or enter a manual path)
+  - select targets (onnx/engine/trt depending on the source)
+  - set batch/imgsz and other export parameters
+
+Artifacts:
+  - tensorrt-engine: Ultralytics export to .engine
+  - tensorrt-trt: trtexec export to .trt
 """
 
 HELP_DEPS_GROUP = """Dependency management helpers.

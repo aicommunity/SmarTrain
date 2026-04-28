@@ -15,12 +15,30 @@ def test_discover_models_lists_only_pt(tmp_path: Path):
     (runs_dir / "b.pt").write_text("pt", encoding="utf-8")
     (runs_dir / "b.onnx").write_text("onnx", encoding="utf-8")
 
-    discovered = mcc._discover_models(tmp_path)
+    discovered = mcc._discover_models(tmp_path, allowed_suffixes=(".pt",))
     paths = [p for _src, p in discovered]
     assert models_dir / "a.pt" in paths
     assert runs_dir / "b.pt" in paths
     assert models_dir / "a.onnx" not in paths
     assert runs_dir / "b.onnx" not in paths
+
+
+def test_discover_models_lists_only_onnx(tmp_path: Path):
+    models_dir = tmp_path / "models"
+    runs_dir = tmp_path / "runs"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (models_dir / "a.pt").write_text("pt", encoding="utf-8")
+    (models_dir / "a.onnx").write_text("onnx", encoding="utf-8")
+    (runs_dir / "b.pt").write_text("pt", encoding="utf-8")
+    (runs_dir / "b.onnx").write_text("onnx", encoding="utf-8")
+
+    discovered = mcc._discover_models(tmp_path, allowed_suffixes=(".onnx",))
+    paths = [p for _src, p in discovered]
+    assert models_dir / "a.onnx" in paths
+    assert runs_dir / "b.onnx" in paths
+    assert models_dir / "a.pt" not in paths
+    assert runs_dir / "b.pt" not in paths
 
 
 def _base_args(**overrides):
@@ -181,7 +199,7 @@ def test_validate_args_rejects_unavailable_format(monkeypatch):
         assert int(exc.code) != 0
 
 
-def test_interactive_shows_unavailable_and_reprompts_format(monkeypatch, tmp_path: Path):
+def test_interactive_pt_wizard_reprompts_unavailable_target_package(monkeypatch, tmp_path: Path):
     import argparse
 
     args = argparse.Namespace(
@@ -196,34 +214,55 @@ def test_interactive_shows_unavailable_and_reprompts_format(monkeypatch, tmp_pat
         half=False,
         nms=False,
         output_dir=None,
+        workspace=None,
+        device=None,
+        data=None,
+        fraction=1.0,
+        workspace_gib=None,
+        force=False,
+        continue_on_error=False,
     )
     monkeypatch.setattr(
         mcc,
         "_discover_models",
-        lambda _root: [("models", tmp_path / "m.pt")],
+        lambda _root, *, allowed_suffixes: [("models", tmp_path / ("m.pt" if allowed_suffixes == (".pt",) else "m.onnx"))],
     )
     monkeypatch.setattr(mcc, "_collect_input_models", lambda _p: [tmp_path / "m.pt"])
-    monkeypatch.setattr(mcc, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (640, "cli"))
+    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
     monkeypatch.setattr(
         mcc,
         "_get_export_format_availability",
-        lambda: {
-            "onnx": (True, ""),
-            "tensorrt-engine": (True, ""),
-            "tensorrt-trt": (False, "runtime fail"),
-        },
+        lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (False, "runtime fail")},
     )
     choices = iter([
+        "pt",
         "models: m.pt",
-        "tensorrt-trt (unavailable: runtime fail)",
+        "onnx+trt (unavailable: runtime fail)",
         "onnx",
-        "static",
         "auto",
+        "static",
     ])
-    monkeypatch.setattr(mcc, "prompt_choice", lambda *a, **k: next(choices))
-    monkeypatch.setattr(mcc, "prompt_int", lambda *a, **k: 1)
+    seen_prompts: list[str] = []
+
+    def _fake_prompt_choice(prompt, *a, **k):
+        seen_prompts.append(prompt)
+        return next(choices)
+
+    monkeypatch.setattr(mcc, "prompt_choice", _fake_prompt_choice)
+    ints = iter([1, 17])
+    monkeypatch.setattr(mcc, "prompt_int", lambda *a, **k: next(ints))
     monkeypatch.setattr(mcc, "prompt_text", lambda *a, **k: "")
     monkeypatch.setattr(mcc, "prompt_yes_no", lambda *a, **k: False)
 
     mcc._interactive_fill(args, tmp_path)
-    assert args.format == "onnx"
+    assert getattr(args, "_source_kind") == "pt"
+    assert getattr(args, "_target_onnx") is True
+    assert getattr(args, "_target_engine") is False
+    assert getattr(args, "_target_trt") is False
+    assert seen_prompts[:5] == [
+        "Source model type",
+        "Select input model",
+        "Targets",
+        "Targets",
+        "ONNX image size mode",
+    ]

@@ -10,7 +10,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_int, prompt_text, prompt_yes_no
@@ -32,6 +32,48 @@ class ConvertStats:
 
 
 _TRTEXEC_RUNTIME_CACHE: tuple[bool, str] | None = None
+
+
+SourceKind = Literal["pt", "onnx"]
+
+
+@dataclass
+class InteractiveContext:
+    source_kind: SourceKind
+    source_path: Path
+    # targets are conceptual: onnx build, ultralytics engine build, trtexec trt build
+    target_onnx: bool
+    target_engine: bool
+    target_trt: bool
+
+    output_dir: Path | None
+    force: bool
+
+    onnx_imgsz: int | tuple[int, int]
+    onnx_imgsz_source: str
+    onnx_batch: int
+    onnx_dynamic: bool
+    device: str | None
+
+    engine_precision: str
+    engine_workspace_gib: float | None
+    trt_precision: str
+    trt_workspace_gib: float | None
+    data: str | None
+    fraction: float
+
+    opset: int
+    simplify: bool
+    half: bool
+    nms: bool
+
+
+@dataclass
+class InteractiveResult:
+    stats: ConvertStats
+    session_onnx: Path | None = None
+    engine_path: Path | None = None
+    trt_path: Path | None = None
 
 
 def build_model_convert_arg_parser() -> argparse.ArgumentParser:
@@ -155,17 +197,16 @@ def _resolve_imgsz_from_args_and_model(args: argparse.Namespace, model_path: Pat
     return 640, "fallback_640"
 
 
-def _discover_models(workspace_root: Path) -> list[tuple[str, Path]]:
+def _discover_models(workspace_root: Path, *, allowed_suffixes: tuple[str, ...]) -> list[tuple[str, Path]]:
     found: list[tuple[str, Path]] = []
     models_dir = workspace_root / "models"
     runs_dir = workspace_root / "runs"
-    formats_order = (".pt",)
 
     def _append_group(root: Path, source: str) -> None:
         if not root.exists():
             return
         files = [p for p in sorted(root.rglob("*")) if p.is_file()]
-        for suffix in formats_order:
+        for suffix in allowed_suffixes:
             for p in files:
                 if p.suffix.lower() == suffix:
                     found.append((source, p))
@@ -189,11 +230,24 @@ def _collect_input_models(input_path: Path) -> list[Path]:
     return []
 
 
-def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
-    discovered = _discover_models(workspace_root)
+def _fmt_unavailable(label: str, reason: str) -> str:
+    plain = f"{label} (unavailable: {reason})"
+    if sys.stdout.isatty():
+        return f"\033[90m{plain}\033[0m"
+    return plain
+
+
+def _prompt_source_kind() -> SourceKind:
+    selected = prompt_choice("Source model type", ["pt", "onnx"], default="pt")
+    return "pt" if selected == "pt" else "onnx"
+
+
+def _prompt_source_path(workspace_root: Path, source_kind: SourceKind) -> Path:
+    suffix = ".pt" if source_kind == "pt" else ".onnx"
+    discovered = _discover_models(workspace_root, allowed_suffixes=(suffix,))
     if discovered:
-        printable = []
-        options = []
+        printable: list[str] = []
+        options: list[str] = []
         for source, path in discovered:
             rel = path.relative_to(workspace_root) if path.is_relative_to(workspace_root) else path
             label = f"{source}: {rel}"
@@ -203,80 +257,345 @@ def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
         print_numbered_options("available models", printable)
         selected = prompt_choice("Select input model", options, default=options[0], show_options=False)
         if selected == "<manual path>":
-            args.input = prompt_text("Input path (.pt/.onnx file or dir)", default="models")
-        else:
-            idx = options.index(selected)
-            args.input = str(discovered[idx][1])
-    else:
-        print("[WARN] No .pt/.onnx models discovered in workspace/models or workspace/runs.")
-        args.input = prompt_text("Input path (.pt/.onnx file or dir)", default="models")
+            raw = prompt_text(f"Input path ({suffix} file or dir)", default="models").strip() or "models"
+            p = Path(raw).expanduser()
+            if not p.is_absolute():
+                p = (workspace_root / p).resolve()
+            return p
+        idx = options.index(selected)
+        return discovered[idx][1]
 
-    format_options = ["onnx", "tensorrt-engine", "tensorrt-trt"]
-    format_availability = _get_export_format_availability()
-    displayed_options: list[str] = []
-    display_to_value: dict[str, str] = {}
-    selectable_labels: set[str] = set()
-    use_dim = bool(sys.stdout.isatty())
-    for raw in format_options:
-        available, reason = format_availability.get(raw, (True, ""))
-        if available:
-            label = raw
-            selectable_labels.add(label)
+    print(f"[WARN] No {suffix} models discovered in workspace/models or workspace/runs.")
+    raw = prompt_text(f"Input path ({suffix} file or dir)", default="models").strip() or "models"
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = (workspace_root / p).resolve()
+    return p
+
+
+def _prompt_target_package(
+    source_kind: SourceKind, *, engine_available: bool, engine_reason: str, trt_available: bool, trt_reason: str
+) -> tuple[bool, bool, bool]:
+    if source_kind == "pt":
+        options: list[str] = ["onnx"]
+        if engine_available:
+            options.append("onnx+engine")
         else:
-            plain = f"{raw} (unavailable: {reason})"
-            label = f"\033[90m{plain}\033[0m" if use_dim else plain
-        displayed_options.append(label)
-        display_to_value[label] = raw
-    if not selectable_labels:
-        raise SystemExit("No export formats are available in current environment.")
-    default_label = next((opt for opt in displayed_options if opt in selectable_labels), displayed_options[0])
-    while True:
-        selected_label = prompt_choice("Export format", displayed_options, default=default_label)
-        selected_format = display_to_value[selected_label]
-        selected_available, selected_reason = format_availability.get(selected_format, (True, ""))
-        if selected_available:
-            args.format = selected_format
-            break
-        print(f"[WARN] Format '{selected_format}' is unavailable: {selected_reason}")
-    batch_mode = prompt_choice("Batch mode", ["static", "dynamic"], default="static")
-    args.dynamic = batch_mode == "dynamic"
-    args.batch = prompt_int("Batch size", default=1)
-    if args.format in {"tensorrt-engine", "tensorrt-trt"}:
-        args.precision = prompt_choice(
-            "TensorRT precision (--precision)",
-            ["fp32", "fp16", "int8"],
-            default="fp32",
-        )
+            options.append(_fmt_unavailable("onnx+engine", engine_reason))
+        if trt_available:
+            options.append("onnx+trt")
+        else:
+            options.append(_fmt_unavailable("onnx+trt", trt_reason))
+        if engine_available and trt_available:
+            options.append("onnx+engine+trt")
+        else:
+            reasons: list[str] = []
+            if not engine_available:
+                reasons.append(f"engine: {engine_reason}")
+            if not trt_available:
+                reasons.append(f"trt: {trt_reason}")
+            options.append(_fmt_unavailable("onnx+engine+trt", "; ".join(reasons)))
+
+        while True:
+            picked = prompt_choice("Targets", options, default=options[0])
+            if "(unavailable:" in picked:
+                print("[WARN] Selected target package is unavailable in current environment.")
+                continue
+            if picked == "onnx":
+                return True, False, False
+            if picked == "onnx+engine":
+                return True, True, False
+            if picked == "onnx+trt":
+                return True, False, True
+            if picked == "onnx+engine+trt":
+                return True, True, True
+            print("[WARN] Invalid selection; retry.")
     else:
-        args.precision = "fp32"
-    if args.format == "onnx":
+        options2: list[str] = []
+        if engine_available:
+            options2.append("engine")
+        else:
+            options2.append(_fmt_unavailable("engine", engine_reason))
+        if trt_available:
+            options2.append("trt")
+        else:
+            options2.append(_fmt_unavailable("trt", trt_reason))
+        if engine_available and trt_available:
+            options2.append("engine+trt")
+        else:
+            reasons2: list[str] = []
+            if not engine_available:
+                reasons2.append(f"engine: {engine_reason}")
+            if not trt_available:
+                reasons2.append(f"trt: {trt_reason}")
+            options2.append(_fmt_unavailable("engine+trt", "; ".join(reasons2)))
+
+        while True:
+            picked = prompt_choice("Targets", options2, default=options2[0])
+            if "(unavailable:" in picked:
+                print("[WARN] Selected target package is unavailable in current environment.")
+                continue
+            if picked == "engine":
+                return False, True, False
+            if picked == "trt":
+                return False, False, True
+            if picked == "engine+trt":
+                return False, True, True
+            print("[WARN] Invalid selection; retry.")
+
+
+def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
+    stats = ConvertStats(total=1)
+    result = InteractiveResult(stats=stats)
+    source_path = ctx.source_path
+    out_dir = ctx.output_dir if ctx.output_dir else source_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[INFO] Found 1 model(s) for conversion.")
+    print(f"[INFO] Convert: {source_path}")
+
+    # Resolve concrete source model file: if directory provided, pick first matching file.
+    source_models = _collect_input_models(source_path)
+    if source_path.is_dir():
+        allowed_ext = ".pt" if ctx.source_kind == "pt" else ".onnx"
+        source_models = [p for p in source_models if p.suffix.lower() == allowed_ext]
+        if not source_models:
+            print(f"[ERROR] No {allowed_ext} models found by input path: {source_path}")
+            stats.failed += 1
+            return result
+        source_path = source_models[0]
+
+    base_common: dict[str, Any] = {
+        "imgsz": ctx.onnx_imgsz,
+        "batch": ctx.onnx_batch,
+        "dynamic": bool(ctx.onnx_dynamic),
+    }
+    if ctx.device is not None:
+        base_common["device"] = ctx.device
+
+    session_onnx: Path | None = None
+    if ctx.source_kind == "pt" and ctx.target_onnx:
+        try:
+            from ultralytics import YOLO
+        except Exception as e:
+            print(f"[ERROR] ultralytics import failed: {e}")
+            stats.failed += 1
+            return result
+        model = YOLO(str(source_path))
+        expected_sig = _expected_onnx_signature(
+            argparse.Namespace(
+                opset=ctx.opset,
+                batch=ctx.onnx_batch,
+                dynamic=ctx.onnx_dynamic,
+                half=ctx.half,
+                simplify=ctx.simplify,
+                nms=ctx.nms,
+            ),
+            ctx.onnx_imgsz,
+        )
+        named = _make_dedicated_onnx_name(source_path.stem, expected_sig) + ".onnx"
+        session_onnx = _next_available_path(out_dir / named)
+        if session_onnx.exists() and not ctx.force:
+            print(f"[WARN] Skip ONNX (exists): {session_onnx}. Use --force to rebuild.")
+        else:
+            ok_onnx, onnx_reason = _export_named_onnx_from_pt(
+                model,
+                source_path=source_path,
+                target_path=session_onnx,
+                base_common=base_common,
+                args=argparse.Namespace(
+                    simplify=ctx.simplify,
+                    opset=ctx.opset,
+                    half=ctx.half,
+                    nms=ctx.nms,
+                ),
+            )
+            if not ok_onnx:
+                print(f"[ERROR] ONNX export failed for {source_path}: {onnx_reason}")
+                stats.failed += 1
+                return result
+            print(f"[OK] ONNX: {session_onnx}")
+            stats.ok += 1
+            stats.artifacts_ok += 1
+        result.session_onnx = session_onnx
+
+    # engine build
+    if ctx.target_engine:
+        engine_target = out_dir / f"{source_path.stem}.engine"
+        if engine_target.exists() and not ctx.force:
+            print(f"[WARN] Skip TensorRT engine (exists): {engine_target}. Use --force to rebuild.")
+            stats.skipped += 1
+            stats.artifacts_skipped += 1
+        else:
+            try:
+                from ultralytics import YOLO
+            except Exception as e:
+                print(f"[ERROR] ultralytics import failed: {e}")
+                stats.failed += 1
+                return result
+            engine_input = session_onnx if (ctx.source_kind == "pt") else source_path
+            if engine_input is None:
+                print("[ERROR] Internal error: engine requested but session ONNX is missing.")
+                stats.failed += 1
+                return result
+            model = YOLO(str(engine_input))
+            engine_kw: dict[str, Any] = {
+                **base_common,
+                **_precision_kwargs(
+                    argparse.Namespace(precision=ctx.engine_precision, data=ctx.data, fraction=ctx.fraction), "engine"
+                ),
+                "format": "engine",
+                "simplify": bool(ctx.simplify),
+            }
+            if ctx.engine_workspace_gib is not None:
+                engine_kw["workspace"] = float(ctx.engine_workspace_gib)
+            if ctx.engine_precision == "int8":
+                if ctx.data:
+                    engine_kw["data"] = ctx.data
+                else:
+                    print("[WARN] INT8 selected without --data; Ultralytics fallback dataset will be used.")
+                engine_kw["fraction"] = float(ctx.fraction)
+            exported = Path(str(model.export(**engine_kw))).expanduser().resolve()
+            ok_move, move_reason = _maybe_move_output(exported, engine_target, ctx.force)
+            if not ok_move:
+                print(f"[ERROR] TensorRT engine export failed for {engine_input}: {move_reason}")
+                stats.failed += 1
+                stats.artifacts_failed += 1
+                return result
+            print(f"[OK] TensorRT engine: {engine_target}")
+            stats.ok += 1
+            stats.artifacts_ok += 1
+            result.engine_path = engine_target
+
+    # trt build
+    if ctx.target_trt:
+        trt_target = out_dir / f"{source_path.stem}.trt"
+        if trt_target.exists() and not ctx.force:
+            print(f"[WARN] Skip TensorRT trt (exists): {trt_target}. Use --force to rebuild.")
+            stats.skipped += 1
+            stats.artifacts_skipped += 1
+        else:
+            trt_input = session_onnx if (ctx.source_kind == "pt") else source_path
+            if trt_input is None:
+                print("[ERROR] Internal error: trt requested but session ONNX is missing.")
+                stats.failed += 1
+                return result
+            ok_trt, trt_reason = _trtexec_export_from_onnx(
+                trt_input,
+                trt_target,
+                argparse.Namespace(
+                    batch=ctx.onnx_batch,
+                    dynamic=ctx.onnx_dynamic,
+                    precision=ctx.trt_precision,
+                    workspace_gib=ctx.trt_workspace_gib,
+                ),
+                ctx.onnx_imgsz,
+            )
+            if not ok_trt:
+                print(f"[ERROR] TensorRT trt export failed for {trt_input}: {trt_reason}")
+                stats.failed += 1
+                stats.artifacts_failed += 1
+                return result
+            print(f"[OK] TensorRT trt: {trt_target}")
+            stats.ok += 1
+            stats.artifacts_ok += 1
+            result.trt_path = trt_target
+
+    return result
+
+
+def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
+    # 1) source kind
+    args._source_kind = _prompt_source_kind()
+    source_kind: SourceKind = args._source_kind
+    # 2) source path (file or dir)
+    source_path = _prompt_source_path(workspace_root, source_kind)
+    args.input = str(source_path)
+
+    # availability
+    engine_ready, engine_reason = _check_tensorrt_ready()
+    availability = _get_export_format_availability()
+    trt_ready, trt_reason = availability.get("tensorrt-trt", (True, ""))
+
+    # 3) targets (package)
+    target_onnx, target_engine, target_trt = _prompt_target_package(
+        source_kind, engine_available=engine_ready, engine_reason=engine_reason, trt_available=trt_ready, trt_reason=trt_reason
+    )
+    args._target_onnx = bool(target_onnx)
+    args._target_engine = bool(target_engine)
+    args._target_trt = bool(target_trt)
+
+    # 4) ONNX block first for pt source
+    imgsz_mode = "auto"
+    args.imgsz = None
+    if source_kind == "pt":
+        imgsz_mode = prompt_choice("ONNX image size mode", ["auto", "manual", "force-640"], default="auto")
+        args._imgsz_mode = imgsz_mode
+        if imgsz_mode == "manual":
+            default_manual = "640"
+            try:
+                probe_input = Path(str(args.input)).expanduser()
+                if not probe_input.is_absolute():
+                    probe_input = (workspace_root / probe_input).resolve()
+                probe_models = _collect_input_models(probe_input)
+                if probe_models:
+                    auto_imgsz, _ = _resolve_imgsz_from_args_and_model(args, probe_models[0])
+                    default_manual = _format_imgsz(auto_imgsz)
+            except Exception:
+                pass
+            args.imgsz = prompt_text("ONNX image size (N or H,W)", default=default_manual).strip() or default_manual
+        elif imgsz_mode == "force-640":
+            args.imgsz = "640"
+        batch_mode = prompt_choice("ONNX batch mode", ["static", "dynamic"], default="static")
+        args.dynamic = batch_mode == "dynamic"
+        args.batch = prompt_int("ONNX batch size", default=1)
         args.opset = prompt_int("ONNX opset", default=int(getattr(args, "opset", 17) or 17))
         args.simplify = prompt_yes_no("Simplify ONNX graph (--simplify)", default=bool(getattr(args, "simplify", True)))
         args.half = prompt_yes_no("Use FP16 for ONNX (--half)", default=bool(getattr(args, "half", False)))
         print("[INFO] Note: for end2end models Ultralytics may force --nms to False during export.")
         args.nms = prompt_yes_no("Include NMS in ONNX graph (--nms)", default=False)
-    imgsz_mode = prompt_choice(
-        "Image size mode",
-        ["auto", "manual", "force-640"],
-        default="auto",
-    )
-    args._imgsz_mode = imgsz_mode
-    args.imgsz = None
-    if imgsz_mode == "manual":
-        default_manual = "640"
-        try:
-            probe_input = Path(str(args.input)).expanduser()
-            if not probe_input.is_absolute():
-                probe_input = (workspace_root / probe_input).resolve()
-            probe_models = _collect_input_models(probe_input)
-            if probe_models:
-                auto_imgsz, _ = _resolve_imgsz_from_args_and_model(args, probe_models[0])
-                default_manual = _format_imgsz(auto_imgsz)
-        except Exception:
-            pass
-        args.imgsz = prompt_text("Image size (N or H,W)", default=default_manual).strip() or default_manual
-    elif imgsz_mode == "force-640":
-        args.imgsz = "640"
+    else:
+        # For strict ONNX input, downstream formats still need shape/profile settings.
+        imgsz_mode = prompt_choice("Target image size mode", ["auto", "manual", "force-640"], default="auto")
+        args._imgsz_mode = imgsz_mode
+        if imgsz_mode == "manual":
+            default_manual = "640"
+            try:
+                probe_input = Path(str(args.input)).expanduser()
+                if not probe_input.is_absolute():
+                    probe_input = (workspace_root / probe_input).resolve()
+                probe_models = _collect_input_models(probe_input)
+                if probe_models:
+                    auto_imgsz, _ = _resolve_imgsz_from_args_and_model(args, probe_models[0])
+                    default_manual = _format_imgsz(auto_imgsz)
+            except Exception:
+                pass
+            args.imgsz = prompt_text("Target image size (N or H,W)", default=default_manual).strip() or default_manual
+        elif imgsz_mode == "force-640":
+            args.imgsz = "640"
+        batch_mode = prompt_choice("Target batch mode", ["static", "dynamic"], default="static")
+        args.dynamic = batch_mode == "dynamic"
+        args.batch = prompt_int("Target batch size", default=1)
+
+    # 5) Engine block
+    args._engine_precision = "fp32"
+    args._engine_workspace_gib = None
+    if target_engine:
+        args._engine_precision = prompt_choice("Engine precision (--precision)", ["fp32", "fp16", "int8"], default="fp32")
+        engine_ws = prompt_text("Engine workspace GiB (empty = default)", default="").strip()
+        args._engine_workspace_gib = float(engine_ws) if engine_ws else None
+
+    # 6) TRT block
+    args._trt_precision = "fp32"
+    args._trt_workspace_gib = None
+    if target_trt:
+        args._trt_precision = prompt_choice("TRT precision (--precision)", ["fp32", "fp16", "int8"], default="fp32")
+        trt_ws = prompt_text("TRT workspace GiB (empty = default)", default="").strip()
+        args._trt_workspace_gib = float(trt_ws) if trt_ws else None
+
+    # Preserve legacy single-value args for non-interactive/validation compatibility.
+    args.precision = args._engine_precision if target_engine else args._trt_precision
+    args.workspace_gib = args._engine_workspace_gib if target_engine else args._trt_workspace_gib
+
     args.output_dir = prompt_text("Output directory (empty = source model dir)", default="").strip() or None
 
 
@@ -1020,25 +1339,149 @@ def main(argv: list[str] | None = None) -> None:
 
     _validate_args(args, interactive_allowed=interactive_allowed, parser=parser, argv=argv)
 
+    if interactive_used:
+        input_path = Path(str(args.input)).expanduser().resolve()
+        imgsz, imgsz_source = _resolve_imgsz_from_args_and_model(args, input_path if input_path.is_file() else input_path)
+        if args.imgsz is None:
+            args.imgsz = _format_imgsz(imgsz)
+        print(f"[INFO] Interactive summary: imgsz={_format_imgsz(imgsz)} (source: {imgsz_source})")
+
+        # Build interactive context and run pipeline (single selection).
+        source_kind: SourceKind = getattr(args, "_source_kind", "pt")
+        target_onnx = bool(getattr(args, "_target_onnx", False))
+        target_engine = bool(getattr(args, "_target_engine", False))
+        target_trt = bool(getattr(args, "_target_trt", False))
+        out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None
+
+        ctx = InteractiveContext(
+            source_kind=source_kind,
+            source_path=input_path,
+            target_onnx=target_onnx,
+            target_engine=target_engine,
+            target_trt=target_trt,
+            output_dir=out_dir,
+            force=bool(args.force),
+            onnx_imgsz=imgsz,
+            onnx_imgsz_source=imgsz_source,
+            onnx_batch=int(args.batch),
+            onnx_dynamic=bool(args.dynamic),
+            device=str(args.device) if args.device is not None else None,
+            engine_precision=str(getattr(args, "_engine_precision", "fp32")),
+            engine_workspace_gib=(
+                float(getattr(args, "_engine_workspace_gib")) if getattr(args, "_engine_workspace_gib", None) is not None else None
+            ),
+            trt_precision=str(getattr(args, "_trt_precision", "fp32")),
+            trt_workspace_gib=(
+                float(getattr(args, "_trt_workspace_gib")) if getattr(args, "_trt_workspace_gib", None) is not None else None
+            ),
+            data=str(args.data) if args.data is not None else None,
+            fraction=float(args.fraction),
+            opset=int(getattr(args, "opset", 17) or 17),
+            simplify=bool(getattr(args, "simplify", True)),
+            half=bool(getattr(args, "half", False)),
+            nms=bool(getattr(args, "nms", False)),
+        )
+
+        result = _run_interactive_pipeline(ctx)
+        stats = result.stats
+        print(
+            f"[INFO] Done. total={stats.total} ok={stats.ok} failed={stats.failed} skipped={stats.skipped} "
+            f"(artifacts: ok={stats.artifacts_ok} failed={stats.artifacts_failed} skipped={stats.artifacts_skipped})"
+        )
+
+        # Replay commands: emit current-step series (best-effort).
+        cmds: list[str] = []
+        session_onnx = result.session_onnx
+        if ctx.source_kind == "pt":
+            # ONNX is always first step for pt pipelines in interactive wizard.
+            cmds.append(
+                build_non_interactive_command(
+                    "model convert",
+                    parser,
+                    argparse.Namespace(**{**vars(args), "format": "onnx", "input": str(input_path)}),
+                )
+            )
+            if ctx.target_engine:
+                if session_onnx:
+                    cmds.append(
+                        build_non_interactive_command(
+                            "model convert",
+                            parser,
+                            argparse.Namespace(
+                                **{
+                                    **vars(args),
+                                    "format": "tensorrt-engine",
+                                    "input": str(session_onnx),
+                                    "precision": getattr(args, "_engine_precision", "fp32"),
+                                    "workspace_gib": getattr(args, "_engine_workspace_gib", None),
+                                }
+                            ),
+                        )
+                    )
+            if ctx.target_trt:
+                if session_onnx:
+                    cmds.append(
+                        build_non_interactive_command(
+                            "model convert",
+                            parser,
+                            argparse.Namespace(
+                                **{
+                                    **vars(args),
+                                    "format": "tensorrt-trt",
+                                    "input": str(session_onnx),
+                                    "precision": getattr(args, "_trt_precision", "fp32"),
+                                    "workspace_gib": getattr(args, "_trt_workspace_gib", None),
+                                }
+                            ),
+                        )
+                    )
+        else:
+            if ctx.target_engine:
+                cmds.append(
+                    build_non_interactive_command(
+                        "model convert",
+                        parser,
+                        argparse.Namespace(
+                            **{
+                                **vars(args),
+                                "format": "tensorrt-engine",
+                                "input": str(input_path),
+                                "precision": getattr(args, "_engine_precision", "fp32"),
+                                "workspace_gib": getattr(args, "_engine_workspace_gib", None),
+                            }
+                        ),
+                    )
+                )
+            if ctx.target_trt:
+                cmds.append(
+                    build_non_interactive_command(
+                        "model convert",
+                        parser,
+                        argparse.Namespace(
+                            **{
+                                **vars(args),
+                                "format": "tensorrt-trt",
+                                "input": str(input_path),
+                                "precision": getattr(args, "_trt_precision", "fp32"),
+                                "workspace_gib": getattr(args, "_trt_workspace_gib", None),
+                            }
+                        ),
+                    )
+                )
+        if cmds:
+            print("[INFO] Command(s) for non-interactive retry:")
+            for c in cmds:
+                print(c)
+
+        if stats.failed > 0:
+            raise SystemExit(1)
+        return
+
     input_path = Path(str(args.input)).expanduser().resolve()
     models = _collect_input_models(input_path)
     if not models:
         print(f"[ERROR] No .pt/.onnx models found by input path: {input_path}")
         raise SystemExit(2)
-
-    if interactive_used:
-        preview_imgsz, preview_source = _resolve_imgsz_from_args_and_model(args, models[0])
-        print(f"[INFO] Interactive summary: imgsz={_format_imgsz(preview_imgsz)} (source: {preview_source})")
-        if args.imgsz is None:
-            args.imgsz = _format_imgsz(preview_imgsz)
-        if not args.force:
-            conflicts = _collect_existing_output_conflicts(models, args)
-            if conflicts:
-                preview = ", ".join(str(p) for p in conflicts[:3])
-                if len(conflicts) > 3:
-                    preview += f", ... (+{len(conflicts) - 3} more)"
-                print(f"[WARN] Existing output files detected: {preview}")
-                args.force = prompt_yes_no("Overwrite existing output files (--force)?", default=False)
 
     stats = ConvertStats(total=len(models))
     print(f"[INFO] Found {len(models)} model(s) for conversion.")
@@ -1063,13 +1506,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     if stats.ok == 0 and stats.failed == 0 and stats.skipped > 0:
         print("[INFO] All conversions were skipped because output artifacts already exist. Use --force to rebuild.")
-    if interactive_used:
-        if args.imgsz is None and models:
-            resolved_imgsz, _ = _resolve_imgsz_from_args_and_model(args, models[0])
-            args.imgsz = _format_imgsz(resolved_imgsz)
-        replay_cmd = build_non_interactive_command("model convert", parser, args)
-        print_replay_command("model convert", replay_cmd)
-
     if stats.failed > 0:
         raise SystemExit(1)
 
