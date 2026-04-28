@@ -57,7 +57,7 @@ smartrain inference --weights dr-yolo:yolov8n --data-mode folder --source-dir im
 
 Внешние прогоны приводятся к тому же контракту, что и встроенное обучение:
 
-- `train/weights/best.pt`
+- `<run_dir_name>.pt` в корне run
 - `test/` артефакты
 - `test_metrics.csv`
 - `training_metadata.json`

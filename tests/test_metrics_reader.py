@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.metrics_reader import flatten_metadata
+from smartrain.confidence_recommendation import write_not_available_recommendations
+from smartrain.metrics_reader import flatten_metadata, read_test_metrics_by_format
 
 
 def test_flatten_metadata_falls_back_to_args_yaml_model(tmp_path: Path) -> None:
@@ -41,3 +42,31 @@ def test_flatten_metadata_uses_run_name_when_args_model_is_last(tmp_path: Path) 
 
     row = flatten_metadata(md, str(run_dir))
     assert row["model"] == "yolo26x"
+
+
+def test_read_test_metrics_by_format_reads_manifest_and_files(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_d" / "run_fmt"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "test").mkdir(parents=True, exist_ok=True)
+    (run_dir / "test_onnx").mkdir(parents=True, exist_ok=True)
+    (run_dir / "test_metrics.csv").write_text("mAP50-95\n0.5\n", encoding="utf-8")
+    (run_dir / "test_metrics_onnx.csv").write_text("mAP50-95\n0.4\n", encoding="utf-8")
+    write_not_available_recommendations(model_dir=str(run_dir), split="test", reason="stub")
+    write_not_available_recommendations(model_dir=str(run_dir), split="val", reason="stub")
+    (run_dir / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "pt": {"metrics_csv": "test_metrics.csv"},
+                    "onnx": {"metrics_csv": "test_metrics_onnx.csv"},
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    by_format = read_test_metrics_by_format(str(run_dir))
+    assert by_format["pt"].endswith("test_metrics.csv")
+    assert by_format["onnx"].endswith("test_metrics_onnx.csv")

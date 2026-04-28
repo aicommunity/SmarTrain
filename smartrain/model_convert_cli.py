@@ -13,10 +13,19 @@ from pathlib import Path
 from typing import Any, Literal
 
 from smartrain.cli_argparse import CliArgumentParser
-from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_int, prompt_text, prompt_yes_no
+from smartrain.cli_prompts import (
+    print_numbered_options,
+    prompt_choice,
+    prompt_int,
+    prompt_multi_choice_csv,
+    prompt_text,
+    prompt_yes_no,
+)
 from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.model_context import infer_img_size_with_source
+from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.run_discovery import find_run_directories
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
 
 
@@ -211,9 +220,24 @@ def _discover_models(workspace_root: Path, *, allowed_suffixes: tuple[str, ...])
                 if p.suffix.lower() == suffix:
                     found.append((source, p))
 
+    def _append_run_canonical(root: Path) -> None:
+        if not root.exists():
+            return
+        run_dirs = [Path(p) for p in find_run_directories(str(root))]
+        for run_dir in run_dirs:
+            for suffix in allowed_suffixes:
+                canonical = Path(canonical_run_model_path(str(run_dir), suffix))
+                if canonical.is_file():
+                    found.append(("runs", canonical))
+                    continue
+                # Transparent legacy workspace migration on first discovery.
+                migrated = materialize_canonical_run_model(str(run_dir), ext=suffix, move=True, normalize_metadata=True)
+                if migrated is not None and migrated.is_file():
+                    found.append(("runs", migrated))
+
     # Preserve outer grouping: models first, then runs.
     _append_group(models_dir, "models")
-    _append_group(runs_dir, "runs")
+    _append_run_canonical(runs_dir)
     return found
 
 
@@ -273,74 +297,50 @@ def _prompt_source_path(workspace_root: Path, source_kind: SourceKind) -> Path:
     return p
 
 
-def _prompt_target_package(
+def _prompt_target_models(
     source_kind: SourceKind, *, engine_available: bool, engine_reason: str, trt_available: bool, trt_reason: str
 ) -> tuple[bool, bool, bool]:
     if source_kind == "pt":
-        options: list[str] = ["onnx"]
+        # ONNX from pt is always available; engine/trt depend on local runtime.
+        options = [
+            "onnx",
+            "engine" if engine_available else _fmt_unavailable("engine", engine_reason),
+            "trt" if trt_available else _fmt_unavailable("trt", trt_reason),
+        ]
+        valid_values = {"onnx"}
         if engine_available:
-            options.append("onnx+engine")
-        else:
-            options.append(_fmt_unavailable("onnx+engine", engine_reason))
+            valid_values.add("engine")
         if trt_available:
-            options.append("onnx+trt")
-        else:
-            options.append(_fmt_unavailable("onnx+trt", trt_reason))
-        if engine_available and trt_available:
-            options.append("onnx+engine+trt")
-        else:
-            reasons: list[str] = []
-            if not engine_available:
-                reasons.append(f"engine: {engine_reason}")
-            if not trt_available:
-                reasons.append(f"trt: {trt_reason}")
-            options.append(_fmt_unavailable("onnx+engine+trt", "; ".join(reasons)))
-
+            valid_values.add("trt")
         while True:
-            picked = prompt_choice("Targets", options, default=options[0])
-            if "(unavailable:" in picked:
-                print("[WARN] Selected target package is unavailable in current environment.")
+            picked = prompt_multi_choice_csv("Targets", options, default_values=["onnx"])
+            if not picked:
+                print("[WARN] Select at least one target.")
                 continue
-            if picked == "onnx":
-                return True, False, False
-            if picked == "onnx+engine":
-                return True, True, False
-            if picked == "onnx+trt":
-                return True, False, True
-            if picked == "onnx+engine+trt":
-                return True, True, True
-            print("[WARN] Invalid selection; retry.")
+            unavailable_selected = [item for item in picked if item not in valid_values]
+            if unavailable_selected:
+                print(f"[WARN] Selected targets are unavailable in current environment: {', '.join(unavailable_selected)}")
+                continue
+            return "onnx" in picked, "engine" in picked, "trt" in picked
     else:
-        options2: list[str] = []
-        if engine_available:
-            options2.append("engine")
-        else:
-            options2.append(_fmt_unavailable("engine", engine_reason))
-        if trt_available:
-            options2.append("trt")
-        else:
-            options2.append(_fmt_unavailable("trt", trt_reason))
-        if engine_available and trt_available:
-            options2.append("engine+trt")
-        else:
-            reasons2: list[str] = []
-            if not engine_available:
-                reasons2.append(f"engine: {engine_reason}")
-            if not trt_available:
-                reasons2.append(f"trt: {trt_reason}")
-            options2.append(_fmt_unavailable("engine+trt", "; ".join(reasons2)))
+        # For ONNX source, only TRT is a supported target in current architecture.
+        if not trt_available:
+            raise SystemExit(
+                "No target models are available for onnx source in current environment: "
+                f"trt: {trt_reason}"
+            )
+        options2: list[str] = ["trt"]
 
         while True:
-            picked = prompt_choice("Targets", options2, default=options2[0])
-            if "(unavailable:" in picked:
-                print("[WARN] Selected target package is unavailable in current environment.")
+            picked = prompt_multi_choice_csv("Targets", options2, default_values=options2)
+            if not picked:
+                print("[WARN] Select at least one target.")
                 continue
-            if picked == "engine":
-                return False, True, False
-            if picked == "trt":
+            if any(item != "trt" for item in picked):
+                print("[WARN] Invalid selection; retry.")
+                continue
+            if "trt" in picked:
                 return False, False, True
-            if picked == "engine+trt":
-                return False, True, True
             print("[WARN] Invalid selection; retry.")
 
 
@@ -432,11 +432,11 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 print(f"[ERROR] ultralytics import failed: {e}")
                 stats.failed += 1
                 return result
-            engine_input = session_onnx if (ctx.source_kind == "pt") else source_path
-            if engine_input is None:
-                print("[ERROR] Internal error: engine requested but session ONNX is missing.")
+            if ctx.source_kind != "pt":
+                print("[ERROR] TensorRT engine export is supported only for .pt source models.")
                 stats.failed += 1
                 return result
+            engine_input = source_path
             model = YOLO(str(engine_input))
             engine_kw: dict[str, Any] = {
                 **base_common,
@@ -516,8 +516,8 @@ def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
     availability = _get_export_format_availability()
     trt_ready, trt_reason = availability.get("tensorrt-trt", (True, ""))
 
-    # 3) targets (package)
-    target_onnx, target_engine, target_trt = _prompt_target_package(
+    # 3) targets (separate model list)
+    target_onnx, target_engine, target_trt = _prompt_target_models(
         source_kind, engine_available=engine_ready, engine_reason=engine_reason, trt_available=trt_ready, trt_reason=trt_reason
     )
     args._target_onnx = bool(target_onnx)
@@ -528,6 +528,7 @@ def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
     imgsz_mode = "auto"
     args.imgsz = None
     if source_kind == "pt":
+        print("[INFO] ONNX settings")
         imgsz_mode = prompt_choice("ONNX image size mode", ["auto", "manual", "force-640"], default="auto")
         args._imgsz_mode = imgsz_mode
         if imgsz_mode == "manual":
@@ -555,6 +556,7 @@ def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
         args.nms = prompt_yes_no("Include NMS in ONNX graph (--nms)", default=False)
     else:
         # For strict ONNX input, downstream formats still need shape/profile settings.
+        print("[INFO] Target shape settings")
         imgsz_mode = prompt_choice("Target image size mode", ["auto", "manual", "force-640"], default="auto")
         args._imgsz_mode = imgsz_mode
         if imgsz_mode == "manual":
@@ -580,6 +582,7 @@ def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
     args._engine_precision = "fp32"
     args._engine_workspace_gib = None
     if target_engine:
+        print("[INFO] Engine settings")
         args._engine_precision = prompt_choice("Engine precision (--precision)", ["fp32", "fp16", "int8"], default="fp32")
         engine_ws = prompt_text("Engine workspace GiB (empty = default)", default="").strip()
         args._engine_workspace_gib = float(engine_ws) if engine_ws else None
@@ -588,6 +591,7 @@ def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
     args._trt_precision = "fp32"
     args._trt_workspace_gib = None
     if target_trt:
+        print("[INFO] TRT settings")
         args._trt_precision = prompt_choice("TRT precision (--precision)", ["fp32", "fp16", "int8"], default="fp32")
         trt_ws = prompt_text("TRT workspace GiB (empty = default)", default="").strip()
         args._trt_workspace_gib = float(trt_ws) if trt_ws else None
@@ -626,6 +630,9 @@ def _validate_args(
         parser.error("--half is incompatible with --device cpu for ONNX export. Use --no-half or GPU device.")
     if args.opset is not None and int(args.opset) <= 0:
         parser.error("--opset must be > 0")
+    input_value = str(getattr(args, "input", "") or "").strip().lower()
+    if args.format == "tensorrt-engine" and input_value.endswith(".onnx"):
+        parser.error("--format tensorrt-engine requires a .pt input model; .onnx is not supported for Ultralytics engine export")
     format_availability = _get_export_format_availability()
     available, reason = format_availability.get(str(args.format), (True, ""))
     if not available:
@@ -1185,6 +1192,14 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                 skipped_any = True
                 artifacts_skipped += 1
             elif source_ext == ".onnx":
+                if not use_trtexec:
+                    print(
+                        f"[ERROR] TensorRT engine export is unsupported for ONNX input {source_path}: "
+                        "Ultralytics engine export requires a .pt model."
+                    )
+                    failed_any = True
+                    artifacts_failed += 1
+                    return ok_any, failed_any, skipped_any, artifacts_ok, artifacts_failed, artifacts_skipped
                 if args.force and engine_target.exists():
                     engine_target.unlink()
                 if use_trtexec:
@@ -1402,22 +1417,21 @@ def main(argv: list[str] | None = None) -> None:
                 )
             )
             if ctx.target_engine:
-                if session_onnx:
-                    cmds.append(
-                        build_non_interactive_command(
-                            "model convert",
-                            parser,
-                            argparse.Namespace(
-                                **{
-                                    **vars(args),
-                                    "format": "tensorrt-engine",
-                                    "input": str(session_onnx),
-                                    "precision": getattr(args, "_engine_precision", "fp32"),
-                                    "workspace_gib": getattr(args, "_engine_workspace_gib", None),
-                                }
-                            ),
-                        )
+                cmds.append(
+                    build_non_interactive_command(
+                        "model convert",
+                        parser,
+                        argparse.Namespace(
+                            **{
+                                **vars(args),
+                                "format": "tensorrt-engine",
+                                "input": str(input_path),
+                                "precision": getattr(args, "_engine_precision", "fp32"),
+                                "workspace_gib": getattr(args, "_engine_workspace_gib", None),
+                            }
+                        ),
                     )
+                )
             if ctx.target_trt:
                 if session_onnx:
                     cmds.append(

@@ -76,7 +76,7 @@ Model token must be sanitized from filenames/paths to avoid nested invalid direc
 
 Required normalized output contract per run:
 
-- `train/weights/best.pt`
+- `<run_dir_name>.pt` in run root
 - `test/`
 - `test_metrics.csv`
 - `training_metadata.json`

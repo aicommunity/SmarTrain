@@ -20,11 +20,12 @@ from smartrain.cli_replay import build_non_interactive_command, print_replay_com
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
 
 
 def build_model_release_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(
-        description="Release run best.pt into workspace models catalog (empty call starts interactive mode)"
+        description="Release canonical run .pt into workspace models catalog (empty call starts interactive mode)"
     )
     p.add_argument(
         "--workspace",
@@ -268,7 +269,7 @@ def _build_release_json(
         "source": {
             "source_run": str(run_dir),
             "source_run_relative": run_rel,
-            "source_weights": "train/weights/best.pt",
+            "source_weights": f"{run_dir.name}.pt",
             "source_sha256": source_sha,
             "released_at": datetime.now(timezone.utc).isoformat(),
         },
@@ -364,9 +365,10 @@ def _same_release(
     except Exception:
         return False, "target json metadata is unreadable"
     src = payload.get("source") or {}
+    expected_source_weights = f"{Path(run_rel).name}.pt"
     same_source = (
         str(src.get("source_run_relative") or "").strip() == run_rel
-        and str(src.get("source_weights") or "").strip() == "train/weights/best.pt"
+        and str(src.get("source_weights") or "").strip() == expected_source_weights
     )
     if not same_source:
         return False, "source run differs"
@@ -403,9 +405,18 @@ def main(argv: list[str] | None = None) -> None:
     if not meta_path.is_file():
         print(f"[ERROR] training_metadata.json not found: {meta_path}", file=sys.stderr)
         raise SystemExit(1)
-    source_best = run_dir / "train" / "weights" / "best.pt"
+    source_best = Path(canonical_run_model_path(str(run_dir), ".pt"))
     if not source_best.is_file():
-        print(f"[ERROR] best.pt not found: {source_best}", file=sys.stderr)
+        materialized = materialize_canonical_run_model(
+            str(run_dir),
+            ext=".pt",
+            move=True,
+            normalize_metadata=True,
+        )
+        if materialized is not None:
+            source_best = Path(materialized)
+    if not source_best.is_file():
+        print(f"[ERROR] run model not found: {source_best}", file=sys.stderr)
         raise SystemExit(1)
 
     md = load_metadata(str(run_dir))

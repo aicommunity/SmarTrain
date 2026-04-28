@@ -86,7 +86,7 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
   - `training_metadata.json`, or
   - `train/args.yaml`, or
   - `train/results.csv`, or
-  - `train/weights/last.pt` / `train/weights/best.pt`.
+  - `train/weights/last.pt` / `<run_dir_name>.pt` in run root.
 - For summary/metrics extraction, `analyze` still requires readable metadata/metrics files depending on subcommand.
 - `export-table` reads:
   - `training_metadata.json`

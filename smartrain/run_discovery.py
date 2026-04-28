@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import os
 
+from smartrain.run_artifacts import canonical_run_model_path
 from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
 
 def _looks_like_run_dir(path: str, filenames: set[str]) -> bool:
+    canonical_best = canonical_run_model_path(path, ".pt")
     train_dir = os.path.join(path, "train")
     has_train_artifacts = (
         os.path.isfile(os.path.join(train_dir, "args.yaml"))
         or os.path.isfile(os.path.join(train_dir, "results.csv"))
         or os.path.isfile(os.path.join(train_dir, "weights", "last.pt"))
-        or os.path.isfile(os.path.join(train_dir, "weights", "best.pt"))
+        or os.path.isfile(canonical_best)
     )
     return "training_metadata.json" in filenames or has_train_artifacts
 

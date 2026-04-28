@@ -1,0 +1,542 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.inference_cli import _resolve_model_from_name, _resolve_run_ref
+from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.model_test_backends import run_native_format_backend, run_ultralytics_backend
+from smartrain.model_test_service import (
+    SUPPORTED_TEST_FORMATS,
+    complete_missing_test_artifacts,
+    has_matching_test_artifacts,
+    has_complete_test_artifacts,
+    persist_target_test_artifacts_state,
+    resolve_root_dir_for_target,
+)
+from smartrain.train_resume import resolve_dataset_path_for_resume
+from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+
+
+def build_model_test_arg_parser() -> argparse.ArgumentParser:
+    p = CliArgumentParser(
+        description="Complete missing test artifacts for runs/models and compare formats (empty call starts interactive mode)."
+    )
+    p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR})")
+    p.add_argument("--run", type=str, default=None, help="Run path or run index from workspace/runs.")
+    p.add_argument("--model-name", type=str, default=None, help="Promoted model directory name from workspace/models.")
+    p.add_argument("--weights", type=str, default=None, help="Explicit weights path (.pt/.onnx/.engine/.trt).")
+    p.add_argument("--data", type=str, default=None, help="Dataset directory or path to data.yaml.")
+    p.add_argument("--formats", type=str, default="pt", help="Comma-separated formats: pt,onnx,engine,trt")
+    p.add_argument("--missing-only", action="store_true", help="Only build artifacts that are currently missing.")
+    p.add_argument("--force", action="store_true", help="Force re-test even if matching artifacts already exist.")
+    p.add_argument("--imgsz", type=int, default=None, help="Validation image size.")
+    p.add_argument("--conf", type=float, default=None, help="Validation confidence threshold.")
+    p.add_argument("--iou", type=float, default=None, help="Validation IoU threshold.")
+    p.add_argument("--batch", type=int, default=None, help="Validation batch size.")
+    p.add_argument("--non-interactive", "-y", action="store_true", help="Disable interactive prompts.")
+    return p
+
+
+def _parse_formats(raw: str) -> list[str]:
+    out: list[str] = []
+    for part in str(raw or "pt").split(","):
+        fmt = part.strip().lower()
+        if not fmt:
+            continue
+        if fmt not in SUPPORTED_TEST_FORMATS:
+            raise ValueError(f"Unsupported format: {fmt}")
+        if fmt not in out:
+            out.append(fmt)
+    return out or ["pt"]
+
+
+def _format_options() -> list[str]:
+    return ["pt", "onnx", "engine", "trt"]
+
+
+def _parse_format_tokens(raw: str) -> list[str]:
+    options = _format_options()
+    out: list[str] = []
+    tokens = [t.strip() for t in str(raw or "").replace(";", ",").split(",") if t.strip()]
+    for t in tokens:
+        if t.isdigit():
+            idx = int(t)
+            if idx < 1 or idx > len(options):
+                raise ValueError(f"Format index {idx} is out of range 1..{len(options)}")
+            fmt = options[idx - 1]
+        else:
+            fmt = t.lower()
+        if fmt not in SUPPORTED_TEST_FORMATS:
+            raise ValueError(f"Unsupported format: {fmt}")
+        if fmt not in out:
+            out.append(fmt)
+    return out or ["pt"]
+
+
+def _prompt_formats_interactive(default: str = "pt,onnx,engine,trt") -> list[str]:
+    opts = _format_options()
+    print_numbered_options("formats", opts)
+    raw = prompt_text(
+        "Formats (comma-separated names or numbers)",
+        default=default,
+    ).strip()
+    return _parse_format_tokens(raw or default)
+
+
+def _normalize_data_to_yaml(data_value: str) -> str:
+    candidate = Path(str(data_value)).expanduser().resolve()
+    if candidate.is_file():
+        return str(candidate)
+    data_yaml = candidate / "data.yaml"
+    if not data_yaml.is_file():
+        raise FileNotFoundError(f"data.yaml not found for dataset: {candidate}")
+    return str(data_yaml)
+
+
+def _suggest_convert_cmd(input_path: str, fmt: str) -> str:
+    convert_fmt = {"onnx": "onnx", "engine": "tensorrt-engine", "trt": "tensorrt-trt"}.get(fmt, fmt)
+    return f"smartrain model convert --input {input_path} --format {convert_fmt}"
+
+
+def _resolve_existing_artifact(
+    *,
+    root_dir: str,
+    primary_path: str,
+    format_name: str,
+    target_kind: str,
+) -> str:
+    fmt = str(format_name).strip().lower()
+    if fmt == "pt":
+        return primary_path
+    ext_map = {"onnx": ".onnx", "engine": ".engine", "trt": ".trt"}
+    ext = ext_map.get(fmt)
+    if not ext:
+        raise ValueError(f"Unsupported format: {format_name}")
+
+    p = Path(primary_path)
+    if p.suffix.lower() == ext and p.is_file():
+        return str(p.resolve())
+
+    root = Path(root_dir)
+    candidates: list[Path] = []
+    if target_kind == "runs":
+        run_pt = Path(canonical_run_model_path(str(root), ".pt"))
+        candidates.extend(
+            [
+                run_pt.with_suffix(ext),
+            ]
+        )
+        candidates.extend(sorted(root.glob(f"*{ext}")))
+        # Some conversion workflows place artifacts into nested folders under the run dir.
+        candidates.extend(sorted(root.rglob(f"*{ext}")))
+    else:
+        candidates.extend(sorted(root.glob(f"*{ext}")))
+        candidates.extend(sorted(root.rglob(f"*{ext}")))
+
+    for cand in candidates:
+        if cand.is_file():
+            return str(cand.resolve())
+
+    if primary_path.lower().endswith(".pt"):
+        raise RuntimeError(
+            f"Missing {fmt} artifact for target. Expected an existing {ext} file under {root_dir}. "
+            f"Convert first: {_suggest_convert_cmd(primary_path, fmt)}"
+        )
+    raise RuntimeError(
+        f"Missing {fmt} artifact for target. Expected an existing {ext} file under {root_dir} "
+        f"or pass explicit --weights {ext}."
+    )
+
+
+def _resolve_target(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[str, str, str, str | None]:
+    if args.run:
+        run_dir = _resolve_run_ref(layout, str(args.run))
+        best_pt = Path(canonical_run_model_path(str(run_dir), ".pt"))
+        if not best_pt.is_file():
+            materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
+            if materialized is not None:
+                best_pt = Path(materialized)
+        return str(run_dir), str(best_pt), "runs", run_dir.name
+    if args.model_name:
+        model_path, model_key = _resolve_model_from_name(layout, str(args.model_name).strip())
+        return str(model_path.parent), str(model_path), "models", model_key
+    if args.weights:
+        weights_path = Path(str(args.weights)).expanduser()
+        if not weights_path.is_absolute():
+            weights_path = (Path(layout.root) / weights_path).resolve()
+        return resolve_root_dir_for_target(str(weights_path)), str(weights_path), "weights", weights_path.stem
+    raise ValueError("Specify one of --run, --model-name or --weights.")
+
+
+def _pick_interactive_target(layout: WorkspaceLayout) -> tuple[str, str, str, str | None]:
+    options = ["runs", "models", "weights"]
+    selected = prompt_choice("Test source", options, default="runs")
+    if selected == "runs":
+        from smartrain.run_discovery import find_run_directories
+
+        runs = find_run_directories(layout.runs)
+        if not runs:
+            raise RuntimeError("No runs found.")
+        printable = [os.path.relpath(x, layout.root) for x in runs]
+        print_numbered_options("runs", printable)
+        chosen = prompt_choice("Select run", runs, default=runs[0], show_options=False)
+        run_dir = Path(chosen).resolve()
+        run_pt = Path(canonical_run_model_path(str(run_dir), ".pt"))
+        if not run_pt.is_file():
+            materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
+            if materialized is not None:
+                run_pt = Path(materialized)
+        return str(run_dir), str(run_pt), "runs", run_dir.name
+    if selected == "models":
+        entries = sorted(d.name for d in Path(layout.models).iterdir() if d.is_dir()) if os.path.isdir(layout.models) else []
+        if not entries:
+            raise RuntimeError("No promoted models found.")
+        print_numbered_options("models", entries)
+        chosen = prompt_choice("Select model", entries, default=entries[0], show_options=False)
+        model_path, model_key = _resolve_model_from_name(layout, chosen)
+        return str(model_path.parent), str(model_path), "models", model_key
+    raw = prompt_text("Weights path", default="models").strip() or "models"
+    weights_path = Path(raw).expanduser()
+    if not weights_path.is_absolute():
+        weights_path = (Path(layout.root) / weights_path).resolve()
+    return resolve_root_dir_for_target(str(weights_path)), str(weights_path), "weights", weights_path.stem
+
+
+def _resolve_data_yaml_for_target(
+    *,
+    target_kind: str,
+    root_dir: str,
+    layout: WorkspaceLayout,
+    data_cli: str | None,
+) -> str:
+    if data_cli:
+        return _normalize_data_to_yaml(data_cli)
+    if target_kind == "runs":
+        dataset_dir = resolve_dataset_path_for_resume(root_dir, layout.root)
+        if not dataset_dir:
+            raise RuntimeError("Failed to resolve dataset path for run.")
+        return _normalize_data_to_yaml(dataset_dir)
+    manifest_path = os.path.join(root_dir, "model_manifest.json")
+    if os.path.isfile(manifest_path):
+        payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        source_run = payload.get("source_run")
+        if isinstance(source_run, str) and source_run.strip():
+            dataset_dir = resolve_dataset_path_for_resume(source_run, layout.root)
+            if dataset_dir:
+                return _normalize_data_to_yaml(dataset_dir)
+    raise RuntimeError("Dataset path is required for models/weights targets. Pass --data.")
+
+
+def _print_test_plan(
+    *,
+    target_kind: str,
+    target_label: str | None,
+    root_dir: str,
+    data_yaml: str,
+    formats: list[str],
+    split_name: str = "test",
+) -> None:
+    print("[INFO] Test plan:")
+    print(f"  target:  {target_kind} {target_label or root_dir}")
+    print(f"  dataset: {data_yaml}")
+    print(f"  split:   {split_name}")
+    print(f"  formats: {', '.join(formats)}")
+
+
+def _should_rerun_existing_match(
+    *,
+    interactive: bool,
+    force: bool,
+    root_dir: str,
+    format_name: str,
+    target_path: str,
+    dataset_yaml: str,
+) -> bool:
+    if force:
+        return True
+    if not has_matching_test_artifacts(
+        root_dir,
+        format_name=format_name,
+        target_path=target_path,
+        dataset_yaml=dataset_yaml,
+    ):
+        return True
+    if interactive:
+        return prompt_yes_no(
+            f"{format_name}: matching test artifacts already exist for this model and dataset. Re-run",
+            default=False,
+        )
+    print(f"[INFO] {format_name}: matching test artifacts already exist for this model and dataset, skipping.")
+    return False
+
+
+def _run_native_backend_isolated(
+    *,
+    root_dir: str,
+    weights_path: str,
+    dataset_yaml_path: str,
+    format_name: str,
+    imgsz: int | None,
+    val_conf: float | None,
+    val_iou: float | None,
+    val_batch: int | None,
+) -> tuple[bool, str | None]:
+    with tempfile.NamedTemporaryFile(prefix=f"smartrain_test_{format_name}_", suffix=".json", delete=False) as tmp:
+        result_path = tmp.name
+    try:
+        cmd = [
+            sys.executable,
+            "-m",
+            "smartrain.model_test_backend_runner",
+            "--root-dir",
+            root_dir,
+            "--weights-path",
+            weights_path,
+            "--dataset-yaml-path",
+            dataset_yaml_path,
+            "--format-name",
+            format_name,
+            "--result-json",
+            result_path,
+        ]
+        if imgsz is not None:
+            cmd.extend(["--imgsz", str(imgsz)])
+        if val_conf is not None:
+            cmd.extend(["--conf", str(val_conf)])
+        if val_iou is not None:
+            cmd.extend(["--iou", str(val_iou)])
+        if val_batch is not None:
+            cmd.extend(["--batch", str(val_batch)])
+        proc = subprocess.run(cmd, text=True, capture_output=True)
+        if proc.returncode != 0:
+            stderr = (proc.stderr or "").strip()
+            stdout = (proc.stdout or "").strip()
+            tail = stderr or stdout or "native backend crashed"
+            if proc.returncode < 0:
+                tail = f"native backend terminated by signal {-proc.returncode}: {tail}"
+            else:
+                tail = f"native backend exit_code={proc.returncode}: {tail}"
+            return False, tail
+        try:
+            payload = json.loads(Path(result_path).read_text(encoding="utf-8"))
+        except Exception as exc:
+            return False, f"native backend completed without valid result payload: {exc}"
+        success = bool(payload.get("success"))
+        error = payload.get("error")
+        return success, (str(error) if error else None)
+    finally:
+        try:
+            os.unlink(result_path)
+        except OSError:
+            pass
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_model_test_arg_parser()
+    args = parser.parse_args(argv)
+    interactive = is_interactive_allowed(bool(getattr(args, "non_interactive", False)))
+    workspace_root = resolve_workspace_root(args.workspace)
+    layout = WorkspaceLayout(workspace_root)
+
+    if not any((args.run, args.model_name, args.weights)):
+        if not interactive:
+            parser.error("Specify one of --run, --model-name or --weights in non-interactive mode.")
+        root_dir, primary_path, target_kind, target_label = _pick_interactive_target(layout)
+        formats = _prompt_formats_interactive(default="pt,onnx,engine,trt")
+        default_data_yaml: str | None = None
+        try:
+            default_data_yaml = _resolve_data_yaml_for_target(
+                target_kind=target_kind,
+                root_dir=root_dir,
+                layout=layout,
+                data_cli=None,
+            )
+        except Exception:
+            default_data_yaml = None
+        raw_data = prompt_text("Dataset path or data.yaml", default=(default_data_yaml or "")).strip()
+        data_yaml = _resolve_data_yaml_for_target(
+            target_kind=target_kind,
+            root_dir=root_dir,
+            layout=layout,
+            data_cli=(raw_data or default_data_yaml),
+        )
+        args.run = None
+        args.model_name = None
+        args.weights = None
+        if target_kind == "runs":
+            args.run = root_dir
+        elif target_kind == "models":
+            args.model_name = target_label
+        else:
+            args.weights = primary_path
+        args.data = data_yaml
+        args.formats = ",".join(formats)
+    else:
+        root_dir, primary_path, target_kind, target_label = _resolve_target(args, layout)
+        formats = _parse_formats(args.formats)
+        data_yaml = _resolve_data_yaml_for_target(target_kind=target_kind, root_dir=root_dir, layout=layout, data_cli=args.data)
+
+    replay = build_non_interactive_command("test", parser, args)
+    results: list[tuple[str, bool, str | None]] = []
+    _print_test_plan(
+        target_kind=target_kind,
+        target_label=target_label,
+        root_dir=root_dir,
+        data_yaml=data_yaml,
+        formats=formats,
+        split_name="test",
+    )
+
+    if "pt" in formats:
+        if target_kind == "runs" and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
+            print(f"  model[pt]: {primary_path}")
+            if not _should_rerun_existing_match(
+                interactive=interactive,
+                force=bool(args.force),
+                root_dir=root_dir,
+                format_name="pt",
+                target_path=primary_path,
+                dataset_yaml=data_yaml,
+            ):
+                results.append(("pt", True, None))
+            else:
+                complete_missing_test_artifacts(
+                    root_dir,
+                    workspace_root=workspace_root,
+                    pt_test_runner=__import__("smartrain.model_training_module", fromlist=["test_yolo"]).test_yolo,
+                    pt_test_runner_kwargs={
+                        "val_imgsz": args.imgsz,
+                        "val_conf": args.conf,
+                        "val_iou": args.iou,
+                        "val_batch": args.batch,
+                    },
+                )
+                persist_target_test_artifacts_state(
+                    root_dir,
+                    format_name="pt",
+                    target_path=primary_path,
+                    dataset_yaml=data_yaml,
+                    backend="ultralytics",
+                    status="ok",
+                )
+                results.append(("pt", True, None))
+        elif target_kind in {"models", "weights"} and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
+            print(f"  model[pt]: {primary_path}")
+            if not _should_rerun_existing_match(
+                interactive=interactive,
+                force=bool(args.force),
+                root_dir=root_dir,
+                format_name="pt",
+                target_path=primary_path,
+                dataset_yaml=data_yaml,
+            ):
+                results.append(("pt", True, None))
+            else:
+                pt_result = run_ultralytics_backend(
+                    root_dir=root_dir,
+                    weights_path=primary_path,
+                    dataset_yaml_path=data_yaml,
+                    format_name="pt",
+                    imgsz=args.imgsz,
+                    val_conf=args.conf,
+                    val_iou=args.iou,
+                    val_batch=args.batch,
+                )
+                results.append(("pt", pt_result.success, pt_result.error))
+
+    for fmt in ("onnx", "engine", "trt"):
+        if fmt not in formats:
+            continue
+        if args.missing_only and has_complete_test_artifacts(root_dir, fmt):
+            continue
+        try:
+            artifact_path = _resolve_existing_artifact(
+                root_dir=root_dir,
+                primary_path=primary_path,
+                format_name=fmt,
+                target_kind=target_kind,
+            )
+            print(f"  model[{fmt}]: {artifact_path}")
+            if not _should_rerun_existing_match(
+                interactive=interactive,
+                force=bool(args.force),
+                root_dir=root_dir,
+                format_name=fmt,
+                target_path=artifact_path,
+                dataset_yaml=data_yaml,
+            ):
+                results.append((fmt, True, None))
+                continue
+            if fmt in {"engine", "trt"}:
+                ok, err = _run_native_backend_isolated(
+                    root_dir=root_dir,
+                    weights_path=artifact_path,
+                    dataset_yaml_path=data_yaml,
+                    format_name=fmt,
+                    imgsz=args.imgsz,
+                    val_conf=args.conf,
+                    val_iou=args.iou,
+                    val_batch=args.batch,
+                )
+                if not ok:
+                    backend = "tensorrt"
+                    persist_target_test_artifacts_state(
+                        root_dir,
+                        format_name=fmt,
+                        target_path=artifact_path,
+                        dataset_yaml=data_yaml,
+                        backend=backend,
+                        status="failed",
+                        error=err,
+                    )
+                results.append((fmt, ok, err))
+            else:
+                result = run_native_format_backend(
+                    root_dir=root_dir,
+                    weights_path=artifact_path,
+                    dataset_yaml_path=data_yaml,
+                    format_name=fmt,
+                    imgsz=args.imgsz,
+                    val_conf=args.conf,
+                    val_iou=args.iou,
+                    val_batch=args.batch,
+                )
+                results.append((fmt, result.success, result.error))
+        except Exception as exc:
+            backend = "onnxruntime" if fmt == "onnx" else "tensorrt"
+            persist_target_test_artifacts_state(
+                root_dir,
+                format_name=fmt,
+                target_path=None,
+                dataset_yaml=data_yaml,
+                backend=backend,
+                status="failed",
+                error=str(exc),
+            )
+            results.append((fmt, False, str(exc)))
+
+    if not results:
+        print(f"[INFO] No test artifacts needed for target: {target_label or root_dir}")
+    else:
+        for fmt, ok, error in results:
+            if ok:
+                print(f"[OK] {fmt}: artifacts are ready in {root_dir}")
+            else:
+                print(f"[WARN] {fmt}: {error}")
+    if replay:
+        print_replay_command("after execution", replay)
+
+
+if __name__ == "__main__":
+    main()

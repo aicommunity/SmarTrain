@@ -32,7 +32,7 @@ External providers are fork-specific training/inference subsystems integrated th
 
 For every provider run, Smart Train normalizes artifacts to:
 
-- `train/weights/best.pt`
+- `<run_dir_name>.pt` in run root
 - `test/` directory
 - `test_metrics.csv`
 - `training_metadata.json`

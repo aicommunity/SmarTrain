@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 import pytest
 
 import smartrain.results_analyzer as results_analyzer
@@ -449,8 +450,11 @@ def test_analyze_all_creates_session_manifest_and_report(
     assert "metric_sources" in manifest
     assert "tables" in manifest
     assert "images" in manifest
+    assert "format_comparison" in manifest
+    assert "artifacts/format_compare/format_metrics_compare.csv" in manifest.get("tables", [])
     assert (session_root / "artifacts" / "metrics" / "metric_sources.json").is_file()
     assert (session_root / "artifacts" / "table" / "system_profile_compare.csv").is_file()
+    assert (session_root / "artifacts" / "format_compare" / "format_metrics_compare.csv").is_file()
     assert "artifacts/table/system_profile_compare.csv" in manifest.get("tables", [])
     assert set(calls) >= {"benchmark", "plot", "pr"}
 
@@ -507,6 +511,33 @@ def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
     out = capsys.readouterr().out
     assert "Found missing metrics. Recompute from best.pt + detected data.yaml?" not in out
     assert recompute_calls["n"] >= 1
+
+
+def test_format_compare_falls_back_statuses_for_legacy_pt_metrics(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_a", "run_legacy_pt", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_legacy"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    out_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare.csv"
+    assert out_csv.is_file()
+    df = pd.read_csv(out_csv)
+    row_pt = df[df["format"] == "pt"].iloc[0]
+    assert row_pt["artifact_status"] == "ok"
+    assert row_pt["backend_status"] == "ultralytics"
+
+
+def test_format_compare_omits_rows_when_format_model_missing(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_a", "run_only_pt", model="yolo11n.pt", map5095=0.51, box_f1=0.60)
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_no_missing_formats"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    out_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare.csv"
+    df = pd.read_csv(out_csv)
+    assert set(df["format"].tolist()) == {"pt"}
 
 
 def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_paths(
@@ -577,6 +608,7 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     (tmp_path / "artifacts" / "compare").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "pr").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
     pd.DataFrame([{"model": "a", "scatter_x_value": 10.0, "scatter_y_value": 0.61}]).to_csv(
         tmp_path / "artifacts" / "speed_quality" / "speed_quality.csv",
         index=False,
@@ -594,6 +626,18 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
             }
         ]
     ).to_csv(tmp_path / "artifacts" / "table" / "runs_summary.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "run_name": "run_a",
+                "format": "pt",
+                "artifact_status": "ok",
+                "backend_status": "ultralytics",
+                "mAP50-95": 0.61,
+                "delta_vs_pt_mAP50-95": 0.0,
+            }
+        ]
+    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare.csv", index=False)
     (tmp_path / "artifacts" / "compare" / "compare_curves.png").write_bytes(b"fakepng")
     (tmp_path / "artifacts" / "pr" / "pr_all_classes.png").write_bytes(b"fakepng")
 
@@ -602,10 +646,15 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
         "profile": "full",
         "baseline": "run_a",
         "others": ["run_b"],
-        "tables": ["artifacts/speed_quality/speed_quality.csv", "artifacts/table/runs_summary.csv"],
+        "tables": [
+            "artifacts/speed_quality/speed_quality.csv",
+            "artifacts/table/runs_summary.csv",
+            "artifacts/format_compare/format_metrics_compare.csv",
+        ],
         "images": ["artifacts/compare/compare_curves.png", "artifacts/pr/pr_all_classes.png"],
         "artifacts": [{"role": "compare_png", "path": "artifacts/compare/compare_curves.png"}],
         "speed_quality": {"csv": "artifacts/speed_quality/speed_quality.csv"},
+        "format_comparison": {"csv": "artifacts/format_compare/format_metrics_compare.csv"},
         "abbreviations": {"a": "M1", "ds_a": "D1"},
         "ultralytics_test": [
             {
@@ -629,9 +678,43 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     assert "Ultralytics test metrics summary" in en_md
     assert "## 1. Comparison Context" in en_md
     assert "## 2. Quality Analysis" in en_md
-    assert "## 7. Executive Summary" in en_md
+    assert "## 4. Model Format Comparison" in en_md
+    assert "## 8. Executive Summary" in en_md
     assert "Datasets: D1 = ds_a" in en_md
-    assert "### 5.1 Run R1" in en_md
+    assert "### 6.1 Run R1" in en_md
+
+
+def test_analyze_report_replaces_nan_with_dash_in_tables(tmp_path: Path) -> None:
+    from smartrain.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "run_name": "run_a",
+                "format": "pt",
+                "artifact_status": np.nan,
+                "backend_status": np.nan,
+                "mAP50-95": 0.61,
+            }
+        ]
+    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare.csv", index=False)
+    manifest = {
+        "session_name": "s_nan",
+        "profile": "quality",
+        "baseline": "run_a",
+        "others": [],
+        "tables": ["artifacts/format_compare/format_metrics_compare.csv"],
+        "images": [],
+        "artifacts": [],
+        "format_comparison": {"csv": "artifacts/format_compare/format_metrics_compare.csv"},
+        "abbreviations": {},
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8").lower()
+    en_md = (tmp_path / "en" / "index.md").read_text(encoding="utf-8").lower()
+    assert " nan " not in ru_md
+    assert " nan " not in en_md
 
 
 def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> None:
@@ -727,7 +810,7 @@ def test_analyze_report_per_class_headers_and_human_readable_ultralytics_caption
     assert "Precision-Recall curve" in en_md
     assert "*Figure" in en_md
     assert "BoxPR_curve.png*" not in en_md
-    assert "### 5.1 Run R1" in en_md
+    assert "### 6.1 Run R1" in en_md
     assert "Run config: model=yolo26x, dataset=-, epochs=300, batch=4, imgsz_train=1280, imgsz_val=1280." in en_md
     assert "Machine: CPU=AMD EPYC (32 cores), RAM=128 GB, GPU=NVIDIA RTX (24 GB), OS=Ubuntu 22.04" in en_md
     assert "Data source for PR-curve table (precision/recall across confidence thresholds): `artifacts/ultralytics-test/R1/pr.csv`" in en_md

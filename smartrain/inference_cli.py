@@ -32,6 +32,7 @@ from smartrain.train_model_catalog import is_supported_external_provider_model, 
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
 from smartrain.model_context import infer_img_size_from_model_context
+from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
@@ -173,9 +174,13 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
         return p, model_key, "models"
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
-        best = run_dir / "train" / "weights" / "best.pt"
+        best = Path(canonical_run_model_path(str(run_dir), ".pt"))
         if not best.is_file():
-            raise FileNotFoundError(f"best.pt not found in run: {run_dir}")
+            materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
+            if materialized is not None:
+                best = Path(materialized)
+        if not best.is_file():
+            raise FileNotFoundError(f"run model not found in run: {run_dir}")
         return best.resolve(), run_dir.name, "runs"
     if args.weights:
         w = Path(str(args.weights)).expanduser()

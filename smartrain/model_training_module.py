@@ -72,6 +72,17 @@ from smartrain.workspace_paths import (
     DATASETS_INFO_FILE,
 )
 from smartrain.run_discovery import find_run_directories
+from smartrain.model_test_service import (
+    complete_missing_test_artifacts,
+    format_metrics_path,
+    persist_target_test_artifacts_state,
+    sync_test_artifacts_manifest,
+)
+from smartrain.run_artifacts import (
+    canonical_run_model_path,
+    materialize_canonical_run_model,
+    resolve_run_model_with_legacy_fallback,
+)
 
 
 MODEL_VERSION = "yolov8n"
@@ -760,21 +771,12 @@ def _run_resume_command(argv: list[str]) -> int:
 
     if chosen.status == RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING:
         try:
-            from smartrain.train_resume import diagnose_run
-
-            dataset_path = resolve_dataset_path_for_resume(chosen.run_dir, workspace_root)
-            if not dataset_path:
-                raise RuntimeError(
-                    "Cannot resolve dataset path for test stage. "
-                    "Expected valid dataset in runtime yaml/metadata/workspace datasets catalog."
-                )
             _maybe_free_cuda_memory()
-            test_yolo(chosen.run_dir, dataset_path)
-            update_resume_test_metadata(
+            complete_missing_test_artifacts(
                 chosen.run_dir,
-                success=True,
-                error=None,
-                diagnosis=diagnose_run(chosen.run_dir),
+                workspace_root=workspace_root,
+                pt_test_runner=test_yolo,
+                update_metadata_cb=update_resume_test_metadata,
             )
             print(f"[OK] Missing test stage completed: {chosen.run_dir}")
             return 0
@@ -828,10 +830,10 @@ def _ensure_resume_confidence_recommendations(
     if recommendations_complete(test_payload) and recommendations_complete(val_payload):
         return
 
-    best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+    best_pt = canonical_run_model_path(run_dir, ".pt")
     if not os.path.isfile(best_pt):
         print(
-            "[WARN] Resume post-check: recommendations missing but best.pt is absent; "
+            "[WARN] Resume post-check: recommendations missing but canonical run model is absent; "
             "cannot recompute confidence recommendations."
         )
         return
@@ -1728,44 +1730,24 @@ def _normalize_external_run_layout(run_dir: str) -> None:
         entry.rename(target)
 
 
+def _materialize_canonical_run_model(run_dir: str, source_path: str | None = None) -> str | None:
+    target = materialize_canonical_run_model(
+        run_dir,
+        ext=".pt",
+        source_path=source_path,
+        move=True,
+        normalize_metadata=True,
+    )
+    return str(target) if target is not None else None
+
+
 def _find_external_best_checkpoint(run_dir: str) -> str | None:
-    root = Path(run_dir).expanduser().resolve()
-    if not root.is_dir():
-        return None
-    preferred = root / "train" / "weights" / "best.pt"
-    if preferred.is_file():
-        return str(preferred)
-    candidates = [
-        root / "weights" / "best.pt",
-        root / "train" / "best.pt",
-        root / "best.pt",
-    ]
-    for cand in candidates:
-        if cand.is_file():
-            return str(cand)
-    for cand in root.rglob("best.pt"):
-        if cand.is_file():
-            return str(cand)
-    return None
+    found = resolve_run_model_with_legacy_fallback(run_dir, ".pt")
+    return str(found) if found is not None else None
 
 
 def _ensure_external_best_checkpoint_layout(run_dir: str) -> str | None:
-    root = Path(run_dir).expanduser().resolve()
-    if not root.is_dir():
-        return None
-    target = root / "train" / "weights" / "best.pt"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.is_file():
-        return str(target)
-    src = _find_external_best_checkpoint(run_dir)
-    if not src:
-        return None
-    src_path = Path(src).expanduser().resolve()
-    if src_path == target:
-        return str(target)
-    if not target.exists():
-        src_path.rename(target)
-    return str(target)
+    return _materialize_canonical_run_model(run_dir, _find_external_best_checkpoint(run_dir))
 
 
 def _resolve_external_eval_source(dataset_path: str) -> str:
@@ -2023,11 +2005,12 @@ def train_yolo(
         register_weighted_sampling_callback(model)
 
     training_end_time = None
-    best_path = os.path.join(model_dir, "train", "weights", "best.pt")
+    raw_best_path = os.path.join(model_dir, "train", "weights", "best.pt")
+    canonical_best_path = canonical_run_model_path(model_dir, ".pt")
     try:
         model.train(**train_kw)
         training_end_time = datetime.now()
-        model_path = best_path
+        model_path = _materialize_canonical_run_model(model_dir, raw_best_path) or canonical_best_path
         print("\n" + "-" * 60)
         if os.path.exists(model_path):
             print("[OK] Training complete.")
@@ -2048,7 +2031,7 @@ def train_yolo(
     meta_extras = {
         "train_kw": {k: v for k, v in train_kw.items() if k != "data"},
         "task_type": task_to_metadata_task_type(train_kw.get("task")),
-        "training_ok": os.path.isfile(best_path),
+        "training_ok": os.path.isfile(canonical_best_path),
     }
     return model_dir, training_start_time, training_end_time, dataset_hash, workspace_root, meta_extras
 
@@ -2084,7 +2067,9 @@ def test_yolo(
         "batch": val_batch,
     }
 
-    model_path = os.path.join(model_dir, "train", "weights", "best.pt")
+    model_path = canonical_run_model_path(model_dir, ".pt")
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(f"canonical run model is missing: {model_path}")
     trained_model = YOLO(model_path)
 
     val_kwargs = {
@@ -2133,6 +2118,14 @@ def test_yolo(
 
         test_end_time = datetime.now()
         csv_file = save_metrics_csv(result, model_dir)
+        target_pt = model_path if os.path.isfile(model_path) else None
+        persist_target_test_artifacts_state(
+            model_dir,
+            format_name="pt",
+            target_path=target_pt,
+            backend="ultralytics",
+            status="ok" if os.path.exists(csv_file) else "incomplete",
+        )
 
         print("\n" + "-" * 60)
         if os.path.exists(csv_file):
@@ -2474,8 +2467,8 @@ def save_training_metadata(
         },
         "paths": {
             "model_directory": ".",
-            "best_model": "train/weights/best.pt"
-            if os.path.exists(os.path.join(model_dir, "train", "weights", "best.pt"))
+            "best_model": os.path.basename(canonical_run_model_path(model_dir, ".pt"))
+            if os.path.exists(canonical_run_model_path(model_dir, ".pt"))
             else None,
         },
     }
@@ -2499,6 +2492,14 @@ def save_training_metadata(
         if confidence_recommendation_config:
             rec_summary["config"] = confidence_recommendation_config
         metadata["recommendations"] = {"confidence": rec_summary}
+    test_manifest = sync_test_artifacts_manifest(
+        model_dir,
+        target_by_format={"pt": metadata["paths"].get("best_model")},
+        backend_by_format={"pt": "ultralytics"},
+    )
+    formats_payload = test_manifest.get("formats")
+    if isinstance(formats_payload, dict) and formats_payload:
+        metadata["test_artifacts_by_format"] = formats_payload
 
     metadata_file = os.path.join(model_dir, "training_metadata.json")
 

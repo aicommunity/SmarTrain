@@ -33,6 +33,7 @@ from smartrain.compare_service import (
     generate_compare_insights,
 )
 from smartrain.analyze_report import write_analysis_report, write_manifest
+from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
 from smartrain.analyze_cache import (
     append_cache_entry,
     compute_fingerprint,
@@ -51,7 +52,9 @@ from smartrain.metrics_reader import (
     pick_map_column,
     read_test_metrics_row,
     results_csv_path,
+    read_test_metrics_by_format,
 )
+from smartrain.model_test_service import load_test_artifacts_manifest
 from smartrain.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.confidence_recommendation import recommendation_file_path, read_recommendation_file
@@ -344,9 +347,13 @@ def _recompute_run_test_metrics(
 ) -> dict[str, Any]:
     from ultralytics import YOLO
 
-    best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+    best_pt = canonical_run_model_path(run_dir, ".pt")
     if not os.path.isfile(best_pt):
-        raise FileNotFoundError(f"best.pt not found: {best_pt}")
+        materialized = materialize_canonical_run_model(run_dir, ext=".pt", move=True, normalize_metadata=True)
+        if materialized is not None:
+            best_pt = str(materialized)
+    if not os.path.isfile(best_pt):
+        raise FileNotFoundError(f"run model not found: {best_pt}")
     model = YOLO(best_pt)
     _clear_gpu_memory()
     rb, ri, rh = _resolve_run_val_profile(
@@ -842,7 +849,7 @@ def cmd_interactive(args: argparse.Namespace) -> None:
                 )
                 if missing_runs:
                     choice = prompt_choice(
-                        "Found missing metrics. Recompute from best.pt + data.yaml now?",
+                        "Found missing metrics. Recompute from run model + data.yaml now?",
                         ["yes", "no"],
                         default="yes",
                         show_options=False,
@@ -1248,7 +1255,7 @@ def _collect_missing_metrics_recompute_plan(
             resolved_yaml = _resolve_data_yaml_for_run(run_dir, workspace)[0]
             if not resolved_yaml:
                 resolved_yaml = data_yaml
-            best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+            best_pt = canonical_run_model_path(run_dir, ".pt")
             if not resolved_yaml:
                 print(
                     "[INFO] "
@@ -1267,7 +1274,7 @@ def _collect_missing_metrics_recompute_plan(
                 print(
                     "[INFO] "
                     + os.path.basename(run_dir.rstrip(os.sep))
-                    + ": skip recompute prompt (best.pt not found)."
+                    + ": skip recompute prompt (run model not found)."
                 )
                 skipped.append(
                     {
@@ -1504,6 +1511,87 @@ def _collect_ultralytics_test_artifacts(
     return rows, artifacts
 
 
+def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> dict[str, str] | None:
+    rows: list[dict[str, Any]] = []
+    backend_fallback = {
+        "pt": "ultralytics",
+        "onnx": "onnxruntime",
+        "engine": "tensorrt",
+        "trt": "tensorrt",
+    }
+    ext_by_format = {
+        "pt": ".pt",
+        "onnx": ".onnx",
+        "engine": ".engine",
+        "trt": ".trt",
+    }
+
+    def _has_model_artifact(run_dir: str, fmt: str, entry: dict[str, Any]) -> bool:
+        target = entry.get("target_path")
+        if isinstance(target, str) and target.strip():
+            candidate = target if os.path.isabs(target) else os.path.join(run_dir, target)
+            if os.path.isfile(candidate):
+                return True
+        if fmt == "pt":
+            return os.path.isfile(canonical_run_model_path(run_dir, ".pt"))
+        ext = ext_by_format.get(fmt)
+        if not ext:
+            return False
+        return any(os.path.isfile(p) for p in glob(os.path.join(run_dir, "**", f"*{ext}"), recursive=True))
+
+    for run_dir in run_dirs:
+        run_name = os.path.basename(run_dir.rstrip(os.sep))
+        pt_metrics = read_test_metrics_row(run_dir, "pt") or {}
+        pt_map = pd.to_numeric(pd.Series([pt_metrics.get("mAP50-95")]), errors="coerce").iloc[0] if pt_metrics else np.nan
+        manifest = load_test_artifacts_manifest(run_dir)
+        formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
+        metrics_paths = read_test_metrics_by_format(run_dir)
+        for fmt in ("pt", "onnx", "engine", "trt"):
+            entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
+            if not isinstance(entry, dict):
+                entry = {}
+            metrics_path = metrics_paths.get(fmt)
+            metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
+            if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
+                continue
+            row: dict[str, Any] = {
+                "run_dir": run_dir,
+                "run_name": run_name,
+                "format": fmt,
+                "artifact_status": entry.get("status"),
+                "backend_status": entry.get("backend"),
+                "target_path": entry.get("target_path"),
+            }
+            if metrics_exists and metrics_path:
+                try:
+                    metrics_df = pd.read_csv(metrics_path)
+                    if len(metrics_df) > 0:
+                        metric_row = metrics_df.iloc[0].to_dict()
+                        row["mAP50-95"] = metric_row.get("mAP50-95")
+                        row["mAP50"] = metric_row.get("mAP50")
+                        row["Box-F1"] = metric_row.get("Box-F1")
+                        row["Box-P"] = metric_row.get("Box-P")
+                        row["Box-R"] = metric_row.get("Box-R")
+                        cur_map = pd.to_numeric(pd.Series([metric_row.get("mAP50-95")]), errors="coerce").iloc[0]
+                        row["delta_vs_pt_mAP50-95"] = (
+                            float(cur_map - pt_map) if pd.notna(cur_map) and pd.notna(pt_map) else np.nan
+                        )
+                        if not row.get("artifact_status"):
+                            row["artifact_status"] = "ok"
+                        if not row.get("backend_status"):
+                            row["backend_status"] = backend_fallback.get(fmt)
+                except Exception:
+                    pass
+            rows.append(row)
+    if not rows:
+        return None
+    out_dir = os.path.join(session_root, "artifacts", "format_compare")
+    os.makedirs(out_dir, exist_ok=True)
+    out_csv = os.path.join(out_dir, "format_metrics_compare.csv")
+    pd.DataFrame(rows).to_csv(out_csv, index=False, encoding="utf-8")
+    return {"csv": os.path.relpath(out_csv, session_root)}
+
+
 def _resolve_pr_output_png(
     workspace_cli: str | None,
     out_png_cli: str | None,
@@ -1607,9 +1695,9 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
     cache_stats: list[dict[str, Any]] = []
     for run_dir in run_dirs:
         label = os.path.basename(run_dir.rstrip(os.sep))
-        best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+        best_pt = canonical_run_model_path(run_dir, ".pt")
         if not os.path.isfile(best_pt):
-            print(f"[WARN] {label}: missing best.pt, skipping ({best_pt})")
+            print(f"[WARN] {label}: missing run model, skipping ({best_pt})")
             continue
         cache_root = run_cache_root(run_dir)
         fp = compute_fingerprint(
@@ -1866,9 +1954,9 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
     cache_stats: list[dict[str, Any]] = []
     for run_dir in run_dirs:
         model_name = os.path.basename(run_dir.rstrip(os.sep))
-        best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+        best_pt = canonical_run_model_path(run_dir, ".pt")
         if not os.path.isfile(best_pt):
-            print(f"[WARN] {model_name}: missing best.pt, skipping")
+            print(f"[WARN] {model_name}: missing run model, skipping")
             continue
         cache_root = run_cache_root(run_dir)
         fp = compute_fingerprint(
@@ -2703,6 +2791,9 @@ def cmd_all(args: argparse.Namespace) -> None:
         abbreviations,
     )
     artifacts.extend(ultralytics_test_artifacts)
+    format_compare = _write_format_compare_artifacts(session_root, [baseline] + others)
+    if format_compare and format_compare.get("csv"):
+        artifacts.append({"role": "format_compare_csv", "path": str(format_compare["csv"])})
     conf_tables = _collect_confidence_recommendation_tables(
         [baseline] + others,
         os.path.join(session_root, "artifacts", "confidence"),
@@ -2734,6 +2825,7 @@ def cmd_all(args: argparse.Namespace) -> None:
             "comparison_context",
             "quality_analysis",
             "speed_analysis",
+            "format_compare",
             "per_class_analysis",
             "conclusion",
         ],
@@ -2765,6 +2857,8 @@ def cmd_all(args: argparse.Namespace) -> None:
             "scatter_x": str(getattr(args, "scatter_x", "avg_inference_ms_per_frame")),
             "scatter_y": str(getattr(args, "scatter_y", "mAP50-95")),
         }
+    if format_compare:
+        manifest["format_comparison"] = format_compare
     manifest_path = os.path.join(session_root, "session.json")
     write_manifest(manifest_path, manifest)
     report_files = write_analysis_report(
@@ -3076,7 +3170,7 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         "--recompute-missing-metrics",
         action="store_true",
         default=False,
-        help="Recompute missing requested metrics from best.pt + detected data.yaml",
+        help="Recompute missing requested metrics from run model + detected data.yaml",
     )
     p_tm_plot.add_argument(
         "--recompute-split",

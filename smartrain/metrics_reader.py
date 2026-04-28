@@ -10,6 +10,11 @@ import pandas as pd
 import yaml
 
 from smartrain.analyze_models import RunRecord
+from smartrain.model_test_service import (
+    SUPPORTED_TEST_FORMATS,
+    format_metrics_path,
+    load_test_artifacts_manifest,
+)
 
 DEFAULT_MAP_COL = "metrics/mAP50-95(B)"
 
@@ -56,9 +61,34 @@ def load_metadata(run_dir: str) -> dict[str, Any]:
         return json.load(f)
 
 
-def latest_test_metrics_path(run_dir: str) -> str | None:
+def latest_test_metrics_path(run_dir: str, format_name: str | None = "pt") -> str | None:
+    if format_name not in (None, "", "pt"):
+        p = format_metrics_path(run_dir, format_name)
+        return p if os.path.isfile(p) else None
     candidates = sorted(glob(os.path.join(run_dir, "test_metrics*.csv")))
     return candidates[-1] if candidates else None
+
+
+def read_test_metrics_by_format(run_dir: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    manifest = load_test_artifacts_manifest(run_dir)
+    formats = manifest.get("formats")
+    if isinstance(formats, dict):
+        for fmt in SUPPORTED_TEST_FORMATS:
+            entry = formats.get(fmt)
+            if not isinstance(entry, dict):
+                continue
+            rel = entry.get("metrics_csv")
+            if not isinstance(rel, str) or not rel.strip():
+                continue
+            p = os.path.abspath(os.path.join(run_dir, rel))
+            if os.path.isfile(p):
+                out[fmt] = p
+    for fmt in SUPPORTED_TEST_FORMATS:
+        p = latest_test_metrics_path(run_dir, fmt)
+        if p and os.path.isfile(p):
+            out.setdefault(fmt, p)
+    return out
 
 
 def results_csv_path(run_dir: str) -> str | None:
@@ -132,8 +162,8 @@ def flatten_metadata(md: dict[str, Any], run_dir: str) -> dict[str, Any]:
     return row
 
 
-def read_test_metrics_row(run_dir: str) -> dict[str, Any]:
-    tm = latest_test_metrics_path(run_dir)
+def read_test_metrics_row(run_dir: str, format_name: str | None = "pt") -> dict[str, Any]:
+    tm = latest_test_metrics_path(run_dir, format_name)
     if not tm:
         return {}
     df = pd.read_csv(tm)

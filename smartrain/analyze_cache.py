@@ -5,6 +5,8 @@ import json
 import os
 from typing import Any
 
+from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+
 
 def run_cache_root(run_dir: str) -> str:
     root = os.path.join(os.path.abspath(run_dir), ".smartrain_cache", "analyze")
@@ -35,7 +37,11 @@ def data_yaml_hash(path: str) -> str:
 
 
 def weights_hash(run_dir: str) -> str:
-    best = os.path.join(run_dir, "train", "weights", "best.pt")
+    best = canonical_run_model_path(run_dir, ".pt")
+    if not os.path.isfile(best):
+        materialized = materialize_canonical_run_model(run_dir, ext=".pt", move=True, normalize_metadata=True)
+        if materialized is not None:
+            best = str(materialized)
     if not os.path.isfile(best):
         return "missing"
     return _sha256_file(best)[:16]

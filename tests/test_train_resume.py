@@ -8,6 +8,7 @@ import pytest
 from smartrain import model_training_module as mtm
 from smartrain import run_discovery as rd
 from smartrain import train_resume as tr
+from smartrain.confidence_recommendation import write_not_available_recommendations
 from smartrain.workspace_paths import deploy_workspace
 
 
@@ -25,6 +26,12 @@ def test_diagnose_run_marks_resumable_when_last_checkpoint_exists(tmp_path: Path
 def test_diagnose_run_marks_completed_from_metadata(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds" / "run2"
     (run_dir / "test").mkdir(parents=True, exist_ok=True)
+    (run_dir / "test" / "args.yaml").write_text("name: test\n", encoding="utf-8")
+    (run_dir / "test" / "pr.csv").write_text("recall,precision\n0.0,1.0\n", encoding="utf-8")
+    (run_dir / "test" / "pr_per_class.csv").write_text("class_name,ap\nobj,0.5\n", encoding="utf-8")
+    (run_dir / "test_metrics.csv").write_text("mAP50-95\n0.5\n", encoding="utf-8")
+    write_not_available_recommendations(model_dir=str(run_dir), split="test", reason="stub")
+    write_not_available_recommendations(model_dir=str(run_dir), split="val", reason="stub")
     (run_dir / "training_metadata.json").write_text(
         json.dumps({"status": {"training": {"success": True}}}, ensure_ascii=False),
         encoding="utf-8",
@@ -44,7 +51,20 @@ def test_diagnose_run_marks_training_complete_test_pending_without_test_dir(tmp_
 
     diag = tr.diagnose_run(str(run_dir))
     assert diag.status == tr.RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING
-    assert "missing_test_dir" in diag.reasons
+    assert "missing_test_artifacts" in diag.reasons
+
+
+def test_diagnose_run_marks_pending_when_test_dir_exists_but_artifacts_incomplete(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run2_partial"
+    (run_dir / "test").mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"status": {"training": {"success": True}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING
+    assert "missing_metrics_csv" in diag.reasons
 
 
 def test_diagnose_run_marks_incomplete_non_resumable_without_last(tmp_path: Path) -> None:

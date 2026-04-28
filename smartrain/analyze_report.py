@@ -44,6 +44,9 @@ def _md_table_from_df(df: pd.DataFrame, abbreviations: dict[str, str], limit: in
         vals = []
         for real_col in preview.columns:
             v = row.get(real_col)
+            if pd.isna(v):
+                vals.append("-")
+                continue
             if isinstance(v, float):
                 vals.append(f"{v:.4f}")
             else:
@@ -358,6 +361,19 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "scatter_y_value",
             "quality_source",
         ]
+    elif "format_metrics_compare" in lower:
+        preferred = [
+            "run_name",
+            "format",
+            "artifact_status",
+            "backend_status",
+            "mAP50-95",
+            "delta_vs_pt_mAP50-95",
+            "mAP50",
+            "Box-F1",
+            "Box-P",
+            "Box-R",
+        ]
     elif "pr_per_class" in lower:
         preferred = ["model", "class_id", "class_name", "ap", "recall", "precision"]
     elif "confidence_recommendations_" in lower:
@@ -574,6 +590,8 @@ def _table_title(rel: str, is_ru: bool) -> str:
         return "Рейтинг моделей" if is_ru else "Model leaderboard"
     if "speed_quality" in low:
         return "Соотношение скорости и качества" if is_ru else "Speed-quality trade-off"
+    if "format_metrics_compare" in low:
+        return "Сравнение test-метрик по форматам" if is_ru else "Format-wise test metrics comparison"
     if "pr_per_class" in low:
         return "Сводка AP по классам" if is_ru else "Per-class AP summary"
     if "confidence_recommendations_" in low:
@@ -800,11 +818,12 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         "context": "Контекст и цель сравнения" if is_ru else "Comparison Context",
         "quality": "Анализ качества" if is_ru else "Quality Analysis",
         "speed": "Анализ скорости" if is_ru else "Speed Analysis",
+        "format_compare": "Сравнение форматов моделей" if is_ru else "Model Format Comparison",
         "per_class": "Анализ по классам" if is_ru else "Per-class Analysis",
         "ultra": "Результаты Ultralytics test" if is_ru else "Ultralytics Test Results",
         "conclusion": "Заключение и рекомендации" if is_ru else "Conclusions and Actions",
     }
-    section_order = ["context", "quality", "speed", "per_class", "ultra", "conclusion", "exec"]
+    section_order = ["context", "quality", "speed", "format_compare", "per_class", "ultra", "conclusion", "exec"]
     section_index = {k: i + 1 for i, k in enumerate(section_order)}
     def _sec(key: str) -> str:
         return f"## {section_index[key]}. {section_titles[key]}"
@@ -966,6 +985,32 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             figure_no += 1
             lines.append("")
             lines.extend(_center_close())
+    lines.append(_sec("format_compare"))
+    lines.append("")
+    fmt_cmp = manifest.get("format_comparison") if isinstance(manifest.get("format_comparison"), dict) else {}
+    fmt_csv_rel = str(fmt_cmp.get("csv") or "")
+    if fmt_csv_rel:
+        fmt_csv_abs = os.path.join(report_root, fmt_csv_rel)
+        if os.path.isfile(fmt_csv_abs):
+            try:
+                fmt_df = pd.read_csv(fmt_csv_abs)
+                fmt_df = _filter_generic_table_for_selection(fmt_df, manifest)
+                fmt_df = _select_table_columns(fmt_csv_rel, fmt_df)
+                fmt_df = _abbrev_df(fmt_df, abbreviations)
+                lines.extend(_center_open())
+                lines.append("")
+                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(fmt_csv_rel, is_ru)}**")
+                lines.append("")
+                lines.extend(_md_table_from_df(fmt_df, abbreviations, limit=None))
+                lines.append("")
+                lines.append(
+                    ("_Источник данных:_ " if is_ru else "_Data source:_ ")
+                    + f"`{fmt_csv_rel}`"
+                )
+                lines.extend(_center_close())
+                table_no += 1
+            except Exception as e:
+                lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
     lines.append(_sec("per_class"))
     lines.append("")
     if tpl.get("PER_CLASS"):

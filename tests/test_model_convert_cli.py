@@ -12,15 +12,19 @@ def test_discover_models_lists_only_pt(tmp_path: Path):
     runs_dir.mkdir(parents=True, exist_ok=True)
     (models_dir / "a.pt").write_text("pt", encoding="utf-8")
     (models_dir / "a.onnx").write_text("onnx", encoding="utf-8")
-    (runs_dir / "b.pt").write_text("pt", encoding="utf-8")
-    (runs_dir / "b.onnx").write_text("onnx", encoding="utf-8")
+    run_dir = runs_dir / "ds1" / "run-1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run_dir / "run-1.pt").write_text("pt", encoding="utf-8")
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_text("legacy-pt", encoding="utf-8")
 
     discovered = mcc._discover_models(tmp_path, allowed_suffixes=(".pt",))
     paths = [p for _src, p in discovered]
     assert models_dir / "a.pt" in paths
-    assert runs_dir / "b.pt" in paths
+    assert run_dir / "run-1.pt" in paths
     assert models_dir / "a.onnx" not in paths
-    assert runs_dir / "b.onnx" not in paths
+    assert run_dir / "train" / "weights" / "best.pt" not in paths
 
 
 def test_discover_models_lists_only_onnx(tmp_path: Path):
@@ -30,15 +34,38 @@ def test_discover_models_lists_only_onnx(tmp_path: Path):
     runs_dir.mkdir(parents=True, exist_ok=True)
     (models_dir / "a.pt").write_text("pt", encoding="utf-8")
     (models_dir / "a.onnx").write_text("onnx", encoding="utf-8")
-    (runs_dir / "b.pt").write_text("pt", encoding="utf-8")
-    (runs_dir / "b.onnx").write_text("onnx", encoding="utf-8")
+    run_dir = runs_dir / "ds1" / "run-1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run_dir / "run-1.onnx").write_text("onnx", encoding="utf-8")
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.onnx").write_text("legacy-onnx", encoding="utf-8")
 
     discovered = mcc._discover_models(tmp_path, allowed_suffixes=(".onnx",))
     paths = [p for _src, p in discovered]
     assert models_dir / "a.onnx" in paths
-    assert runs_dir / "b.onnx" in paths
+    assert run_dir / "run-1.onnx" in paths
     assert models_dir / "a.pt" not in paths
-    assert runs_dir / "b.pt" not in paths
+    assert run_dir / "train" / "weights" / "best.onnx" not in paths
+
+
+def test_discover_models_materializes_canonical_from_legacy_run(tmp_path: Path):
+    runs_dir = tmp_path / "runs"
+    run_dir = runs_dir / "ds1" / "run-1"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text(
+        '{"paths":{"best_model":"train/weights/best.pt"}}',
+        encoding="utf-8",
+    )
+    legacy_best = run_dir / "train" / "weights" / "best.pt"
+    legacy_best.write_text("legacy-pt", encoding="utf-8")
+
+    discovered = mcc._discover_models(tmp_path, allowed_suffixes=(".pt",))
+    paths = [p for _src, p in discovered]
+    canonical = run_dir / "run-1.pt"
+    assert canonical in paths
+    assert canonical.is_file()
+    assert not legacy_best.exists()
 
 
 def _base_args(**overrides):
@@ -199,7 +226,22 @@ def test_validate_args_rejects_unavailable_format(monkeypatch):
         assert int(exc.code) != 0
 
 
-def test_interactive_pt_wizard_reprompts_unavailable_target_package(monkeypatch, tmp_path: Path):
+def test_validate_args_rejects_onnx_to_engine(monkeypatch):
+    parser = mcc.build_model_convert_arg_parser()
+    args = _base_args(format="tensorrt-engine", input="x.onnx")
+    monkeypatch.setattr(
+        mcc,
+        "_get_export_format_availability",
+        lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (True, "")},
+    )
+    try:
+        mcc._validate_args(args, interactive_allowed=False, parser=parser, argv=["--input", "x.onnx", "--format", "tensorrt-engine"])
+        assert False, "onnx to engine must be rejected"
+    except SystemExit as exc:
+        assert int(exc.code) != 0
+
+
+def test_interactive_pt_wizard_reprompts_unavailable_target_model(monkeypatch, tmp_path: Path):
     import argparse
 
     args = argparse.Namespace(
@@ -234,14 +276,8 @@ def test_interactive_pt_wizard_reprompts_unavailable_target_package(monkeypatch,
         "_get_export_format_availability",
         lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (False, "runtime fail")},
     )
-    choices = iter([
-        "pt",
-        "models: m.pt",
-        "onnx+trt (unavailable: runtime fail)",
-        "onnx",
-        "auto",
-        "static",
-    ])
+    choices = iter(["pt", "models: m.pt", "auto", "static"])
+    target_lists = iter([["onnx", "trt (unavailable: runtime fail)"], ["onnx"]])
     seen_prompts: list[str] = []
 
     def _fake_prompt_choice(prompt, *a, **k):
@@ -249,6 +285,11 @@ def test_interactive_pt_wizard_reprompts_unavailable_target_package(monkeypatch,
         return next(choices)
 
     monkeypatch.setattr(mcc, "prompt_choice", _fake_prompt_choice)
+    monkeypatch.setattr(
+        mcc,
+        "prompt_multi_choice_csv",
+        lambda prompt, *_a, **_k: (seen_prompts.append(prompt) or next(target_lists)),
+    )
     ints = iter([1, 17])
     monkeypatch.setattr(mcc, "prompt_int", lambda *a, **k: next(ints))
     monkeypatch.setattr(mcc, "prompt_text", lambda *a, **k: "")
@@ -266,3 +307,165 @@ def test_interactive_pt_wizard_reprompts_unavailable_target_package(monkeypatch,
         "Targets",
         "ONNX image size mode",
     ]
+
+
+def test_interactive_onnx_wizard_exits_when_no_targets_available(monkeypatch, tmp_path: Path):
+    import argparse
+
+    args = argparse.Namespace(
+        input=None,
+        format=None,
+        batch=1,
+        dynamic=False,
+        precision="fp32",
+        imgsz=None,
+        opset=17,
+        simplify=True,
+        half=False,
+        nms=False,
+        output_dir=None,
+        workspace=None,
+        device=None,
+        data=None,
+        fraction=1.0,
+        workspace_gib=None,
+        force=False,
+        continue_on_error=False,
+    )
+    monkeypatch.setattr(
+        mcc,
+        "_discover_models",
+        lambda _root, *, allowed_suffixes: [("models", tmp_path / ("m.onnx" if allowed_suffixes == (".onnx",) else "m.pt"))],
+    )
+    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(
+        mcc,
+        "_get_export_format_availability",
+        lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (False, "runtime fail")},
+    )
+    choices = iter(["onnx", "models: m.onnx"])
+    monkeypatch.setattr(mcc, "prompt_choice", lambda *a, **k: next(choices))
+    monkeypatch.setattr(mcc, "prompt_int", lambda *a, **k: 1)
+    monkeypatch.setattr(mcc, "prompt_text", lambda *a, **k: "")
+    monkeypatch.setattr(mcc, "prompt_yes_no", lambda *a, **k: False)
+
+    try:
+        mcc._interactive_fill(args, tmp_path)
+        assert False, "interactive flow must stop when no targets are available"
+    except SystemExit as exc:
+        assert "No target models are available for onnx source" in str(exc)
+
+
+def test_interactive_onnx_wizard_offers_only_trt(monkeypatch, tmp_path: Path):
+    import argparse
+
+    args = argparse.Namespace(
+        input=None,
+        format=None,
+        batch=1,
+        dynamic=False,
+        precision="fp32",
+        imgsz=None,
+        opset=17,
+        simplify=True,
+        half=False,
+        nms=False,
+        output_dir=None,
+        workspace=None,
+        device=None,
+        data=None,
+        fraction=1.0,
+        workspace_gib=None,
+        force=False,
+        continue_on_error=False,
+    )
+    monkeypatch.setattr(
+        mcc,
+        "_discover_models",
+        lambda _root, *, allowed_suffixes: [("models", tmp_path / "m.onnx")],
+    )
+    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(
+        mcc,
+        "_get_export_format_availability",
+        lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (True, "")},
+    )
+
+    calls: list[tuple[str, list[str]]] = []
+    choices = iter(["onnx", "models: m.onnx", "auto", "static", "fp32"])
+    multi_choices = iter([["trt"]])
+
+    def _fake_prompt_choice(prompt, options, *a, **k):
+        calls.append((prompt, list(options)))
+        return next(choices)
+
+    monkeypatch.setattr(mcc, "prompt_choice", _fake_prompt_choice)
+    monkeypatch.setattr(
+        mcc,
+        "prompt_multi_choice_csv",
+        lambda prompt, options, *a, **k: (calls.append((prompt, list(options))) or next(multi_choices)),
+    )
+    monkeypatch.setattr(mcc, "prompt_int", lambda *a, **k: 1)
+    monkeypatch.setattr(mcc, "prompt_text", lambda *a, **k: "")
+    monkeypatch.setattr(mcc, "prompt_yes_no", lambda *a, **k: False)
+
+    mcc._interactive_fill(args, tmp_path)
+    target_prompt = [opts for prompt, opts in calls if prompt == "Targets"][0]
+    assert target_prompt == ["trt"]
+
+
+def test_interactive_pipeline_engine_uses_pt_source_not_session_onnx(monkeypatch, tmp_path: Path):
+    source_pt = tmp_path / "m.pt"
+    source_pt.write_text("pt", encoding="utf-8")
+
+    yolo_inits: list[Path] = []
+
+    class _FakeYOLO:
+        def __init__(self, path: str):
+            yolo_inits.append(Path(path))
+
+        def export(self, **_kwargs):
+            exported = tmp_path / "ultralytics.engine"
+            exported.write_text("engine", encoding="utf-8")
+            return str(exported)
+
+    import ultralytics
+
+    monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
+
+    def _fake_export_named_onnx_from_pt(*_a, **_k):
+        target_path = Path(_k["target_path"])
+        target_path.write_text("onnx", encoding="utf-8")
+        return True, "ok"
+
+    monkeypatch.setattr(mcc, "_export_named_onnx_from_pt", _fake_export_named_onnx_from_pt)
+    monkeypatch.setattr(mcc, "_maybe_move_output", lambda *_a, **_k: (True, "ok"))
+
+    ctx = mcc.InteractiveContext(
+        source_kind="pt",
+        source_path=source_pt,
+        target_onnx=True,
+        target_engine=True,
+        target_trt=False,
+        output_dir=tmp_path,
+        force=True,
+        onnx_imgsz=640,
+        onnx_imgsz_source="cli",
+        onnx_batch=1,
+        onnx_dynamic=False,
+        device=None,
+        engine_precision="fp32",
+        engine_workspace_gib=None,
+        trt_precision="fp32",
+        trt_workspace_gib=None,
+        data=None,
+        fraction=1.0,
+        opset=17,
+        simplify=True,
+        half=False,
+        nms=False,
+    )
+    result = mcc._run_interactive_pipeline(ctx)
+    assert result.stats.failed == 0
+    assert yolo_inits
+    assert all(p.suffix == ".pt" for p in yolo_inits)

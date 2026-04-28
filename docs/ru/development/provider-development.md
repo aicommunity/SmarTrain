@@ -76,7 +76,7 @@
 
 Обязательный нормализованный контракт артефактов:
 
-- `train/weights/best.pt`
+- `<run_dir_name>.pt` в корне run
 - `test/`
 - `test_metrics.csv`
 - `training_metadata.json`
