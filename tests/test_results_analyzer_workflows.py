@@ -540,6 +540,25 @@ def test_format_compare_omits_rows_when_format_model_missing(tmp_path: Path) -> 
     assert set(df["format"].tolist()) == {"pt"}
 
 
+def test_format_compare_does_not_use_onnx_csv_as_pt_source(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_no_pt_csv"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    (run_dir / "test_metrics_onnx.csv").write_text("mAP50-95,mAP50,Box-F1,Box-P,Box-R\n0.4000,0.5,0.6,0.7,0.8\n", encoding="utf-8")
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_no_pt_fallback"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    out_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare.csv"
+    df = pd.read_csv(out_csv)
+    row_onnx = df[df["format"] == "onnx"].iloc[0]
+    assert float(row_onnx["mAP50-95"]) == 0.4
+    assert "pt" not in set(df["format"].tolist())
+    sources_json = session_root / "artifacts" / "format_compare" / "format_metrics_sources.json"
+    assert sources_json.is_file()
+
+
 def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -634,7 +653,6 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
                 "artifact_status": "ok",
                 "backend_status": "ultralytics",
                 "mAP50-95": 0.61,
-                "delta_vs_pt_mAP50-95": 0.0,
             }
         ]
     ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare.csv", index=False)

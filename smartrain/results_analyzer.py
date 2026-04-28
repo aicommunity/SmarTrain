@@ -1513,6 +1513,7 @@ def _collect_ultralytics_test_artifacts(
 
 def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> dict[str, str] | None:
     rows: list[dict[str, Any]] = []
+    metrics_sources: list[dict[str, Any]] = []
     backend_fallback = {
         "pt": "ultralytics",
         "onnx": "onnxruntime",
@@ -1541,11 +1542,15 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
 
     for run_dir in run_dirs:
         run_name = os.path.basename(run_dir.rstrip(os.sep))
-        pt_metrics = read_test_metrics_row(run_dir, "pt") or {}
-        pt_map = pd.to_numeric(pd.Series([pt_metrics.get("mAP50-95")]), errors="coerce").iloc[0] if pt_metrics else np.nan
         manifest = load_test_artifacts_manifest(run_dir)
         formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
         metrics_paths = read_test_metrics_by_format(run_dir)
+        pt_source = metrics_paths.get("pt")
+        if isinstance(pt_source, str) and os.path.isfile(pt_source):
+            bn = os.path.basename(pt_source).lower()
+            if bn.startswith("test_metrics_") and bn != "test_metrics.csv":
+                print(f"[WARN] analyze: invalid pt metrics source ignored for {run_name}: {pt_source}")
+                metrics_paths.pop("pt", None)
         for fmt in ("pt", "onnx", "engine", "trt"):
             entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
             if not isinstance(entry, dict):
@@ -1561,7 +1566,16 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                 "artifact_status": entry.get("status"),
                 "backend_status": entry.get("backend"),
                 "target_path": entry.get("target_path"),
+                "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
             }
+            metrics_sources.append(
+                {
+                    "run_dir": run_dir,
+                    "run_name": run_name,
+                    "format": fmt,
+                    "metrics_source": row.get("metrics_source"),
+                }
+            )
             if metrics_exists and metrics_path:
                 try:
                     metrics_df = pd.read_csv(metrics_path)
@@ -1572,10 +1586,6 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         row["Box-F1"] = metric_row.get("Box-F1")
                         row["Box-P"] = metric_row.get("Box-P")
                         row["Box-R"] = metric_row.get("Box-R")
-                        cur_map = pd.to_numeric(pd.Series([metric_row.get("mAP50-95")]), errors="coerce").iloc[0]
-                        row["delta_vs_pt_mAP50-95"] = (
-                            float(cur_map - pt_map) if pd.notna(cur_map) and pd.notna(pt_map) else np.nan
-                        )
                         if not row.get("artifact_status"):
                             row["artifact_status"] = "ok"
                         if not row.get("backend_status"):
@@ -1589,6 +1599,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
     os.makedirs(out_dir, exist_ok=True)
     out_csv = os.path.join(out_dir, "format_metrics_compare.csv")
     pd.DataFrame(rows).to_csv(out_csv, index=False, encoding="utf-8")
+    out_sources = os.path.join(out_dir, "format_metrics_sources.json")
+    with open(out_sources, "w", encoding="utf-8") as f:
+        json.dump(metrics_sources, f, ensure_ascii=False, indent=2)
     return {"csv": os.path.relpath(out_csv, session_root)}
 
 

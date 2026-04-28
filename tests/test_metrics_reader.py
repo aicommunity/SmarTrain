@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from smartrain.confidence_recommendation import write_not_available_recommendations
-from smartrain.metrics_reader import flatten_metadata, read_test_metrics_by_format
+from smartrain.metrics_reader import flatten_metadata, latest_test_metrics_path, read_test_metrics_by_format, read_test_metrics_row
 
 
 def test_flatten_metadata_falls_back_to_args_yaml_model(tmp_path: Path) -> None:
@@ -70,3 +70,23 @@ def test_read_test_metrics_by_format_reads_manifest_and_files(tmp_path: Path) ->
     by_format = read_test_metrics_by_format(str(run_dir))
     assert by_format["pt"].endswith("test_metrics.csv")
     assert by_format["onnx"].endswith("test_metrics_onnx.csv")
+
+
+def test_latest_test_metrics_path_pt_does_not_fallback_to_format_specific(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_e" / "run_pt_path"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "test_metrics_onnx.csv").write_text("mAP50-95\n0.4\n", encoding="utf-8")
+    assert latest_test_metrics_path(str(run_dir), "pt") is None
+
+
+def test_read_test_metrics_row_pt_uses_manifest_metrics_csv_when_default_missing(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_f" / "run_manifest_pt"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "custom_pt_metrics.csv").write_text("mAP50-95\n0.55\n", encoding="utf-8")
+    (run_dir / "test_metrics_onnx.csv").write_text("mAP50-95\n0.4\n", encoding="utf-8")
+    (run_dir / "test_artifacts_manifest.json").write_text(
+        json.dumps({"formats": {"pt": {"metrics_csv": "custom_pt_metrics.csv"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    row = read_test_metrics_row(str(run_dir), "pt")
+    assert float(row["mAP50-95"]) == 0.55

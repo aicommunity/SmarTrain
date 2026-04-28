@@ -368,7 +368,6 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "artifact_status",
             "backend_status",
             "mAP50-95",
-            "delta_vs_pt_mAP50-95",
             "mAP50",
             "Box-F1",
             "Box-P",

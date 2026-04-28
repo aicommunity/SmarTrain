@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-from glob import glob
 from typing import Any
 
 import pandas as pd
@@ -65,8 +64,8 @@ def latest_test_metrics_path(run_dir: str, format_name: str | None = "pt") -> st
     if format_name not in (None, "", "pt"):
         p = format_metrics_path(run_dir, format_name)
         return p if os.path.isfile(p) else None
-    candidates = sorted(glob(os.path.join(run_dir, "test_metrics*.csv")))
-    return candidates[-1] if candidates else None
+    pt_metrics = os.path.join(run_dir, "test_metrics.csv")
+    return pt_metrics if os.path.isfile(pt_metrics) else None
 
 
 def read_test_metrics_by_format(run_dir: str) -> dict[str, str]:
@@ -163,7 +162,11 @@ def flatten_metadata(md: dict[str, Any], run_dir: str) -> dict[str, Any]:
 
 
 def read_test_metrics_row(run_dir: str, format_name: str | None = "pt") -> dict[str, Any]:
-    tm = latest_test_metrics_path(run_dir, format_name)
+    fmt = str(format_name or "pt").strip().lower()
+    by_format = read_test_metrics_by_format(run_dir)
+    tm = by_format.get(fmt) if by_format else None
+    if not tm:
+        tm = latest_test_metrics_path(run_dir, format_name)
     if not tm:
         return {}
     df = pd.read_csv(tm)
