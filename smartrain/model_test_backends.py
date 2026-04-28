@@ -4,6 +4,8 @@ import os
 import sys
 import gc
 import time
+import json
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -923,6 +925,25 @@ def _is_onnx_cuda_oom_error(exc: Exception) -> bool:
     return ("cuda" in msg and "out of memory" in msg) or "cudamalloc" in msg
 
 
+def _classify_onnx_error_text(message: str) -> str:
+    msg = str(message or "").lower()
+    if "timeout" in msg:
+        return "timeout"
+    if "terminated by signal" in msg:
+        return "signal_terminated"
+    if "out of memory" in msg or "cudamalloc" in msg or "bfc_arena" in msg:
+        return "oom_gpu"
+    if "inferencesession" in msg or "session init" in msg:
+        return "init_session_failed"
+    if "onnxruntimeerror" in msg or "runtime_exception" in msg:
+        return "runtime_exception"
+    return "unknown"
+
+
+def _format_onnx_error(code: str, detail: str) -> str:
+    return f"[{str(code or 'unknown').strip()}] {str(detail or '').strip()}"
+
+
 def _release_cuda_memory_best_effort() -> None:
     gc.collect()
     try:
@@ -992,6 +1013,85 @@ def _run_onnx_split_with_retry(
     if last_error is not None:
         raise last_error
     raise RuntimeError(f"onnxruntime {split_name} inference failed for unknown reason")
+
+
+def _run_onnx_split_in_subprocess(
+    *,
+    split_name: str,
+    image_paths: list[str],
+    weights_path: str,
+    dataset_yaml_path: str,
+    imgsz: int | None,
+    conf_thr: float,
+    iou_thr: float,
+    providers: list[str],
+    timeout_s: int = 1800,
+) -> tuple[list[_Pred], tuple[int, int]]:
+    request = {
+        "weights_path": weights_path,
+        "dataset_yaml_path": dataset_yaml_path,
+        "split_name": split_name,
+        "image_paths": image_paths,
+        "imgsz": imgsz,
+        "conf_thr": conf_thr,
+        "iou_thr": iou_thr,
+        "providers": providers,
+        "max_retries": 3,
+    }
+    cmd = [sys.executable, "-m", "smartrain.model_test_onnx_worker"]
+    try:
+        completed = subprocess.run(
+            cmd,
+            input=json.dumps(request, ensure_ascii=False),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=None,
+            timeout=max(30, int(timeout_s)),
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(_format_onnx_error("timeout", f"onnx worker timeout during {split_name}: {exc}")) from exc
+    stdout_text = (completed.stdout or "").strip()
+    payload: dict[str, Any] = {}
+    if stdout_text:
+        try:
+            payload = json.loads(stdout_text)
+        except Exception as exc:
+            raise RuntimeError(
+                _format_onnx_error(
+                    "runtime_exception",
+                    f"onnx worker returned non-json output during {split_name}. "
+                    f"exit={completed.returncode}, stdout={stdout_text[:400]}",
+                )
+            ) from exc
+    if completed.returncode != 0 or not bool(payload.get("ok")):
+        worker_error = payload.get("error") if isinstance(payload, dict) else None
+        msg_raw = str(worker_error or f"onnx worker failed for {split_name} (exit={completed.returncode})")
+        msg = _format_onnx_error(_classify_onnx_error_text(msg_raw), msg_raw)
+        raise RuntimeError(msg)
+    preds_payload = payload.get("preds") if isinstance(payload, dict) else []
+    preds: list[_Pred] = []
+    if isinstance(preds_payload, list):
+        for row in preds_payload:
+            if not isinstance(row, dict):
+                continue
+            preds.append(
+                _Pred(
+                    image_path=str(row.get("image_path", "")),
+                    cls_id=int(row.get("cls_id", 0)),
+                    conf=float(row.get("conf", 0.0)),
+                    x1=float(row.get("x1", 0.0)),
+                    y1=float(row.get("y1", 0.0)),
+                    x2=float(row.get("x2", 0.0)),
+                    y2=float(row.get("y2", 0.0)),
+                )
+            )
+    hw = payload.get("input_hw") if isinstance(payload, dict) else None
+    if isinstance(hw, list) and len(hw) == 2:
+        return preds, (int(hw[0]), int(hw[1]))
+    if isinstance(imgsz, int):
+        return preds, (int(imgsz), int(imgsz))
+    return preds, (640, 640)
 
 
 def _infer_with_pt_model(model: Any, image_path: str, input_hw: tuple[int, int], conf_thr: float, iou_thr: float) -> list[_Pred]:
@@ -1382,39 +1482,51 @@ def run_native_format_backend(
                 )
             return result
         if format_name == "onnx":
-            import onnxruntime as ort  # type: ignore
-            providers = []
-            available = list(ort.get_available_providers())
-            if "CUDAExecutionProvider" in available:
-                providers.append("CUDAExecutionProvider")
-            if "CPUExecutionProvider" in available:
-                providers.append("CPUExecutionProvider")
-            try:
-                session = _build_onnx_session_with_retry(ort, weights_path, providers)
-            except Exception as primary_exc:
-                cpu_only = ["CPUExecutionProvider"] if "CPUExecutionProvider" in available else None
-                if not cpu_only:
-                    raise primary_exc
-                print("[WARN] onnx: switching to CPUExecutionProvider after repeated initialization failures.")
-                session = ort.InferenceSession(weights_path, providers=cpu_only)
-            input_meta = session.get_inputs()[0]
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             names = _load_names(dataset_yaml_path)
             gt_rows, _by_image_gt, image_paths = _collect_gt(dataset_yaml_path, "test")
-            input_hw = _resolve_imgsz_from_onnx(session, imgsz)
-            eval_params = normalize_eval_params(imgsz=input_hw[0], conf=val_conf, iou=val_iou, default_imgsz=input_hw[0])
+            eval_params = normalize_eval_params(imgsz=imgsz, conf=val_conf, iou=val_iou)
             conf_thr = float(eval_params["conf"])
             iou_thr = float(eval_params["iou"])
-            preds = _run_onnx_split_with_retry(
-                split_name="test",
-                image_paths=image_paths,
-                session=session,
-                input_hw=input_hw,
-                conf_thr=conf_thr,
-                iou_thr=iou_thr,
-                names=names,
-                format_name=format_name,
-                weights_path=weights_path,
-            )
+            use_worker = str(os.getenv("SMARTTRAIN_ONNX_USE_SUBPROCESS", "1")).strip().lower() not in {"0", "false", "no"}
+            if use_worker:
+                preds, input_hw = _run_onnx_split_in_subprocess(
+                    split_name="test",
+                    image_paths=image_paths,
+                    weights_path=weights_path,
+                    dataset_yaml_path=dataset_yaml_path,
+                    imgsz=int(eval_params["imgsz"]),
+                    conf_thr=conf_thr,
+                    iou_thr=iou_thr,
+                    providers=providers,
+                )
+            else:
+                import onnxruntime as ort  # type: ignore
+
+                available = list(ort.get_available_providers())
+                providers_local = [p for p in providers if p in available]
+                try:
+                    session = _build_onnx_session_with_retry(ort, weights_path, providers_local)
+                except Exception as primary_exc:
+                    cpu_only = ["CPUExecutionProvider"] if "CPUExecutionProvider" in available else None
+                    if not cpu_only:
+                        raise primary_exc
+                    print("[WARN] onnx: switching to CPUExecutionProvider after repeated initialization failures.")
+                    session = ort.InferenceSession(weights_path, providers=cpu_only)
+                input_hw = _resolve_imgsz_from_onnx(session, int(eval_params["imgsz"]))
+                preds = _run_onnx_split_with_retry(
+                    split_name="test",
+                    image_paths=image_paths,
+                    session=session,
+                    input_hw=input_hw,
+                    conf_thr=conf_thr,
+                    iou_thr=iou_thr,
+                    names=names,
+                    format_name=format_name,
+                    weights_path=weights_path,
+                )
+            if not isinstance(input_hw, tuple):
+                input_hw = (int(eval_params["imgsz"]), int(eval_params["imgsz"]))
             inference = _write_native_eval_artifacts(
                 root_dir=root_dir,
                 format_name=format_name,
@@ -1435,17 +1547,29 @@ def run_native_format_backend(
             )
             try:
                 gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
-                preds_val = _run_onnx_split_with_retry(
-                    split_name="val",
-                    image_paths=image_paths_val,
-                    session=session,
-                    input_hw=input_hw,
-                    conf_thr=conf_thr,
-                    iou_thr=iou_thr,
-                    names=names,
-                    format_name=format_name,
-                    weights_path=weights_path,
-                )
+                if use_worker:
+                    preds_val, _input_hw_val = _run_onnx_split_in_subprocess(
+                        split_name="val",
+                        image_paths=image_paths_val,
+                        weights_path=weights_path,
+                        dataset_yaml_path=dataset_yaml_path,
+                        imgsz=input_hw[0],
+                        conf_thr=conf_thr,
+                        iou_thr=iou_thr,
+                        providers=providers,
+                    )
+                else:
+                    preds_val = _run_onnx_split_with_retry(
+                        split_name="val",
+                        image_paths=image_paths_val,
+                        session=session,
+                        input_hw=input_hw,
+                        conf_thr=conf_thr,
+                        iou_thr=iou_thr,
+                        names=names,
+                        format_name=format_name,
+                        weights_path=weights_path,
+                    )
                 _write_native_eval_artifacts(
                     root_dir=root_dir,
                     format_name=format_name,

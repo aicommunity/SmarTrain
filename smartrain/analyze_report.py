@@ -1020,11 +1020,29 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             except Exception:
                 issues_payload = []
             if isinstance(issues_payload, list) and issues_payload:
+                lines.append("### " + ("Проблемы вычисления форматов" if is_ru else "Format evaluation issues"))
+                lines.append("")
                 lines.append(
                     (
-                        "- Непосчитанные форматы и причины (агрегировано):"
+                        "- Сводка причин (код -> количество):"
                         if is_ru
-                        else "- Uncomputed formats and reasons (aggregated):"
+                        else "- Reason summary (code -> count):"
+                    )
+                )
+                reason_counts: dict[str, int] = {}
+                for item in issues_payload:
+                    if not isinstance(item, dict):
+                        continue
+                    reason_code = str(item.get("reason_code") or "unknown").strip() or "unknown"
+                    reason_counts[reason_code] = int(reason_counts.get(reason_code, 0)) + 1
+                for code, cnt in sorted(reason_counts.items(), key=lambda x: (-x[1], x[0])):
+                    lines.append(f"  - `{code}`: {cnt}")
+                lines.append("")
+                lines.append(
+                    (
+                        "- Детализация по run/split/format:"
+                        if is_ru
+                        else "- Detailed list by run/split/format:"
                     )
                 )
                 for item in issues_payload:
@@ -1034,8 +1052,9 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     split_name = str(item.get("split") or "-")
                     fmt = str(item.get("format") or "-")
                     status = str(item.get("status") or "-")
+                    reason_code = str(item.get("reason_code") or "unknown").strip() or "unknown"
                     reason = str(item.get("reason") or "-").replace("\n", " ").strip()
-                    lines.append(f"- {run_name} / {split_name} / {fmt}: {status} ({reason})")
+                    lines.append(f"- `{run_name}` / `{split_name}` / `{fmt}`: `{status}` / `{reason_code}` - {reason}")
                 lines.append("")
     eval_rel = str(fmt_cmp.get("eval_csv") or "")
     if eval_rel:

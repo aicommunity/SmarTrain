@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import pytest
 from pathlib import Path
 from types import ModuleType
 
@@ -39,6 +40,7 @@ def _install_fake_onnxruntime(monkeypatch) -> None:
     fake_mod.get_available_providers = lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"]
     fake_mod.InferenceSession = _FakeSession
     monkeypatch.setitem(sys.modules, "onnxruntime", fake_mod)
+    monkeypatch.setenv("SMARTTRAIN_ONNX_USE_SUBPROCESS", "0")
 
 
 def _answers(monkeypatch, values: list[str]) -> None:
@@ -204,6 +206,53 @@ def test_model_test_cli_force_reruns_matching_existing_test_non_interactive(monk
     out = capsys.readouterr().out
     assert called["native"] == 1
     assert "matching test artifacts already exist for this model and dataset, skipping." not in out
+
+
+def test_model_test_cli_reports_missing_data_yaml_without_traceback(tmp_path: Path, capsys) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_bad_data"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+
+    with pytest.raises(SystemExit):
+        smartrain_test_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--run",
+                str(run_dir),
+                "--formats",
+                "onnx",
+                "--data",
+                str(tmp_path / "datasets" / "..." / "data.yaml"),
+                "-y",
+            ]
+        )
+    err = capsys.readouterr().err
+    assert "data.yaml not found for dataset" in err
+    assert "replace with full real path" in err
+
+
+def test_model_test_cli_reports_missing_run_path_without_traceback(tmp_path: Path, capsys) -> None:
+    deploy_workspace(str(tmp_path))
+    missing_run = tmp_path / "runs" / "..." / "run_x"
+    with pytest.raises(SystemExit):
+        smartrain_test_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--run",
+                str(missing_run),
+                "--formats",
+                "onnx",
+                "--data",
+                str(tmp_path / "datasets" / "ds_a" / "data.yaml"),
+                "-y",
+            ]
+        )
+    err = capsys.readouterr().err
+    assert "Run directory not found" in err
+    assert "replace with full real path" in err
 
 
 def test_model_test_cli_skips_matching_existing_test_from_args_yaml_fallback(monkeypatch, tmp_path: Path, capsys) -> None:

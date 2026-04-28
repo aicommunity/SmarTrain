@@ -565,6 +565,33 @@ def test_format_compare_does_not_use_onnx_csv_as_pt_source(tmp_path: Path) -> No
     assert sources_json.is_file()
 
 
+def test_format_compare_issues_include_reason_code(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_a", "run_issue_code", model="yolo11n.pt", map5095=0.51, box_f1=0.60)
+    (run_dir / "model.onnx").write_bytes(b"fake")
+    manifest = {
+        "formats": {
+            "onnx": {
+                "backend": "onnxruntime",
+                "status": "unavailable",
+                "target_path": str(run_dir / "model.onnx"),
+                "error": "[oom_gpu] CUDA out of memory during split",
+            }
+        }
+    }
+    (run_dir / "test_artifacts_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_issue_code"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    issues_rel = out.get("issues_json")
+    assert issues_rel
+    issues_payload = json.loads((session_root / issues_rel).read_text(encoding="utf-8"))
+    assert isinstance(issues_payload, list) and issues_payload
+    onnx_issue = next(item for item in issues_payload if item.get("format") == "onnx")
+    assert onnx_issue["reason_code"] == "oom_gpu"
+
+
 def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

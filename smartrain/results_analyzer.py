@@ -1581,6 +1581,28 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         except Exception:
             return {}
 
+    def _normalize_issue_reason(reason: str) -> tuple[str, str]:
+        raw = str(reason or "").strip()
+        if raw.startswith("[") and "]" in raw:
+            maybe_code = raw[1 : raw.index("]")].strip().lower()
+            detail = raw[raw.index("]") + 1 :].strip()
+            if maybe_code:
+                return maybe_code, detail or raw
+        lower = raw.lower()
+        if "timeout" in lower:
+            return "timeout", raw
+        if "out of memory" in lower or "bfc_arena" in lower or "cudamalloc" in lower:
+            return "oom_gpu", raw
+        if "terminated by signal" in lower:
+            return "signal_terminated", raw
+        if "runtime_exception" in lower or "onnxruntimeerror" in lower:
+            return "runtime_exception", raw
+        if "session init" in lower or "inferencesession" in lower:
+            return "init_session_failed", raw
+        if "missing" in lower:
+            return "missing_artifact", raw
+        return "unknown", raw
+
     def _build_format_rows(
         split_name: str,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1644,13 +1666,15 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     status_raw = str(entry.get("status") or "").strip() if isinstance(entry, dict) else ""
                     err_raw = str(entry.get("error") or "").strip() if isinstance(entry, dict) else ""
                     if status_raw or err_raw:
+                        reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
                         issues.append(
                             {
                                 "run_name": run_name,
                                 "split": split_name,
                                 "format": fmt,
                                 "status": status_raw or "unknown",
-                                "reason": err_raw or "metrics missing",
+                                "reason": reason_detail,
+                                "reason_code": reason_code,
                             }
                         )
                 rows.append(row)
@@ -1730,13 +1754,15 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         status_raw = str(entry.get("status") or "").strip() if isinstance(entry, dict) else ""
                         err_raw = str(entry.get("error") or "").strip() if isinstance(entry, dict) else ""
                         if status_raw or err_raw:
+                            reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
                             issues.append(
                                 {
                                     "run_name": run_name,
                                     "split": split_name,
                                     "format": fmt,
                                     "status": status_raw or "unknown",
-                                    "reason": err_raw or "metrics missing",
+                                    "reason": reason_detail,
+                                    "reason_code": reason_code,
                                 }
                             )
                     rows.append(row)

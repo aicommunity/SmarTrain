@@ -100,7 +100,11 @@ def _normalize_data_to_yaml(data_value: str) -> str:
         return str(candidate)
     data_yaml = candidate / "data.yaml"
     if not data_yaml.is_file():
-        raise FileNotFoundError(f"data.yaml not found for dataset: {candidate}")
+        raw = str(data_value or "").strip()
+        hint = ""
+        if "..." in raw:
+            hint = " Path contains '...'; replace with full real path."
+        raise FileNotFoundError(f"data.yaml not found for dataset: {candidate}.{hint}")
     return str(data_yaml)
 
 
@@ -162,6 +166,10 @@ def _resolve_existing_artifact(
 def _resolve_target(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[str, str, str, str | None]:
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
+        if not run_dir.is_dir():
+            raw = str(args.run or "").strip()
+            hint = " Path contains '...'; replace with full real path." if "..." in raw else ""
+            raise FileNotFoundError(f"Run directory not found: {run_dir}.{hint}")
         best_pt = Path(canonical_run_model_path(str(run_dir), ".pt"))
         if not best_pt.is_file():
             materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
@@ -419,17 +427,21 @@ def main(argv: list[str] | None = None) -> None:
         except Exception:
             default_data_yaml = None
         raw_data = prompt_text("Dataset path or data.yaml", default=(default_data_yaml or "")).strip()
-        data_yaml = _resolve_data_yaml_for_target(
-            target_kind=target_kind,
-            root_dir=root_dir,
-            layout=layout,
-            data_cli=(raw_data or default_data_yaml),
-        )
+        try:
+            data_yaml = _resolve_data_yaml_for_target(
+                target_kind=target_kind,
+                root_dir=root_dir,
+                layout=layout,
+                data_cli=(raw_data or default_data_yaml),
+            )
+        except FileNotFoundError as exc:
+            parser.error(str(exc))
         defaults = _resolve_default_inference_params(root_dir)
         args.imgsz = int(defaults["imgsz"]) if defaults["imgsz"] is not None else None
         args.conf = float(defaults["conf"]) if defaults["conf"] is not None else None
         args.iou = float(defaults["iou"]) if defaults["iou"] is not None else None
-        args.batch = int(defaults["batch"]) if defaults["batch"] is not None else None
+        # Keep test runs memory-stable by default across backends.
+        args.batch = 1 if args.batch is None else int(args.batch)
         args.run = None
         args.model_name = None
         args.weights = None
@@ -442,9 +454,15 @@ def main(argv: list[str] | None = None) -> None:
         args.data = data_yaml
         args.formats = ",".join(formats)
     else:
-        root_dir, primary_path, target_kind, target_label = _resolve_target(args, layout)
+        try:
+            root_dir, primary_path, target_kind, target_label = _resolve_target(args, layout)
+        except (FileNotFoundError, ValueError) as exc:
+            parser.error(str(exc))
         formats = _parse_formats(args.formats)
-        data_yaml = _resolve_data_yaml_for_target(target_kind=target_kind, root_dir=root_dir, layout=layout, data_cli=args.data)
+        try:
+            data_yaml = _resolve_data_yaml_for_target(target_kind=target_kind, root_dir=root_dir, layout=layout, data_cli=args.data)
+        except FileNotFoundError as exc:
+            parser.error(str(exc))
         defaults = _resolve_default_inference_params(root_dir)
         if args.imgsz is None:
             args.imgsz = int(defaults["imgsz"]) if defaults["imgsz"] is not None else None
@@ -452,8 +470,8 @@ def main(argv: list[str] | None = None) -> None:
             args.conf = float(defaults["conf"]) if defaults["conf"] is not None else None
         if args.iou is None:
             args.iou = float(defaults["iou"]) if defaults["iou"] is not None else None
-        if args.batch is None and defaults["batch"] is not None:
-            args.batch = int(defaults["batch"])
+        if args.batch is None:
+            args.batch = 1
 
     replay = build_non_interactive_command("test", parser, args)
     results: list[tuple[str, bool, str | None]] = []

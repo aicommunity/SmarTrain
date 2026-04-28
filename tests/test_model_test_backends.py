@@ -38,6 +38,7 @@ def _install_fake_onnxruntime(monkeypatch) -> None:
     fake_mod.get_available_providers = lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"]
     fake_mod.InferenceSession = _FakeSession
     monkeypatch.setitem(sys.modules, "onnxruntime", fake_mod)
+    monkeypatch.setenv("SMARTTRAIN_ONNX_USE_SUBPROCESS", "0")
 
 
 def _make_dataset(tmp_path: Path, name: str, *, with_test: bool = True) -> Path:
@@ -179,6 +180,86 @@ def test_run_native_onnx_backend_retries_after_cuda_oom(monkeypatch, tmp_path: P
     assert result.success is True
     assert "CUDA OOM during test on attempt 1/3" in out
     assert (root_dir / "test_metrics_onnx.csv").is_file()
+
+
+def test_run_native_onnx_backend_subprocess_mode(monkeypatch, tmp_path: Path) -> None:
+    import subprocess
+
+    monkeypatch.setenv("SMARTTRAIN_ONNX_USE_SUBPROCESS", "1")
+    root_dir = tmp_path / "run_onnx_subprocess"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.onnx"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_onnx_subprocess", with_test=True)
+    test_image = str(ds / "test" / "images" / "a.jpg")
+
+    def _fake_subprocess_run(*_args, **kwargs):
+        req = json.loads(str(kwargs.get("input", "{}")))
+        payload = {
+            "ok": True,
+            "preds": [
+                {
+                    "image_path": test_image,
+                    "cls_id": 0,
+                    "conf": 0.9,
+                    "x1": 10.0,
+                    "y1": 10.0,
+                    "x2": 30.0,
+                    "y2": 30.0,
+                }
+            ],
+            "input_hw": [int(req.get("imgsz", 640)), int(req.get("imgsz", 640))],
+            "provider": "CUDAExecutionProvider",
+        }
+        return subprocess.CompletedProcess(args=_args[0] if _args else [], returncode=0, stdout=json.dumps(payload), stderr="")
+
+    monkeypatch.setattr("smartrain.model_test_backends.subprocess.run", _fake_subprocess_run)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="onnx",
+        imgsz=640,
+        val_conf=0.25,
+        val_iou=0.5,
+        val_batch=1,
+    )
+
+    assert result.success is True
+    assert (root_dir / "test_metrics_onnx.csv").is_file()
+
+
+def test_run_native_onnx_backend_subprocess_error_has_reason_code(monkeypatch, tmp_path: Path) -> None:
+    import subprocess
+
+    monkeypatch.setenv("SMARTTRAIN_ONNX_USE_SUBPROCESS", "1")
+    root_dir = tmp_path / "run_onnx_subprocess_err"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.onnx"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_onnx_subprocess_err", with_test=True)
+
+    def _fake_subprocess_run(*_args, **_kwargs):
+        payload = {"ok": False, "error": "CUDA out of memory during worker run"}
+        return subprocess.CompletedProcess(args=_args[0] if _args else [], returncode=1, stdout=json.dumps(payload), stderr="")
+
+    monkeypatch.setattr("smartrain.model_test_backends.subprocess.run", _fake_subprocess_run)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="onnx",
+        imgsz=640,
+        val_conf=0.25,
+        val_iou=0.5,
+        val_batch=1,
+    )
+
+    assert result.success is False
+    assert isinstance(result.error, str)
+    assert result.error.startswith("[oom_gpu]")
 
 
 def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path: Path) -> None:
