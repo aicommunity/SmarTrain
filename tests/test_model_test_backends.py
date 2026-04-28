@@ -8,6 +8,7 @@ from types import ModuleType
 from PIL import Image
 
 from smartrain.model_test_backends import run_native_format_backend
+from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
 
 
 class _FakeInput:
@@ -232,3 +233,62 @@ def test_ultralytics_style_metrics_payload_is_stable() -> None:
     assert float(payload["box_p"]) > 0.99
     assert float(payload["box_r"]) > 0.99
     assert float(payload["box_f1"]) > 0.99
+
+
+def test_collect_ultralytics_style_gt_filters_out_of_bounds_labels(tmp_path: Path) -> None:
+    ds = tmp_path / "datasets" / "ds_invalid"
+    (ds / "test" / "images").mkdir(parents=True, exist_ok=True)
+    (ds / "test" / "labels").mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (100, 100), color=(128, 128, 128)).save(ds / "test" / "images" / "a.jpg")
+    (ds / "test" / "labels" / "a.txt").write_text("0 1.10 0.5 0.2 0.2\n", encoding="utf-8")
+    (ds / "data.yaml").write_text(
+        "train: test/images\nval: test/images\ntest: test/images\nnames: ['obj']\n",
+        encoding="utf-8",
+    )
+
+    gt_rows, image_paths, issues = collect_ultralytics_style_gt(str(ds / "data.yaml"), "test", ["obj"])
+    assert len(image_paths) == 1
+    assert gt_rows == []
+    assert any("non-normalized or out of bounds coordinates" in str(msg) for msg in issues)
+
+
+def test_pt_uni_uses_validator_style_backend(monkeypatch, tmp_path: Path) -> None:
+    from smartrain.model_test_backends import BackendRunResult
+
+    root_dir = tmp_path / "run_pt_uni"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.pt"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_pt_uni", with_test=True)
+
+    called = {"n": 0}
+
+    def _fake_run_ultralytics_backend(**kwargs):
+        called["n"] += 1
+        return BackendRunResult(
+            format="pt_uni",
+            backend="ultralytics",
+            success=True,
+            test_start_time=None,
+            test_end_time=None,
+            inference={"imgsz": kwargs.get("imgsz"), "conf": kwargs.get("val_conf"), "iou": kwargs.get("val_iou")},
+            target_path=str(weights_path),
+        )
+
+    monkeypatch.setattr("smartrain.model_test_backends.run_ultralytics_backend", _fake_run_ultralytics_backend)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="pt_uni",
+        imgsz=640,
+        val_conf=0.001,
+        val_iou=0.7,
+        val_batch=1,
+    )
+
+    assert result.success is True
+    assert called["n"] == 1
+    assert result.backend == "unified_pt"
+    assert result.inference["inference_source"] == "ultralytics_model_val"

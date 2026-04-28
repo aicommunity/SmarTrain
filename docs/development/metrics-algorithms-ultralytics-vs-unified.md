@@ -63,6 +63,45 @@ To stay aligned with Ultralytics validation defaults:
 
 `imgsz`, `conf`, `iou` are persisted and exposed in report comparison metadata.
 
+## Cross-format Provenance (Section 4)
+Format comparison artifacts now include explicit provenance fields:
+- `inference_source`
+- `gt_source`
+- `nms_profile`
+
+They are stored in:
+- `artifacts/format_compare/format_metrics_compare_*.csv`
+- `artifacts/format_compare/format_eval_settings.csv`
+
+Use these fields to separate methodological drift from backend-specific effects.
+
+## Differences: Legacy vs Current vs Residual
+
+### Legacy Unified (before alignment)
+- `pt_uni` relied on per-image `predict` while `pt` used validator `val`.
+- GT parsing was project-local and less strict than Ultralytics validation checks.
+- NMS/matching/AP paths were only partially aligned with Ultralytics.
+- A meaningful part of `pt` vs `pt_uni` deltas was methodological.
+
+### Current Validator-style Unified
+- `pt_uni` now runs through validator-style `model.val` with aligned `imgsz/conf/iou`.
+- Non-pt formats keep a unified metric core aligned to Ultralytics AP/matching behavior.
+- GT collection is validated through Ultralytics `verify_image_label`.
+- Section 4 persists provenance (`inference_source`, `gt_source`, `nms_profile`) for diagnostics.
+
+### Unavoidable Residual Differences
+- Numerical/runtime differences across PyTorch, ONNX Runtime, TensorRT.
+- Export graph and plugin/kernel differences.
+- Backend instability cases (OOM/runtime/crash), tracked in `format_compare_issues.json`.
+
+## Drift Diagnostics Checklist
+When `pt` and `pt_uni` still differ, check in order:
+1. `inference_source`: validator-style is expected for `pt` and `pt_uni`; backend-specific source for `onnx/engine/trt`.
+2. `nms_profile`: compare validator/NMS profile across formats.
+3. `gt_source`: both should be Ultralytics-style validated labels.
+4. Eval params (`imgsz/conf/iou`) must match exactly.
+5. Runtime issues in `format_compare_issues.json` (OOM, runtime exceptions, missing artifacts).
+
 ## Implementation References
 - Unified evaluator: `smartrain/model_test_backends.py`
   - `_build_ultralytics_style_stats()`

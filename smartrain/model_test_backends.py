@@ -12,6 +12,7 @@ from typing import Any
 import matplotlib
 import numpy as np
 import pandas as pd
+import torch
 import yaml
 from PIL import Image
 
@@ -19,6 +20,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from ultralytics import YOLO
+from ultralytics.utils import nms as ultralytics_nms
 from ultralytics.utils.metrics import ap_per_class
 
 from smartrain.confidence_recommendation import (
@@ -33,6 +35,8 @@ from smartrain.model_test_service import (
     format_test_dir,
     persist_target_test_artifacts_state,
 )
+from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
+from smartrain.unified_validator_core import EvalProvenance, normalize_eval_params
 
 
 @dataclass
@@ -290,45 +294,56 @@ def _decode_onnx_predictions(
     num_classes = len(names)
     if raw.ndim != 2:
         raw = raw.reshape(-1, raw.shape[-1])
-    boxes_xyxy: np.ndarray
-    scores: np.ndarray
-    cls_ids: np.ndarray
     cols = int(raw.shape[1]) if raw.ndim == 2 else 0
     if cols == 6:
         boxes_xyxy = raw[:, :4].copy()
         scores = raw[:, 4].copy()
         cls_ids = raw[:, 5].astype(int)
+        valid = scores >= float(conf_thr)
+        if not np.any(valid):
+            return []
+        boxes_xyxy = boxes_xyxy[valid]
+        scores = scores[valid]
+        cls_ids = cls_ids[valid]
+        merged = np.concatenate([boxes_xyxy, scores[:, None], cls_ids[:, None]], axis=1).astype(np.float32)
+        nms_out = torch.tensor(merged, dtype=torch.float32).unsqueeze(0)
     else:
-        boxes = raw[:, :4].copy()
+        boxes = raw[:, :4].copy().astype(np.float32)
+        class_logits = raw[:, 4:].copy().astype(np.float32)
         if num_classes > 0 and cols == num_classes + 5:
-            obj = raw[:, 4:5]
-            class_scores = raw[:, 5:]
-            fused = obj * class_scores
-        else:
-            class_scores = raw[:, 4:]
-            fused = class_scores
-        cls_ids = np.argmax(fused, axis=1).astype(int)
-        scores = fused[np.arange(fused.shape[0]), cls_ids]
-        boxes_xyxy = _xywh_to_xyxy(boxes)
-    valid = scores >= float(conf_thr)
-    if not np.any(valid):
+            obj = class_logits[:, :1]
+            cls = class_logits[:, 1:]
+            class_logits = np.concatenate([obj, cls], axis=1)
+        # Build tensor in BCN format expected by Ultralytics NMS.
+        pred = np.concatenate([boxes, class_logits], axis=1).astype(np.float32)  # N x (4 + C or 5 + C)
+        nms_out = torch.tensor(pred, dtype=torch.float32).T.unsqueeze(0)
+    nms_result = ultralytics_nms.non_max_suppression(
+        nms_out,
+        conf_thres=float(conf_thr),
+        iou_thres=float(iou_thr),
+        agnostic=False,
+        multi_label=True,
+        max_det=300,
+        nc=max(num_classes, 0),
+    )[0]
+    if nms_result is None or nms_result.numel() == 0:
         return []
-    boxes_xyxy = boxes_xyxy[valid]
-    scores = scores[valid]
-    cls_ids = cls_ids[valid]
+    kept = nms_result.detach().cpu().numpy()
+    boxes_xyxy = kept[:, :4].copy()
+    scores = kept[:, 4].copy()
+    cls_ids = kept[:, 5].astype(int)
     boxes_xyxy[:, [0, 2]] -= pad[0]
     boxes_xyxy[:, [1, 3]] -= pad[1]
     boxes_xyxy /= max(gain, 1e-9)
     boxes_xyxy = _clip_boxes_xyxy(boxes_xyxy, orig_hw[1], orig_hw[0])
-    keep = _nms_classwise(boxes_xyxy, scores, cls_ids, iou_thr)
     preds: list[_Pred] = []
-    for idx in keep:
+    for idx in range(len(boxes_xyxy)):
         b = boxes_xyxy[idx]
         preds.append(
             _Pred(
                 image_path=image_path,
-                cls_id=int(cls_ids[idx]),
-                conf=float(scores[idx]),
+                cls_id=int(max(cls_ids[idx], 0)),
+                conf=float(max(scores[idx], 0.0)),
                 x1=float(b[0]),
                 y1=float(b[1]),
                 x2=float(b[2]),
@@ -339,26 +354,22 @@ def _decode_onnx_predictions(
 
 
 def _collect_gt(data_yaml_path: str, split: str) -> tuple[list[_Gt], dict[str, list[_Gt]], list[str]]:
-    image_paths = _split_images_from_yaml(data_yaml_path, split, 0)
-    gt_rows: list[_Gt] = []
+    names = _load_names(data_yaml_path)
+    gt_payload, image_paths, _issues = collect_ultralytics_style_gt(data_yaml_path, split, names)
+    gt_rows: list[_Gt] = [
+        _Gt(
+            image_path=row.image_path,
+            cls_id=int(row.cls_id),
+            x1=float(row.x1),
+            y1=float(row.y1),
+            x2=float(row.x2),
+            y2=float(row.y2),
+        )
+        for row in gt_payload
+    ]
     by_image: dict[str, list[_Gt]] = {}
-    for image_path in image_paths:
-        with Image.open(image_path) as im:
-            img_w, img_h = im.size
-        gt_boxes = _read_gt_boxes(image_path, img_w, img_h)
-        rows = [
-            _Gt(
-                image_path=image_path,
-                cls_id=int(box.cls_id),
-                x1=float(box.x1),
-                y1=float(box.y1),
-                x2=float(box.x2),
-                y2=float(box.y2),
-            )
-            for box in gt_boxes
-        ]
-        gt_rows.extend(rows)
-        by_image[image_path] = rows
+    for gt in gt_rows:
+        by_image.setdefault(gt.image_path, []).append(gt)
     return gt_rows, by_image, image_paths
 
 
@@ -751,6 +762,9 @@ def _write_test_args_yaml(
     conf: float | None,
     iou: float | None,
     batch: int | None,
+    inference_source: str,
+    gt_source: str,
+    nms_profile: str,
 ) -> None:
     payload = {
         "backend": backend,
@@ -761,6 +775,9 @@ def _write_test_args_yaml(
         "conf": conf,
         "iou": iou,
         "batch": batch,
+        "inference_source": inference_source,
+        "gt_source": gt_source,
+        "nms_profile": nms_profile,
     }
     with open(os.path.join(test_dir, "args.yaml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(payload, f, allow_unicode=True, sort_keys=False)
@@ -801,6 +818,9 @@ def _write_native_eval_artifacts(
     iou_thr: float,
     imgsz: int | None,
     batch: int | None,
+    inference_source: str,
+    gt_source: str,
+    nms_profile: str,
 ) -> dict[str, Any]:
     test_dir = format_test_dir(root_dir, format_name)
     if split == "test":
@@ -863,11 +883,22 @@ def _write_native_eval_artifacts(
             conf=conf_thr,
             iou=iou_thr,
             batch=batch,
+            inference_source=inference_source,
+            gt_source=gt_source,
+            nms_profile=nms_profile,
         )
     metrics_stub = _build_confidence_metrics_stub(names, thresholds, p2d, r2d)
     split_payload = compute_confidence_recommendations(metrics_stub, split=split)
     write_recommendation_file(format_recommendation_path(root_dir, split, format_name), split_payload)
-    return {"imgsz": imgsz, "conf": conf_thr, "iou": iou_thr, "batch": batch}
+    return {
+        "imgsz": imgsz,
+        "conf": conf_thr,
+        "iou": iou_thr,
+        "batch": batch,
+        "inference_source": inference_source,
+        "gt_source": gt_source,
+        "nms_profile": nms_profile,
+    }
 
 
 def _infer_with_onnx_session(session: Any, image_path: str, input_hw: tuple[int, int], conf_thr: float, iou_thr: float, names: list[str]) -> list[_Pred]:
@@ -1239,7 +1270,15 @@ def run_ultralytics_backend(
             success=True,
             test_start_time=test_start_time,
             test_end_time=test_end_time,
-            inference={"imgsz": imgsz, "conf": val_conf, "iou": val_iou, "batch": val_batch},
+            inference={
+                "imgsz": imgsz,
+                "conf": val_conf,
+                "iou": val_iou,
+                "batch": val_batch,
+                "inference_source": "ultralytics_model_val",
+                "gt_source": "ultralytics_validator",
+                "nms_profile": "ultralytics_validator_multilabel",
+            },
             target_path=weights_path,
         )
     except Exception as exc:
@@ -1258,7 +1297,15 @@ def run_ultralytics_backend(
             success=False,
             test_start_time=test_start_time,
             test_end_time=datetime.now(),
-            inference={"imgsz": imgsz, "conf": val_conf, "iou": val_iou, "batch": val_batch},
+            inference={
+                "imgsz": imgsz,
+                "conf": val_conf,
+                "iou": val_iou,
+                "batch": val_batch,
+                "inference_source": "ultralytics_model_val",
+                "gt_source": "ultralytics_validator",
+                "nms_profile": "ultralytics_validator_multilabel",
+            },
             target_path=weights_path,
             error=str(exc),
         )
@@ -1277,6 +1324,63 @@ def run_native_format_backend(
 ) -> BackendRunResult:
     backend_name = "onnxruntime" if format_name == "onnx" else ("unified_pt" if format_name == "pt_uni" else "tensorrt")
     try:
+        if format_name == "pt_uni":
+            eval_params = normalize_eval_params(imgsz=imgsz, conf=val_conf, iou=val_iou)
+            result = run_ultralytics_backend(
+                root_dir=root_dir,
+                weights_path=weights_path,
+                dataset_yaml_path=dataset_yaml_path,
+                format_name="pt_uni",
+                imgsz=int(eval_params["imgsz"]),
+                val_conf=float(eval_params["conf"]),
+                val_iou=float(eval_params["iou"]),
+                val_batch=val_batch,
+            )
+            if result.success:
+                test_dir = format_test_dir(root_dir, "pt_uni")
+                os.makedirs(test_dir, exist_ok=True)
+                _write_test_args_yaml(
+                    test_dir,
+                    backend=backend_name,
+                    format_name="pt_uni",
+                    weights_path=weights_path,
+                    data_yaml_path=dataset_yaml_path,
+                    imgsz=int(eval_params["imgsz"]),
+                    conf=float(eval_params["conf"]),
+                    iou=float(eval_params["iou"]),
+                    batch=val_batch,
+                    inference_source="ultralytics_model_val",
+                    gt_source="ultralytics_validator",
+                    nms_profile="ultralytics_validator_multilabel",
+                )
+                persist_target_test_artifacts_state(
+                    root_dir,
+                    format_name="pt_uni",
+                    target_path=weights_path,
+                    dataset_yaml=dataset_yaml_path,
+                    backend=backend_name,
+                    status="ok",
+                )
+            else:
+                persist_target_test_artifacts_state(
+                    root_dir,
+                    format_name="pt_uni",
+                    target_path=weights_path,
+                    dataset_yaml=dataset_yaml_path,
+                    backend=backend_name,
+                    status="failed",
+                    error=result.error,
+                )
+            result.backend = backend_name
+            if isinstance(result.inference, dict):
+                result.inference.update(
+                    EvalProvenance(
+                        inference_source="ultralytics_model_val",
+                        gt_source="ultralytics_validator",
+                        nms_profile="ultralytics_validator_multilabel",
+                    ).as_dict()
+                )
+            return result
         if format_name == "onnx":
             import onnxruntime as ort  # type: ignore
             providers = []
@@ -1297,8 +1401,9 @@ def run_native_format_backend(
             names = _load_names(dataset_yaml_path)
             gt_rows, _by_image_gt, image_paths = _collect_gt(dataset_yaml_path, "test")
             input_hw = _resolve_imgsz_from_onnx(session, imgsz)
-            conf_thr = float(val_conf if val_conf is not None else 0.25)
-            iou_thr = float(val_iou if val_iou is not None else 0.45)
+            eval_params = normalize_eval_params(imgsz=input_hw[0], conf=val_conf, iou=val_iou, default_imgsz=input_hw[0])
+            conf_thr = float(eval_params["conf"])
+            iou_thr = float(eval_params["iou"])
             preds = _run_onnx_split_with_retry(
                 split_name="test",
                 image_paths=image_paths,
@@ -1324,6 +1429,9 @@ def run_native_format_backend(
                 iou_thr=iou_thr,
                 imgsz=input_hw[0],
                 batch=val_batch,
+                inference_source="onnxruntime_session",
+                gt_source="ultralytics_verify_image_label",
+                nms_profile="ultralytics_nms_multilabel",
             )
             try:
                 gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
@@ -1352,6 +1460,9 @@ def run_native_format_backend(
                     iou_thr=iou_thr,
                     imgsz=input_hw[0],
                     batch=val_batch,
+                    inference_source="onnxruntime_session",
+                    gt_source="ultralytics_verify_image_label",
+                    nms_profile="ultralytics_nms_multilabel",
                 )
             except Exception:
                 pass
@@ -1372,21 +1483,18 @@ def run_native_format_backend(
                 inference=inference,
                 target_path=weights_path,
             )
-        elif format_name in {"engine", "trt", "pt_uni"}:
+        elif format_name in {"engine", "trt"}:
             names = _load_names(dataset_yaml_path)
             gt_rows, _by_image_gt, image_paths = _collect_gt(dataset_yaml_path, "test")
-            conf_thr = float(val_conf if val_conf is not None else 0.25)
-            iou_thr = float(val_iou if val_iou is not None else 0.45)
-            input_hw = (int(imgsz or 640), int(imgsz or 640))
-            pt_model = YOLO(weights_path) if format_name == "pt_uni" else None
+            eval_params = normalize_eval_params(imgsz=imgsz, conf=val_conf, iou=val_iou)
+            conf_thr = float(eval_params["conf"])
+            iou_thr = float(eval_params["iou"])
+            input_hw = (int(eval_params["imgsz"]), int(eval_params["imgsz"]))
             preds: list[_Pred] = []
             total_images = len(image_paths)
             print(f"[INFO] {format_name}: running native test on {total_images} images with {weights_path}")
             for image_path in tqdm(image_paths, desc=f"{format_name}:test", unit="img", file=sys.stdout):
-                if format_name == "pt_uni" and pt_model is not None:
-                    preds.extend(_infer_with_pt_model(pt_model, image_path, input_hw, conf_thr, iou_thr))
-                else:
-                    preds.extend(_infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names))
+                preds.extend(_infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names))
             print(f"[INFO] {format_name}: native test completed ({total_images}/{total_images} images).")
             inference = _write_native_eval_artifacts(
                 root_dir=root_dir,
@@ -1402,16 +1510,16 @@ def run_native_format_backend(
                 iou_thr=iou_thr,
                 imgsz=input_hw[0],
                 batch=val_batch,
+                inference_source="tensorrt_engine",
+                gt_source="ultralytics_verify_image_label",
+                nms_profile="ultralytics_nms_multilabel",
             )
             try:
                 gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
                 preds_val: list[_Pred] = []
                 print(f"[INFO] {format_name}: running native val on {len(image_paths_val)} images with {weights_path}")
                 for image_path in tqdm(image_paths_val, desc=f"{format_name}:val", unit="img", file=sys.stdout):
-                    if format_name == "pt_uni" and pt_model is not None:
-                        preds_val.extend(_infer_with_pt_model(pt_model, image_path, input_hw, conf_thr, iou_thr))
-                    else:
-                        preds_val.extend(_infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names))
+                    preds_val.extend(_infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names))
                 print(f"[INFO] {format_name}: native val completed ({len(image_paths_val)}/{len(image_paths_val)} images).")
                 _write_native_eval_artifacts(
                     root_dir=root_dir,
@@ -1427,6 +1535,9 @@ def run_native_format_backend(
                     iou_thr=iou_thr,
                     imgsz=input_hw[0],
                     batch=val_batch,
+                    inference_source="tensorrt_engine",
+                    gt_source="ultralytics_verify_image_label",
+                    nms_profile="ultralytics_nms_multilabel",
                 )
             except Exception:
                 pass

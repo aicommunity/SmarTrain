@@ -1558,6 +1558,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     "imgsz": inf.get("imgsz"),
                     "conf": inf.get("conf", 0.001 if inf.get("conf") is None else inf.get("conf")),
                     "iou": inf.get("iou"),
+                    "inference_source": "ultralytics_model_val",
+                    "gt_source": "ultralytics_validator",
+                    "nms_profile": "ultralytics_validator_multilabel",
                 }
             return {}
         try:
@@ -1607,6 +1610,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     "backend_status": entry.get("backend"),
                     "target_path": entry.get("target_path"),
                     "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
+                    "inference_source": None,
+                    "gt_source": None,
+                    "nms_profile": None,
                     "mAP50-95": metric_row.get("mAP50-95"),
                     "mAP50": metric_row.get("mAP50"),
                     "Box-F1": metric_row.get("Box-F1"),
@@ -1614,6 +1620,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     "Box-R": metric_row.get("Box-R"),
                 }
                 eval_args = _read_eval_args(run_dir, fmt)
+                row["inference_source"] = eval_args.get("inference_source")
+                row["gt_source"] = eval_args.get("gt_source")
+                row["nms_profile"] = eval_args.get("nms_profile")
                 eval_rows.append(
                     {
                         "run_dir": run_dir,
@@ -1623,6 +1632,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         "eval_imgsz": eval_args.get("imgsz"),
                         "eval_conf": eval_args.get("conf"),
                         "eval_iou": eval_args.get("iou"),
+                            "inference_source": eval_args.get("inference_source"),
+                            "gt_source": eval_args.get("gt_source"),
+                            "nms_profile": eval_args.get("nms_profile"),
                     }
                 )
                 if metrics_exists:
@@ -1649,6 +1661,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         "split": split_name,
                         "format": fmt,
                         "metrics_source": row.get("metrics_source"),
+                        "inference_source": row.get("inference_source"),
+                        "gt_source": row.get("gt_source"),
+                        "nms_profile": row.get("nms_profile"),
                     }
                 )
         return rows, sources, eval_rows, issues
@@ -1681,6 +1696,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         "backend_status": entry.get("backend"),
                         "target_path": entry.get("target_path"),
                         "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
+                        "inference_source": None,
+                        "gt_source": None,
+                        "nms_profile": None,
                         "mAP50-95": metric_row.get("mAP50-95"),
                         "mAP50": metric_row.get("mAP50"),
                         "Box-F1": metric_row.get("Box-F1"),
@@ -1688,6 +1706,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         "Box-R": metric_row.get("Box-R"),
                     }
                     eval_args = _read_eval_args(run_dir, fmt)
+                    row["inference_source"] = eval_args.get("inference_source")
+                    row["gt_source"] = eval_args.get("gt_source")
+                    row["nms_profile"] = eval_args.get("nms_profile")
                     eval_rows.append(
                         {
                             "run_dir": run_dir,
@@ -1697,6 +1718,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                             "eval_imgsz": eval_args.get("imgsz"),
                             "eval_conf": eval_args.get("conf"),
                             "eval_iou": eval_args.get("iou"),
+                            "inference_source": eval_args.get("inference_source"),
+                            "gt_source": eval_args.get("gt_source"),
+                            "nms_profile": eval_args.get("nms_profile"),
                         }
                     )
                     if metrics_exists:
@@ -1723,6 +1747,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                             "split": split_name,
                             "format": fmt,
                             "metrics_source": row.get("metrics_source"),
+                            "inference_source": row.get("inference_source"),
+                            "gt_source": row.get("gt_source"),
+                            "nms_profile": row.get("nms_profile"),
                         }
                     )
         return rows, sources, eval_rows, issues

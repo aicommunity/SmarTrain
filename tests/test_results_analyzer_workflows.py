@@ -526,6 +526,13 @@ def test_format_compare_falls_back_backend_for_legacy_pt_metrics(tmp_path: Path)
     row_pt = df[df["format"] == "pt"].iloc[0]
     assert row_pt["backend_status"] == "ultralytics"
 
+    eval_csv = session_root / "artifacts" / "format_compare" / "format_eval_settings.csv"
+    assert eval_csv.is_file()
+    eval_df = pd.read_csv(eval_csv)
+    assert "inference_source" in eval_df.columns
+    assert "gt_source" in eval_df.columns
+    assert "nms_profile" in eval_df.columns
+
 
 def test_format_compare_omits_rows_when_format_model_missing(tmp_path: Path) -> None:
     run_dir = _write_run(tmp_path, "ds_a", "run_only_pt", model="yolo11n.pt", map5095=0.51, box_f1=0.60)

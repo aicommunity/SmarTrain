@@ -381,6 +381,9 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "eval_imgsz",
             "eval_conf",
             "eval_iou",
+            "inference_source",
+            "gt_source",
+            "nms_profile",
         ]
     elif "pr_per_class" in lower:
         preferred = ["model", "class_id", "class_name", "ap", "recall", "precision"]

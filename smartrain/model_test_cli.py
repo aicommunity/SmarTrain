@@ -284,7 +284,7 @@ def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | 
     if defaults["conf"] is None:
         defaults["conf"] = 0.001
     if defaults["iou"] is None:
-        defaults["iou"] = 0.45
+        defaults["iou"] = 0.7
     return defaults
 
 

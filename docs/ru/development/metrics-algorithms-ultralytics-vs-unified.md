@@ -60,6 +60,45 @@
 
 Параметры `imgsz`, `conf`, `iou` сохраняются в артефактах и выводятся в отчете.
 
+## Provenance для сравнения форматов (раздел 4)
+В сравнения добавлены поля происхождения расчета:
+- `inference_source`
+- `gt_source`
+- `nms_profile`
+
+Они пишутся в:
+- `artifacts/format_compare/format_metrics_compare_*.csv`
+- `artifacts/format_compare/format_eval_settings.csv`
+
+Эти поля нужны, чтобы отделять backend-эффекты от методологических расхождений.
+
+## Различия: было / стало / неизбежный остаток
+
+### Было (legacy unified)
+- `pt_uni` считался через `predict` по изображениям, а `pt` через `val`-validator.
+- GT читался упрощенным парсером без полной валидации Ultralytics.
+- NMS/matching/AP могли расходиться по деталям реализации.
+- В результате различия `pt` vs `pt_uni` были частично методологическими.
+
+### Стало (validator-style unified)
+- `pt_uni` переведен на validator-style путь (`model.val`) с теми же `imgsz/conf/iou`.
+- Для non-pt форматов сохранен единый metric core с Ultralytics-совместимыми `ap_per_class` и IoU-grid.
+- GT собирается через Ultralytics-проверку `verify_image_label`.
+- В отчетах раздела 4 фиксируется provenance (`inference_source`, `gt_source`, `nms_profile`).
+
+### Неизбежный остаток (backend-эффекты)
+- Различия численной точности/ядра инференса: PyTorch vs ONNX Runtime vs TensorRT.
+- Различия экспортных графов и runtime-плагинов.
+- Нестабильность отдельных backend (OOM/runtime/crash), отражаемая в `format_compare_issues.json`.
+
+## Чеклист диагностики расхождений
+Если `pt` и `pt_uni` расходятся, проверять по порядку:
+1. `inference_source`: ожидается validator-style для `pt` и `pt_uni`; и backend-specific источник для `onnx/engine/trt`.
+2. `nms_profile`: сравнивать профили validator/NMS между форматами.
+3. `gt_source`: должен быть один и тот же валидированный источник GT.
+4. Совпадение параметров `imgsz/conf/iou`.
+5. `format_compare_issues.json` (OOM/runtime/missing artifacts).
+
 ## Ссылки на реализацию
 - Unified в проекте:
   - `smartrain/model_test_backends.py`
