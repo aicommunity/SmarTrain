@@ -12,5 +12,5 @@ tmp_merge_check/
 models/
 datasets/
 runs/
-
+dist/
 

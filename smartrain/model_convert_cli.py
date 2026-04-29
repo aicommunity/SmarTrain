@@ -41,6 +41,7 @@ class ConvertStats:
 
 
 _TRTEXEC_RUNTIME_CACHE: tuple[bool, str] | None = None
+_TRTEXEC_CAPS_CACHE: tuple[str, "TrtexecCapabilities"] | None = None
 
 
 SourceKind = Literal["pt", "onnx"]
@@ -83,6 +84,17 @@ class InteractiveResult:
     session_onnx: Path | None = None
     engine_path: Path | None = None
     trt_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class TrtexecCapabilities:
+    supports_build_only: bool
+    supports_explicit_batch: bool
+    workspace_mode: Literal["workspace", "memPoolSize", "none"]
+
+
+def _print_stage_header(title: str) -> None:
+    print(f"[INFO] ===== {title} =====")
 
 
 def build_model_convert_arg_parser() -> argparse.ArgumentParser:
@@ -351,6 +363,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
     out_dir = ctx.output_dir if ctx.output_dir else source_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Found 1 model(s) for conversion.")
+    _print_stage_header("Model 1/1")
     print(f"[INFO] Convert: {source_path}")
 
     # Resolve concrete source model file: if directory provided, pick first matching file.
@@ -374,6 +387,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
 
     session_onnx: Path | None = None
     if ctx.source_kind == "pt" and ctx.target_onnx:
+        _print_stage_header("Step ONNX")
         try:
             from ultralytics import YOLO
         except Exception as e:
@@ -420,6 +434,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
 
     # engine build
     if ctx.target_engine:
+        _print_stage_header("Step TensorRT engine")
         engine_target = out_dir / f"{source_path.stem}.engine"
         if engine_target.exists() and not ctx.force:
             print(f"[WARN] Skip TensorRT engine (exists): {engine_target}. Use --force to rebuild.")
@@ -454,6 +469,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 else:
                     print("[WARN] INT8 selected without --data; Ultralytics fallback dataset will be used.")
                 engine_kw["fraction"] = float(ctx.fraction)
+            print(f"[INFO] [START] TensorRT engine export: {engine_input} -> {engine_target}")
             exported = Path(str(model.export(**engine_kw))).expanduser().resolve()
             ok_move, move_reason = _maybe_move_output(exported, engine_target, ctx.force)
             if not ok_move:
@@ -462,12 +478,14 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 stats.artifacts_failed += 1
                 return result
             print(f"[OK] TensorRT engine: {engine_target}")
+            print(f"[INFO] [DONE] TensorRT engine export: {engine_target}")
             stats.ok += 1
             stats.artifacts_ok += 1
             result.engine_path = engine_target
 
     # trt build
     if ctx.target_trt:
+        _print_stage_header("Step TensorRT trt")
         trt_target = out_dir / f"{source_path.stem}.trt"
         if trt_target.exists() and not ctx.force:
             print(f"[WARN] Skip TensorRT trt (exists): {trt_target}. Use --force to rebuild.")
@@ -669,6 +687,49 @@ def _check_tensorrt_ready() -> tuple[bool, str]:
     return True, ""
 
 
+def _detect_trtexec_capabilities(trtexec_bin: str) -> TrtexecCapabilities:
+    help_text = ""
+    try:
+        proc = subprocess.run([trtexec_bin, "--help"], check=False, text=True, capture_output=True)
+        help_text = f"{proc.stdout}\n{proc.stderr}"
+    except Exception:
+        help_text = ""
+    help_lower = help_text.lower()
+    has_help = bool(help_lower.strip())
+    supports_build_only = "--buildonly" in help_lower if has_help else True
+    supports_explicit_batch = "--explicitbatch" in help_lower if has_help else True
+    if "--mempoolsize" in help_lower:
+        workspace_mode: Literal["workspace", "memPoolSize", "none"] = "memPoolSize"
+    elif "--workspace" in help_lower:
+        workspace_mode = "workspace"
+    elif has_help:
+        workspace_mode = "none"
+    else:
+        # Fail-open when we cannot inspect help, let runtime probe validate.
+        workspace_mode = "workspace"
+    return TrtexecCapabilities(
+        supports_build_only=supports_build_only,
+        supports_explicit_batch=supports_explicit_batch,
+        workspace_mode=workspace_mode,
+    )
+
+
+def _get_trtexec_capabilities(trtexec_bin: str) -> TrtexecCapabilities:
+    global _TRTEXEC_CAPS_CACHE
+    if _TRTEXEC_CAPS_CACHE is not None and _TRTEXEC_CAPS_CACHE[0] == trtexec_bin:
+        return _TRTEXEC_CAPS_CACHE[1]
+    caps = _detect_trtexec_capabilities(trtexec_bin)
+    _TRTEXEC_CAPS_CACHE = (trtexec_bin, caps)
+    return caps
+
+
+def _append_trtexec_workspace_arg(cmd: list[str], workspace_mib: int, caps: TrtexecCapabilities) -> None:
+    if caps.workspace_mode == "workspace":
+        cmd.append(f"--workspace={workspace_mib}")
+    elif caps.workspace_mode == "memPoolSize":
+        cmd.append(f"--memPoolSize=workspace:{workspace_mib}")
+
+
 def _check_trtexec_dependencies() -> tuple[bool, str]:
     trtexec_bin = _resolve_trtexec_bin()
     if not trtexec_bin:
@@ -733,6 +794,7 @@ def _check_trtexec_runtime_ready() -> tuple[bool, str]:
     if not trtexec_bin:
         _TRTEXEC_RUNTIME_CACHE = (False, "trtexec binary is not found")
         return _TRTEXEC_RUNTIME_CACHE
+    caps = _get_trtexec_capabilities(trtexec_bin)
     try:
         import onnx  # type: ignore
         from onnx import TensorProto, helper  # type: ignore
@@ -749,23 +811,44 @@ def _check_trtexec_runtime_ready() -> tuple[bool, str]:
         graph = helper.make_graph([node], "smartrain_probe", [x], [y])
         model = helper.make_model(graph, opset_imports=[helper.make_operatorsetid("", 13)])
         onnx.save(model, str(onnx_path))
-        cmd = [
+        base_cmd = [
             trtexec_bin,
             f"--onnx={onnx_path}",
-            "--buildOnly",
             f"--saveEngine={engine_path}",
-            "--workspace=64",
         ]
-        proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
-        if proc.returncode != 0:
+        attempts: list[tuple[str, list[str]]] = []
+        cmd_primary = list(base_cmd)
+        if caps.supports_build_only:
+            cmd_primary.append("--buildOnly")
+        _append_trtexec_workspace_arg(cmd_primary, 64, caps)
+        attempts.append(("primary", cmd_primary))
+
+        cmd_fallback = list(base_cmd)
+        attempts.append(("fallback_no_optional_flags", cmd_fallback))
+
+        unique_attempts: list[tuple[str, list[str]]] = []
+        seen: set[tuple[str, ...]] = set()
+        for name, cmd in attempts:
+            key = tuple(cmd)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_attempts.append((name, cmd))
+
+        reasons: list[str] = []
+        for attempt_name, cmd in unique_attempts:
+            if engine_path.exists():
+                engine_path.unlink(missing_ok=True)
+            proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+            if proc.returncode == 0 and engine_path.exists():
+                _TRTEXEC_RUNTIME_CACHE = (True, "")
+                return _TRTEXEC_RUNTIME_CACHE
             err = (proc.stderr or proc.stdout or "").strip()
             short = err.splitlines()[-1] if err else f"exit={proc.returncode}"
-            _TRTEXEC_RUNTIME_CACHE = (False, f"trtexec runtime probe failed: {short}")
-            return _TRTEXEC_RUNTIME_CACHE
-        if not engine_path.exists():
-            _TRTEXEC_RUNTIME_CACHE = (False, "trtexec runtime probe failed: engine is not produced")
-            return _TRTEXEC_RUNTIME_CACHE
-        _TRTEXEC_RUNTIME_CACHE = (True, "")
+            reasons.append(f"{attempt_name}: {short}")
+
+        details = "; ".join(reasons[:2]) if reasons else "engine is not produced"
+        _TRTEXEC_RUNTIME_CACHE = (False, f"trtexec runtime probe failed: {details}")
         return _TRTEXEC_RUNTIME_CACHE
     except Exception as e:
         _TRTEXEC_RUNTIME_CACHE = (False, f"trtexec runtime probe failed: {e}")
@@ -795,7 +878,8 @@ def _get_export_format_availability() -> dict[str, tuple[bool, str]]:
         return result
     runtime_ready, runtime_reason = _check_trtexec_runtime_ready()
     if not runtime_ready:
-        result["tensorrt-trt"] = (False, runtime_reason)
+        hint = "try format=tensorrt-engine as a fallback path"
+        result["tensorrt-trt"] = (False, f"{runtime_reason}; {hint}")
     return result
 
 
@@ -830,6 +914,7 @@ def _trtexec_export_from_onnx(
     trtexec_bin = _resolve_trtexec_bin()
     if not trtexec_bin:
         return False, "trtexec binary is not found"
+    caps = _get_trtexec_capabilities(trtexec_bin)
     h, w = (imgsz, imgsz) if isinstance(imgsz, int) else imgsz
     input_name = _guess_onnx_input_name(onnx_path)
     batch = int(args.batch)
@@ -839,12 +924,13 @@ def _trtexec_export_from_onnx(
     cmd = [
         trtexec_bin,
         f"--onnx={onnx_path}",
-        "--explicitBatch",
         f"--saveEngine={engine_target}",
         "--verbose",
     ]
+    if caps.supports_explicit_batch:
+        cmd.append("--explicitBatch")
     if args.workspace_gib is not None:
-        cmd.append(f"--workspace={max(1, int(float(args.workspace_gib) * 1024))}")
+        _append_trtexec_workspace_arg(cmd, max(1, int(float(args.workspace_gib) * 1024)), caps)
     if args.precision == "fp16":
         cmd.append("--fp16")
     elif args.precision == "int8":
@@ -855,6 +941,7 @@ def _trtexec_export_from_onnx(
         cmd.append(f"--optShapes={shape}")
         cmd.append(f"--maxShapes={shape}")
 
+    print(f"[INFO] [START] TensorRT trt build (trtexec): {onnx_path} -> {engine_target}")
     try:
         proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
     except Exception as e:
@@ -865,6 +952,7 @@ def _trtexec_export_from_onnx(
         return False, f"trtexec failed: {short}"
     if not engine_target.exists():
         return False, "trtexec finished without engine artifact"
+    print(f"[INFO] [DONE] TensorRT trt build (trtexec): {engine_target}")
     return True, "ok"
 
 
@@ -1120,6 +1208,7 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
         base_common["device"] = args.device
 
     if do_onnx:
+        _print_stage_header("Step ONNX")
         if model is None:
             try:
                 from ultralytics import YOLO
@@ -1171,6 +1260,8 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                 artifacts_failed += 1
 
     if do_trt:
+        stage_title = "Step TensorRT trt" if use_trtexec else "Step TensorRT engine"
+        _print_stage_header(stage_title)
         ready, reason = _check_tensorrt_ready()
         if not ready:
             print(f"[WARN] TensorRT export unavailable for {source_path}: {reason}")
@@ -1227,6 +1318,7 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                             print("[WARN] INT8 selected without --data; Ultralytics fallback dataset will be used.")
                         engine_kw["fraction"] = float(args.fraction)
                     try:
+                        print(f"[INFO] [START] TensorRT engine export: {source_path} -> {engine_target}")
                         exported = Path(str(model.export(**engine_kw))).expanduser().resolve()
                         ok_move, move_reason = _maybe_move_output(exported, engine_target, args.force)
                         if ok_move:
@@ -1237,6 +1329,8 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                         ok_trt, trt_reason = False, str(e)
                 if ok_trt:
                     print(f"[OK] TensorRT: {engine_target}")
+                    if not use_trtexec:
+                        print(f"[INFO] [DONE] TensorRT engine export: {engine_target}")
                     ok_any = True
                     artifacts_ok += 1
                 else:
@@ -1267,10 +1361,12 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                             print("[WARN] INT8 selected without --data; Ultralytics fallback dataset will be used.")
                         engine_kw["fraction"] = float(args.fraction)
                     try:
+                        print(f"[INFO] [START] TensorRT engine export: {source_path} -> {engine_target}")
                         exported = Path(str(model.export(**engine_kw))).expanduser().resolve()
                         ok_move, move_reason = _maybe_move_output(exported, engine_target, args.force)
                         if ok_move:
                             print(f"[OK] TensorRT: {engine_target}")
+                            print(f"[INFO] [DONE] TensorRT engine export: {engine_target}")
                             ok_any = True
                             artifacts_ok += 1
                         else:
@@ -1498,8 +1594,10 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(2)
 
     stats = ConvertStats(total=len(models))
-    print(f"[INFO] Found {len(models)} model(s) for conversion.")
-    for model_path in models:
+    total_models = len(models)
+    print(f"[INFO] Found {total_models} model(s) for conversion.")
+    for idx, model_path in enumerate(models, start=1):
+        _print_stage_header(f"Model {idx}/{total_models}")
         print(f"[INFO] Convert: {model_path}")
         ok_any, failed_any, skipped_any, artifacts_ok, artifacts_failed, artifacts_skipped = _convert_one(model_path, args)
         if ok_any:

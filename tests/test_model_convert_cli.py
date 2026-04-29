@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import smartrain.model_convert_cli as mcc
@@ -208,7 +210,124 @@ def test_get_export_format_availability_marks_trt_unavailable_on_runtime_probe(m
     availability = mcc._get_export_format_availability()
     assert availability["onnx"][0] is True
     assert availability["tensorrt-engine"][0] is True
-    assert availability["tensorrt-trt"] == (False, "runtime fail")
+    assert availability["tensorrt-trt"][0] is False
+    assert "runtime fail" in availability["tensorrt-trt"][1]
+    assert "format=tensorrt-engine" in availability["tensorrt-trt"][1]
+
+
+def test_detect_trtexec_capabilities_prefers_mempoolsize(monkeypatch):
+    def _fake_run(cmd, **_kwargs):
+        assert cmd[-1] == "--help"
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout="--memPoolSize --buildOnly",
+            stderr="",
+        )
+
+    monkeypatch.setattr(mcc.subprocess, "run", _fake_run)
+    caps = mcc._detect_trtexec_capabilities("/usr/bin/trtexec")
+    assert caps.supports_build_only is True
+    assert caps.workspace_mode == "memPoolSize"
+
+
+def test_runtime_probe_fallback_without_buildonly(monkeypatch, tmp_path: Path):
+    class _FakeTensorProto:
+        FLOAT = 1
+
+    class _FakeHelper:
+        @staticmethod
+        def make_tensor_value_info(*_args, **_kwargs):
+            return object()
+
+        @staticmethod
+        def make_node(*_args, **_kwargs):
+            return object()
+
+        @staticmethod
+        def make_graph(*_args, **_kwargs):
+            return object()
+
+        @staticmethod
+        def make_model(*_args, **_kwargs):
+            return object()
+
+        @staticmethod
+        def make_operatorsetid(*_args, **_kwargs):
+            return object()
+
+    fake_onnx = types.SimpleNamespace(
+        TensorProto=_FakeTensorProto,
+        helper=_FakeHelper,
+        save=lambda _model, path: Path(path).write_text("onnx", encoding="utf-8"),
+    )
+    monkeypatch.setitem(sys.modules, "onnx", fake_onnx)
+    monkeypatch.setattr(mcc, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
+    monkeypatch.setattr(
+        mcc,
+        "_get_trtexec_capabilities",
+        lambda _bin: mcc.TrtexecCapabilities(
+            supports_build_only=True,
+            supports_explicit_batch=True,
+            workspace_mode="workspace",
+        ),
+    )
+    monkeypatch.setattr(mcc.tempfile, "mkdtemp", lambda prefix: str(tmp_path / "probe_dir"))
+    (tmp_path / "probe_dir").mkdir(parents=True, exist_ok=True)
+
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd, **_kwargs):
+        calls.append(list(cmd))
+        save_engine_arg = [arg for arg in cmd if arg.startswith("--saveEngine=")][0]
+        engine_path = Path(save_engine_arg.split("=", 1)[1])
+        if "--buildOnly" in cmd:
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="Unknown option: --buildOnly")
+        engine_path.write_text("ok", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(mcc.subprocess, "run", _fake_run)
+    monkeypatch.setattr(mcc.shutil, "rmtree", lambda *_a, **_k: None)
+    monkeypatch.setattr(mcc, "_TRTEXEC_RUNTIME_CACHE", None)
+
+    ok, reason = mcc._check_trtexec_runtime_ready()
+    assert ok is True
+    assert reason == ""
+    assert any("--buildOnly" in cmd for cmd in calls)
+    assert any("--buildOnly" not in cmd for cmd in calls)
+
+
+def test_trtexec_export_skips_explicit_batch_when_unsupported(monkeypatch, tmp_path: Path):
+    onnx_path = tmp_path / "m.onnx"
+    onnx_path.write_text("onnx", encoding="utf-8")
+    engine_target = tmp_path / "m.trt"
+    args = _base_args(workspace_gib=1.0, batch=1, dynamic=False, precision="fp32")
+
+    monkeypatch.setattr(mcc, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
+    monkeypatch.setattr(mcc, "_guess_onnx_input_name", lambda _p: "images")
+    monkeypatch.setattr(
+        mcc,
+        "_get_trtexec_capabilities",
+        lambda _bin: mcc.TrtexecCapabilities(
+            supports_build_only=True,
+            supports_explicit_batch=False,
+            workspace_mode="memPoolSize",
+        ),
+    )
+    seen_cmds: list[list[str]] = []
+
+    def _fake_run(cmd, **_kwargs):
+        seen_cmds.append(list(cmd))
+        engine_target.write_text("engine", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(mcc.subprocess, "run", _fake_run)
+    ok, reason = mcc._trtexec_export_from_onnx(onnx_path, engine_target, args, 640)
+    assert ok is True
+    assert reason == "ok"
+    assert seen_cmds
+    cmd = seen_cmds[0]
+    assert "--explicitBatch" not in cmd
+    assert any(arg.startswith("--memPoolSize=workspace:") for arg in cmd)
 
 
 def test_validate_args_rejects_unavailable_format(monkeypatch):
