@@ -5,6 +5,8 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -638,21 +640,21 @@ def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
         expected_sig = _expected_onnx_signature(args, _parse_imgsz(str(args.imgsz)) if args.imgsz else _resolve_imgsz_from_args_and_model(args, chosen_source)[0])
         onnx_named = _make_dedicated_onnx_name(chosen_source.stem, expected_sig) + ".onnx"
         onnx_target = out_dir / onnx_named
-        if onnx_target.exists():
+        if onnx_target.is_file():
             args._force_onnx = prompt_yes_no(
                 f"Overwrite existing ONNX target ({onnx_target.name})",
                 default=False,
             )
     if bool(target_engine):
         engine_target = out_dir / f"{chosen_source.stem}.engine"
-        if engine_target.exists():
+        if engine_target.is_file():
             args._force_engine = prompt_yes_no(
                 f"Overwrite existing TensorRT engine ({engine_target.name})",
                 default=False,
             )
     if bool(target_trt):
         trt_target = out_dir / f"{chosen_source.stem}.trt"
-        if trt_target.exists():
+        if trt_target.is_file():
             args._force_trt = prompt_yes_no(
                 f"Overwrite existing TensorRT trt ({trt_target.name})",
                 default=False,
@@ -822,16 +824,34 @@ def _trtexec_export_from_onnx(
         cmd.append(f"--maxShapes={shape}")
 
     print(f"[INFO] [START] TensorRT trt build (trtexec): {onnx_path} -> {engine_target}")
+    log_file = Path(tempfile.mkstemp(prefix="smartrain_trtexec_", suffix=".log")[1])
     try:
-        # Stream trtexec output directly to terminal so long builds have visible progress.
-        proc = subprocess.run(cmd, check=False, text=True)
+        with log_file.open("w", encoding="utf-8") as lf:
+            proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, text=True)
+            started = time.monotonic()
+            while True:
+                rc = proc.poll()
+                if rc is not None:
+                    break
+                elapsed = int(time.monotonic() - started)
+                print(f"[INFO] [LIVE] TensorRT trt build is running... {elapsed}s elapsed")
+                time.sleep(5)
     except Exception as e:
         return False, f"failed to run trtexec: {e}"
     if proc.returncode != 0:
-        short = f"exit={proc.returncode} (see trtexec logs above)"
-        return False, f"trtexec failed: {short}"
+        try:
+            lines = log_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+            tail = lines[-1] if lines else ""
+        except Exception:
+            tail = ""
+        details = tail or f"exit={proc.returncode}"
+        return False, f"trtexec failed: {details} (full log: {log_file})"
     if not engine_target.exists():
         return False, "trtexec finished without engine artifact"
+    try:
+        log_file.unlink(missing_ok=True)
+    except Exception:
+        pass
     print(f"[INFO] [DONE] TensorRT trt build (trtexec): {engine_target}")
     return True, "ok"
 

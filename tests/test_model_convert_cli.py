@@ -315,12 +315,32 @@ def test_trtexec_export_skips_explicit_batch_when_unsupported(monkeypatch, tmp_p
     )
     seen_cmds: list[list[str]] = []
 
-    def _fake_run(cmd, **_kwargs):
-        seen_cmds.append(list(cmd))
-        engine_target.write_text("engine", encoding="utf-8")
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    class _FakePopen:
+        def __init__(self, cmd, **_kwargs):
+            seen_cmds.append(list(cmd))
+            self.returncode = None
+            self._done = False
 
-    monkeypatch.setattr(mcc.subprocess, "run", _fake_run)
+        def poll(self):
+            if not self._done:
+                self._done = True
+                return None
+            self.returncode = 0
+            engine_target.write_text("engine", encoding="utf-8")
+            return 0
+
+    def _fake_sleep(_secs):
+        return None
+
+    def _fake_mkstemp(**_kwargs):
+        p = tmp_path / "trtexec.log"
+        p.write_text("", encoding="utf-8")
+        return (123, str(p))
+
+    monkeypatch.setattr(mcc.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr(mcc.time, "sleep", _fake_sleep)
+    monkeypatch.setattr(mcc.tempfile, "mkstemp", _fake_mkstemp)
+
     ok, reason = mcc._trtexec_export_from_onnx(onnx_path, engine_target, args, 640)
     assert ok is True
     assert reason == "ok"
@@ -328,6 +348,49 @@ def test_trtexec_export_skips_explicit_batch_when_unsupported(monkeypatch, tmp_p
     cmd = seen_cmds[0]
     assert "--explicitBatch" not in cmd
     assert any(arg.startswith("--memPoolSize=workspace:") for arg in cmd)
+
+
+def test_trtexec_export_failure_reports_log_tail(monkeypatch, tmp_path: Path):
+    onnx_path = tmp_path / "m.onnx"
+    onnx_path.write_text("onnx", encoding="utf-8")
+    engine_target = tmp_path / "m.trt"
+    args = _base_args(workspace_gib=None, batch=1, dynamic=False, precision="fp32")
+
+    monkeypatch.setattr(mcc, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
+    monkeypatch.setattr(mcc, "_guess_onnx_input_name", lambda _p: "images")
+    monkeypatch.setattr(
+        mcc,
+        "_get_trtexec_capabilities",
+        lambda _bin: mcc.TrtexecCapabilities(
+            supports_build_only=True,
+            supports_explicit_batch=False,
+            workspace_mode="workspace",
+        ),
+    )
+
+    class _FailPopen:
+        def __init__(self, _cmd, **_kwargs):
+            out = _kwargs.get("stdout")
+            if out is not None:
+                out.write("line1\nline2\nfatal error\n")
+                out.flush()
+            self.returncode = 1
+
+        def poll(self):
+            return 1
+
+    def _fake_mkstemp(**_kwargs):
+        p = tmp_path / "trtexec_error.log"
+        p.write_text("", encoding="utf-8")
+        return (123, str(p))
+
+    monkeypatch.setattr(mcc.subprocess, "Popen", _FailPopen)
+    monkeypatch.setattr(mcc.tempfile, "mkstemp", _fake_mkstemp)
+
+    ok, reason = mcc._trtexec_export_from_onnx(onnx_path, engine_target, args, 640)
+    assert ok is False
+    assert "fatal error" in reason
+    assert "full log:" in reason
 
 
 def test_validate_args_rejects_unavailable_format(monkeypatch):

@@ -426,6 +426,84 @@ def _run_native_backend_isolated(
             pass
 
 
+def _collect_interactive_rerun_decisions(
+    *,
+    interactive: bool,
+    force: bool,
+    missing_only: bool,
+    root_dir: str,
+    target_kind: str,
+    primary_path: str,
+    formats: list[str],
+    data_yaml: str,
+    requested_imgsz: int | None,
+    requested_conf: float | None,
+    requested_iou: float | None,
+    deep_diagnostics: bool,
+) -> dict[str, bool]:
+    decisions: dict[str, bool] = {}
+    if not interactive or force:
+        return decisions
+
+    # Ask all overwrite/rerun questions upfront before any heavy work starts.
+    if "pt" in formats:
+        if target_kind == "runs" and (not missing_only or not has_complete_test_artifacts(root_dir, "pt")):
+            decisions["pt"] = _should_rerun_existing_match(
+                interactive=interactive,
+                force=force,
+                root_dir=root_dir,
+                format_name="pt",
+                target_path=primary_path,
+                dataset_yaml=data_yaml,
+                imgsz=requested_imgsz,
+                conf=requested_conf,
+                iou=requested_iou,
+                deep_diagnostics=deep_diagnostics,
+            )
+        elif target_kind in {"models", "weights"} and (not missing_only or not has_complete_test_artifacts(root_dir, "pt")):
+            decisions["pt"] = _should_rerun_existing_match(
+                interactive=interactive,
+                force=force,
+                root_dir=root_dir,
+                format_name="pt",
+                target_path=primary_path,
+                dataset_yaml=data_yaml,
+                imgsz=requested_imgsz,
+                conf=requested_conf,
+                iou=requested_iou,
+                deep_diagnostics=deep_diagnostics,
+            )
+
+    for fmt in ("pt_uni", "onnx", "engine", "trt"):
+        if fmt not in formats:
+            continue
+        if missing_only and has_complete_test_artifacts(root_dir, fmt):
+            continue
+        try:
+            artifact_path = _resolve_existing_artifact(
+                root_dir=root_dir,
+                primary_path=primary_path,
+                format_name=fmt,
+                target_kind=target_kind,
+            )
+        except Exception:
+            continue
+        decisions[fmt] = _should_rerun_existing_match(
+            interactive=interactive,
+            force=force,
+            root_dir=root_dir,
+            format_name=fmt,
+            target_path=artifact_path,
+            dataset_yaml=data_yaml,
+            imgsz=requested_imgsz,
+            conf=requested_conf,
+            iou=requested_iou,
+            deep_diagnostics=deep_diagnostics,
+        )
+
+    return decisions
+
+
 def _check_native_format_preflight(format_name: str) -> tuple[bool, str | None]:
     fmt = str(format_name).strip().lower()
     if fmt not in {"engine", "trt"}:
@@ -521,22 +599,39 @@ def main(argv: list[str] | None = None) -> None:
         formats=formats,
         split_name="test",
     )
+    predecisions = _collect_interactive_rerun_decisions(
+        interactive=interactive,
+        force=bool(args.force),
+        missing_only=bool(args.missing_only),
+        root_dir=root_dir,
+        target_kind=target_kind,
+        primary_path=primary_path,
+        formats=formats,
+        data_yaml=data_yaml,
+        requested_imgsz=requested_imgsz,
+        requested_conf=requested_conf,
+        requested_iou=requested_iou,
+        deep_diagnostics=bool(args.deep_diagnostics),
+    )
 
     if "pt" in formats:
         if target_kind == "runs" and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
             print(f"  model[pt]: {primary_path}")
-            if not _should_rerun_existing_match(
-                interactive=interactive,
-                force=bool(args.force),
-                root_dir=root_dir,
-                format_name="pt",
-                target_path=primary_path,
-                dataset_yaml=data_yaml,
-                imgsz=requested_imgsz,
-                conf=requested_conf,
-                iou=requested_iou,
-                deep_diagnostics=bool(args.deep_diagnostics),
-            ):
+            should_rerun = predecisions.get("pt")
+            if should_rerun is None:
+                should_rerun = _should_rerun_existing_match(
+                    interactive=interactive,
+                    force=bool(args.force),
+                    root_dir=root_dir,
+                    format_name="pt",
+                    target_path=primary_path,
+                    dataset_yaml=data_yaml,
+                    imgsz=requested_imgsz,
+                    conf=requested_conf,
+                    iou=requested_iou,
+                    deep_diagnostics=bool(args.deep_diagnostics),
+                )
+            if not should_rerun:
                 results.append(("pt", True, None))
             else:
                 if bool(args.deep_diagnostics):
@@ -575,18 +670,21 @@ def main(argv: list[str] | None = None) -> None:
                     results.append(("pt", True, None))
         elif target_kind in {"models", "weights"} and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
             print(f"  model[pt]: {primary_path}")
-            if not _should_rerun_existing_match(
-                interactive=interactive,
-                force=bool(args.force),
-                root_dir=root_dir,
-                format_name="pt",
-                target_path=primary_path,
-                dataset_yaml=data_yaml,
-                imgsz=requested_imgsz,
-                conf=requested_conf,
-                iou=requested_iou,
-                deep_diagnostics=bool(args.deep_diagnostics),
-            ):
+            should_rerun = predecisions.get("pt")
+            if should_rerun is None:
+                should_rerun = _should_rerun_existing_match(
+                    interactive=interactive,
+                    force=bool(args.force),
+                    root_dir=root_dir,
+                    format_name="pt",
+                    target_path=primary_path,
+                    dataset_yaml=data_yaml,
+                    imgsz=requested_imgsz,
+                    conf=requested_conf,
+                    iou=requested_iou,
+                    deep_diagnostics=bool(args.deep_diagnostics),
+                )
+            if not should_rerun:
                 results.append(("pt", True, None))
             else:
                 pt_result = run_ultralytics_backend(
@@ -615,18 +713,21 @@ def main(argv: list[str] | None = None) -> None:
                 target_kind=target_kind,
             )
             print(f"  model[{fmt}]: {artifact_path}")
-            if not _should_rerun_existing_match(
-                interactive=interactive,
-                force=bool(args.force),
-                root_dir=root_dir,
-                format_name=fmt,
-                target_path=artifact_path,
-                dataset_yaml=data_yaml,
-                imgsz=requested_imgsz,
-                conf=requested_conf,
-                iou=requested_iou,
-                deep_diagnostics=bool(args.deep_diagnostics),
-            ):
+            should_rerun = predecisions.get(fmt)
+            if should_rerun is None:
+                should_rerun = _should_rerun_existing_match(
+                    interactive=interactive,
+                    force=bool(args.force),
+                    root_dir=root_dir,
+                    format_name=fmt,
+                    target_path=artifact_path,
+                    dataset_yaml=data_yaml,
+                    imgsz=requested_imgsz,
+                    conf=requested_conf,
+                    iou=requested_iou,
+                    deep_diagnostics=bool(args.deep_diagnostics),
+                )
+            if not should_rerun:
                 results.append((fmt, True, None))
                 continue
             if fmt in {"engine", "trt"}:

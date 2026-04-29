@@ -1416,7 +1416,22 @@ def _infer_with_trt_engine(
     logger = trt.Logger(trt.Logger.ERROR)
     runtime = trt.Runtime(logger)
     with open(engine_path, "rb") as f:
-        engine = runtime.deserialize_cuda_engine(f.read())
+        blob = f.read()
+
+    # Ultralytics .engine can contain a JSON metadata prefix:
+    # [4-byte little-endian metadata_len][metadata JSON][raw TRT plan].
+    # Native .trt plans start directly with "ftrt".
+    payload = blob
+    if len(blob) >= 8 and not blob.startswith(b"ftrt"):
+        try:
+            meta_len = int.from_bytes(blob[:4], "little")
+            start = 4 + meta_len
+            if 0 < meta_len < len(blob) and start < len(blob) and blob[start : start + 4] == b"ftrt":
+                payload = blob[start:]
+        except Exception:
+            payload = blob
+
+    engine = runtime.deserialize_cuda_engine(payload)
     if engine is None:
         raise RuntimeError(
             f"Failed to deserialize TensorRT engine: {engine_path}. "
