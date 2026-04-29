@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.run_artifacts import model_sidecar_metadata_path
 
 import yaml
 from smartrain.confidence_recommendation import read_recommendation_file, recommendations_complete
@@ -240,7 +241,35 @@ def update_test_artifacts_manifest(
     if not isinstance(formats, dict):
         formats = {}
         payload["formats"] = formats
-    formats[fmt] = asdict(record)
+    existing = formats.get(fmt)
+    if isinstance(existing, dict):
+        artifacts = existing.get("artifacts")
+        if not isinstance(artifacts, list):
+            artifacts = []
+        rec_dict = asdict(record)
+        updated = False
+        for idx, item in enumerate(artifacts):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("target_path") or "") == str(rec_dict.get("target_path") or ""):
+                artifacts[idx] = rec_dict
+                updated = True
+                break
+        if not updated:
+            artifacts.append(rec_dict)
+        existing.update(rec_dict)
+        existing["artifacts"] = artifacts
+        if target_path:
+            sidecar = model_sidecar_metadata_path(target_path)
+            existing["target_metadata_json"] = os.path.relpath(str(sidecar), root_dir) if sidecar.is_file() else None
+        formats[fmt] = existing
+    else:
+        rec_dict = asdict(record)
+        rec_dict["artifacts"] = [asdict(record)]
+        if target_path:
+            sidecar = model_sidecar_metadata_path(target_path)
+            rec_dict["target_metadata_json"] = os.path.relpath(str(sidecar), root_dir) if sidecar.is_file() else None
+        formats[fmt] = rec_dict
     payload["updated_at"] = datetime.now().isoformat(timespec="seconds")
     _write_json_atomic(test_artifacts_manifest_path(root_dir), payload)
     return payload
@@ -418,15 +447,27 @@ def has_matching_test_artifacts(
     entry = formats.get(fmt)
     if not isinstance(entry, dict):
         return False
-    if str(entry.get("status") or "").strip().lower() != "ok":
+    expected_target = _normalize_compare_path(root_dir, target_path)
+    expected_dataset = _normalize_compare_path(root_dir, dataset_yaml)
+    artifacts = entry.get("artifacts")
+    selected_entry: dict[str, Any] | None = None
+    if isinstance(artifacts, list) and expected_target:
+        for item in artifacts:
+            if not isinstance(item, dict):
+                continue
+            item_target = _normalize_compare_path(root_dir, item.get("target_path"))
+            if item_target == expected_target:
+                selected_entry = item
+                break
+    if selected_entry is None:
+        selected_entry = entry
+    if str(selected_entry.get("status") or "").strip().lower() != "ok":
         return False
-    recorded_target = _normalize_compare_path(root_dir, entry.get("target_path"))
-    recorded_dataset_raw = entry.get("dataset_yaml")
+    recorded_target = _normalize_compare_path(root_dir, selected_entry.get("target_path"))
+    recorded_dataset_raw = selected_entry.get("dataset_yaml")
     if not recorded_dataset_raw:
         recorded_dataset_raw = _read_dataset_yaml_from_test_args(root_dir, fmt)
     recorded_dataset = _normalize_compare_path(root_dir, recorded_dataset_raw)
-    expected_target = _normalize_compare_path(root_dir, target_path)
-    expected_dataset = _normalize_compare_path(root_dir, dataset_yaml)
     if not (recorded_target and recorded_dataset and recorded_target == expected_target and recorded_dataset == expected_dataset):
         return False
     recorded = _read_inference_params_from_test_args(root_dir, fmt)

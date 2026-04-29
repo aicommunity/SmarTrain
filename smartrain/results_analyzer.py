@@ -33,7 +33,7 @@ from smartrain.compare_service import (
     generate_compare_insights,
 )
 from smartrain.analyze_report import write_analysis_report, write_manifest
-from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model, run_tmp_dir
 from smartrain.analyze_cache import (
     append_cache_entry,
     compute_fingerprint,
@@ -54,6 +54,7 @@ from smartrain.metrics_reader import (
     results_csv_path,
     read_test_metrics_by_format,
     read_metrics_by_format_for_split,
+    read_metrics_by_format_for_split_artifacts,
 )
 from smartrain.model_test_service import load_test_artifacts_manifest
 from smartrain.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
@@ -258,9 +259,13 @@ def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | Non
         except Exception:
             pass
 
-    runtime_yaml = os.path.join(rd, "_runtime_data_train.yaml")
+    runtime_yaml = os.path.join(str(run_tmp_dir(rd)), "_runtime_data_train.yaml")
     if os.path.isfile(runtime_yaml):
         _add(runtime_yaml, "_runtime_data_train.yaml")
+    else:
+        runtime_yaml = os.path.join(rd, "_runtime_data_train.yaml")
+        if os.path.isfile(runtime_yaml):
+            _add(runtime_yaml, "_runtime_data_train.yaml(legacy)")
 
     try:
         md = load_metadata(rd)
@@ -995,7 +1000,11 @@ def _extract_pr_curve_from_metrics(metrics_obj: Any) -> tuple[np.ndarray, np.nda
 
             if y.ndim >= 2:
                 # Usually shape: (num_classes, points); average across classes.
-                y = np.nanmean(y, axis=0)
+                valid_rows = ~np.all(np.isnan(y), axis=1)
+                if bool(np.any(valid_rows)):
+                    y = np.nanmean(y[valid_rows], axis=0)
+                else:
+                    continue
             if x.ndim > 1:
                 x = np.ravel(x)
             if y.ndim > 1:
@@ -1536,12 +1545,103 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
             candidate = target if os.path.isabs(target) else os.path.join(run_dir, target)
             if os.path.isfile(candidate):
                 return True
+        artifacts = entry.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if not isinstance(item, dict):
+                    continue
+                target_item = item.get("target_path")
+                if not isinstance(target_item, str) or not target_item.strip():
+                    continue
+                candidate = target_item if os.path.isabs(target_item) else os.path.join(run_dir, target_item)
+                if os.path.isfile(candidate):
+                    return True
         if fmt in {"pt", "pt_uni"}:
             return os.path.isfile(canonical_run_model_path(run_dir, ".pt"))
         ext = ext_by_format.get(fmt)
         if not ext:
             return False
         return any(os.path.isfile(p) for p in glob(os.path.join(run_dir, "**", f"*{ext}"), recursive=True))
+
+    def _pick_target_path(entry: dict[str, Any]) -> str | None:
+        target = entry.get("target_path")
+        if isinstance(target, str) and target.strip():
+            return target
+        artifacts = entry.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if not isinstance(item, dict):
+                    continue
+                t = item.get("target_path")
+                if isinstance(t, str) and t.strip():
+                    return t
+        return None
+
+    def _format_alias_prefix(fmt: str) -> str:
+        return {
+            "pt": "PT",
+            "pt_uni": "PTUNI",
+            "onnx": "ONNX",
+            "engine": "ENGINE",
+            "trt": "TRT",
+        }.get(fmt, str(fmt).upper())
+
+    def _iter_entry_variants(
+        run_dir: str,
+        fmt: str,
+        entry: dict[str, Any],
+        split_metrics: list[dict[str, str]],
+    ) -> list[dict[str, Any]]:
+        variants: list[dict[str, Any]] = []
+        artifacts = entry.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if not isinstance(item, dict):
+                    continue
+                target_rel = str(item.get("target_path") or "").strip()
+                target_abs = (
+                    os.path.abspath(os.path.join(run_dir, target_rel))
+                    if target_rel and not os.path.isabs(target_rel)
+                    else (target_rel or None)
+                )
+                metrics_rel = str(item.get("metrics_csv") or "").strip()
+                metrics_abs = (
+                    os.path.abspath(os.path.join(run_dir, metrics_rel))
+                    if metrics_rel and not os.path.isabs(metrics_rel)
+                    else (metrics_rel or None)
+                )
+                matched = None
+                if target_abs:
+                    for rec in split_metrics:
+                        if rec.get("target_path") == target_abs:
+                            matched = rec
+                            break
+                if matched is None and metrics_abs:
+                    for rec in split_metrics:
+                        if rec.get("metrics_path") == metrics_abs:
+                            matched = rec
+                            break
+                variants.append(
+                    {
+                        "target_path": target_rel or None,
+                        "metrics_path": (matched or {}).get("metrics_path") or metrics_abs,
+                        "status": item.get("status", entry.get("status")),
+                        "error": item.get("error", entry.get("error")),
+                        "backend": item.get("backend", entry.get("backend")),
+                    }
+                )
+        if not variants:
+            fallback_metrics = split_metrics[0].get("metrics_path") if split_metrics else None
+            variants.append(
+                {
+                    "target_path": _pick_target_path(entry),
+                    "metrics_path": fallback_metrics,
+                    "status": entry.get("status"),
+                    "error": entry.get("error"),
+                    "backend": entry.get("backend"),
+                }
+            )
+        return variants
 
     def _read_eval_args(run_dir: str, fmt: str) -> dict[str, Any]:
         args_yaml = os.path.join(run_dir, "test" if fmt == "pt" else f"test_{fmt}", "args.yaml")
@@ -1634,81 +1734,89 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
             manifest = load_test_artifacts_manifest(run_dir)
             formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
             metrics_paths = read_metrics_by_format_for_split(run_dir, split_name)
+            metrics_artifacts = read_metrics_by_format_for_split_artifacts(run_dir, split_name)
             for fmt in ("pt", "onnx", "engine", "trt"):
                 entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
                 if not isinstance(entry, dict):
                     entry = {}
-                metrics_path = metrics_paths.get(fmt)
-                metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
-                if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
+                fmt_metrics = list(metrics_artifacts.get(fmt) or [])
+                if not fmt_metrics and metrics_paths.get(fmt):
+                    fmt_metrics = [{"metrics_path": str(metrics_paths[fmt]), "target_path": ""}]
+                variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics)
+                if not variants and not _has_model_artifact(run_dir, fmt, entry):
                     continue
-                metric_row = _read_metric_row(metrics_path)
-                row: dict[str, Any] = {
-                    "run_dir": run_dir,
-                    "run_name": run_name,
-                    "split": split_name,
-                    "format": fmt,
-                    "backend_status": entry.get("backend"),
-                    "target_path": entry.get("target_path"),
-                    "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
-                    "inference_source": None,
-                    "gt_source": None,
-                    "nms_profile": None,
-                    "mAP50-95": metric_row.get("mAP50-95"),
-                    "mAP50": metric_row.get("mAP50"),
-                    "Box-F1": metric_row.get("Box-F1"),
-                    "Box-P": metric_row.get("Box-P"),
-                    "Box-R": metric_row.get("Box-R"),
-                }
                 eval_args = _read_eval_args(run_dir, fmt)
-                row["inference_source"] = eval_args.get("inference_source")
-                row["gt_source"] = eval_args.get("gt_source")
-                row["nms_profile"] = eval_args.get("nms_profile")
-                eval_rows.append(
-                    {
+                for var in variants:
+                    metrics_path = str(var.get("metrics_path") or "").strip() or None
+                    metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
+                    if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
+                        continue
+                    metric_row = _read_metric_row(metrics_path)
+                    row: dict[str, Any] = {
                         "run_dir": run_dir,
                         "run_name": run_name,
                         "split": split_name,
                         "format": fmt,
-                        "eval_imgsz": eval_args.get("imgsz"),
-                        "eval_conf": eval_args.get("conf"),
-                        "eval_iou": eval_args.get("iou"),
+                        "backend_status": var.get("backend"),
+                        "target_path": var.get("target_path"),
+                        "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
+                        "inference_source": eval_args.get("inference_source"),
+                        "gt_source": eval_args.get("gt_source"),
+                        "nms_profile": eval_args.get("nms_profile"),
+                        "mAP50-95": metric_row.get("mAP50-95"),
+                        "mAP50": metric_row.get("mAP50"),
+                        "Box-F1": metric_row.get("Box-F1"),
+                        "Box-P": metric_row.get("Box-P"),
+                        "Box-R": metric_row.get("Box-R"),
+                    }
+                    eval_rows.append(
+                        {
+                            "run_dir": run_dir,
+                            "run_name": run_name,
+                            "split": split_name,
+                            "format": fmt,
+                            "target_path": var.get("target_path"),
+                            "eval_imgsz": eval_args.get("imgsz"),
+                            "eval_conf": eval_args.get("conf"),
+                            "eval_iou": eval_args.get("iou"),
                             "inference_source": eval_args.get("inference_source"),
                             "gt_source": eval_args.get("gt_source"),
                             "nms_profile": eval_args.get("nms_profile"),
-                    }
-                )
-                if metrics_exists:
-                    if not row.get("backend_status"):
-                        row["backend_status"] = backend_fallback.get(fmt)
-                else:
-                    status_raw = str(entry.get("status") or "").strip() if isinstance(entry, dict) else ""
-                    err_raw = str(entry.get("error") or "").strip() if isinstance(entry, dict) else ""
-                    if status_raw or err_raw:
-                        reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
-                        issues.append(
-                            {
-                                "run_name": run_name,
-                                "split": split_name,
-                                "format": fmt,
-                                "status": status_raw or "unknown",
-                                "reason": reason_detail,
-                                "reason_code": reason_code,
-                            }
-                        )
-                rows.append(row)
-                sources.append(
-                    {
-                        "run_dir": run_dir,
-                        "run_name": run_name,
-                        "split": split_name,
-                        "format": fmt,
-                        "metrics_source": row.get("metrics_source"),
-                        "inference_source": row.get("inference_source"),
-                        "gt_source": row.get("gt_source"),
-                        "nms_profile": row.get("nms_profile"),
-                    }
-                )
+                        }
+                    )
+                    if metrics_exists:
+                        if not row.get("backend_status"):
+                            row["backend_status"] = backend_fallback.get(fmt)
+                    else:
+                        status_raw = str(var.get("status") or "").strip()
+                        err_raw = str(var.get("error") or "").strip()
+                        if status_raw or err_raw:
+                            reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
+                            issues.append(
+                                {
+                                    "run_name": run_name,
+                                    "split": split_name,
+                                    "format": fmt,
+                                    "target_path": var.get("target_path"),
+                                    "status": status_raw or "unknown",
+                                    "reason": reason_detail,
+                                    "reason_code": reason_code,
+                                }
+                            )
+                    rows.append(row)
+                    sources.append(
+                        {
+                            "run_dir": run_dir,
+                            "run_name": run_name,
+                            "split": split_name,
+                            "format": fmt,
+                            "target_path": var.get("target_path"),
+                            "metrics_source": row.get("metrics_source"),
+                            "inference_source": row.get("inference_source"),
+                            "gt_source": row.get("gt_source"),
+                            "nms_profile": row.get("nms_profile"),
+                        }
+                    )
         return rows, sources, eval_rows, issues
 
     def _build_pt_uni_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1722,81 +1830,87 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                 manifest = load_test_artifacts_manifest(run_dir)
                 formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
                 metrics_paths = read_metrics_by_format_for_split(run_dir, split_name)
+                metrics_artifacts = read_metrics_by_format_for_split_artifacts(run_dir, split_name)
                 for fmt in ("pt", "pt_uni"):
                     entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
                     if not isinstance(entry, dict):
                         entry = {}
-                    metrics_path = metrics_paths.get(fmt)
-                    metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
-                    if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
-                        continue
-                    metric_row = _read_metric_row(metrics_path)
-                    row: dict[str, Any] = {
-                        "run_dir": run_dir,
-                        "run_name": run_name,
-                        "split": split_name,
-                        "format": fmt,
-                        "backend_status": entry.get("backend"),
-                        "target_path": entry.get("target_path"),
-                        "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
-                        "inference_source": None,
-                        "gt_source": None,
-                        "nms_profile": None,
-                        "mAP50-95": metric_row.get("mAP50-95"),
-                        "mAP50": metric_row.get("mAP50"),
-                        "Box-F1": metric_row.get("Box-F1"),
-                        "Box-P": metric_row.get("Box-P"),
-                        "Box-R": metric_row.get("Box-R"),
-                    }
+                    fmt_metrics = list(metrics_artifacts.get(fmt) or [])
+                    if not fmt_metrics and metrics_paths.get(fmt):
+                        fmt_metrics = [{"metrics_path": str(metrics_paths[fmt]), "target_path": ""}]
+                    variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics)
                     eval_args = _read_eval_args(run_dir, fmt)
-                    row["inference_source"] = eval_args.get("inference_source")
-                    row["gt_source"] = eval_args.get("gt_source")
-                    row["nms_profile"] = eval_args.get("nms_profile")
-                    eval_rows.append(
-                        {
+                    for var in variants:
+                        metrics_path = str(var.get("metrics_path") or "").strip() or None
+                        metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
+                        if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
+                            continue
+                        metric_row = _read_metric_row(metrics_path)
+                        row: dict[str, Any] = {
                             "run_dir": run_dir,
                             "run_name": run_name,
                             "split": split_name,
                             "format": fmt,
-                            "eval_imgsz": eval_args.get("imgsz"),
-                            "eval_conf": eval_args.get("conf"),
-                            "eval_iou": eval_args.get("iou"),
+                            "backend_status": var.get("backend"),
+                            "target_path": var.get("target_path"),
+                            "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
                             "inference_source": eval_args.get("inference_source"),
                             "gt_source": eval_args.get("gt_source"),
                             "nms_profile": eval_args.get("nms_profile"),
+                            "mAP50-95": metric_row.get("mAP50-95"),
+                            "mAP50": metric_row.get("mAP50"),
+                            "Box-F1": metric_row.get("Box-F1"),
+                            "Box-P": metric_row.get("Box-P"),
+                            "Box-R": metric_row.get("Box-R"),
                         }
-                    )
-                    if metrics_exists:
-                        if not row.get("backend_status"):
-                            row["backend_status"] = backend_fallback.get(fmt)
-                    else:
-                        status_raw = str(entry.get("status") or "").strip() if isinstance(entry, dict) else ""
-                        err_raw = str(entry.get("error") or "").strip() if isinstance(entry, dict) else ""
-                        if status_raw or err_raw:
-                            reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
-                            issues.append(
-                                {
-                                    "run_name": run_name,
-                                    "split": split_name,
-                                    "format": fmt,
-                                    "status": status_raw or "unknown",
-                                    "reason": reason_detail,
-                                    "reason_code": reason_code,
-                                }
-                            )
-                    rows.append(row)
-                    sources.append(
-                        {
-                            "run_dir": run_dir,
-                            "run_name": run_name,
-                            "split": split_name,
-                            "format": fmt,
-                            "metrics_source": row.get("metrics_source"),
-                            "inference_source": row.get("inference_source"),
-                            "gt_source": row.get("gt_source"),
-                            "nms_profile": row.get("nms_profile"),
-                        }
-                    )
+                        eval_rows.append(
+                            {
+                                "run_dir": run_dir,
+                                "run_name": run_name,
+                                "split": split_name,
+                                "format": fmt,
+                                "target_path": var.get("target_path"),
+                                "eval_imgsz": eval_args.get("imgsz"),
+                                "eval_conf": eval_args.get("conf"),
+                                "eval_iou": eval_args.get("iou"),
+                                "inference_source": eval_args.get("inference_source"),
+                                "gt_source": eval_args.get("gt_source"),
+                                "nms_profile": eval_args.get("nms_profile"),
+                            }
+                        )
+                        if metrics_exists:
+                            if not row.get("backend_status"):
+                                row["backend_status"] = backend_fallback.get(fmt)
+                        else:
+                            status_raw = str(var.get("status") or "").strip()
+                            err_raw = str(var.get("error") or "").strip()
+                            if status_raw or err_raw:
+                                reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
+                                issues.append(
+                                    {
+                                        "run_name": run_name,
+                                        "split": split_name,
+                                        "format": fmt,
+                                        "target_path": var.get("target_path"),
+                                        "status": status_raw or "unknown",
+                                        "reason": reason_detail,
+                                        "reason_code": reason_code,
+                                    }
+                                )
+                        rows.append(row)
+                        sources.append(
+                            {
+                                "run_dir": run_dir,
+                                "run_name": run_name,
+                                "split": split_name,
+                                "format": fmt,
+                                "target_path": var.get("target_path"),
+                                "metrics_source": row.get("metrics_source"),
+                                "inference_source": row.get("inference_source"),
+                                "gt_source": row.get("gt_source"),
+                                "nms_profile": row.get("nms_profile"),
+                            }
+                        )
         return rows, sources, eval_rows, issues
 
     test_rows, test_sources, test_eval_rows, test_issues = _build_format_rows("test")
@@ -1807,6 +1921,26 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
     out_dir = os.path.join(session_root, "artifacts", "format_compare")
     os.makedirs(out_dir, exist_ok=True)
     out: dict[str, str] = {}
+    all_rows = test_rows + val_rows + pt_uni_rows
+    alias_legend: list[dict[str, str]] = []
+    alias_counters: dict[str, int] = {}
+    for row in sorted(
+        all_rows,
+        key=lambda r: (str(r.get("format") or ""), str(r.get("run_name") or ""), str(r.get("target_path") or "")),
+    ):
+        fmt = str(row.get("format") or "")
+        prefix = _format_alias_prefix(fmt)
+        alias_counters[prefix] = int(alias_counters.get(prefix, 0)) + 1
+        alias = f"{prefix}{alias_counters[prefix]}"
+        row["alias"] = alias
+        alias_legend.append(
+            {
+                "alias": alias,
+                "format": fmt,
+                "run_name": str(row.get("run_name") or ""),
+                "target_path": str(row.get("target_path") or ""),
+            }
+        )
     if test_rows:
         out_csv = os.path.join(out_dir, "format_metrics_compare_test.csv")
         pd.DataFrame(test_rows).to_csv(out_csv, index=False, encoding="utf-8")
@@ -1820,10 +1954,30 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         pd.DataFrame(pt_uni_rows).to_csv(out_csv, index=False, encoding="utf-8")
         out["pt_uni_csv"] = os.path.relpath(out_csv, session_root)
     eval_rows = test_eval_rows + val_eval_rows + pt_uni_eval_rows
+    alias_by_key = {
+        (str(r.get("run_name") or ""), str(r.get("split") or ""), str(r.get("format") or ""), str(r.get("target_path") or "")): str(
+            r.get("alias") or ""
+        )
+        for r in all_rows
+    }
+    for er in eval_rows:
+        er["alias"] = alias_by_key.get(
+            (
+                str(er.get("run_name") or ""),
+                str(er.get("split") or ""),
+                str(er.get("format") or ""),
+                str(er.get("target_path") or ""),
+            ),
+            "",
+        )
     if eval_rows:
         eval_csv = os.path.join(out_dir, "format_eval_settings.csv")
         pd.DataFrame(eval_rows).drop_duplicates().to_csv(eval_csv, index=False, encoding="utf-8")
         out["eval_csv"] = os.path.relpath(eval_csv, session_root)
+    if alias_legend:
+        alias_csv = os.path.join(out_dir, "format_alias_legend.csv")
+        pd.DataFrame(alias_legend).to_csv(alias_csv, index=False, encoding="utf-8")
+        out["alias_legend_csv"] = os.path.relpath(alias_csv, session_root)
     issues = test_issues + val_issues + pt_uni_issues
     if issues:
         issues_json = os.path.join(out_dir, "format_compare_issues.json")

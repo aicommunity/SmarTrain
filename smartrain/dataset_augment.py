@@ -189,7 +189,13 @@ def _compose_for_basic(args) -> A.Compose:
     if args.enable_conveyor:
         t.extend(
             [
-                A.ShiftScaleRotate(shift_limit=0.03, scale_limit=0.05, rotate_limit=5, border_mode=0, p=0.8),
+                A.Affine(
+                    translate_percent={"x": (-0.03, 0.03), "y": (-0.03, 0.03)},
+                    scale=(0.95, 1.05),
+                    rotate=(-5, 5),
+                    border_mode=0,
+                    p=0.8,
+                ),
                 A.GaussNoise(p=0.3),
                 A.MotionBlur(blur_limit=3, p=0.15),
             ]

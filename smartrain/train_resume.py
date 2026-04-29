@@ -13,7 +13,7 @@ import yaml
 from ultralytics import YOLO
 
 from smartrain.model_test_service import has_complete_test_artifacts, missing_test_artifacts
-from smartrain.run_artifacts import canonical_run_model_path
+from smartrain.run_artifacts import canonical_run_model_path, run_tmp_dir
 from smartrain.run_discovery import find_run_directories
 from smartrain.workspace_paths import WorkspaceLayout
 
@@ -201,7 +201,9 @@ def list_incomplete_runs(workspace_root: str) -> list[RunDiagnosis]:
 
 
 def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
-    data_yaml = os.path.join(run_dir, "_runtime_data_train.yaml")
+    preferred = os.path.join(str(run_tmp_dir(run_dir)), "_runtime_data_train.yaml")
+    legacy = os.path.join(run_dir, "_runtime_data_train.yaml")
+    data_yaml = preferred if os.path.isfile(preferred) else legacy
     if not os.path.isfile(data_yaml):
         return None
     try:

@@ -39,6 +39,13 @@ smartrain train --data 2026-01-01_12-00-00-merged --device 0 -y
 - `train` creates a run directory with metrics and metadata;
 - `analyze` and `registry` work on artifacts in `runs/`.
 
+Run artifact layout:
+
+- `runs/<dataset>/<run>/models/` stores model artifacts (`.pt/.onnx/.engine/.trt`).
+- `runs/<dataset>/<run>/tmp/` stores runtime/temporary service files.
+- Each model artifact can have sidecar metadata: `<filename>.meta.json`.
+- Multiple artifacts of the same format are supported in one run (for example, several `trt` variants).
+
 ## Key commands
 
 | Command | Purpose |

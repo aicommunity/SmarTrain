@@ -10,6 +10,7 @@ import pytest
 
 from smartrain import cli_prompts
 from smartrain import model_training_module as mtm
+from smartrain.run_artifacts import canonical_run_model_path
 from smartrain.workspace_paths import DATASETS_INFO_FILE, deploy_workspace
 
 
@@ -594,7 +595,7 @@ def test_train_main_external_layout_normalized_to_train_subdir(
     run_dir = target_root / "ds_a" / "run-fixed"
     assert called["test"] is True
     assert (run_dir / "train" / "args.yaml").is_file()
-    assert (run_dir / f"{run_dir.name}.pt").is_file()
+    assert Path(canonical_run_model_path(str(run_dir), ".pt")).is_file()
     assert (run_dir / "training_metadata.json").is_file()
     payload = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))
     assert payload["status"]["testing"]["success"] is True
@@ -645,5 +646,5 @@ def test_train_main_external_best_pt_moved_to_contract_path(
     )
     assert rc == 0
     run_dir = target_root / "ds_a" / "run-fixed"
-    assert (run_dir / f"{run_dir.name}.pt").is_file()
+    assert Path(canonical_run_model_path(str(run_dir), ".pt")).is_file()
 

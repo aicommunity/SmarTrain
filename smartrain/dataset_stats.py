@@ -152,7 +152,8 @@ def _average_hash(path: str) -> int:
     from PIL import Image
 
     img = Image.open(path).convert("L").resize((8, 8))
-    pixels = list(img.getdata())
+    get_flat = getattr(img, "get_flattened_data", None)
+    pixels = list(get_flat() if callable(get_flat) else img.getdata())
     mean = sum(pixels) / len(pixels)
     bits = 0
     for px in pixels:

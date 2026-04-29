@@ -26,7 +26,12 @@ from smartrain.model_test_service import (
     resolve_root_dir_for_target,
 )
 from smartrain.train_resume import resolve_dataset_path_for_resume
-from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.run_artifacts import (
+    canonical_run_model_path,
+    materialize_canonical_run_model,
+    scan_run_models,
+    run_models_dir,
+)
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 
@@ -64,37 +69,81 @@ def _parse_formats(raw: str) -> list[str]:
     return out or ["pt"]
 
 
-def _format_options() -> list[str]:
-    return ["pt", "pt_uni", "onnx", "engine", "trt"]
+def _discover_run_artifact_candidates(root_dir: str, formats: list[str] | None = None) -> dict[str, list[str]]:
+    requested = list(formats or list(SUPPORTED_TEST_FORMATS))
+    out: dict[str, list[str]] = {fmt: [] for fmt in requested}
+    scanned = scan_run_models(root_dir)
+    by_fmt: dict[str, list[str]] = {}
+    for rec in scanned:
+        fmt = str(rec.get("format") or "").strip().lower()
+        path = str(rec.get("path") or "").strip()
+        if not fmt or not path:
+            continue
+        by_fmt.setdefault(fmt, []).append(path)
+    for fmt in requested:
+        if fmt == "pt":
+            best = canonical_run_model_path(root_dir, ".pt")
+            if os.path.isfile(best):
+                out[fmt] = [best]
+            continue
+        if fmt in by_fmt:
+            out[fmt] = sorted(set(by_fmt[fmt]))
+            continue
+        try:
+            one = _resolve_existing_artifact(
+                root_dir=root_dir,
+                primary_path=canonical_run_model_path(root_dir, ".pt"),
+                format_name=fmt,
+                target_kind="runs",
+            )
+            out[fmt] = [one]
+        except Exception:
+            out[fmt] = []
+    # Keep deterministic order by format and path.
+    ordered: dict[str, list[str]] = {}
+    for fmt in SUPPORTED_TEST_FORMATS:
+        if fmt in out and out[fmt]:
+            ordered[fmt] = sorted(set(out[fmt]))
+    return ordered
 
 
-def _parse_format_tokens(raw: str) -> list[str]:
-    options = _format_options()
-    out: list[str] = []
-    tokens = [t.strip() for t in str(raw or "").replace(";", ",").split(",") if t.strip()]
-    for t in tokens:
-        if t.isdigit():
-            idx = int(t)
-            if idx < 1 or idx > len(options):
-                raise ValueError(f"Format index {idx} is out of range 1..{len(options)}")
-            fmt = options[idx - 1]
-        else:
-            fmt = t.lower()
-        if fmt not in SUPPORTED_TEST_FORMATS:
-            raise ValueError(f"Unsupported format: {fmt}")
-        if fmt not in out:
-            out.append(fmt)
-    return out or ["pt"]
+def _prompt_artifact_selection_interactive(candidates: dict[str, list[str]]) -> list[tuple[str, str]]:
+    options: list[str] = []
+    mapping: dict[int, tuple[str, str]] = {}
+    idx = 1
+    for fmt in SUPPORTED_TEST_FORMATS:
+        paths = candidates.get(fmt, [])
+        if not paths:
+            continue
+        for p in paths:
+            rel = os.path.relpath(p, os.path.dirname(os.path.dirname(p))) if os.path.isabs(p) else p
+            label = f"{fmt}: {rel}"
+            options.append(label)
+            mapping[idx] = (fmt, p)
+            idx += 1
+    if not options:
+        return []
+    if len(options) == 1:
+        return [mapping[1]]
+    print_numbered_options("models", options)
+    default = ",".join(str(i) for i in mapping.keys())
+    raw = prompt_text("Select models for test (comma-separated numbers)", default=default).strip() or default
+    selected: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for token in [t.strip() for t in raw.split(",") if t.strip()]:
+        if not token.isdigit():
+            continue
+        i = int(token)
+        item = mapping.get(i)
+        if item is None or item in seen:
+            continue
+        seen.add(item)
+        selected.append(item)
+    return selected
 
 
-def _prompt_formats_interactive(default: str = "pt,pt_uni,onnx,engine,trt") -> list[str]:
-    opts = _format_options()
-    print_numbered_options("formats", opts)
-    raw = prompt_text(
-        "Formats (comma-separated names or numbers)",
-        default=default,
-    ).strip()
-    return _parse_format_tokens(raw or default)
+def _artifact_key(fmt: str, path: str) -> str:
+    return f"{fmt}|{os.path.abspath(path)}"
 
 
 def _normalize_data_to_yaml(data_value: str) -> str:
@@ -138,6 +187,8 @@ def _resolve_existing_artifact(
     root = Path(root_dir)
     candidates: list[Path] = []
     if target_kind == "runs":
+        models_dir = run_models_dir(str(root))
+        candidates.extend(sorted(models_dir.glob(f"*{ext}")))
         run_pt = Path(canonical_run_model_path(str(root), ".pt"))
         candidates.extend(
             [
@@ -435,6 +486,7 @@ def _collect_interactive_rerun_decisions(
     target_kind: str,
     primary_path: str,
     formats: list[str],
+    selected_artifacts: list[tuple[str, str]] | None,
     data_yaml: str,
     requested_imgsz: int | None,
     requested_conf: float | None,
@@ -448,7 +500,7 @@ def _collect_interactive_rerun_decisions(
     # Ask all overwrite/rerun questions upfront before any heavy work starts.
     if "pt" in formats:
         if target_kind == "runs" and (not missing_only or not has_complete_test_artifacts(root_dir, "pt")):
-            decisions["pt"] = _should_rerun_existing_match(
+            decisions[_artifact_key("pt", primary_path)] = _should_rerun_existing_match(
                 interactive=interactive,
                 force=force,
                 root_dir=root_dir,
@@ -461,7 +513,7 @@ def _collect_interactive_rerun_decisions(
                 deep_diagnostics=deep_diagnostics,
             )
         elif target_kind in {"models", "weights"} and (not missing_only or not has_complete_test_artifacts(root_dir, "pt")):
-            decisions["pt"] = _should_rerun_existing_match(
+            decisions[_artifact_key("pt", primary_path)] = _should_rerun_existing_match(
                 interactive=interactive,
                 force=force,
                 root_dir=root_dir,
@@ -474,21 +526,28 @@ def _collect_interactive_rerun_decisions(
                 deep_diagnostics=deep_diagnostics,
             )
 
-    for fmt in ("pt_uni", "onnx", "engine", "trt"):
-        if fmt not in formats:
-            continue
-        if missing_only and has_complete_test_artifacts(root_dir, fmt):
-            continue
-        try:
-            artifact_path = _resolve_existing_artifact(
-                root_dir=root_dir,
-                primary_path=primary_path,
-                format_name=fmt,
-                target_kind=target_kind,
-            )
-        except Exception:
-            continue
-        decisions[fmt] = _should_rerun_existing_match(
+    entries: list[tuple[str, str]] = []
+    if selected_artifacts:
+        entries.extend(selected_artifacts)
+    else:
+        for fmt in ("pt_uni", "onnx", "engine", "trt"):
+            if fmt not in formats:
+                continue
+            if missing_only and has_complete_test_artifacts(root_dir, fmt):
+                continue
+            try:
+                artifact_path = _resolve_existing_artifact(
+                    root_dir=root_dir,
+                    primary_path=primary_path,
+                    format_name=fmt,
+                    target_kind=target_kind,
+                )
+            except Exception:
+                continue
+            entries.append((fmt, artifact_path))
+
+    for fmt, artifact_path in entries:
+        decisions[_artifact_key(fmt, artifact_path)] = _should_rerun_existing_match(
             interactive=interactive,
             force=force,
             root_dir=root_dir,
@@ -531,7 +590,7 @@ def main(argv: list[str] | None = None) -> None:
         if not interactive:
             parser.error("Specify one of --run, --model-name or --weights in non-interactive mode.")
         root_dir, primary_path, target_kind, target_label = _pick_interactive_target(layout)
-        formats = _prompt_formats_interactive(default="pt,pt_uni,onnx,engine,trt")
+        formats = _parse_formats("pt,pt_uni,onnx,engine,trt")
         default_data_yaml: str | None = None
         try:
             default_data_yaml = _resolve_data_yaml_for_target(
@@ -589,7 +648,7 @@ def main(argv: list[str] | None = None) -> None:
         if args.batch is None:
             args.batch = 1
 
-    replay = build_non_interactive_command("test", parser, args)
+    replay: str | None = None
     results: list[tuple[str, bool, str | None]] = []
     _print_test_plan(
         target_kind=target_kind,
@@ -599,6 +658,15 @@ def main(argv: list[str] | None = None) -> None:
         formats=formats,
         split_name="test",
     )
+    selected_artifacts: list[tuple[str, str]] = []
+    if interactive and target_kind == "runs":
+        candidates = _discover_run_artifact_candidates(root_dir)
+        selected_artifacts = _prompt_artifact_selection_interactive(candidates)
+        selected_formats = {fmt for fmt, _ in selected_artifacts}
+        if selected_formats:
+            formats = [fmt for fmt in SUPPORTED_TEST_FORMATS if fmt in selected_formats]
+            args.formats = ",".join(formats)
+    replay = build_non_interactive_command("test", parser, args)
     predecisions = _collect_interactive_rerun_decisions(
         interactive=interactive,
         force=bool(args.force),
@@ -607,6 +675,7 @@ def main(argv: list[str] | None = None) -> None:
         target_kind=target_kind,
         primary_path=primary_path,
         formats=formats,
+        selected_artifacts=selected_artifacts,
         data_yaml=data_yaml,
         requested_imgsz=requested_imgsz,
         requested_conf=requested_conf,
@@ -617,7 +686,7 @@ def main(argv: list[str] | None = None) -> None:
     if "pt" in formats:
         if target_kind == "runs" and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
             print(f"  model[pt]: {primary_path}")
-            should_rerun = predecisions.get("pt")
+            should_rerun = predecisions.get(_artifact_key("pt", primary_path))
             if should_rerun is None:
                 should_rerun = _should_rerun_existing_match(
                     interactive=interactive,
@@ -670,7 +739,7 @@ def main(argv: list[str] | None = None) -> None:
                     results.append(("pt", True, None))
         elif target_kind in {"models", "weights"} and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
             print(f"  model[pt]: {primary_path}")
-            should_rerun = predecisions.get("pt")
+            should_rerun = predecisions.get(_artifact_key("pt", primary_path))
             if should_rerun is None:
                 should_rerun = _should_rerun_existing_match(
                     interactive=interactive,
@@ -700,20 +769,43 @@ def main(argv: list[str] | None = None) -> None:
                 )
                 results.append(("pt", pt_result.success, pt_result.error))
 
-    for fmt in ("pt_uni", "onnx", "engine", "trt"):
-        if fmt not in formats:
-            continue
-        if args.missing_only and has_complete_test_artifacts(root_dir, fmt):
-            continue
+    queued: list[tuple[str, str]] = []
+    if selected_artifacts:
+        for fmt, path in selected_artifacts:
+            if fmt in {"pt", "pt_uni", "onnx", "engine", "trt"}:
+                queued.append((fmt, path))
+    else:
+        for fmt in ("pt_uni", "onnx", "engine", "trt"):
+            if fmt not in formats:
+                continue
+            if args.missing_only and has_complete_test_artifacts(root_dir, fmt):
+                continue
+            try:
+                artifact_path = _resolve_existing_artifact(
+                    root_dir=root_dir,
+                    primary_path=primary_path,
+                    format_name=fmt,
+                    target_kind=target_kind,
+                )
+            except Exception as exc:
+                backend = "onnxruntime" if fmt == "onnx" else "tensorrt"
+                persist_target_test_artifacts_state(
+                    root_dir,
+                    format_name=fmt,
+                    target_path=None,
+                    dataset_yaml=data_yaml,
+                    backend=backend,
+                    status="failed",
+                    error=str(exc),
+                )
+                results.append((fmt, False, str(exc)))
+                continue
+            queued.append((fmt, artifact_path))
+
+    for fmt, artifact_path in queued:
         try:
-            artifact_path = _resolve_existing_artifact(
-                root_dir=root_dir,
-                primary_path=primary_path,
-                format_name=fmt,
-                target_kind=target_kind,
-            )
             print(f"  model[{fmt}]: {artifact_path}")
-            should_rerun = predecisions.get(fmt)
+            should_rerun = predecisions.get(_artifact_key(fmt, artifact_path))
             if should_rerun is None:
                 should_rerun = _should_rerun_existing_match(
                     interactive=interactive,
@@ -777,7 +869,7 @@ def main(argv: list[str] | None = None) -> None:
                     val_conf=args.conf,
                     val_iou=args.iou,
                     val_batch=args.batch,
-                        deep_diagnostics=bool(args.deep_diagnostics),
+                    deep_diagnostics=bool(args.deep_diagnostics),
                 )
                 results.append((fmt, result.success, result.error))
         except Exception as exc:

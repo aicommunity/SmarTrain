@@ -83,6 +83,8 @@ from smartrain.run_artifacts import (
     canonical_run_model_path,
     materialize_canonical_run_model,
     resolve_run_model_with_legacy_fallback,
+    run_tmp_dir,
+    ensure_run_layout,
 )
 
 
@@ -1569,7 +1571,8 @@ def _build_runtime_data_yaml(dataset_path: str, run_dir: str, *, stage: str) -> 
     if test_rel is not None:
         runtime_cfg["test"] = test_rel
 
-    out_yaml = os.path.join(run_dir, f"_runtime_data_{stage}.yaml")
+    ensure_run_layout(run_dir)
+    out_yaml = os.path.join(str(run_tmp_dir(run_dir)), f"_runtime_data_{stage}.yaml")
     with open(out_yaml, "w", encoding="utf-8") as f:
         yaml.safe_dump(runtime_cfg, f, allow_unicode=True, sort_keys=False)
     print(

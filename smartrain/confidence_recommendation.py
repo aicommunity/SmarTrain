@@ -32,6 +32,20 @@ def _as_2d(values: Any) -> np.ndarray:
     return arr
 
 
+def _safe_nanmean_axis0(values: np.ndarray) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    if arr.ndim < 2:
+        arr = _as_2d(arr)
+    if arr.size == 0:
+        return np.asarray([], dtype=float)
+    if arr.shape[-1] == 0:
+        return np.asarray([], dtype=float)
+    valid_rows = ~np.all(np.isnan(arr), axis=1)
+    if not bool(np.any(valid_rows)):
+        return np.full(arr.shape[-1], np.nan, dtype=float)
+    return np.nanmean(arr[valid_rows], axis=0)
+
+
 def _extract_curve_map(metrics_obj: Any) -> dict[str, tuple[np.ndarray, np.ndarray | np.ndarray]]:
     out: dict[str, tuple[np.ndarray, np.ndarray | np.ndarray]] = {}
     sources = [metrics_obj, getattr(metrics_obj, "box", None)]
@@ -86,9 +100,9 @@ def _normalize_confidence_curves(
     r2d = r2d[:, :n_points]
     f1_2d = f1_2d[:, :n_points]
 
-    p_global = np.nanmean(p2d, axis=0)
-    r_global = np.nanmean(r2d, axis=0)
-    _f1_global = np.nanmean(f1_2d, axis=0)
+    p_global = _safe_nanmean_axis0(p2d)
+    r_global = _safe_nanmean_axis0(r2d)
+    _f1_global = _safe_nanmean_axis0(f1_2d)
     return conf, p2d, r2d, f1_2d, p_global, r_global
 
 

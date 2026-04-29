@@ -52,6 +52,7 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
   - executive summary, context, quality, speed, per-class analysis, conclusion
   - captions for tables/figures and optional abbreviations glossary for wide tables
 - `session.json` now contains sections: `metric_sources`, `pr_per_class`, `speed_quality`, `tables`, `images`, `cache`, `artifact_scope`.
+- Format comparison reads per-format artifacts from test manifests and supports entries with multiple artifacts per format (`formats.<fmt>.artifacts`), selecting available metrics sources with legacy fallback.
 - `analyze all` supports:
   - `--report-languages` (default `ru,en`)
   - `--scatter-x` / `--scatter-y` for speed-quality scatter axes
@@ -88,6 +89,7 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
   - `train/results.csv`, or
   - `train/weights/last.pt` / `<run_dir_name>.pt` in run root.
 - For summary/metrics extraction, `analyze` still requires readable metadata/metrics files depending on subcommand.
+- Run model artifacts are expected under `runs/<dataset>/<run>/models/` (legacy root paths are still read as fallback).
 - `export-table` reads:
   - `training_metadata.json`
   - latest `test_metrics*.csv` (first row)

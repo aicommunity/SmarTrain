@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from smartrain.run_artifacts import run_tmp_dir
 
 
 def _extract_img_size_from_obj(obj: Any) -> int | None:
@@ -73,6 +74,7 @@ def _collect_context_candidates(model_path: Path) -> list[tuple[str, Path]]:
                     ("training_metadata", run_dir / "training_metadata.json"),
                     ("args_yaml", run_dir / "train" / "args.yaml"),
                     ("args_yaml", run_dir / "train" / "args.yml"),
+                    ("runtime_yaml", run_tmp_dir(str(run_dir)) / "_runtime_data_test.yaml"),
                     ("runtime_yaml", run_dir / "_runtime_data_test.yaml"),
                 ]
             )

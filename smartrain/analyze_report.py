@@ -363,6 +363,7 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
         ]
     elif "format_metrics_compare" in lower:
         preferred = [
+            "alias",
             "run_name",
             "split",
             "format",
@@ -375,6 +376,7 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
         ]
     elif "format_eval_settings" in lower:
         preferred = [
+            "alias",
             "run_name",
             "split",
             "format",
@@ -1074,6 +1076,32 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     lines.append(f"- `{run_name}` / `{split_name}` / `{fmt}`: `{status}` / `{reason_code}` - {reason}")
                 lines.append("")
     eval_rel = str(fmt_cmp.get("eval_csv") or "")
+    alias_rel = str(fmt_cmp.get("alias_legend_csv") or "")
+    if alias_rel:
+        alias_abs = os.path.join(report_root, alias_rel)
+        if os.path.isfile(alias_abs):
+            try:
+                alias_df = pd.read_csv(alias_abs)
+                alias_df = _filter_generic_table_for_selection(alias_df, manifest)
+                preferred_alias = [c for c in ("alias", "format", "run_name", "target_path") if c in alias_df.columns]
+                if preferred_alias:
+                    alias_df = alias_df[preferred_alias]
+                alias_df = _abbrev_df(alias_df, abbreviations)
+                lines.extend(_center_open())
+                lines.append("")
+                lines.append(
+                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                    + ("Легенда алиасов форматов" if is_ru else "Format alias legend")
+                    + "**"
+                )
+                lines.append("")
+                lines.extend(_md_table_from_df(alias_df, abbreviations, limit=None))
+                lines.append("")
+                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{alias_rel}`"))
+                lines.extend(_center_close())
+                table_no += 1
+            except Exception as e:
+                lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
     if eval_rel:
         lines.append(
             (

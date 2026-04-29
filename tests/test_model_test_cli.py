@@ -131,7 +131,10 @@ def test_model_test_cli_interactive_replay_command_is_complete(monkeypatch, tmp_
 
     monkeypatch.setattr("smartrain.model_test_cli.is_interactive_allowed", lambda _flag: True)
     monkeypatch.setattr("smartrain.model_test_cli._pick_interactive_target", lambda _layout: (str(run_dir), str(run_dir / "train" / "weights" / "best.pt"), "runs", run_dir.name))
-    monkeypatch.setattr("smartrain.model_test_cli._prompt_formats_interactive", lambda default="pt,onnx,engine,trt": ["onnx"])
+    monkeypatch.setattr(
+        "smartrain.model_test_cli._prompt_artifact_selection_interactive",
+        lambda _candidates: [("onnx", str(run_dir / "train" / "weights" / "best.onnx"))],
+    )
     _answers(monkeypatch, [str(dataset_yaml)])
     monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", lambda **_kwargs: _FakeResult())
     monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
@@ -369,7 +372,10 @@ def test_model_test_cli_prompts_before_rerun_matching_existing_test_interactive(
 
     monkeypatch.setattr("smartrain.model_test_cli.is_interactive_allowed", lambda _flag: True)
     monkeypatch.setattr("smartrain.model_test_cli._pick_interactive_target", lambda _layout: (str(run_dir), str(run_dir / "train" / "weights" / "best.pt"), "runs", run_dir.name))
-    monkeypatch.setattr("smartrain.model_test_cli._prompt_formats_interactive", lambda default="pt,onnx,engine,trt": ["onnx"])
+    monkeypatch.setattr(
+        "smartrain.model_test_cli._prompt_artifact_selection_interactive",
+        lambda _candidates: [("onnx", str(run_dir / "train" / "weights" / "best.onnx"))],
+    )
     _answers(monkeypatch, [str(dataset_yaml)])
 
     def _fake_prompt_yes_no(label: str, default: bool = False) -> bool:

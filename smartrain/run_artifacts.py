@@ -1,17 +1,63 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+
+def _normalize_run_root(run_dir: str | Path) -> Path:
+    root = Path(run_dir).expanduser().resolve()
+    # Defensive normalization: callers may accidentally pass runs/<run>/models
+    # or runs/<run>/tmp instead of runs/<run>. Collapse such paths to run root.
+    while root.name in {"models", "tmp"}:
+        parent = root.parent
+        if parent == root:
+            break
+        if (parent / "training_metadata.json").is_file() or (parent / "train").is_dir():
+            root = parent
+            continue
+        break
+    return root
+
+
+def run_models_dir(run_dir: str) -> Path:
+    root = _normalize_run_root(run_dir)
+    return root / "models"
+
+
+def run_tmp_dir(run_dir: str) -> Path:
+    root = _normalize_run_root(run_dir)
+    return root / "tmp"
+
+
+def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:
+    root = _normalize_run_root(run_dir)
+    models = run_models_dir(str(root))
+    tmp = run_tmp_dir(str(root))
+    models.mkdir(parents=True, exist_ok=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    for runtime_name in ("_runtime_data_train.yaml", "_runtime_data_test.yaml"):
+        src = root / runtime_name
+        dst = tmp / runtime_name
+        if src.is_file() and not dst.exists():
+            try:
+                src.replace(dst)
+            except Exception:
+                pass
+    return models, tmp
 
 
 def canonical_run_model_path(run_dir: str, ext: str = ".pt") -> str:
-    root = Path(run_dir).expanduser().resolve()
+    root = _normalize_run_root(run_dir)
+    models, _tmp = ensure_run_layout(str(root))
     suffix = ext if str(ext).startswith(".") else f".{ext}"
-    return str(root / f"{root.name}{suffix}")
+    return str(models / f"{root.name}{suffix}")
 
 
 def _legacy_run_model_candidates(run_dir: str, ext: str = ".pt") -> list[Path]:
-    root = Path(run_dir).expanduser().resolve()
+    root = _normalize_run_root(run_dir)
     suffix = ext if str(ext).startswith(".") else f".{ext}"
     suffix_l = suffix.lower()
     candidates = [
@@ -46,6 +92,11 @@ def resolve_run_model_with_legacy_fallback(run_dir: str, ext: str = ".pt") -> Pa
     canonical = Path(canonical_run_model_path(run_dir, ext))
     if canonical.is_file():
         return canonical
+    root = _normalize_run_root(run_dir)
+    suffix = ext if str(ext).startswith(".") else f".{ext}"
+    legacy_canonical = root / f"{root.name}{suffix}"
+    if legacy_canonical.is_file():
+        return legacy_canonical
     for cand in _legacy_run_model_candidates(run_dir, ext):
         if cand.is_file():
             return cand
@@ -106,9 +157,10 @@ def materialize_canonical_run_model(
     move: bool = True,
     normalize_metadata: bool = True,
 ) -> Path | None:
-    root = Path(run_dir).expanduser().resolve()
+    root = _normalize_run_root(run_dir)
     if not root.is_dir():
         return None
+    ensure_run_layout(str(root))
     canonical = Path(canonical_run_model_path(run_dir, ext))
     canonical.parent.mkdir(parents=True, exist_ok=True)
     if canonical.is_file():
@@ -134,4 +186,92 @@ def materialize_canonical_run_model(
     if normalize_metadata:
         normalize_model_references_in_metadata(root / "training_metadata.json", run_dir, ext)
     return canonical
+
+
+def model_sidecar_metadata_path(model_path: str | Path) -> Path:
+    p = Path(model_path)
+    return p.with_name(f"{p.name}.meta.json")
+
+
+def _fingerprint_file(path: Path) -> str | None:
+    try:
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
+def write_model_sidecar_metadata(
+    model_path: str | Path,
+    *,
+    format_name: str,
+    run_dir: str | None = None,
+    source_path: str | None = None,
+    tool: str | None = None,
+    params: dict[str, Any] | None = None,
+    status: str = "ok",
+    error: str | None = None,
+) -> Path:
+    p = Path(model_path).expanduser().resolve()
+    sidecar = model_sidecar_metadata_path(p)
+    payload: dict[str, Any] = {
+        "format": str(format_name),
+        "path": str(p),
+        "filename": p.name,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "source_path": source_path,
+        "tool": tool,
+        "params": params or {},
+        "status": status,
+        "error": error,
+        "fingerprint_sha256": _fingerprint_file(p) if p.is_file() else None,
+        "size_bytes": p.stat().st_size if p.is_file() else None,
+        "run_path": str(Path(run_dir).expanduser().resolve()) if run_dir else None,
+    }
+    tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(sidecar)
+    return sidecar
+
+
+def read_model_sidecar_metadata(model_path: str | Path) -> dict[str, Any] | None:
+    sidecar = model_sidecar_metadata_path(model_path)
+    if not sidecar.is_file():
+        return None
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def scan_run_models(run_dir: str) -> list[dict[str, Any]]:
+    root = _normalize_run_root(run_dir)
+    models, _tmp = ensure_run_layout(str(root))
+    out: list[dict[str, Any]] = []
+    exts = {".pt", ".onnx", ".engine", ".trt"}
+    for p in sorted(models.glob("*")):
+        if not p.is_file() or p.suffix.lower() not in exts:
+            continue
+        meta = read_model_sidecar_metadata(p) or {}
+        fmt = str(meta.get("format") or p.suffix.lower().lstrip(".")).lower()
+        if fmt == "tensorrt-engine":
+            fmt = "engine"
+        if fmt == "tensorrt-trt":
+            fmt = "trt"
+        out.append(
+            {
+                "format": fmt,
+                "path": str(p),
+                "name": p.name,
+                "metadata": meta,
+            }
+        )
+    return out
 

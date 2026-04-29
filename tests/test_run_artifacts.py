@@ -3,14 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.run_artifacts import materialize_canonical_run_model, resolve_run_model_with_legacy_fallback
+from smartrain.run_artifacts import (
+    canonical_run_model_path,
+    materialize_canonical_run_model,
+    resolve_run_model_with_legacy_fallback,
+)
 
 
 def test_resolve_run_model_with_legacy_fallback_prefers_canonical(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds1" / "run-1"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
-    canonical = run_dir / "run-1.pt"
+    canonical = Path(canonical_run_model_path(str(run_dir), ".pt"))
     legacy = run_dir / "train" / "weights" / "best.pt"
+    canonical.parent.mkdir(parents=True, exist_ok=True)
     canonical.write_bytes(b"canonical")
     legacy.write_bytes(b"legacy")
 
@@ -35,7 +40,7 @@ def test_materialize_canonical_run_model_moves_legacy_and_normalizes_metadata(tm
     )
 
     canonical = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
-    assert canonical == (run_dir / "run-1.pt")
+    assert canonical == Path(canonical_run_model_path(str(run_dir), ".pt"))
     assert canonical.is_file()
     assert not legacy.exists()
 

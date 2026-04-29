@@ -592,6 +592,37 @@ def test_format_compare_issues_include_reason_code(tmp_path: Path) -> None:
     assert onnx_issue["reason_code"] == "oom_gpu"
 
 
+def test_format_compare_builds_alias_legend_for_variants(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_a", "run_alias", model="yolo11n.pt", map5095=0.51, box_f1=0.60)
+    (run_dir / "v1.onnx").write_bytes(b"onnx1")
+    (run_dir / "v2.onnx").write_bytes(b"onnx2")
+    pd.DataFrame([{"mAP50-95": 0.41, "mAP50": 0.5, "Box-F1": 0.6, "Box-P": 0.7, "Box-R": 0.8}]).to_csv(
+        run_dir / "test_metrics_onnx.csv", index=False
+    )
+    manifest = {
+        "formats": {
+            "onnx": {
+                "artifacts": [
+                    {"target_path": "v1.onnx", "metrics_csv": "test_metrics_onnx.csv", "status": "ok", "backend": "onnxruntime"},
+                    {"target_path": "v2.onnx", "metrics_csv": "test_metrics_onnx.csv", "status": "ok", "backend": "onnxruntime"},
+                ]
+            }
+        }
+    }
+    (run_dir / "test_artifacts_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_aliases"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    alias_rel = out.get("alias_legend_csv")
+    assert alias_rel
+    alias_df = pd.read_csv(session_root / alias_rel)
+    assert any(str(v).startswith("ONNX") for v in alias_df["alias"].tolist())
+    cmp_df = pd.read_csv(session_root / "artifacts" / "format_compare" / "format_metrics_compare_test.csv")
+    assert "alias" in cmp_df.columns
+
+
 def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -681,6 +712,7 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     pd.DataFrame(
         [
             {
+                "alias": "PT1",
                 "run_name": "run_a",
                 "format": "pt",
                 "artifact_status": "ok",
@@ -689,6 +721,9 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
             }
         ]
     ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare_test.csv", index=False)
+    pd.DataFrame(
+        [{"alias": "PT1", "format": "pt", "run_name": "run_a", "target_path": "models/run_a.pt"}]
+    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_alias_legend.csv", index=False)
     (tmp_path / "artifacts" / "compare" / "compare_curves.png").write_bytes(b"fakepng")
     (tmp_path / "artifacts" / "pr" / "pr_all_classes.png").write_bytes(b"fakepng")
 
@@ -705,7 +740,10 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
         "images": ["artifacts/compare/compare_curves.png", "artifacts/pr/pr_all_classes.png"],
         "artifacts": [{"role": "compare_png", "path": "artifacts/compare/compare_curves.png"}],
         "speed_quality": {"csv": "artifacts/speed_quality/speed_quality.csv"},
-        "format_comparison": {"test_csv": "artifacts/format_compare/format_metrics_compare_test.csv"},
+        "format_comparison": {
+            "test_csv": "artifacts/format_compare/format_metrics_compare_test.csv",
+            "alias_legend_csv": "artifacts/format_compare/format_alias_legend.csv",
+        },
         "abbreviations": {"a": "M1", "ds_a": "D1"},
         "ultralytics_test": [
             {
@@ -730,6 +768,8 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     assert "## 1. Comparison Context" in en_md
     assert "## 2. Quality Analysis" in en_md
     assert "## 4. Model Format Comparison" in en_md
+    assert "Format alias legend" in en_md
+    assert "| alias | format | run_name | target_path |" in en_md
     assert "## 8. Executive Summary" in en_md
     assert "Datasets: D1 = ds_a" in en_md
     assert "### 6.1 Run R1" in en_md

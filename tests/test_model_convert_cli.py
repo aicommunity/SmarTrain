@@ -24,7 +24,7 @@ def test_discover_models_lists_only_pt(tmp_path: Path):
     discovered = mcc._discover_models(tmp_path, allowed_suffixes=(".pt",))
     paths = [p for _src, p in discovered]
     assert models_dir / "a.pt" in paths
-    assert run_dir / "run-1.pt" in paths
+    assert run_dir / "models" / "run-1.pt" in paths
     assert models_dir / "a.onnx" not in paths
     assert run_dir / "train" / "weights" / "best.pt" not in paths
 
@@ -46,7 +46,7 @@ def test_discover_models_lists_only_onnx(tmp_path: Path):
     discovered = mcc._discover_models(tmp_path, allowed_suffixes=(".onnx",))
     paths = [p for _src, p in discovered]
     assert models_dir / "a.onnx" in paths
-    assert run_dir / "run-1.onnx" in paths
+    assert run_dir / "models" / "run-1.onnx" in paths
     assert models_dir / "a.pt" not in paths
     assert run_dir / "train" / "weights" / "best.onnx" not in paths
 
@@ -64,7 +64,7 @@ def test_discover_models_materializes_canonical_from_legacy_run(tmp_path: Path):
 
     discovered = mcc._discover_models(tmp_path, allowed_suffixes=(".pt",))
     paths = [p for _src, p in discovered]
-    canonical = run_dir / "run-1.pt"
+    canonical = run_dir / "models" / "run-1.pt"
     assert canonical in paths
     assert canonical.is_file()
     assert not legacy_best.exists()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -23,7 +24,13 @@ from smartrain.cli_prompts import (
 from smartrain.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.model_context import infer_img_size_with_source
-from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.run_artifacts import (
+    canonical_run_model_path,
+    materialize_canonical_run_model,
+    run_models_dir,
+    run_tmp_dir,
+    write_model_sidecar_metadata,
+)
 from smartrain import tensorrt_checks as trt_checks
 from smartrain.run_discovery import find_run_directories
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
@@ -359,7 +366,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
     stats = ConvertStats(total=1)
     result = InteractiveResult(stats=stats)
     source_path = ctx.source_path
-    out_dir = ctx.output_dir if ctx.output_dir else source_path.parent
+    out_dir = ctx.output_dir if ctx.output_dir else _default_output_dir_for_source(source_path)
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"[INFO] Found 1 model(s) for conversion.")
     _print_stage_header("Model 1/1")
@@ -427,6 +434,23 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 stats.failed += 1
                 return result
             print(f"[OK] ONNX: {session_onnx}")
+            run_root = _guess_run_root_for_path(source_path)
+            write_model_sidecar_metadata(
+                session_onnx,
+                format_name="onnx",
+                run_dir=str(run_root) if run_root else None,
+                source_path=str(source_path),
+                tool="ultralytics",
+                params={
+                    "imgsz": _format_imgsz(ctx.onnx_imgsz),
+                    "batch": ctx.onnx_batch,
+                    "dynamic": bool(ctx.onnx_dynamic),
+                    "opset": ctx.opset,
+                    "simplify": bool(ctx.simplify),
+                    "half": bool(ctx.half),
+                    "nms": bool(ctx.nms),
+                },
+            )
             stats.ok += 1
             stats.artifacts_ok += 1
         result.session_onnx = session_onnx
@@ -478,6 +502,21 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 return result
             print(f"[OK] TensorRT engine: {engine_target}")
             print(f"[INFO] [DONE] TensorRT engine export: {engine_target}")
+            run_root = _guess_run_root_for_path(source_path)
+            write_model_sidecar_metadata(
+                engine_target,
+                format_name="engine",
+                run_dir=str(run_root) if run_root else None,
+                source_path=str(engine_input),
+                tool="ultralytics",
+                params={
+                    "imgsz": _format_imgsz(ctx.onnx_imgsz),
+                    "batch": ctx.onnx_batch,
+                    "dynamic": bool(ctx.onnx_dynamic),
+                    "precision": ctx.engine_precision,
+                    "workspace_gib": ctx.engine_workspace_gib,
+                },
+            )
             stats.ok += 1
             stats.artifacts_ok += 1
             result.engine_path = engine_target
@@ -513,6 +552,21 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 stats.artifacts_failed += 1
                 return result
             print(f"[OK] TensorRT trt: {trt_target}")
+            run_root = _guess_run_root_for_path(source_path)
+            write_model_sidecar_metadata(
+                trt_target,
+                format_name="trt",
+                run_dir=str(run_root) if run_root else None,
+                source_path=str(trt_input),
+                tool="trtexec",
+                params={
+                    "imgsz": _format_imgsz(ctx.onnx_imgsz),
+                    "batch": ctx.onnx_batch,
+                    "dynamic": bool(ctx.onnx_dynamic),
+                    "precision": ctx.trt_precision,
+                    "workspace_gib": ctx.trt_workspace_gib,
+                },
+            )
             stats.ok += 1
             stats.artifacts_ok += 1
             result.trt_path = trt_target
@@ -824,10 +878,22 @@ def _trtexec_export_from_onnx(
         cmd.append(f"--maxShapes={shape}")
 
     print(f"[INFO] [START] TensorRT trt build (trtexec): {onnx_path} -> {engine_target}")
-    log_file = Path(tempfile.mkstemp(prefix="smartrain_trtexec_", suffix=".log")[1])
+    # Ultralytics ONNX export may leave CUDA visibility in a CPU-only state
+    # for the current process. Run trtexec with a sanitized environment to
+    # keep direct GPU access deterministic.
+    trt_env = os.environ.copy()
+    cvd = trt_env.get("CUDA_VISIBLE_DEVICES")
+    if cvd is not None and not str(cvd).strip():
+        trt_env.pop("CUDA_VISIBLE_DEVICES", None)
+    run_tmp = _guess_run_tmp_dir_for_path(engine_target)
+    if run_tmp is not None:
+        run_tmp.mkdir(parents=True, exist_ok=True)
+        log_file = Path(tempfile.mkstemp(prefix="smartrain_trtexec_", suffix=".log", dir=str(run_tmp))[1])
+    else:
+        log_file = Path(tempfile.mkstemp(prefix="smartrain_trtexec_", suffix=".log")[1])
     try:
         with log_file.open("w", encoding="utf-8") as lf:
-            proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, text=True)
+            proc = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, text=True, env=trt_env)
             started = time.monotonic()
             while True:
                 rc = proc.poll()
@@ -854,6 +920,30 @@ def _trtexec_export_from_onnx(
         pass
     print(f"[INFO] [DONE] TensorRT trt build (trtexec): {engine_target}")
     return True, "ok"
+
+
+def _guess_run_root_for_path(path: Path) -> Path | None:
+    current = path.expanduser().resolve()
+    if current.is_file():
+        current = current.parent
+    for cand in [current, *current.parents]:
+        if (cand / "training_metadata.json").is_file() and (cand / "train").is_dir():
+            return cand
+    return None
+
+
+def _guess_run_tmp_dir_for_path(path: Path) -> Path | None:
+    run_root = _guess_run_root_for_path(path)
+    if run_root is None:
+        return None
+    return run_tmp_dir(str(run_root))
+
+
+def _default_output_dir_for_source(source_path: Path) -> Path:
+    run_root = _guess_run_root_for_path(source_path)
+    if run_root is not None:
+        return run_models_dir(str(run_root))
+    return source_path.parent
 
 
 def _validate_onnx_export(onnx_path: Path) -> tuple[bool, str]:
@@ -977,6 +1067,23 @@ def _make_dedicated_onnx_name(stem: str, expected: dict[str, Any]) -> str:
     )
 
 
+def _make_variant_tensor_name(stem: str, ext: str, args: argparse.Namespace, imgsz: int | tuple[int, int]) -> str:
+    h, w = _imgsz_to_hw(imgsz)
+    dyn = "dynamic" if bool(args.dynamic) else "static"
+    precision = str(getattr(args, "precision", "fp32"))
+    ws = getattr(args, "workspace_gib", None)
+    ws_tag = f"_ws{str(ws).replace('.', 'p')}" if ws is not None else ""
+    base = f"{stem}_imgsz{h}x{w}_b{int(args.batch)}_{dyn}_{precision}{ws_tag}"
+    return f"{base}{ext}"
+
+
+def _variant_or_legacy_name(source_path: Path, *, ext: str, args: argparse.Namespace, imgsz: int | tuple[int, int]) -> str:
+    run_root = _guess_run_root_for_path(source_path)
+    if run_root is None:
+        return f"{source_path.stem}{ext}"
+    return _make_variant_tensor_name(source_path.stem, ext, args, imgsz)
+
+
 def _next_available_path(path: Path) -> Path:
     if not path.exists():
         return path
@@ -1078,7 +1185,7 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
         print(f"[ERROR] Unsupported input extension for {source_path}. Expected .pt or .onnx")
         return False, True, False, 0, 1, 0
 
-    out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else source_path.parent
+    out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else _default_output_dir_for_source(source_path)
     out_dir.mkdir(parents=True, exist_ok=True)
     imgsz, imgsz_source = _resolve_imgsz_from_args_and_model(args, source_path)
     print(f"[INFO] Resolved image size: {_format_imgsz(imgsz)} (source: {imgsz_source})")
@@ -1116,7 +1223,11 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                 print(f"[ERROR] ultralytics import failed: {e}")
                 return False, True, False
             model = YOLO(str(source_path))
-        onnx_target = out_dir / f"{source_path.stem}.onnx"
+        expected = _expected_onnx_signature(args, imgsz)
+        if _guess_run_root_for_path(source_path) is None:
+            onnx_target = out_dir / f"{source_path.stem}.onnx"
+        else:
+            onnx_target = out_dir / (_make_dedicated_onnx_name(source_path.stem, expected) + ".onnx")
         if onnx_target.exists() and not args.force:
             print(f"[WARN] Skip ONNX (exists): {onnx_target}. Use --force to rebuild.")
             skipped_any = True
@@ -1141,6 +1252,23 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                     valid_onnx, validation_reason = _validate_onnx_export(onnx_target)
                     if valid_onnx:
                         print(f"[OK] ONNX: {onnx_target}")
+                        run_root = _guess_run_root_for_path(source_path)
+                        write_model_sidecar_metadata(
+                            onnx_target,
+                            format_name="onnx",
+                            run_dir=str(run_root) if run_root else None,
+                            source_path=str(source_path),
+                            tool="ultralytics",
+                            params={
+                                "imgsz": _format_imgsz(imgsz),
+                                "batch": int(args.batch),
+                                "dynamic": bool(args.dynamic),
+                                "opset": int(args.opset),
+                                "simplify": bool(getattr(args, "simplify", True)),
+                                "half": bool(getattr(args, "half", False)),
+                                "nms": bool(getattr(args, "nms", False)),
+                            },
+                        )
                         print(
                             "[INFO] ONNX post-check passed. PyTorch export warnings (e.g. aten::index) are treated as non-fatal unless validation fails."
                         )
@@ -1177,7 +1305,7 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                     failed_any = True
                     return ok_any, failed_any, skipped_any, artifacts_ok, artifacts_failed, artifacts_skipped
             engine_suffix = ".trt" if use_trtexec else ".engine"
-            engine_target = out_dir / f"{source_path.stem}{engine_suffix}"
+            engine_target = out_dir / _variant_or_legacy_name(source_path, ext=engine_suffix, args=args, imgsz=imgsz)
             if engine_target.exists() and not args.force:
                 print(f"[WARN] Skip TensorRT (exists): {engine_target}. Use --force to rebuild.")
                 skipped_any = True
@@ -1231,6 +1359,21 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                     print(f"[OK] TensorRT: {engine_target}")
                     if not use_trtexec:
                         print(f"[INFO] [DONE] TensorRT engine export: {engine_target}")
+                        run_root = _guess_run_root_for_path(source_path)
+                        write_model_sidecar_metadata(
+                            engine_target,
+                            format_name="engine",
+                            run_dir=str(run_root) if run_root else None,
+                            source_path=str(source_path),
+                            tool="ultralytics",
+                            params={
+                                "imgsz": _format_imgsz(imgsz),
+                                "batch": int(args.batch),
+                                "dynamic": bool(args.dynamic),
+                                "precision": str(args.precision),
+                                "workspace_gib": getattr(args, "workspace_gib", None),
+                            },
+                        )
                     ok_any = True
                     artifacts_ok += 1
                 else:
@@ -1267,6 +1410,21 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                         if ok_move:
                             print(f"[OK] TensorRT: {engine_target}")
                             print(f"[INFO] [DONE] TensorRT engine export: {engine_target}")
+                            run_root = _guess_run_root_for_path(source_path)
+                            write_model_sidecar_metadata(
+                                engine_target,
+                                format_name="engine",
+                                run_dir=str(run_root) if run_root else None,
+                                source_path=str(source_path),
+                                tool="ultralytics",
+                                params={
+                                    "imgsz": _format_imgsz(imgsz),
+                                    "batch": int(args.batch),
+                                    "dynamic": bool(args.dynamic),
+                                    "precision": str(args.precision),
+                                    "workspace_gib": getattr(args, "workspace_gib", None),
+                                },
+                            )
                             ok_any = True
                             artifacts_ok += 1
                         else:
@@ -1326,6 +1484,21 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                 ok_trt, trt_reason = _trtexec_export_from_onnx(onnx_for_trt, engine_target, args, imgsz)
                 if ok_trt:
                     print(f"[OK] TensorRT: {engine_target}")
+                    run_root = _guess_run_root_for_path(source_path)
+                    write_model_sidecar_metadata(
+                        engine_target,
+                        format_name="trt",
+                        run_dir=str(run_root) if run_root else None,
+                        source_path=str(onnx_for_trt),
+                        tool="trtexec",
+                        params={
+                            "imgsz": _format_imgsz(imgsz),
+                            "batch": int(args.batch),
+                            "dynamic": bool(args.dynamic),
+                            "precision": str(args.precision),
+                            "workspace_gib": getattr(args, "workspace_gib", None),
+                        },
+                    )
                     ok_any = True
                     artifacts_ok += 1
                 else:

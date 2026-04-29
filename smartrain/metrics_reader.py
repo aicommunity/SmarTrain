@@ -80,15 +80,72 @@ def read_test_metrics_by_format(run_dir: str) -> dict[str, str]:
             if not isinstance(entry, dict):
                 continue
             rel = entry.get("metrics_csv")
-            if not isinstance(rel, str) or not rel.strip():
-                continue
-            p = os.path.abspath(os.path.join(run_dir, rel))
-            if os.path.isfile(p):
-                out[fmt] = p
+            selected: str | None = None
+            if isinstance(rel, str) and rel.strip():
+                p = os.path.abspath(os.path.join(run_dir, rel))
+                if os.path.isfile(p):
+                    selected = p
+            if selected is None:
+                artifacts = entry.get("artifacts")
+                if isinstance(artifacts, list):
+                    for item in artifacts:
+                        if not isinstance(item, dict):
+                            continue
+                        rel_item = item.get("metrics_csv")
+                        if not isinstance(rel_item, str) or not rel_item.strip():
+                            continue
+                        p = os.path.abspath(os.path.join(run_dir, rel_item))
+                        if os.path.isfile(p):
+                            selected = p
+                            break
+            if selected is not None:
+                out[fmt] = selected
     for fmt in SUPPORTED_TEST_FORMATS:
         p = latest_test_metrics_path(run_dir, fmt)
         if p and os.path.isfile(p):
             out.setdefault(fmt, p)
+    return out
+
+
+def read_test_metrics_by_format_artifacts(run_dir: str) -> dict[str, list[dict[str, str]]]:
+    out: dict[str, list[dict[str, str]]] = {}
+    manifest = load_test_artifacts_manifest(run_dir)
+    formats = manifest.get("formats")
+    if not isinstance(formats, dict):
+        return out
+    for fmt in SUPPORTED_TEST_FORMATS:
+        entry = formats.get(fmt)
+        if not isinstance(entry, dict):
+            continue
+        records: list[dict[str, str]] = []
+        artifacts = entry.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if not isinstance(item, dict):
+                    continue
+                rel_metrics = item.get("metrics_csv")
+                if not isinstance(rel_metrics, str) or not rel_metrics.strip():
+                    continue
+                metrics_path = os.path.abspath(os.path.join(run_dir, rel_metrics))
+                if not os.path.isfile(metrics_path):
+                    continue
+                rel_target = item.get("target_path")
+                target_path = os.path.abspath(os.path.join(run_dir, rel_target)) if isinstance(rel_target, str) and rel_target else ""
+                records.append({"metrics_path": metrics_path, "target_path": target_path})
+        if not records:
+            rel = entry.get("metrics_csv")
+            if isinstance(rel, str) and rel.strip():
+                metrics_path = os.path.abspath(os.path.join(run_dir, rel))
+                if os.path.isfile(metrics_path):
+                    rel_target = entry.get("target_path")
+                    target_path = (
+                        os.path.abspath(os.path.join(run_dir, rel_target))
+                        if isinstance(rel_target, str) and rel_target
+                        else ""
+                    )
+                    records.append({"metrics_path": metrics_path, "target_path": target_path})
+        if records:
+            out[fmt] = records
     return out
 
 
@@ -101,6 +158,18 @@ def read_metrics_by_format_for_split(run_dir: str, split: str) -> dict[str, str]
         p = format_metrics_path_for_split(run_dir, split_name, fmt)
         if os.path.isfile(p):
             out[fmt] = p
+    return out
+
+
+def read_metrics_by_format_for_split_artifacts(run_dir: str, split: str) -> dict[str, list[dict[str, str]]]:
+    split_name = str(split).strip().lower()
+    if split_name == "test":
+        return read_test_metrics_by_format_artifacts(run_dir)
+    out: dict[str, list[dict[str, str]]] = {}
+    for fmt in SUPPORTED_TEST_FORMATS:
+        p = format_metrics_path_for_split(run_dir, split_name, fmt)
+        if os.path.isfile(p):
+            out[fmt] = [{"metrics_path": p, "target_path": ""}]
     return out
 
 
