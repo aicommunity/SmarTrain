@@ -469,7 +469,15 @@ def _build_ultralytics_style_stats(
     preds: list[_Pred],
     gt_rows: list[_Gt],
     iouv: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    deep_diagnostics: bool = False,
+    image_paths: list[str] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    list[dict[str, Any]],
+]:
     by_image_gt: dict[str, list[_Gt]] = {}
     by_image_pred: dict[str, list[_Pred]] = {}
     for gt in gt_rows:
@@ -477,11 +485,13 @@ def _build_ultralytics_style_stats(
     for pred in preds:
         by_image_pred.setdefault(pred.image_path, []).append(pred)
 
-    all_images = sorted(set(by_image_gt) | set(by_image_pred))
+    all_images = sorted((set(image_paths) if image_paths else set()) | set(by_image_gt) | set(by_image_pred))
     correct_rows: list[np.ndarray] = []
     conf_rows: list[float] = []
     pred_cls_rows: list[int] = []
     target_cls_rows: list[int] = []
+    deep_records: list[dict[str, Any]] = []
+    best_iou_bins = np.linspace(0.0, 1.0, 11, dtype=np.float32)  # 10 bins
 
     for image_path in all_images:
         img_gts = by_image_gt.get(image_path, [])
@@ -489,6 +499,19 @@ def _build_ultralytics_style_stats(
         if img_gts:
             target_cls_rows.extend([int(g.cls_id) for g in img_gts])
         if not img_preds:
+            if deep_diagnostics:
+                deep_records.append(
+                    {
+                        "image_path": image_path,
+                        "n_gts": int(len(img_gts)),
+                        "n_preds": 0,
+                        "tp_counts_by_iou": [0 for _ in iouv.tolist()],
+                        "fp_counts_by_iou": [0 for _ in iouv.tolist()],
+                        "best_iou_bins": best_iou_bins.tolist(),
+                        "best_iou_tp_hist_by_iou": [[0 for _ in range(len(best_iou_bins) - 1)] for _ in iouv.tolist()],
+                        "best_iou_fp_hist_by_iou": [[0 for _ in range(len(best_iou_bins) - 1)] for _ in iouv.tolist()],
+                    }
+                )
             continue
 
         pred_boxes = np.asarray([[p.x1, p.y1, p.x2, p.y2] for p in img_preds], dtype=np.float32)
@@ -498,12 +521,16 @@ def _build_ultralytics_style_stats(
         gt_cls = np.asarray([int(g.cls_id) for g in img_gts], dtype=np.int32) if img_gts else np.zeros((0,), dtype=np.int32)
 
         correct = np.zeros((len(img_preds), len(iouv)), dtype=bool)
+        best_iou_per_pred = np.zeros((len(img_preds),), dtype=np.float32)
         if len(img_gts):
             iou_mat = np.zeros((len(img_gts), len(img_preds)), dtype=np.float32)
             for gi in range(len(img_gts)):
                 iou_mat[gi, :] = _box_iou_np(gt_boxes[gi], pred_boxes)
             class_mask = gt_cls[:, None] == pred_cls[None, :]
             iou_mat = iou_mat * class_mask
+            if deep_diagnostics and iou_mat.size:
+                # “Best IoU per pred” is used for localization diagnostics.
+                best_iou_per_pred = iou_mat.max(axis=0) if iou_mat.shape[1] else np.zeros((0,), dtype=np.float32)
             for ti, thr in enumerate(iouv.tolist()):
                 matches = np.argwhere(iou_mat >= float(thr))
                 if matches.size == 0:
@@ -521,11 +548,39 @@ def _build_ultralytics_style_stats(
         correct_rows.append(correct)
         conf_rows.extend(pred_conf.tolist())
         pred_cls_rows.extend(pred_cls.tolist())
+        if deep_diagnostics:
+            tp_counts_by_iou = [int(correct[:, ti].sum()) for ti in range(correct.shape[1])]
+            fp_counts_by_iou = [int(len(img_preds) - tp_counts_by_iou[ti]) for ti in range(len(tp_counts_by_iou))]
+            hist_tp_by_iou: list[list[int]] = []
+            hist_fp_by_iou: list[list[int]] = []
+            for ti in range(correct.shape[1]):
+                tp_mask = correct[:, ti]
+                fp_mask = ~tp_mask
+                tp_vals = best_iou_per_pred[tp_mask]
+                fp_vals = best_iou_per_pred[fp_mask]
+                tp_hist = np.histogram(tp_vals, bins=best_iou_bins, range=(0.0, 1.0))[0].astype(int).tolist()
+                fp_hist = np.histogram(fp_vals, bins=best_iou_bins, range=(0.0, 1.0))[0].astype(int).tolist()
+                hist_tp_by_iou.append(tp_hist)
+                hist_fp_by_iou.append(fp_hist)
+            deep_records.append(
+                {
+                    "image_path": image_path,
+                    "n_gts": int(len(img_gts)),
+                    "n_preds": int(len(img_preds)),
+                    "tp_counts_by_iou": tp_counts_by_iou,
+                    "fp_counts_by_iou": fp_counts_by_iou,
+                    "best_iou_bins": best_iou_bins.tolist(),
+                    "best_iou_tp_hist_by_iou": hist_tp_by_iou,
+                    "best_iou_fp_hist_by_iou": hist_fp_by_iou,
+                }
+            )
 
     tp = np.concatenate(correct_rows, axis=0) if correct_rows else np.zeros((0, len(iouv)), dtype=bool)
     conf = np.asarray(conf_rows, dtype=np.float32) if conf_rows else np.zeros((0,), dtype=np.float32)
     pred_cls = np.asarray(pred_cls_rows, dtype=np.int32) if pred_cls_rows else np.zeros((0,), dtype=np.int32)
     target_cls = np.asarray(target_cls_rows, dtype=np.int32) if target_cls_rows else np.zeros((0,), dtype=np.int32)
+    if deep_diagnostics:
+        return tp, conf, pred_cls, target_cls, deep_records
     return tp, conf, pred_cls, target_cls
 
 
@@ -608,6 +663,76 @@ def _compute_ultralytics_style_payload(
         if isinstance(prec_values, np.ndarray) and prec_values.size
         else np.zeros((1000,), dtype=np.float32),
     }
+
+
+def _compute_ultralytics_style_deep_payload(
+    preds: list[_Pred],
+    gt_rows: list[_Gt],
+    names: list[str],
+    image_paths: list[str] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    iouv = np.linspace(0.5, 0.95, 10, dtype=np.float32)
+    tp, conf, pred_cls, target_cls, deep_records = _build_ultralytics_style_stats(
+        preds, gt_rows, iouv, deep_diagnostics=True, image_paths=image_paths
+    )
+
+    names_map = {idx: name for idx, name in enumerate(names)}
+    (
+        _tp_cnt,
+        _fp_cnt,
+        _p_cls,
+        _r_cls,
+        _f1_cls,
+        ap,
+        unique_classes,
+        _p_curve,
+        _r_curve,
+        _f1_curve,
+        x,
+        _prec_values,
+    ) = ap_per_class(
+        tp=tp,
+        conf=conf,
+        pred_cls=pred_cls,
+        target_cls=target_cls,
+        plot=False,
+        names=names_map,
+    )
+
+    if isinstance(ap, np.ndarray) and ap.ndim == 2 and ap.size:
+        ap_mean_by_iou = ap.mean(axis=0).astype(np.float32).tolist()
+        map50 = float(ap[:, 0].mean()) if ap.shape[0] else 0.0
+        map5095 = float(ap.mean()) if ap.size else 0.0
+    else:
+        ap_mean_by_iou = [0.0 for _ in iouv.tolist()]
+        map50 = 0.0
+        map5095 = 0.0
+
+    agg_tp = np.zeros((len(iouv),), dtype=np.int64)
+    agg_fp = np.zeros((len(iouv),), dtype=np.int64)
+    total_gts = 0
+    total_preds = 0
+    for rec in deep_records:
+        total_gts += int(rec.get("n_gts", 0))
+        total_preds += int(rec.get("n_preds", 0))
+        tp_counts_by_iou = rec.get("tp_counts_by_iou") or []
+        fp_counts_by_iou = rec.get("fp_counts_by_iou") or []
+        if isinstance(tp_counts_by_iou, list) and len(tp_counts_by_iou) == len(iouv):
+            agg_tp += np.asarray(tp_counts_by_iou, dtype=np.int64)
+        if isinstance(fp_counts_by_iou, list) and len(fp_counts_by_iou) == len(iouv):
+            agg_fp += np.asarray(fp_counts_by_iou, dtype=np.int64)
+
+    summary: dict[str, Any] = {
+        "iou_thresholds": iouv.astype(np.float32).tolist(),
+        "total_gts": int(total_gts),
+        "total_preds": int(total_preds),
+        "tp_counts_by_iou": agg_tp.astype(np.int64).tolist(),
+        "fp_counts_by_iou": agg_fp.astype(np.int64).tolist(),
+        "map50": map50,
+        "map5095": map5095,
+        "ap_mean_by_iou": ap_mean_by_iou,
+    }
+    return summary, deep_records
 
 
 def _compute_global_stats(preds: list[_Pred], gt_rows: list[_Gt], names: list[str], iou_thr: float) -> dict[str, float]:
@@ -903,6 +1028,124 @@ def _write_native_eval_artifacts(
     }
 
 
+def _write_deep_diagnostics_artifacts(
+    *,
+    root_dir: str,
+    format_name: str,
+    backend_name: str,
+    weights_path: str,
+    data_yaml_path: str,
+    split: str,
+    preds: list[_Pred],
+    gt_rows: list[_Gt],
+    image_paths: list[str],
+    names: list[str],
+    conf_thr: float,
+    iou_thr: float,
+    imgsz: int | None,
+    batch: int | None,
+    inference_source: str,
+    gt_source: str,
+    nms_profile: str,
+) -> dict[str, Any]:
+    test_dir = format_test_dir(root_dir, format_name)
+    deep_dir = os.path.join(test_dir, "deep_diagnostics")
+    os.makedirs(deep_dir, exist_ok=True)
+
+    deep_summary, deep_records = _compute_ultralytics_style_deep_payload(
+        preds=preds,
+        gt_rows=gt_rows,
+        names=names,
+        image_paths=image_paths,
+    )
+    deep_by_image = {rec.get("image_path"): rec for rec in deep_records if isinstance(rec, dict)}
+
+    by_image_gt: dict[str, list[_Gt]] = {}
+    for gt in gt_rows:
+        by_image_gt.setdefault(gt.image_path, []).append(gt)
+
+    by_image_pred: dict[str, list[_Pred]] = {}
+    for pred in preds:
+        by_image_pred.setdefault(pred.image_path, []).append(pred)
+
+    jsonl_path = os.path.join(deep_dir, f"debug_{split}.jsonl")
+    with open(jsonl_path, "w", encoding="utf-8") as f:
+        for image_path in sorted(image_paths):
+            rec = deep_by_image.get(image_path)
+            tp_counts_by_iou = rec.get("tp_counts_by_iou", [0 for _ in deep_summary.get("iou_thresholds", [])]) if isinstance(rec, dict) else []
+            fp_counts_by_iou = rec.get("fp_counts_by_iou", [0 for _ in deep_summary.get("iou_thresholds", [])]) if isinstance(rec, dict) else []
+            best_iou_bins = rec.get("best_iou_bins", []) if isinstance(rec, dict) else []
+            best_iou_tp_hist_by_iou = rec.get("best_iou_tp_hist_by_iou", []) if isinstance(rec, dict) else []
+            best_iou_fp_hist_by_iou = rec.get("best_iou_fp_hist_by_iou", []) if isinstance(rec, dict) else []
+
+            gts = by_image_gt.get(image_path, [])
+            image_preds = by_image_pred.get(image_path, [])
+            payload = {
+                "image_path": image_path,
+                "gts": [
+                    {"cls_id": int(g.cls_id), "x1": float(g.x1), "y1": float(g.y1), "x2": float(g.x2), "y2": float(g.y2)}
+                    for g in gts
+                ],
+                "preds": [
+                    {
+                        "cls_id": int(p.cls_id),
+                        "conf": float(p.conf),
+                        "x1": float(p.x1),
+                        "y1": float(p.y1),
+                        "x2": float(p.x2),
+                        "y2": float(p.y2),
+                    }
+                    for p in image_preds
+                ],
+                "matching": {
+                    "tp_counts_by_iou": tp_counts_by_iou,
+                    "fp_counts_by_iou": fp_counts_by_iou,
+                    "best_iou_bins": best_iou_bins,
+                    "best_iou_tp_hist_by_iou": best_iou_tp_hist_by_iou,
+                    "best_iou_fp_hist_by_iou": best_iou_fp_hist_by_iou,
+                },
+            }
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    summary_path = os.path.join(deep_dir, f"debug_{split}_summary.json")
+    summary_payload: dict[str, Any] = {
+        "split": split,
+        "format": format_name,
+        "backend": backend_name,
+        "weights_path": weights_path,
+        "data_yaml_path": data_yaml_path,
+        "imgsz": imgsz,
+        "conf_thr": conf_thr,
+        "iou_thr": iou_thr,
+        "batch": batch,
+        "inference_source": inference_source,
+        "gt_source": gt_source,
+        "nms_profile": nms_profile,
+        **deep_summary,
+    }
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary_payload, f, ensure_ascii=False, indent=2)
+
+    params_path = os.path.join(deep_dir, "debug_params.json")
+    params_payload = {
+        "format": format_name,
+        "backend": backend_name,
+        "weights_path": weights_path,
+        "data_yaml_path": data_yaml_path,
+        "imgsz": imgsz,
+        "conf_thr": conf_thr,
+        "iou_thr": iou_thr,
+        "batch": batch,
+        "inference_source": inference_source,
+        "gt_source": gt_source,
+        "nms_profile": nms_profile,
+    }
+    with open(params_path, "w", encoding="utf-8") as f:
+        json.dump(params_payload, f, ensure_ascii=False, indent=2)
+
+    return params_payload
+
+
 def _infer_with_onnx_session(session: Any, image_path: str, input_hw: tuple[int, int], conf_thr: float, iou_thr: float, names: list[str]) -> list[_Pred]:
     input_name = str(session.get_inputs()[0].name)
     tensor, orig_hw, gain, pad = _preprocess_image(image_path, input_hw)
@@ -922,7 +1165,15 @@ def _infer_with_onnx_session(session: Any, image_path: str, input_hw: tuple[int,
 
 def _is_onnx_cuda_oom_error(exc: Exception) -> bool:
     msg = str(exc).lower()
-    return ("cuda" in msg and "out of memory" in msg) or "cudamalloc" in msg
+    # ONNXRuntime CUDA failures are not always "out of memory" text-only;
+    # sometimes you get CUBLAS_STATUS_ALLOC_FAILED / cudaMalloc failure.
+    if ("cuda" in msg and "out of memory" in msg) or "cudamalloc" in msg or "bfc_arena" in msg:
+        return True
+    if "cublas" in msg and ("alloc_failed" in msg or "status_alloc_failed" in msg):
+        return True
+    if "cublas_status_alloc_failed" in msg:
+        return True
+    return False
 
 
 def _classify_onnx_error_text(message: str) -> str:
@@ -1319,6 +1570,7 @@ def run_ultralytics_backend(
     conf_rec_beta_recall: float = 2.0,
     conf_rec_beta_precision: float = 0.5,
     conf_rec_fallback: float = 0.25,
+    deep_diagnostics: bool = False,
 ) -> BackendRunResult:
     test_start_time = datetime.now()
     model = YOLO(weights_path)
@@ -1355,6 +1607,129 @@ def run_ultralytics_backend(
                 beta_precision=conf_rec_beta_precision,
                 fallback_confidence=conf_rec_fallback,
             )
+        if deep_diagnostics:
+            eval_params = normalize_eval_params(imgsz=imgsz, conf=val_conf, iou=val_iou)
+            input_hw = (int(eval_params["imgsz"]), int(eval_params["imgsz"]))
+            conf_thr = float(eval_params["conf"])
+            iou_thr = float(eval_params["iou"])
+            names = _load_names(dataset_yaml_path)
+
+            # Deep diagnostics are optional, but when enabled they must be produced for test and val.
+            for split in ("test", "val"):
+                try:
+                    gt_rows_split, _bgv_split, image_paths_split = _collect_gt(dataset_yaml_path, split)
+                except Exception as exc:
+                    if split == "test":
+                        raise
+                    print(f"[WARN] {format_name}: deep-diagnostics could not collect GT for split={split}: {exc}")
+                    continue
+
+                # Batched prediction for deep diagnostics can spike memory.
+                # We chunk the input to keep peak RSS low and avoid OOM-killer.
+                preds_split: list[_Pred] = []
+                predict_chunk_size = 10
+
+                def _append_preds_from_results(results_iter: Any, *, chunk_paths: list[str], chunk_start_idx: int) -> None:
+                    # idx->image_path mapping relies on Ultralytics preserving input order.
+                    for idx, r0 in tqdm(
+                        enumerate(results_iter),
+                        desc=f"{format_name}:deep_{split}",
+                        unit="img",
+                        file=sys.stdout,
+                        total=len(chunk_paths),
+                    ):
+                        image_path = (
+                            chunk_paths[idx]
+                            if idx < len(chunk_paths)
+                            else str(getattr(r0, "path", ""))
+                        )
+                        boxes = getattr(r0, "boxes", None)
+                        if boxes is None:
+                            del r0
+                            continue
+                        xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, "cpu") else np.asarray(boxes.xyxy)
+                        confs = boxes.conf.cpu().numpy() if hasattr(boxes.conf, "cpu") else np.asarray(boxes.conf)
+                        clss = boxes.cls.cpu().numpy() if hasattr(boxes.cls, "cpu") else np.asarray(boxes.cls)
+                        for b, c, k in zip(xyxy, confs, clss):
+                            preds_split.append(
+                                _Pred(
+                                    image_path=image_path,
+                                    cls_id=int(k),
+                                    conf=float(c),
+                                    x1=float(b[0]),
+                                    y1=float(b[1]),
+                                    x2=float(b[2]),
+                                    y2=float(b[3]),
+                                )
+                            )
+                        # Best-effort cleanup: Results objects keep references to large arrays.
+                        del r0, boxes, xyxy, confs, clss
+                        # Periodic GC to control peak RSS without destroying performance.
+                        if (chunk_start_idx + idx) % 10 == 0:
+                            _release_cuda_memory_best_effort()
+
+                def _is_cuda_oom_text(exc: Exception) -> bool:
+                    msg = str(exc).lower()
+                    return ("out of memory" in msg and "cuda" in msg) or "cudamemoryerror" in msg
+
+                for chunk_start in range(0, len(image_paths_split), predict_chunk_size):
+                    chunk_paths = image_paths_split[chunk_start : chunk_start + predict_chunk_size]
+                    if not chunk_paths:
+                        continue
+                    try:
+                        # stream=True prevents Ultralytics from buffering all Results objects in RAM.
+                        results_iter = model.predict(
+                            source=chunk_paths,
+                            imgsz=int(input_hw[0]),
+                            conf=float(conf_thr),
+                            iou=float(iou_thr),
+                            verbose=False,
+                            batch=int(val_batch) if val_batch is not None else 1,
+                            stream=True,
+                        )
+                        _append_preds_from_results(results_iter, chunk_paths=chunk_paths, chunk_start_idx=chunk_start)
+                    except Exception as exc:
+                        if _is_cuda_oom_text(exc):
+                            print(
+                                f"[WARN] {format_name}: deep-diagnostics predict OOM on GPU for split={split}, chunk={chunk_start}. "
+                                "Retrying on CPU.",
+                                file=sys.stderr,
+                            )
+                            _release_cuda_memory_best_effort()
+                            results_iter = model.predict(
+                                source=chunk_paths,
+                                imgsz=int(input_hw[0]),
+                                conf=float(conf_thr),
+                                iou=float(iou_thr),
+                                verbose=False,
+                                device="cpu",
+                                batch=1,
+                                stream=True,
+                            )
+                            _append_preds_from_results(results_iter, chunk_paths=chunk_paths, chunk_start_idx=chunk_start)
+                        else:
+                            raise
+                    _release_cuda_memory_best_effort()
+
+                _write_deep_diagnostics_artifacts(
+                    root_dir=root_dir,
+                    format_name=format_name,
+                    backend_name="ultralytics_predict",
+                    weights_path=weights_path,
+                    data_yaml_path=dataset_yaml_path,
+                    split=split,
+                    preds=preds_split,
+                    gt_rows=gt_rows_split,
+                    image_paths=image_paths_split,
+                    names=names,
+                    conf_thr=conf_thr,
+                    iou_thr=iou_thr,
+                    imgsz=input_hw[0],
+                    batch=val_batch,
+                    inference_source="ultralytics_model_predict",
+                    gt_source="ultralytics_verify_image_label",
+                    nms_profile="ultralytics_validator_multilabel",
+                )
         test_end_time = datetime.now()
         persist_target_test_artifacts_state(
             root_dir,
@@ -1421,6 +1796,7 @@ def run_native_format_backend(
     val_conf: float | None = None,
     val_iou: float | None = None,
     val_batch: int | None = None,
+    deep_diagnostics: bool = False,
 ) -> BackendRunResult:
     backend_name = "onnxruntime" if format_name == "onnx" else ("unified_pt" if format_name == "pt_uni" else "tensorrt")
     try:
@@ -1435,6 +1811,7 @@ def run_native_format_backend(
                 val_conf=float(eval_params["conf"]),
                 val_iou=float(eval_params["iou"]),
                 val_batch=val_batch,
+                deep_diagnostics=deep_diagnostics,
             )
             if result.success:
                 test_dir = format_test_dir(root_dir, "pt_uni")
@@ -1545,6 +1922,26 @@ def run_native_format_backend(
                 gt_source="ultralytics_verify_image_label",
                 nms_profile="ultralytics_nms_multilabel",
             )
+            if deep_diagnostics:
+                _write_deep_diagnostics_artifacts(
+                    root_dir=root_dir,
+                    format_name=format_name,
+                    backend_name=backend_name,
+                    weights_path=weights_path,
+                    data_yaml_path=dataset_yaml_path,
+                    split="test",
+                    preds=preds,
+                    gt_rows=gt_rows,
+                    image_paths=image_paths,
+                    names=names,
+                    conf_thr=conf_thr,
+                    iou_thr=iou_thr,
+                    imgsz=input_hw[0],
+                    batch=val_batch,
+                    inference_source="onnxruntime_session",
+                    gt_source="ultralytics_verify_image_label",
+                    nms_profile="ultralytics_nms_multilabel",
+                )
             try:
                 gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
                 if use_worker:
@@ -1588,6 +1985,26 @@ def run_native_format_backend(
                     gt_source="ultralytics_verify_image_label",
                     nms_profile="ultralytics_nms_multilabel",
                 )
+                if deep_diagnostics:
+                    _write_deep_diagnostics_artifacts(
+                        root_dir=root_dir,
+                        format_name=format_name,
+                        backend_name=backend_name,
+                        weights_path=weights_path,
+                        data_yaml_path=dataset_yaml_path,
+                        split="val",
+                        preds=preds_val,
+                        gt_rows=gt_rows_val,
+                        image_paths=image_paths_val,
+                        names=names,
+                        conf_thr=conf_thr,
+                        iou_thr=iou_thr,
+                        imgsz=input_hw[0],
+                        batch=val_batch,
+                        inference_source="onnxruntime_session",
+                        gt_source="ultralytics_verify_image_label",
+                        nms_profile="ultralytics_nms_multilabel",
+                    )
             except Exception:
                 pass
             persist_target_test_artifacts_state(

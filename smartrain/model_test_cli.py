@@ -20,6 +20,7 @@ from smartrain.model_test_service import (
     complete_missing_test_artifacts,
     has_matching_test_artifacts,
     has_complete_test_artifacts,
+    format_test_dir,
     persist_target_test_artifacts_state,
     resolve_root_dir_for_target,
 )
@@ -44,6 +45,7 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--conf", type=float, default=None, help="Validation confidence threshold.")
     p.add_argument("--iou", type=float, default=None, help="Validation IoU threshold.")
     p.add_argument("--batch", type=int, default=None, help="Validation batch size.")
+    p.add_argument("--deep-diagnostics", action="store_true", help="Save deep per-image diagnostics artifacts.")
     p.add_argument("--non-interactive", "-y", action="store_true", help="Disable interactive prompts.")
     return p
 
@@ -296,6 +298,18 @@ def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | 
     return defaults
 
 
+def _has_deep_diagnostics_artifacts(root_dir: str, format_name: str) -> bool:
+    deep_dir = os.path.join(format_test_dir(root_dir, format_name), "deep_diagnostics")
+    if not os.path.isdir(deep_dir):
+        return False
+    for split in ("test", "val"):
+        if not os.path.isfile(os.path.join(deep_dir, f"debug_{split}.jsonl")):
+            return False
+        if not os.path.isfile(os.path.join(deep_dir, f"debug_{split}_summary.json")):
+            return False
+    return os.path.isfile(os.path.join(deep_dir, "debug_params.json"))
+
+
 def _should_rerun_existing_match(
     *,
     interactive: bool,
@@ -307,6 +321,7 @@ def _should_rerun_existing_match(
     imgsz: int | None,
     conf: float | None,
     iou: float | None,
+    deep_diagnostics: bool = False,
 ) -> bool:
     if force:
         return True
@@ -321,7 +336,7 @@ def _should_rerun_existing_match(
     )
     if not matches:
         if has_complete_test_artifacts(root_dir, format_name):
-            if any(v is not None for v in (imgsz, conf, iou, batch)):
+            if any(v is not None for v in (imgsz, conf, iou)):
                 print(
                     f"[INFO] {format_name}: existing artifacts found, but model/dataset/params differ "
                     f"(imgsz={imgsz}, conf={conf}, iou={iou}). Recomputing."
@@ -330,6 +345,15 @@ def _should_rerun_existing_match(
                 print(
                     f"[INFO] {format_name}: existing artifacts found, but model or dataset differs. Recomputing."
                 )
+        return True
+
+    if deep_diagnostics and not _has_deep_diagnostics_artifacts(root_dir, format_name):
+        if interactive:
+            return prompt_yes_no(
+                f"{format_name}: deep-diagnostics artifacts are missing. Re-run",
+                default=True,
+            )
+        print(f"[INFO] {format_name}: deep-diagnostics artifacts are missing. Recomputing.")
         return True
     if interactive:
         return prompt_yes_no(
@@ -497,29 +521,44 @@ def main(argv: list[str] | None = None) -> None:
                 imgsz=requested_imgsz,
                 conf=requested_conf,
                 iou=requested_iou,
+                deep_diagnostics=bool(args.deep_diagnostics),
             ):
                 results.append(("pt", True, None))
             else:
-                complete_missing_test_artifacts(
-                    root_dir,
-                    workspace_root=workspace_root,
-                    pt_test_runner=__import__("smartrain.model_training_module", fromlist=["test_yolo"]).test_yolo,
-                    pt_test_runner_kwargs={
-                        "val_imgsz": args.imgsz,
-                        "val_conf": args.conf,
-                        "val_iou": args.iou,
-                        "val_batch": args.batch,
-                    },
-                )
-                persist_target_test_artifacts_state(
-                    root_dir,
-                    format_name="pt",
-                    target_path=primary_path,
-                    dataset_yaml=data_yaml,
-                    backend="ultralytics",
-                    status="ok",
-                )
-                results.append(("pt", True, None))
+                if bool(args.deep_diagnostics):
+                    pt_result = run_ultralytics_backend(
+                        root_dir=root_dir,
+                        weights_path=primary_path,
+                        dataset_yaml_path=data_yaml,
+                        format_name="pt",
+                        imgsz=args.imgsz,
+                        val_conf=args.conf,
+                        val_iou=args.iou,
+                        val_batch=args.batch,
+                        deep_diagnostics=True,
+                    )
+                    results.append(("pt", pt_result.success, pt_result.error))
+                else:
+                    complete_missing_test_artifacts(
+                        root_dir,
+                        workspace_root=workspace_root,
+                        pt_test_runner=__import__("smartrain.model_training_module", fromlist=["test_yolo"]).test_yolo,
+                        pt_test_runner_kwargs={
+                            "val_imgsz": args.imgsz,
+                            "val_conf": args.conf,
+                            "val_iou": args.iou,
+                            "val_batch": args.batch,
+                        },
+                    )
+                    persist_target_test_artifacts_state(
+                        root_dir,
+                        format_name="pt",
+                        target_path=primary_path,
+                        dataset_yaml=data_yaml,
+                        backend="ultralytics",
+                        status="ok",
+                    )
+                    results.append(("pt", True, None))
         elif target_kind in {"models", "weights"} and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
             print(f"  model[pt]: {primary_path}")
             if not _should_rerun_existing_match(
@@ -532,6 +571,7 @@ def main(argv: list[str] | None = None) -> None:
                 imgsz=requested_imgsz,
                 conf=requested_conf,
                 iou=requested_iou,
+                deep_diagnostics=bool(args.deep_diagnostics),
             ):
                 results.append(("pt", True, None))
             else:
@@ -544,6 +584,7 @@ def main(argv: list[str] | None = None) -> None:
                     val_conf=args.conf,
                     val_iou=args.iou,
                     val_batch=args.batch,
+                    deep_diagnostics=bool(args.deep_diagnostics),
                 )
                 results.append(("pt", pt_result.success, pt_result.error))
 
@@ -570,6 +611,7 @@ def main(argv: list[str] | None = None) -> None:
                 imgsz=requested_imgsz,
                 conf=requested_conf,
                 iou=requested_iou,
+                deep_diagnostics=bool(args.deep_diagnostics),
             ):
                 results.append((fmt, True, None))
                 continue
@@ -606,6 +648,7 @@ def main(argv: list[str] | None = None) -> None:
                     val_conf=args.conf,
                     val_iou=args.iou,
                     val_batch=args.batch,
+                        deep_diagnostics=bool(args.deep_diagnostics),
                 )
                 results.append((fmt, result.success, result.error))
         except Exception as exc:

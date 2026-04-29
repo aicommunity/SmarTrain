@@ -76,6 +76,11 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:  # noqa: PERF203
             last_error = exc
             if _is_onnx_cuda_oom_error(exc) and attempt < max_retries:
+                # If CUDA initialization fails (OOM / CUBLAS alloc_failed), keep retrying can be pointless.
+                # Switch to CPUExecutionProvider for remaining attempts (if available).
+                if isinstance(selected, list) and "CUDAExecutionProvider" in selected and "CPUExecutionProvider" in available:
+                    selected = ["CPUExecutionProvider"]
+                    print(f"[WARN] onnx-worker: switching to CPUExecutionProvider after CUDA init OOM for {split_name}.", file=sys.stderr)
                 _release_cuda_memory_best_effort()
                 time.sleep(0.5 * (2 ** (attempt - 1)))
                 continue

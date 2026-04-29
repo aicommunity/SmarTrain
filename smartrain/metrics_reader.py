@@ -17,6 +17,7 @@ from smartrain.model_test_service import (
 )
 
 DEFAULT_MAP_COL = "metrics/mAP50-95(B)"
+METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
 
 def _infer_model_from_run_dir_name(run_dir: str) -> str | None:
@@ -186,6 +187,21 @@ def read_test_metrics_row(run_dir: str, format_name: str | None = "pt") -> dict[
     df.columns = [str(c).strip() for c in df.columns]
     if len(df) == 0:
         return {}
+    # Prefer explicit aggregate row if present.
+    if "Class" in df.columns:
+        cls = df["Class"].astype(str).str.strip().str.lower()
+        all_mask = cls.eq("all")
+        if bool(all_mask.any()):
+            return df.loc[all_mask].iloc[0].to_dict()
+    # If metrics are per-class without an "all" row, build macro-average.
+    if "Class" in df.columns and len(df) > 1:
+        out: dict[str, Any] = {}
+        for col in METRIC_AGG_COLUMNS:
+            if col in df.columns:
+                out[col] = pd.to_numeric(df[col], errors="coerce").mean()
+        if out:
+            out["Class"] = "all"
+            return out
     return df.iloc[0].to_dict()
 
 

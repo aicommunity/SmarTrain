@@ -60,6 +60,8 @@ from smartrain.run_discovery import find_run_directories, is_run_directory, reso
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.confidence_recommendation import recommendation_file_path, read_recommendation_file
 
+METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
+
 
 def _clear_gpu_memory() -> None:
     try:
@@ -1577,6 +1579,23 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
             mdf = pd.read_csv(metrics_path)
             if len(mdf) == 0:
                 return {}
+            mdf.columns = [str(c).strip() for c in mdf.columns]
+            # Prefer explicit aggregate row for Ultralytics-like CSVs.
+            if "Class" in mdf.columns:
+                cls = mdf["Class"].astype(str).str.strip().str.lower()
+                all_mask = cls.eq("all")
+                if bool(all_mask.any()):
+                    return dict(mdf.loc[all_mask].iloc[0].to_dict())
+            # Some generated pt/pt_uni metrics CSVs are per-class only.
+            # For compare tables we need run-level aggregate, so use macro mean.
+            if "Class" in mdf.columns and len(mdf) > 1:
+                out: dict[str, Any] = {}
+                for col in METRIC_AGG_COLUMNS:
+                    if col in mdf.columns:
+                        out[col] = pd.to_numeric(mdf[col], errors="coerce").mean()
+                if out:
+                    out["Class"] = "all"
+                    return out
             return dict(mdf.iloc[0].to_dict())
         except Exception:
             return {}

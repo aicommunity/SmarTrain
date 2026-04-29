@@ -295,6 +295,76 @@ def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path
     assert manifest["formats"]["engine"]["status"] == "ok"
 
 
+def test_run_native_onnx_backend_writes_deep_diagnostics_artifacts(monkeypatch, tmp_path: Path) -> None:
+    _install_fake_onnxruntime(monkeypatch)
+    root_dir = tmp_path / "run_onnx_deep"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.onnx"
+    weights_path.write_bytes(b"fake")
+
+    ds = _make_dataset(tmp_path, "ds_onnx_deep", with_test=True)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="onnx",
+        imgsz=640,
+        val_conf=0.25,
+        val_iou=0.5,
+        val_batch=1,
+        deep_diagnostics=True,
+    )
+
+    assert result.success is True
+
+    deep_dir = root_dir / "test_onnx" / "deep_diagnostics"
+    assert deep_dir.is_dir()
+    assert (deep_dir / "debug_params.json").is_file()
+    assert (deep_dir / "debug_test.jsonl").is_file()
+    assert (deep_dir / "debug_test_summary.json").is_file()
+
+    summary = json.loads((deep_dir / "debug_test_summary.json").read_text(encoding="utf-8"))
+    assert "tp_counts_by_iou" in summary
+    assert "fp_counts_by_iou" in summary
+    assert isinstance(summary.get("tp_counts_by_iou"), list)
+    assert isinstance(summary.get("fp_counts_by_iou"), list)
+    assert len(summary["tp_counts_by_iou"]) == 10
+    assert len(summary["fp_counts_by_iou"]) == 10
+
+    # Verify JSONL schema + aggregation invariants.
+    tp_sum = [0 for _ in range(10)]
+    line_count = 0
+    with open(deep_dir / "debug_test.jsonl", "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            payload = json.loads(line)
+            line_count += 1
+            assert "image_path" in payload
+            assert "gts" in payload
+            assert "preds" in payload
+            assert "matching" in payload
+            matching = payload["matching"]
+            assert isinstance(matching.get("tp_counts_by_iou"), list)
+            assert len(matching["tp_counts_by_iou"]) == 10
+            assert isinstance(matching.get("fp_counts_by_iou"), list)
+            assert len(matching["fp_counts_by_iou"]) == 10
+
+            # best_iou hist dimensions: 10 IoU thresholds x 10 bins.
+            best_tp = matching.get("best_iou_tp_hist_by_iou")
+            assert isinstance(best_tp, list)
+            assert len(best_tp) == 10
+            assert all(isinstance(row, list) and len(row) == 10 for row in best_tp)
+
+            tp = matching["tp_counts_by_iou"]
+            tp_sum = [tp_sum[i] + int(tp[i]) for i in range(10)]
+
+    assert line_count > 0
+    assert tp_sum == [int(x) for x in summary["tp_counts_by_iou"]]
+
+
 def test_ultralytics_style_metrics_payload_is_stable() -> None:
     from smartrain.model_test_backends import _Gt, _Pred, _compute_ultralytics_style_payload
 
