@@ -341,6 +341,7 @@ def test_model_test_cli_run_finds_engine_in_nested_dir(monkeypatch, tmp_path: Pa
     monkeypatch.setattr("smartrain.model_test_cli._run_native_backend_isolated", _fake_isolated)
     monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
     monkeypatch.setattr("smartrain.model_test_cli.has_matching_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli._check_native_format_preflight", lambda _fmt: (True, None))
 
     smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "engine", "-y"])
     assert called["format_name"] == "engine"
@@ -504,6 +505,7 @@ def test_model_test_cli_engine_crash_isolated_and_recorded(monkeypatch, tmp_path
 
     monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
     monkeypatch.setattr("smartrain.model_test_cli.has_matching_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli._check_native_format_preflight", lambda _fmt: (True, None))
     monkeypatch.setattr(
         "smartrain.model_test_cli.subprocess.run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=-6, stdout="", stderr="Aborted (core dumped)"),
@@ -524,6 +526,51 @@ def test_model_test_cli_engine_crash_isolated_and_recorded(monkeypatch, tmp_path
     manifest = json.loads((run_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
     assert manifest["formats"]["engine"]["status"] == "failed"
     assert "signal 6" in str(manifest["formats"]["engine"]["error"]).lower()
+
+
+def test_model_test_cli_engine_preflight_fail_skips_isolated(monkeypatch, tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_engine_preflight"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    (run_dir / "engine.engine").write_bytes(b"fake")
+    (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
+    ((tmp_path / "datasets" / "ds_a") / "data.yaml").write_text(
+        "train: train/images\nval: val/images\ntest: test/images\nnames: ['obj']\n",
+        encoding="utf-8",
+    )
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"path_under_workspace": "datasets/ds_a"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli.has_matching_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli._check_native_format_preflight", lambda _fmt: (False, "python CUDA runtime is unavailable"))
+    calls = {"isolated": 0}
+
+    def _fake_isolated(**_kwargs):
+        calls["isolated"] += 1
+        return True, None
+
+    monkeypatch.setattr("smartrain.model_test_cli._run_native_backend_isolated", _fake_isolated)
+
+    smartrain_test_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--run",
+            str(run_dir),
+            "--formats",
+            "engine",
+            "-y",
+        ]
+    )
+
+    assert calls["isolated"] == 0
+    manifest = json.loads((run_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["formats"]["engine"]["status"] == "failed"
+    assert "python cuda runtime is unavailable" in str(manifest["formats"]["engine"]["error"]).lower()
 
 
 def test_model_test_cli_run_builds_onnx_artifacts_end_to_end(monkeypatch, tmp_path: Path) -> None:

@@ -15,6 +15,7 @@ from smartrain.cli_replay import build_non_interactive_command, print_replay_com
 from smartrain.inference_cli import _resolve_model_from_name, _resolve_run_ref
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.model_test_backends import run_native_format_backend, run_ultralytics_backend
+from smartrain import tensorrt_checks as trt_checks
 from smartrain.model_test_service import (
     SUPPORTED_TEST_FORMATS,
     complete_missing_test_artifacts,
@@ -401,11 +402,11 @@ def _run_native_backend_isolated(
             cmd.extend(["--iou", str(val_iou)])
         if val_batch is not None:
             cmd.extend(["--batch", str(val_batch)])
-        proc = subprocess.run(cmd, text=True, capture_output=True)
+        # Stream child process output directly to the current terminal so tqdm
+        # progress bars from native backends (engine/trt) remain visible.
+        proc = subprocess.run(cmd, text=True)
         if proc.returncode != 0:
-            stderr = (proc.stderr or "").strip()
-            stdout = (proc.stdout or "").strip()
-            tail = stderr or stdout or "native backend crashed"
+            tail = "native backend crashed (see logs above)"
             if proc.returncode < 0:
                 tail = f"native backend terminated by signal {-proc.returncode}: {tail}"
             else:
@@ -423,6 +424,19 @@ def _run_native_backend_isolated(
             os.unlink(result_path)
         except OSError:
             pass
+
+
+def _check_native_format_preflight(format_name: str) -> tuple[bool, str | None]:
+    fmt = str(format_name).strip().lower()
+    if fmt not in {"engine", "trt"}:
+        return True, None
+    ready, reason = trt_checks.check_tensorrt_ready()
+    if not ready:
+        return False, reason
+    cuda_ready, cuda_reason = trt_checks.check_python_cuda_runtime_ready()
+    if not cuda_ready:
+        return False, cuda_reason
+    return True, None
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -616,6 +630,20 @@ def main(argv: list[str] | None = None) -> None:
                 results.append((fmt, True, None))
                 continue
             if fmt in {"engine", "trt"}:
+                preflight_ok, preflight_reason = _check_native_format_preflight(fmt)
+                if not preflight_ok:
+                    backend = "tensorrt"
+                    persist_target_test_artifacts_state(
+                        root_dir,
+                        format_name=fmt,
+                        target_path=artifact_path,
+                        dataset_yaml=data_yaml,
+                        backend=backend,
+                        status="failed",
+                        error=preflight_reason,
+                    )
+                    results.append((fmt, False, preflight_reason))
+                    continue
                 ok, err = _run_native_backend_isolated(
                     root_dir=root_dir,
                     weights_path=artifact_path,

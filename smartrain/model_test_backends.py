@@ -37,6 +37,7 @@ from smartrain.model_test_service import (
     format_test_dir,
     persist_target_test_artifacts_state,
 )
+from smartrain import tensorrt_checks as trt_checks
 from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
 from smartrain.unified_validator_core import EvalProvenance, normalize_eval_params
 
@@ -1404,71 +1405,128 @@ def _infer_with_trt_engine(
     names: list[str],
 ) -> list[_Pred]:
     import tensorrt as trt  # type: ignore
-    from cuda import cudart  # type: ignore
+    try:
+        cudart, _import_path = trt_checks.resolve_cuda_runtime_module()
+    except Exception as e:
+        raise RuntimeError(
+            "python CUDA runtime is unavailable. "
+            f"Install CUDA Python bindings and verify runtime libraries: {e}"
+        ) from e
 
     logger = trt.Logger(trt.Logger.ERROR)
     runtime = trt.Runtime(logger)
     with open(engine_path, "rb") as f:
         engine = runtime.deserialize_cuda_engine(f.read())
     if engine is None:
-        raise RuntimeError(f"Failed to deserialize TensorRT engine: {engine_path}")
+        raise RuntimeError(
+            f"Failed to deserialize TensorRT engine: {engine_path}. "
+            "This usually means engine/runtime incompatibility (TensorRT/CUDA/GPU mismatch). "
+            "Rebuild engine/trt artifacts on this machine with current runtime."
+        )
     context = engine.create_execution_context()
     if context is None:
         raise RuntimeError("Failed to create TensorRT execution context")
 
     tensor, orig_hw, gain, pad = _preprocess_image(image_path, input_hw)
     input_array = np.ascontiguousarray(tensor.astype(np.float32))
-    bindings: list[int] = [0] * int(getattr(engine, "num_bindings"))
     device_allocations: list[int] = []
     host_outputs: list[np.ndarray] = []
     try:
-        for binding_idx in range(int(engine.num_bindings)):
-            is_input = bool(engine.binding_is_input(binding_idx))
-            dtype = np.dtype(trt.nptype(engine.get_binding_dtype(binding_idx)))
-            if is_input:
-                shape = tuple(int(x) for x in input_array.shape)
-                if any(int(v) < 0 for v in engine.get_binding_shape(binding_idx)):
-                    context.set_binding_shape(binding_idx, shape)
-                nbytes = int(input_array.nbytes)
-                err, ptr = cudart.cudaMalloc(nbytes)
-                _cuda_check((err,), "cudaMalloc(input)")
-                device_allocations.append(int(ptr))
+        output_ptrs: list[int] = []
+        if hasattr(engine, "num_io_tensors"):
+            # TensorRT 10+ tensor-based API.
+            tensor_names = [str(engine.get_tensor_name(i)) for i in range(int(engine.num_io_tensors))]
+            for tensor_name in tensor_names:
+                mode = engine.get_tensor_mode(tensor_name)
+                is_input = bool(mode == trt.TensorIOMode.INPUT)
+                dtype = np.dtype(trt.nptype(engine.get_tensor_dtype(tensor_name)))
+                if is_input:
+                    shape = tuple(int(x) for x in input_array.shape)
+                    declared = tuple(int(v) for v in engine.get_tensor_shape(tensor_name))
+                    if any(v < 0 for v in declared):
+                        context.set_input_shape(tensor_name, shape)
+                    nbytes = int(input_array.nbytes)
+                    err, ptr = cudart.cudaMalloc(nbytes)
+                    _cuda_check((err,), "cudaMalloc(input)")
+                    device_allocations.append(int(ptr))
+                    _cuda_check(
+                        cudart.cudaMemcpy(
+                            int(ptr),
+                            input_array.ctypes.data,
+                            nbytes,
+                            cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
+                        ),
+                        "cudaMemcpy(H2D)",
+                    )
+                    context.set_tensor_address(tensor_name, int(ptr))
+                else:
+                    shape = tuple(int(x) for x in context.get_tensor_shape(tensor_name))
+                    nbytes = int(_trt_volume(shape) * dtype.itemsize)
+                    host = np.empty(shape, dtype=dtype)
+                    err, ptr = cudart.cudaMalloc(nbytes)
+                    _cuda_check((err,), "cudaMalloc(output)")
+                    device_allocations.append(int(ptr))
+                    context.set_tensor_address(tensor_name, int(ptr))
+                    host_outputs.append(host)
+                    output_ptrs.append(int(ptr))
+            if not context.execute_async_v3(0):
+                raise RuntimeError("TensorRT execute_async_v3 returned False")
+            for host, ptr in zip(host_outputs, output_ptrs):
                 _cuda_check(
                     cudart.cudaMemcpy(
+                        host.ctypes.data,
                         int(ptr),
-                        input_array.ctypes.data,
-                        nbytes,
-                        cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
+                        int(host.nbytes),
+                        cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
                     ),
-                    "cudaMemcpy(H2D)",
+                    "cudaMemcpy(D2H)",
                 )
-                bindings[binding_idx] = int(ptr)
-            else:
-                shape = tuple(int(x) for x in context.get_binding_shape(binding_idx))
-                nbytes = int(_trt_volume(shape) * dtype.itemsize)
-                host = np.empty(shape, dtype=dtype)
-                err, ptr = cudart.cudaMalloc(nbytes)
-                _cuda_check((err,), "cudaMalloc(output)")
-                device_allocations.append(int(ptr))
-                bindings[binding_idx] = int(ptr)
-                host_outputs.append(host)
-        if not context.execute_v2(bindings):
-            raise RuntimeError("TensorRT execute_v2 returned False")
-        output_idx = 0
-        for binding_idx in range(int(engine.num_bindings)):
-            if bool(engine.binding_is_input(binding_idx)):
-                continue
-            host = host_outputs[output_idx]
-            output_idx += 1
-            _cuda_check(
-                cudart.cudaMemcpy(
-                    host.ctypes.data,
-                    int(bindings[binding_idx]),
-                    int(host.nbytes),
-                    cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
-                ),
-                "cudaMemcpy(D2H)",
-            )
+        else:
+            # TensorRT 8/9 legacy bindings API.
+            bindings: list[int] = [0] * int(getattr(engine, "num_bindings"))
+            for binding_idx in range(int(engine.num_bindings)):
+                is_input = bool(engine.binding_is_input(binding_idx))
+                dtype = np.dtype(trt.nptype(engine.get_binding_dtype(binding_idx)))
+                if is_input:
+                    shape = tuple(int(x) for x in input_array.shape)
+                    if any(int(v) < 0 for v in engine.get_binding_shape(binding_idx)):
+                        context.set_binding_shape(binding_idx, shape)
+                    nbytes = int(input_array.nbytes)
+                    err, ptr = cudart.cudaMalloc(nbytes)
+                    _cuda_check((err,), "cudaMalloc(input)")
+                    device_allocations.append(int(ptr))
+                    _cuda_check(
+                        cudart.cudaMemcpy(
+                            int(ptr),
+                            input_array.ctypes.data,
+                            nbytes,
+                            cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
+                        ),
+                        "cudaMemcpy(H2D)",
+                    )
+                    bindings[binding_idx] = int(ptr)
+                else:
+                    shape = tuple(int(x) for x in context.get_binding_shape(binding_idx))
+                    nbytes = int(_trt_volume(shape) * dtype.itemsize)
+                    host = np.empty(shape, dtype=dtype)
+                    err, ptr = cudart.cudaMalloc(nbytes)
+                    _cuda_check((err,), "cudaMalloc(output)")
+                    device_allocations.append(int(ptr))
+                    bindings[binding_idx] = int(ptr)
+                    host_outputs.append(host)
+                    output_ptrs.append(int(ptr))
+            if not context.execute_v2(bindings):
+                raise RuntimeError("TensorRT execute_v2 returned False")
+            for host, ptr in zip(host_outputs, output_ptrs):
+                _cuda_check(
+                    cudart.cudaMemcpy(
+                        host.ctypes.data,
+                        int(ptr),
+                        int(host.nbytes),
+                        cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
+                    ),
+                    "cudaMemcpy(D2H)",
+                )
         raw = _select_output_tensor([np.asarray(x) for x in host_outputs])
     finally:
         for ptr in device_allocations:

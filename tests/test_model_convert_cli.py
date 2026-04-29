@@ -271,7 +271,7 @@ def test_runtime_probe_fallback_without_buildonly(monkeypatch, tmp_path: Path):
             workspace_mode="workspace",
         ),
     )
-    monkeypatch.setattr(mcc.tempfile, "mkdtemp", lambda prefix: str(tmp_path / "probe_dir"))
+    monkeypatch.setattr(mcc.trt_checks.tempfile, "mkdtemp", lambda prefix: str(tmp_path / "probe_dir"))
     (tmp_path / "probe_dir").mkdir(parents=True, exist_ok=True)
 
     calls: list[list[str]] = []
@@ -568,6 +568,9 @@ def test_interactive_pipeline_engine_uses_pt_source_not_session_onnx(monkeypatch
         target_trt=False,
         output_dir=tmp_path,
         force=True,
+        force_onnx=True,
+        force_engine=True,
+        force_trt=True,
         onnx_imgsz=640,
         onnx_imgsz_source="cli",
         onnx_batch=1,

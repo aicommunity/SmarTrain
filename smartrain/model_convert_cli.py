@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import ctypes
 import json
-import platform
 import shutil
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -25,6 +22,7 @@ from smartrain.cli_replay import build_non_interactive_command, print_replay_com
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.model_context import infer_img_size_with_source
 from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain import tensorrt_checks as trt_checks
 from smartrain.run_discovery import find_run_directories
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
 
@@ -58,6 +56,9 @@ class InteractiveContext:
 
     output_dir: Path | None
     force: bool
+    force_onnx: bool
+    force_engine: bool
+    force_trt: bool
 
     onnx_imgsz: int | tuple[int, int]
     onnx_imgsz_source: str
@@ -86,11 +87,7 @@ class InteractiveResult:
     trt_path: Path | None = None
 
 
-@dataclass(frozen=True)
-class TrtexecCapabilities:
-    supports_build_only: bool
-    supports_explicit_batch: bool
-    workspace_mode: Literal["workspace", "memPoolSize", "none"]
+TrtexecCapabilities = trt_checks.TrtexecCapabilities
 
 
 def _print_stage_header(title: str) -> None:
@@ -408,7 +405,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
         )
         named = _make_dedicated_onnx_name(source_path.stem, expected_sig) + ".onnx"
         session_onnx = _next_available_path(out_dir / named)
-        if session_onnx.exists() and not ctx.force:
+        if session_onnx.exists() and not ctx.force_onnx:
             print(f"[WARN] Skip ONNX (exists): {session_onnx}. Use --force to rebuild.")
         else:
             ok_onnx, onnx_reason = _export_named_onnx_from_pt(
@@ -436,7 +433,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
     if ctx.target_engine:
         _print_stage_header("Step TensorRT engine")
         engine_target = out_dir / f"{source_path.stem}.engine"
-        if engine_target.exists() and not ctx.force:
+        if engine_target.exists() and not ctx.force_engine:
             print(f"[WARN] Skip TensorRT engine (exists): {engine_target}. Use --force to rebuild.")
             stats.skipped += 1
             stats.artifacts_skipped += 1
@@ -471,7 +468,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 engine_kw["fraction"] = float(ctx.fraction)
             print(f"[INFO] [START] TensorRT engine export: {engine_input} -> {engine_target}")
             exported = Path(str(model.export(**engine_kw))).expanduser().resolve()
-            ok_move, move_reason = _maybe_move_output(exported, engine_target, ctx.force)
+            ok_move, move_reason = _maybe_move_output(exported, engine_target, ctx.force_engine)
             if not ok_move:
                 print(f"[ERROR] TensorRT engine export failed for {engine_input}: {move_reason}")
                 stats.failed += 1
@@ -487,7 +484,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
     if ctx.target_trt:
         _print_stage_header("Step TensorRT trt")
         trt_target = out_dir / f"{source_path.stem}.trt"
-        if trt_target.exists() and not ctx.force:
+        if trt_target.exists() and not ctx.force_trt:
             print(f"[WARN] Skip TensorRT trt (exists): {trt_target}. Use --force to rebuild.")
             stats.skipped += 1
             stats.artifacts_skipped += 1
@@ -619,6 +616,47 @@ def _interactive_fill(args: argparse.Namespace, workspace_root: Path) -> None:
     args.workspace_gib = args._engine_workspace_gib if target_engine else args._trt_workspace_gib
 
     args.output_dir = prompt_text("Output directory (empty = source model dir)", default="").strip() or None
+    args._force_onnx = bool(args.force)
+    args._force_engine = bool(args.force)
+    args._force_trt = bool(args.force)
+    if bool(args.force):
+        return
+
+    source_input = Path(str(args.input)).expanduser()
+    if not source_input.is_absolute():
+        source_input = (workspace_root / source_input).resolve()
+    chosen_models = _collect_input_models(source_input)
+    if source_input.is_dir():
+        expected_ext = ".pt" if source_kind == "pt" else ".onnx"
+        chosen_models = [p for p in chosen_models if p.suffix.lower() == expected_ext]
+    if not chosen_models:
+        return
+    chosen_source = chosen_models[0]
+    out_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else chosen_source.parent
+
+    if source_kind == "pt" and bool(target_onnx):
+        expected_sig = _expected_onnx_signature(args, _parse_imgsz(str(args.imgsz)) if args.imgsz else _resolve_imgsz_from_args_and_model(args, chosen_source)[0])
+        onnx_named = _make_dedicated_onnx_name(chosen_source.stem, expected_sig) + ".onnx"
+        onnx_target = out_dir / onnx_named
+        if onnx_target.exists():
+            args._force_onnx = prompt_yes_no(
+                f"Overwrite existing ONNX target ({onnx_target.name})",
+                default=False,
+            )
+    if bool(target_engine):
+        engine_target = out_dir / f"{chosen_source.stem}.engine"
+        if engine_target.exists():
+            args._force_engine = prompt_yes_no(
+                f"Overwrite existing TensorRT engine ({engine_target.name})",
+                default=False,
+            )
+    if bool(target_trt):
+        trt_target = out_dir / f"{chosen_source.stem}.trt"
+        if trt_target.exists():
+            args._force_trt = prompt_yes_no(
+                f"Overwrite existing TensorRT trt ({trt_target.name})",
+                default=False,
+            )
 
 
 def _validate_args(
@@ -668,193 +706,41 @@ def _precision_kwargs(args: argparse.Namespace, target: str) -> dict[str, Any]:
 
 
 def _check_tensorrt_ready() -> tuple[bool, str]:
-    reasons: list[str] = []
-    try:
-        import torch  # type: ignore
-
-        if not torch.cuda.is_available():
-            reasons.append("CUDA GPU is not available")
-    except Exception:
-        reasons.append("PyTorch CUDA check failed")
-    try:
-        import tensorrt  # type: ignore # noqa: F401
-    except Exception:
-        trtexec = shutil.which("trtexec") or "/usr/src/tensorrt/bin/trtexec"
-        if not Path(trtexec).exists():
-            reasons.append("python package 'tensorrt' is not installed and trtexec is not found")
-    if reasons:
-        return False, "; ".join(reasons)
-    return True, ""
+    return trt_checks.check_tensorrt_ready()
 
 
 def _detect_trtexec_capabilities(trtexec_bin: str) -> TrtexecCapabilities:
-    help_text = ""
-    try:
-        proc = subprocess.run([trtexec_bin, "--help"], check=False, text=True, capture_output=True)
-        help_text = f"{proc.stdout}\n{proc.stderr}"
-    except Exception:
-        help_text = ""
-    help_lower = help_text.lower()
-    has_help = bool(help_lower.strip())
-    supports_build_only = "--buildonly" in help_lower if has_help else True
-    supports_explicit_batch = "--explicitbatch" in help_lower if has_help else True
-    if "--mempoolsize" in help_lower:
-        workspace_mode: Literal["workspace", "memPoolSize", "none"] = "memPoolSize"
-    elif "--workspace" in help_lower:
-        workspace_mode = "workspace"
-    elif has_help:
-        workspace_mode = "none"
-    else:
-        # Fail-open when we cannot inspect help, let runtime probe validate.
-        workspace_mode = "workspace"
-    return TrtexecCapabilities(
-        supports_build_only=supports_build_only,
-        supports_explicit_batch=supports_explicit_batch,
-        workspace_mode=workspace_mode,
-    )
+    return trt_checks.detect_trtexec_capabilities(trtexec_bin)
 
 
 def _get_trtexec_capabilities(trtexec_bin: str) -> TrtexecCapabilities:
     global _TRTEXEC_CAPS_CACHE
     if _TRTEXEC_CAPS_CACHE is not None and _TRTEXEC_CAPS_CACHE[0] == trtexec_bin:
         return _TRTEXEC_CAPS_CACHE[1]
-    caps = _detect_trtexec_capabilities(trtexec_bin)
+    caps = trt_checks.get_trtexec_capabilities(trtexec_bin)
     _TRTEXEC_CAPS_CACHE = (trtexec_bin, caps)
     return caps
 
 
 def _append_trtexec_workspace_arg(cmd: list[str], workspace_mib: int, caps: TrtexecCapabilities) -> None:
-    if caps.workspace_mode == "workspace":
-        cmd.append(f"--workspace={workspace_mib}")
-    elif caps.workspace_mode == "memPoolSize":
-        cmd.append(f"--memPoolSize=workspace:{workspace_mib}")
+    trt_checks.append_trtexec_workspace_arg(cmd, workspace_mib, caps)
 
 
 def _check_trtexec_dependencies() -> tuple[bool, str]:
-    trtexec_bin = _resolve_trtexec_bin()
-    if not trtexec_bin:
-        return False, "trtexec binary is not found"
-    system_name = platform.system().lower()
-    if system_name == "linux":
-        try:
-            proc = subprocess.run(["ldd", trtexec_bin], check=False, text=True, capture_output=True)
-            output = f"{proc.stdout}\n{proc.stderr}"
-            missing = [line.strip() for line in output.splitlines() if "not found" in line]
-            if missing:
-                return False, f"missing shared libs: {'; '.join(missing[:3])}"
-        except Exception as e:
-            return False, f"ldd check failed: {e}"
-        # TensorRT often loads cuBLAS Lt dynamically at runtime.
-        # If version 12 is unavailable, trtexec frequently fails before build.
-        try:
-            ctypes.CDLL("libcublasLt.so.12")
-        except OSError:
-            return False, "libcublasLt.so.12 is not found"
-    elif system_name == "windows":
-        try:
-            ctypes.WinDLL("cublasLt64_12.dll")
-        except Exception:
-            return False, "cublasLt64_12.dll is not found"
-    return True, ""
+    return trt_checks.check_trtexec_dependencies()
 
 
 def _check_trtexec_gpu_ready() -> tuple[bool, str]:
-    trtexec_bin = _resolve_trtexec_bin()
-    if not trtexec_bin:
-        return False, "trtexec binary is not found"
-    # Fast environment preflight to avoid spending time on ONNX work when GPU
-    # is not reachable from the current process namespace.
-    if platform.system().lower() == "windows":
-        try:
-            import torch  # type: ignore
-
-            if not torch.cuda.is_available():
-                return False, "PyTorch CUDA check failed (cuda is unavailable)"
-        except Exception as e:
-            return False, f"PyTorch CUDA check failed: {e}"
-        return True, ""
-    try:
-        probe = subprocess.run(["nvidia-smi", "-L"], check=False, text=True, capture_output=True)
-    except Exception as e:
-        return False, f"nvidia-smi probe failed: {e}"
-    if probe.returncode != 0:
-        details = (probe.stderr or probe.stdout or "").strip()
-        return False, f"nvidia-smi probe failed: {details or f'exit={probe.returncode}'}"
-    out = (probe.stdout or "").strip()
-    if "GPU " not in out:
-        return False, "nvidia-smi did not report any GPUs"
-    return True, ""
+    return trt_checks.check_trtexec_gpu_ready()
 
 
 def _check_trtexec_runtime_ready() -> tuple[bool, str]:
     global _TRTEXEC_RUNTIME_CACHE
     if _TRTEXEC_RUNTIME_CACHE is not None:
         return _TRTEXEC_RUNTIME_CACHE
-    trtexec_bin = _resolve_trtexec_bin()
-    if not trtexec_bin:
-        _TRTEXEC_RUNTIME_CACHE = (False, "trtexec binary is not found")
-        return _TRTEXEC_RUNTIME_CACHE
-    caps = _get_trtexec_capabilities(trtexec_bin)
-    try:
-        import onnx  # type: ignore
-        from onnx import TensorProto, helper  # type: ignore
-    except Exception as e:
-        _TRTEXEC_RUNTIME_CACHE = (False, f"onnx probe dependencies are unavailable: {e}")
-        return _TRTEXEC_RUNTIME_CACHE
-    probe_dir = Path(tempfile.mkdtemp(prefix="smartrain_trt_probe_"))
-    onnx_path = probe_dir / "probe.onnx"
-    engine_path = probe_dir / "probe.trt"
-    try:
-        x = helper.make_tensor_value_info("images", TensorProto.FLOAT, [1, 3, 32, 32])
-        y = helper.make_tensor_value_info("out", TensorProto.FLOAT, [1, 3, 32, 32])
-        node = helper.make_node("Identity", inputs=["images"], outputs=["out"])
-        graph = helper.make_graph([node], "smartrain_probe", [x], [y])
-        model = helper.make_model(graph, opset_imports=[helper.make_operatorsetid("", 13)])
-        onnx.save(model, str(onnx_path))
-        base_cmd = [
-            trtexec_bin,
-            f"--onnx={onnx_path}",
-            f"--saveEngine={engine_path}",
-        ]
-        attempts: list[tuple[str, list[str]]] = []
-        cmd_primary = list(base_cmd)
-        if caps.supports_build_only:
-            cmd_primary.append("--buildOnly")
-        _append_trtexec_workspace_arg(cmd_primary, 64, caps)
-        attempts.append(("primary", cmd_primary))
-
-        cmd_fallback = list(base_cmd)
-        attempts.append(("fallback_no_optional_flags", cmd_fallback))
-
-        unique_attempts: list[tuple[str, list[str]]] = []
-        seen: set[tuple[str, ...]] = set()
-        for name, cmd in attempts:
-            key = tuple(cmd)
-            if key in seen:
-                continue
-            seen.add(key)
-            unique_attempts.append((name, cmd))
-
-        reasons: list[str] = []
-        for attempt_name, cmd in unique_attempts:
-            if engine_path.exists():
-                engine_path.unlink(missing_ok=True)
-            proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
-            if proc.returncode == 0 and engine_path.exists():
-                _TRTEXEC_RUNTIME_CACHE = (True, "")
-                return _TRTEXEC_RUNTIME_CACHE
-            err = (proc.stderr or proc.stdout or "").strip()
-            short = err.splitlines()[-1] if err else f"exit={proc.returncode}"
-            reasons.append(f"{attempt_name}: {short}")
-
-        details = "; ".join(reasons[:2]) if reasons else "engine is not produced"
-        _TRTEXEC_RUNTIME_CACHE = (False, f"trtexec runtime probe failed: {details}")
-        return _TRTEXEC_RUNTIME_CACHE
-    except Exception as e:
-        _TRTEXEC_RUNTIME_CACHE = (False, f"trtexec runtime probe failed: {e}")
-        return _TRTEXEC_RUNTIME_CACHE
-    finally:
-        shutil.rmtree(probe_dir, ignore_errors=True)
+    trt_checks._TRTEXEC_RUNTIME_CACHE = None
+    _TRTEXEC_RUNTIME_CACHE = trt_checks.check_trtexec_runtime_ready()
+    return _TRTEXEC_RUNTIME_CACHE
 
 
 def _get_export_format_availability() -> dict[str, tuple[bool, str]]:
@@ -884,13 +770,7 @@ def _get_export_format_availability() -> dict[str, tuple[bool, str]]:
 
 
 def _resolve_trtexec_bin() -> str | None:
-    candidate = shutil.which("trtexec")
-    if candidate:
-        return candidate
-    fallback = "/usr/src/tensorrt/bin/trtexec"
-    if Path(fallback).exists():
-        return fallback
-    return None
+    return trt_checks.resolve_trtexec_bin()
 
 
 def _guess_onnx_input_name(onnx_path: Path) -> str:
@@ -943,12 +823,12 @@ def _trtexec_export_from_onnx(
 
     print(f"[INFO] [START] TensorRT trt build (trtexec): {onnx_path} -> {engine_target}")
     try:
-        proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+        # Stream trtexec output directly to terminal so long builds have visible progress.
+        proc = subprocess.run(cmd, check=False, text=True)
     except Exception as e:
         return False, f"failed to run trtexec: {e}"
     if proc.returncode != 0:
-        err = (proc.stderr or proc.stdout or "").strip()
-        short = err.splitlines()[-1] if err else f"exit={proc.returncode}"
+        short = f"exit={proc.returncode} (see trtexec logs above)"
         return False, f"trtexec failed: {short}"
     if not engine_target.exists():
         return False, "trtexec finished without engine artifact"
@@ -1472,6 +1352,9 @@ def main(argv: list[str] | None = None) -> None:
             target_trt=target_trt,
             output_dir=out_dir,
             force=bool(args.force),
+            force_onnx=bool(getattr(args, "_force_onnx", args.force)),
+            force_engine=bool(getattr(args, "_force_engine", args.force)),
+            force_trt=bool(getattr(args, "_force_trt", args.force)),
             onnx_imgsz=imgsz,
             onnx_imgsz_source=imgsz_source,
             onnx_batch=int(args.batch),
@@ -1502,16 +1385,15 @@ def main(argv: list[str] | None = None) -> None:
 
         # Replay commands: emit current-step series (best-effort).
         cmds: list[str] = []
-        session_onnx = result.session_onnx
         if ctx.source_kind == "pt":
-            # ONNX is always first step for pt pipelines in interactive wizard.
-            cmds.append(
-                build_non_interactive_command(
-                    "model convert",
-                    parser,
-                    argparse.Namespace(**{**vars(args), "format": "onnx", "input": str(input_path)}),
+            if ctx.target_onnx:
+                cmds.append(
+                    build_non_interactive_command(
+                        "model convert",
+                        parser,
+                        argparse.Namespace(**{**vars(args), "format": "onnx", "input": str(input_path)}),
+                    )
                 )
-            )
             if ctx.target_engine:
                 cmds.append(
                     build_non_interactive_command(
@@ -1529,22 +1411,21 @@ def main(argv: list[str] | None = None) -> None:
                     )
                 )
             if ctx.target_trt:
-                if session_onnx:
-                    cmds.append(
-                        build_non_interactive_command(
-                            "model convert",
-                            parser,
-                            argparse.Namespace(
-                                **{
-                                    **vars(args),
-                                    "format": "tensorrt-trt",
-                                    "input": str(session_onnx),
-                                    "precision": getattr(args, "_trt_precision", "fp32"),
-                                    "workspace_gib": getattr(args, "_trt_workspace_gib", None),
-                                }
-                            ),
-                        )
+                cmds.append(
+                    build_non_interactive_command(
+                        "model convert",
+                        parser,
+                        argparse.Namespace(
+                            **{
+                                **vars(args),
+                                "format": "tensorrt-trt",
+                                "input": str(input_path),
+                                "precision": getattr(args, "_trt_precision", "fp32"),
+                                "workspace_gib": getattr(args, "_trt_workspace_gib", None),
+                            }
+                        ),
                     )
+                )
         else:
             if ctx.target_engine:
                 cmds.append(
