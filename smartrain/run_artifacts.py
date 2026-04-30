@@ -60,10 +60,78 @@ def run_test_format_dir(run_dir: str, format_name: str) -> Path:
 
 
 def _migrate_legacy_run_layout(root: Path) -> None:
-    # Non-destructive lazy migration: create new layout folders and let
-    # producers/consumers progressively switch to them with legacy fallbacks.
+    # Lazy migration with cleanup: move legacy artifacts into canonical
+    # layout and remove legacy folders/files after successful relocation.
     run_tests_dir(str(root)).mkdir(parents=True, exist_ok=True)
     run_train_backend_dir(str(root), "ultralytics").mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_train_artifacts(root)
+    _migrate_legacy_test_artifacts(root)
+
+
+def _move_file_to_canonical(src: Path, dst: Path) -> None:
+    if not src.exists():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if dst.exists():
+            # Canonical copy already exists; drop legacy duplicate.
+            src.unlink(missing_ok=True)
+            return
+        src.replace(dst)
+    except Exception:
+        return
+
+
+def _move_tree_merge_to_canonical(src: Path, dst: Path) -> None:
+    if not src.is_dir():
+        return
+    for item in sorted(src.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        rel = item.relative_to(src)
+        target = dst / rel
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            try:
+                item.rmdir()
+            except OSError:
+                pass
+            continue
+        _move_file_to_canonical(item, target)
+    try:
+        src.rmdir()
+    except OSError:
+        pass
+
+
+def _migrate_legacy_train_artifacts(root: Path) -> None:
+    legacy = root / "train"
+    canonical = run_train_backend_dir(str(root), "ultralytics")
+    _move_tree_merge_to_canonical(legacy, canonical)
+
+
+def _migrate_legacy_test_artifacts(root: Path) -> None:
+    tests_root = run_tests_dir(str(root))
+    tests_root.mkdir(parents=True, exist_ok=True)
+
+    legacy_to_new_dirs = {
+        "test": "test-ultralytics",
+        "test_onnx": "test_onnx",
+        "test_engine": "test_engine",
+        "test_trt": "test_trt",
+        "test_pt_uni": "test_pt_uni",
+    }
+    for legacy_name, new_name in legacy_to_new_dirs.items():
+        _move_tree_merge_to_canonical(root / legacy_name, tests_root / new_name)
+
+    legacy_patterns = (
+        "test_metrics*.csv",
+        "val_metrics*.csv",
+        "confidence_recommendations_*.json",
+        "test_artifacts_manifest.json",
+    )
+    for pattern in legacy_patterns:
+        for src in root.glob(pattern):
+            if src.is_file():
+                _move_file_to_canonical(src, tests_root / src.name)
 
 
 def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:

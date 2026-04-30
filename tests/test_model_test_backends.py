@@ -105,6 +105,33 @@ def test_run_native_onnx_backend_writes_test_artifacts(monkeypatch, tmp_path: Pa
     assert runtime.get("format") == "onnx"
 
 
+def test_run_native_onnx_backend_writes_to_new_tests_layout_even_with_legacy_dirs(monkeypatch, tmp_path: Path) -> None:
+    _install_fake_onnxruntime(monkeypatch)
+    root_dir = tmp_path / "run_x_legacy_layout"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    (root_dir / "test_onnx").mkdir(parents=True, exist_ok=True)
+    (root_dir / "test_onnx" / "legacy.txt").write_text("legacy", encoding="utf-8")
+    weights_path = root_dir / "model.onnx"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_a_new_layout", with_test=True)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="onnx",
+        imgsz=640,
+        val_conf=0.25,
+        val_iou=0.5,
+        val_batch=1,
+    )
+
+    assert result.success is True
+    assert (root_dir / "tests" / "test_onnx" / "pr.csv").is_file()
+    assert (root_dir / "tests" / "test_metrics_onnx.csv").is_file()
+    assert (root_dir / "tests" / "test_artifacts_manifest.json").is_file()
+
+
 def test_run_native_onnx_backend_collects_performance(monkeypatch, tmp_path: Path) -> None:
     _install_fake_onnxruntime(monkeypatch)
     root_dir = tmp_path / "run_perf_onnx"

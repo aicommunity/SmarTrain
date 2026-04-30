@@ -28,6 +28,7 @@ from smartrain.model_test_service import (
 from smartrain.train_resume import resolve_dataset_path_for_resume
 from smartrain.run_artifacts import (
     canonical_run_model_path,
+    ensure_run_layout,
     is_internal_conversion_artifact,
     materialize_canonical_run_model,
     scan_run_models,
@@ -248,6 +249,7 @@ def _resolve_target(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[
             raw = str(args.run or "").strip()
             hint = " Path contains '...'; replace with full real path." if "..." in raw else ""
             raise FileNotFoundError(f"Run directory not found: {run_dir}.{hint}")
+        ensure_run_layout(str(run_dir))
         best_pt = Path(canonical_run_model_path(str(run_dir), ".pt"))
         if not best_pt.is_file():
             materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
@@ -278,6 +280,7 @@ def _pick_interactive_target(layout: WorkspaceLayout) -> tuple[str, str, str, st
         print_numbered_options("runs", printable)
         chosen = prompt_choice("Select run", runs, default=runs[0], show_options=False)
         run_dir = Path(chosen).resolve()
+        ensure_run_layout(str(run_dir))
         run_pt = Path(canonical_run_model_path(str(run_dir), ".pt"))
         if not run_pt.is_file():
             materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)

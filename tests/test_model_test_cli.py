@@ -16,6 +16,7 @@ from smartrain.model_test_cli import (
     main as smartrain_test_main,
 )
 from smartrain.model_test_service import (
+    artifacts_manifest_path_for_write,
     format_metrics_path,
     format_recommendation_path,
     format_test_dir,
@@ -138,7 +139,7 @@ def test_model_test_cli_prints_selected_model_and_dataset(monkeypatch, tmp_path:
     assert "  split:   test" in out
     assert str((tmp_path / "datasets" / "ds_a" / "data.yaml")) in out
     assert "  model[onnx]:" in out
-    assert str(run_dir / "models" / "best.onnx") in out or str(run_dir / "train" / "weights" / "best.onnx") in out
+    assert str(run_dir / "models" / "best.onnx") in out or str(run_dir / "train-ultralytics" / "weights" / "best.onnx") in out
 
 
 def test_model_test_cli_interactive_replay_command_is_complete(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -330,8 +331,8 @@ def test_model_test_cli_reports_missing_run_path_without_traceback(tmp_path: Pat
 def test_model_test_cli_skips_matching_existing_test_from_args_yaml_fallback(monkeypatch, tmp_path: Path, capsys) -> None:
     deploy_workspace(str(tmp_path))
     run_dir = tmp_path / "runs" / "ds_a" / "run_skip_args_yaml"
-    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
-    onnx_path = run_dir / "train" / "weights" / "best.onnx"
+    (run_dir / "train-ultralytics" / "weights").mkdir(parents=True, exist_ok=True)
+    onnx_path = run_dir / "train-ultralytics" / "weights" / "best.onnx"
     onnx_path.write_bytes(b"fake-onnx")
     dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
     dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
@@ -362,7 +363,7 @@ def test_model_test_cli_skips_matching_existing_test_from_args_yaml_fallback(mon
                 "formats": {
                     "onnx": {
                         "format": "onnx",
-                        "target_path": "train/weights/best.onnx",
+                        "target_path": "train-ultralytics/weights/best.onnx",
                         "status": "ok",
                     }
                 }
@@ -421,6 +422,36 @@ def test_model_test_cli_run_finds_engine_in_nested_dir(monkeypatch, tmp_path: Pa
     smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "engine", "-y"])
     assert called["format_name"] == "engine"
     assert called["weights_path"] == str(engine_path)
+
+
+def test_model_test_cli_run_materializes_legacy_tests_manifest_to_new_layout(monkeypatch, tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_manifest_migration"
+    (run_dir / "test_onnx").mkdir(parents=True, exist_ok=True)
+    (run_dir / "test_onnx" / "pr.csv").write_text("legacy", encoding="utf-8")
+    (run_dir / "test_artifacts_manifest.json").write_text('{"formats":{}}', encoding="utf-8")
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    onnx_path = run_dir / "models" / "model.onnx"
+    onnx_path.write_bytes(b"fake")
+    dataset_dir = tmp_path / "datasets" / "ds_a"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / "data.yaml").write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"path_under_workspace": "datasets/ds_a"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    class _FakeResult:
+        success = True
+        error = None
+
+    monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli.has_matching_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli._resolve_existing_artifact", lambda **_kwargs: str(onnx_path))
+    monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", lambda **_kwargs: _FakeResult())
+
+    smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "onnx", "-y"])
+    assert Path(artifacts_manifest_path_for_write(str(run_dir))).is_file()
 
 
 def test_model_test_cli_prompts_before_rerun_matching_existing_test_interactive(monkeypatch, tmp_path: Path, capsys) -> None:

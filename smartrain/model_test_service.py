@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from smartrain.run_artifacts import (
     canonical_run_model_path,
+    ensure_run_layout,
     materialize_canonical_run_model,
     run_test_backend_dir,
     run_test_format_dir,
@@ -90,53 +91,105 @@ def format_suffix(format_name: str | None) -> str:
 
 
 def format_test_dir(root_dir: str, format_name: str | None = "pt") -> str:
+    return _format_test_dir(root_dir, format_name, prefer_legacy_for_read=True)
+
+
+def format_test_dir_for_write(root_dir: str, format_name: str | None = "pt") -> str:
+    return _format_test_dir(root_dir, format_name, prefer_legacy_for_read=False)
+
+
+def _format_test_dir(root_dir: str, format_name: str | None, *, prefer_legacy_for_read: bool) -> str:
     fmt = _normalize_format_name(format_name)
     preferred = run_test_backend_dir(root_dir, "ultralytics") if fmt == "pt" else run_test_format_dir(root_dir, fmt)
     legacy = os.path.join(root_dir, f"test{format_suffix(fmt)}")
-    if os.path.isdir(legacy) and not preferred.exists():
+    if prefer_legacy_for_read and os.path.isdir(legacy) and not preferred.exists():
         return legacy
     return str(preferred)
 
 
 def format_metrics_path(root_dir: str, format_name: str | None = "pt") -> str:
+    return _format_metrics_path(root_dir, format_name, prefer_legacy_for_read=True)
+
+
+def format_metrics_path_for_write(root_dir: str, format_name: str | None = "pt") -> str:
+    return _format_metrics_path(root_dir, format_name, prefer_legacy_for_read=False)
+
+
+def _format_metrics_path(root_dir: str, format_name: str | None, *, prefer_legacy_for_read: bool) -> str:
     fmt = _normalize_format_name(format_name)
     preferred = run_tests_dir(root_dir) / f"test_metrics{format_suffix(fmt)}.csv"
     legacy = os.path.join(root_dir, f"test_metrics{format_suffix(fmt)}.csv")
-    if os.path.isfile(legacy) and not preferred.is_file():
+    if prefer_legacy_for_read and os.path.isfile(legacy) and not preferred.is_file():
         return legacy
     return str(preferred)
 
 
 def format_metrics_path_for_split(root_dir: str, split: str, format_name: str | None = "pt") -> str:
+    return _format_metrics_path_for_split(root_dir, split, format_name, prefer_legacy_for_read=True)
+
+
+def format_metrics_path_for_split_write(root_dir: str, split: str, format_name: str | None = "pt") -> str:
+    return _format_metrics_path_for_split(root_dir, split, format_name, prefer_legacy_for_read=False)
+
+
+def _format_metrics_path_for_split(
+    root_dir: str,
+    split: str,
+    format_name: str | None,
+    *,
+    prefer_legacy_for_read: bool,
+) -> str:
     split_name = str(split).strip().lower()
     if split_name == "test":
-        return format_metrics_path(root_dir, format_name)
+        return _format_metrics_path(root_dir, format_name, prefer_legacy_for_read=prefer_legacy_for_read)
     if split_name == "val":
         fmt = _normalize_format_name(format_name)
         preferred = run_tests_dir(root_dir) / f"val_metrics{format_suffix(fmt)}.csv"
         legacy = os.path.join(root_dir, f"val_metrics{format_suffix(fmt)}.csv")
-        if os.path.isfile(legacy) and not preferred.is_file():
+        if prefer_legacy_for_read and os.path.isfile(legacy) and not preferred.is_file():
             return legacy
         return str(preferred)
     raise ValueError(f"Unsupported split: {split}")
 
 
 def format_recommendation_path(root_dir: str, split: str, format_name: str | None = "pt") -> str:
+    return _format_recommendation_path(root_dir, split, format_name, prefer_legacy_for_read=True)
+
+
+def format_recommendation_path_for_write(root_dir: str, split: str, format_name: str | None = "pt") -> str:
+    return _format_recommendation_path(root_dir, split, format_name, prefer_legacy_for_read=False)
+
+
+def _format_recommendation_path(
+    root_dir: str,
+    split: str,
+    format_name: str | None,
+    *,
+    prefer_legacy_for_read: bool,
+) -> str:
     split_name = str(split).strip().lower()
     if split_name not in {"test", "val"}:
         raise ValueError(f"Unsupported split: {split}")
     fmt = _normalize_format_name(format_name)
     preferred = run_tests_dir(root_dir) / f"confidence_recommendations_{split_name}{format_suffix(fmt)}.json"
     legacy = os.path.join(root_dir, f"confidence_recommendations_{split_name}{format_suffix(fmt)}.json")
-    if os.path.isfile(legacy) and not preferred.is_file():
+    if prefer_legacy_for_read and os.path.isfile(legacy) and not preferred.is_file():
         return legacy
     return str(preferred)
 
 
 def test_artifacts_manifest_path(root_dir: str) -> str:
+    return _test_artifacts_manifest_path(root_dir, prefer_legacy_for_read=True)
+
+
+def artifacts_manifest_path_for_write(root_dir: str) -> str:
+    return _test_artifacts_manifest_path(root_dir, prefer_legacy_for_read=False)
+
+
+def _test_artifacts_manifest_path(root_dir: str, *, prefer_legacy_for_read: bool) -> str:
     preferred = run_tests_dir(root_dir) / TEST_ARTIFACTS_MANIFEST
     legacy = os.path.join(root_dir, TEST_ARTIFACTS_MANIFEST)
-    if os.path.isfile(legacy) and not preferred.is_file():
+    if prefer_legacy_for_read and os.path.isfile(legacy) and not preferred.is_file():
         return legacy
     return str(preferred)
 
@@ -253,6 +306,7 @@ def update_test_artifacts_manifest(
     status: str | None = None,
     error: str | None = None,
 ) -> dict[str, Any]:
+    ensure_run_layout(root_dir)
     fmt = _normalize_format_name(format_name)
     snapshot = get_test_artifacts_status(root_dir, fmt)
     record = TestFormatArtifact(
@@ -260,12 +314,12 @@ def update_test_artifacts_manifest(
         target_path=os.path.relpath(target_path, root_dir) if target_path and os.path.isabs(target_path) else target_path,
         dataset_yaml=os.path.relpath(dataset_yaml, root_dir) if dataset_yaml and os.path.isabs(dataset_yaml) else dataset_yaml,
         backend=backend,
-        metrics_csv=os.path.relpath(format_metrics_path(root_dir, fmt), root_dir) if snapshot.metrics_exists else None,
-        test_dir=os.path.relpath(format_test_dir(root_dir, fmt), root_dir) if snapshot.test_dir_exists else None,
-        confidence_test_json=os.path.relpath(format_recommendation_path(root_dir, "test", fmt), root_dir)
+        metrics_csv=os.path.relpath(format_metrics_path_for_write(root_dir, fmt), root_dir) if snapshot.metrics_exists else None,
+        test_dir=os.path.relpath(format_test_dir_for_write(root_dir, fmt), root_dir) if snapshot.test_dir_exists else None,
+        confidence_test_json=os.path.relpath(format_recommendation_path_for_write(root_dir, "test", fmt), root_dir)
         if snapshot.confidence_test_complete
         else None,
-        confidence_val_json=os.path.relpath(format_recommendation_path(root_dir, "val", fmt), root_dir)
+        confidence_val_json=os.path.relpath(format_recommendation_path_for_write(root_dir, "val", fmt), root_dir)
         if snapshot.confidence_val_complete
         else None,
         status=status or ("ok" if snapshot.complete else "incomplete"),
@@ -310,7 +364,7 @@ def update_test_artifacts_manifest(
             rec_dict["target_metadata_json"] = os.path.relpath(str(sidecar), root_dir) if sidecar.is_file() else None
         formats[fmt] = rec_dict
     payload["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    _write_json_atomic(test_artifacts_manifest_path(root_dir), payload)
+    _write_json_atomic(artifacts_manifest_path_for_write(root_dir), payload)
     return payload
 
 
@@ -320,6 +374,7 @@ def sync_test_artifacts_manifest(
     target_by_format: dict[str, str | None] | None = None,
     backend_by_format: dict[str, str | None] | None = None,
 ) -> dict[str, Any]:
+    ensure_run_layout(root_dir)
     payload = load_test_artifacts_manifest(root_dir)
     formats = payload.get("formats")
     if not isinstance(formats, dict):
@@ -345,12 +400,12 @@ def sync_test_artifacts_manifest(
                 target_path=target_by_format.get(fmt),
                 dataset_yaml=None,
                 backend=backend_by_format.get(fmt),
-                metrics_csv=os.path.relpath(format_metrics_path(root_dir, fmt), root_dir) if status.metrics_exists else None,
-                test_dir=os.path.relpath(format_test_dir(root_dir, fmt), root_dir) if status.test_dir_exists else None,
-                confidence_test_json=os.path.relpath(format_recommendation_path(root_dir, "test", fmt), root_dir)
+                metrics_csv=os.path.relpath(format_metrics_path_for_write(root_dir, fmt), root_dir) if status.metrics_exists else None,
+                test_dir=os.path.relpath(format_test_dir_for_write(root_dir, fmt), root_dir) if status.test_dir_exists else None,
+                confidence_test_json=os.path.relpath(format_recommendation_path_for_write(root_dir, "test", fmt), root_dir)
                 if status.confidence_test_complete
                 else None,
-                confidence_val_json=os.path.relpath(format_recommendation_path(root_dir, "val", fmt), root_dir)
+                confidence_val_json=os.path.relpath(format_recommendation_path_for_write(root_dir, "val", fmt), root_dir)
                 if status.confidence_val_complete
                 else None,
                 status="ok" if status.complete else "incomplete",
@@ -359,7 +414,7 @@ def sync_test_artifacts_manifest(
             )
         )
     payload["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    _write_json_atomic(test_artifacts_manifest_path(root_dir), payload)
+    _write_json_atomic(artifacts_manifest_path_for_write(root_dir), payload)
     return payload
 
 

@@ -33,10 +33,15 @@ from smartrain.confidence_recommendation import (
 from smartrain.model_test_service import (
     format_metrics_path,
     format_metrics_path_for_split,
+    format_metrics_path_for_split_write,
+    format_metrics_path_for_write,
     format_recommendation_path,
+    format_recommendation_path_for_write,
     format_test_dir,
+    format_test_dir_for_write,
     persist_target_test_artifacts_state,
 )
+from smartrain.run_artifacts import ensure_run_layout
 from smartrain import tensorrt_checks as trt_checks
 from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
 from smartrain.unified_validator_core import EvalProvenance, normalize_eval_params
@@ -126,7 +131,8 @@ class PerfCollector:
 
 
 def _write_perf_artifact(root_dir: str, format_name: str, target_path: str, performance: dict[str, Any]) -> str:
-    test_dir = format_test_dir(root_dir, format_name)
+    ensure_run_layout(root_dir)
+    test_dir = format_test_dir_for_write(root_dir, format_name)
     os.makedirs(test_dir, exist_ok=True)
     stem = Path(target_path).stem if target_path else format_name
     out_path = os.path.join(test_dir, f"perf_{stem}.json")
@@ -267,7 +273,8 @@ def _split_images_from_yaml(data_yaml_path: str, split_name: str, limit: int) ->
 
 
 def _save_metrics_csv_for_format(test_result: Any, root_dir: str, format_name: str) -> str:
-    csv_file = format_metrics_path(root_dir, format_name)
+    ensure_run_layout(root_dir)
+    csv_file = format_metrics_path_for_write(root_dir, format_name)
     csv_data = test_result.to_csv()
     with open(csv_file, "w", encoding="utf-8") as f:
         f.write(csv_data)
@@ -1058,7 +1065,8 @@ def _write_native_eval_artifacts(
     gt_source: str,
     nms_profile: str,
 ) -> dict[str, Any]:
-    test_dir = format_test_dir(root_dir, format_name)
+    ensure_run_layout(root_dir)
+    test_dir = format_test_dir_for_write(root_dir, format_name)
     if split == "test":
         os.makedirs(test_dir, exist_ok=True)
     metrics_payload = _compute_ultralytics_style_payload(preds, gt_rows, names)
@@ -1077,7 +1085,7 @@ def _write_native_eval_artifacts(
             }
         ]
     )
-    metrics_df.to_csv(format_metrics_path_for_split(root_dir, split, format_name), index=False, encoding="utf-8")
+    metrics_df.to_csv(format_metrics_path_for_split_write(root_dir, split, format_name), index=False, encoding="utf-8")
     if split == "test":
         if len(pr_per_class_df) > 0:
             pr_per_class_df.to_csv(os.path.join(test_dir, "pr_per_class.csv"), index=False, encoding="utf-8")
@@ -1125,7 +1133,7 @@ def _write_native_eval_artifacts(
         )
     metrics_stub = _build_confidence_metrics_stub(names, thresholds, p2d, r2d)
     split_payload = compute_confidence_recommendations(metrics_stub, split=split)
-    write_recommendation_file(format_recommendation_path(root_dir, split, format_name), split_payload)
+    write_recommendation_file(format_recommendation_path_for_write(root_dir, split, format_name), split_payload)
     return {
         "imgsz": imgsz,
         "conf": conf_thr,
@@ -1157,7 +1165,8 @@ def _write_deep_diagnostics_artifacts(
     gt_source: str,
     nms_profile: str,
 ) -> dict[str, Any]:
-    test_dir = format_test_dir(root_dir, format_name)
+    ensure_run_layout(root_dir)
+    test_dir = format_test_dir_for_write(root_dir, format_name)
     deep_dir = os.path.join(test_dir, "deep_diagnostics")
     os.makedirs(deep_dir, exist_ok=True)
 
@@ -1740,8 +1749,9 @@ def _ensure_confidence_recommendations_for_explicit_artifact(
     beta_precision: float,
     fallback_confidence: float,
 ) -> None:
-    test_path = format_recommendation_path(root_dir, "test", format_name)
-    val_path = format_recommendation_path(root_dir, "val", format_name)
+    ensure_run_layout(root_dir)
+    test_path = format_recommendation_path_for_write(root_dir, "test", format_name)
+    val_path = format_recommendation_path_for_write(root_dir, "val", format_name)
     test_payload = compute_confidence_recommendations(
         primary_test_result,
         split="test",
@@ -1817,7 +1827,7 @@ def run_ultralytics_backend(
         "data": dataset_yaml_path,
         "split": "test",
         "project": root_dir,
-        "name": os.path.basename(format_test_dir(root_dir, format_name)),
+        "name": os.path.basename(format_test_dir_for_write(root_dir, format_name)),
         "exist_ok": True,
     }
     if imgsz is not None:
@@ -2087,7 +2097,7 @@ def run_native_format_backend(
                 perf_warmup_images=perf_warmup_images,
             )
             if result.success:
-                test_dir = format_test_dir(root_dir, "pt_uni")
+                test_dir = format_test_dir_for_write(root_dir, "pt_uni")
                 os.makedirs(test_dir, exist_ok=True)
                 _write_test_args_yaml(
                     test_dir,
