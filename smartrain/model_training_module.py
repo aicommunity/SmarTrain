@@ -41,7 +41,13 @@ from smartrain.train_profile import (
     resolve_profile_data_path,
     task_to_metadata_task_type,
 )
-from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
+from smartrain.device_selector import (
+    default_device_value,
+    device_display_name,
+    prompt_device_selection,
+    resolve_device_request,
+    validate_device_available,
+)
 from smartrain.train_model_catalog import (
     TrainModelCatalog,
     is_supported_external_provider_model,
@@ -924,26 +930,7 @@ def _prompt_optional_float(label: str, default: float | None = None) -> float | 
 
 
 def _prompt_train_device(default: str | None = None) -> str:
-    options = discover_device_options()
-    labels = [o.label for o in options]
-    by_label = {o.label: o.value for o in options}
-    effective_default = str(default).strip() if default is not None else default_device_value()
-    default_label = next((o.label for o in options if o.value == effective_default), labels[0])
-    print_numbered_options("Train devices", labels)
-    picked = _prompt_input("Train device (--device, number/value): ", default=default_label).strip()
-    if not picked:
-        return by_label[default_label]
-    if picked in by_label:
-        return by_label[picked]
-    if picked.isdigit():
-        idx = int(picked)
-        if 1 <= idx <= len(options):
-            return options[idx - 1].value
-    for option in options:
-        if picked == option.value:
-            return option.value
-    print(f"[WARNING] Unknown device {picked!r}; fallback to default {by_label[default_label]!r}")
-    return by_label[default_label]
+    return prompt_device_selection(title="Train devices", default_device=default or default_device_value())
 
 
 def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
@@ -2595,17 +2582,7 @@ def _maybe_free_cuda_memory() -> None:
 
 
 def _ensure_device_available_or_raise(device: str | None) -> None:
-    if not is_cuda_device(device):
-        return
-    try:
-        import torch
-    except Exception as exc:
-        raise RuntimeError(f"CUDA device requested ({device}), but torch is unavailable: {exc}") from exc
-    if not torch.cuda.is_available():
-        raise RuntimeError(
-            f"CUDA device requested ({device}), but torch.cuda.is_available()=False. "
-            f"torch={getattr(torch, '__version__', 'unknown')} cuda_runtime={getattr(torch.version, 'cuda', 'unknown')}"
-        )
+    validate_device_available(device)
 
 
 def main(argv=None):
@@ -2675,6 +2652,7 @@ def main(argv=None):
         },
     )
     apply_cli_smartrain_overrides(sm_opts, args)
+    u_cfg["device"] = resolve_device_request(u_cfg.get("device"))
 
     try:
         workspace_root, data, target_dir = _resolve_cli_paths_with_profile(args, u_cfg)
@@ -2687,6 +2665,7 @@ def main(argv=None):
     model_version = _normalize_model_spec(u_cfg.get("model", MODEL_VERSION), add_pt_when_missing=True)
     u_cfg["model"] = model_version
     _ensure_device_available_or_raise(str(u_cfg.get("device")) if u_cfg.get("device") is not None else None)
+    print(f"[INFO] Train device: {device_display_name(str(u_cfg.get('device')) if u_cfg.get('device') is not None else None)}")
     epochs = int(u_cfg.get("epochs", EPOCHS))
     batch = int(u_cfg.get("batch", BATCH))
     img_size = u_cfg.get("imgsz", IMG_SIZE)

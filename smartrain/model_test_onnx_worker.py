@@ -42,11 +42,18 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
     iou_thr = float(request.get("iou_thr", 0.7))
     max_retries = int(request.get("max_retries", 3))
     providers = [str(x) for x in request.get("providers", [])]
+    provider_policy = str(request.get("provider_policy", "gpu_preferred")).strip().lower()
     collect_performance = bool(request.get("collect_performance", False))
     perf_warmup_images = int(request.get("perf_warmup_images", 5))
 
     available = list(ort.get_available_providers())
     selected = [p for p in providers if p in available] or [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in available]
+    if provider_policy == "gpu_strict" and "CUDAExecutionProvider" not in selected:
+        return {
+            "ok": False,
+            "error": f"[provider_unavailable] CUDAExecutionProvider is unavailable. available={available}",
+            "provider": None,
+        }
     if not selected:
         selected = None  # type: ignore[assignment]
 
@@ -90,6 +97,8 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
                 # If CUDA initialization fails (OOM / CUBLAS alloc_failed), keep retrying can be pointless.
                 # Switch to CPUExecutionProvider for remaining attempts (if available).
                 if isinstance(selected, list) and "CUDAExecutionProvider" in selected and "CPUExecutionProvider" in available:
+                    if provider_policy == "gpu_strict":
+                        break
                     selected = ["CPUExecutionProvider"]
                     print(f"[WARN] onnx-worker: switching to CPUExecutionProvider after CUDA init OOM for {split_name}.", file=sys.stderr)
                 _release_cuda_memory_best_effort()

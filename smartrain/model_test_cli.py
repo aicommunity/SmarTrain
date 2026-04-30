@@ -35,6 +35,13 @@ from smartrain.run_artifacts import (
     run_models_dir,
 )
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.device_selector import (
+    default_device_value,
+    device_display_name,
+    prompt_device_selection,
+    resolve_device_request,
+    validate_device_available,
+)
 
 
 def build_model_test_arg_parser() -> argparse.ArgumentParser:
@@ -53,9 +60,17 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--conf", type=float, default=None, help="Validation confidence threshold.")
     p.add_argument("--iou", type=float, default=None, help="Validation IoU threshold.")
     p.add_argument("--batch", type=int, default=None, help="Validation batch size.")
+    p.add_argument("--device", type=str, default=None, help="Compute device: cpu, 0, cuda:0, or GPU name.")
     p.add_argument("--deep-diagnostics", action="store_true", help="Save deep per-image diagnostics artifacts.")
     p.add_argument("--perf", action="store_true", help="Collect inference performance metrics.")
     p.add_argument("--perf-warmup-images", type=int, default=5, help="Warmup images excluded from steady perf stats.")
+    p.add_argument(
+        "--onnx-provider-policy",
+        type=str,
+        choices=["gpu_strict", "gpu_preferred", "cpu_only"],
+        default=None,
+        help="ONNX provider policy: gpu_strict, gpu_preferred, cpu_only.",
+    )
     p.add_argument("--non-interactive", "-y", action="store_true", help="Disable interactive prompts.")
     return p
 
@@ -455,6 +470,8 @@ def _run_native_backend_isolated(
     val_batch: int | None,
     collect_performance: bool = False,
     perf_warmup_images: int = 5,
+    onnx_provider_policy: str | None = None,
+    runtime_device: str | None = None,
 ) -> tuple[bool, str | None]:
     with tempfile.NamedTemporaryFile(prefix=f"smartrain_test_{format_name}_", suffix=".json", delete=False) as tmp:
         result_path = tmp.name
@@ -485,6 +502,10 @@ def _run_native_backend_isolated(
         if collect_performance:
             cmd.append("--perf")
             cmd.extend(["--perf-warmup-images", str(max(0, int(perf_warmup_images)))])
+        if onnx_provider_policy:
+            cmd.extend(["--onnx-provider-policy", str(onnx_provider_policy)])
+        if runtime_device:
+            cmd.extend(["--device", str(runtime_device)])
         # Stream child process output directly to the current terminal so tqdm
         # progress bars from native backends (engine/trt) remain visible.
         proc = subprocess.run(cmd, text=True)
@@ -608,6 +629,25 @@ def _check_native_format_preflight(format_name: str) -> tuple[bool, str | None]:
     return True, None
 
 
+def _check_onnx_format_preflight(policy: str) -> tuple[bool, str | None]:
+    try:
+        import onnxruntime as ort  # type: ignore
+    except Exception as exc:
+        return False, f"onnxruntime import failed: {exc}"
+    available = list(ort.get_available_providers())
+    if policy == "cpu_only":
+        if "CPUExecutionProvider" in available:
+            return True, "onnx policy=cpu_only: CUDA provider disabled by policy."
+        return False, "CPUExecutionProvider is unavailable."
+    if "CUDAExecutionProvider" in available:
+        return True, None
+    if policy == "gpu_strict":
+        return False, f"CUDAExecutionProvider is unavailable. available={available}"
+    if "CPUExecutionProvider" in available:
+        return True, f"CUDAExecutionProvider is unavailable. available={available}; CPU fallback may be used."
+    return False, f"No usable ONNX providers. available={available}"
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = build_model_test_arg_parser()
     args = parser.parse_args(argv)
@@ -617,6 +657,13 @@ def main(argv: list[str] | None = None) -> None:
     requested_imgsz = args.imgsz
     requested_conf = args.conf
     requested_iou = args.iou
+    user_onnx_policy = getattr(args, "onnx_provider_policy", None)
+    args.device = resolve_device_request(getattr(args, "device", None) or default_device_value())
+    onnx_provider_policy = str(
+        user_onnx_policy or os.getenv("SMARTTRAIN_ONNX_PROVIDER_POLICY", "gpu_preferred")
+    ).strip()
+    if onnx_provider_policy not in {"gpu_strict", "gpu_preferred", "cpu_only"}:
+        parser.error(f"Unsupported --onnx-provider-policy: {onnx_provider_policy}")
 
     if not any((args.run, args.model_name, args.weights)):
         if not interactive:
@@ -660,6 +707,8 @@ def main(argv: list[str] | None = None) -> None:
             args.weights = primary_path
         args.data = data_yaml
         args.formats = ",".join(formats)
+        if sys.stdin.isatty():
+            args.device = prompt_device_selection(title="test devices", default_device=str(args.device or default_device_value()))
     else:
         try:
             root_dir, primary_path, target_kind, target_label = _resolve_target(args, layout)
@@ -679,6 +728,14 @@ def main(argv: list[str] | None = None) -> None:
             args.iou = float(defaults["iou"]) if defaults["iou"] is not None else None
         if args.batch is None:
             args.batch = 1
+    args.device = resolve_device_request(args.device or default_device_value())
+    if user_onnx_policy is None and str(args.device).strip().lower() == "cpu":
+        onnx_provider_policy = "cpu_only"
+    try:
+        validate_device_available(args.device)
+    except Exception as exc:
+        parser.error(str(exc))
+    print(f"[INFO] Test device: {device_display_name(args.device)}")
 
     replay: str | None = None
     results: list[tuple[str, bool, str | None]] = []
@@ -835,6 +892,8 @@ def main(argv: list[str] | None = None) -> None:
                     deep_diagnostics=bool(args.deep_diagnostics),
                     collect_performance=bool(args.perf),
                     perf_warmup_images=int(max(0, args.perf_warmup_images)),
+                    onnx_provider_policy=onnx_provider_policy,
+                    runtime_device=args.device,
                 )
                 if not pt_uni_result.success:
                     print(f"[WARN] Internal pt_uni compare artifacts failed: {pt_uni_result.error}")
@@ -918,6 +977,7 @@ def main(argv: list[str] | None = None) -> None:
                     val_batch=args.batch,
                     collect_performance=bool(args.perf),
                     perf_warmup_images=int(max(0, args.perf_warmup_images)),
+                    runtime_device=args.device,
                 )
                 if not ok:
                     backend = "tensorrt"
@@ -932,6 +992,22 @@ def main(argv: list[str] | None = None) -> None:
                     )
                 results.append((fmt, ok, err))
             else:
+                if fmt == "onnx":
+                    onnx_ok, onnx_reason = _check_onnx_format_preflight(onnx_provider_policy)
+                    if not onnx_ok:
+                        persist_target_test_artifacts_state(
+                            root_dir,
+                            format_name=fmt,
+                            target_path=artifact_path,
+                            dataset_yaml=data_yaml,
+                            backend="onnxruntime",
+                            status="failed",
+                            error=onnx_reason,
+                        )
+                        results.append((fmt, False, onnx_reason))
+                        continue
+                    if onnx_reason:
+                        print(f"[WARN] onnx preflight: {onnx_reason}")
                 result = run_native_format_backend(
                     root_dir=root_dir,
                     weights_path=artifact_path,
@@ -944,6 +1020,8 @@ def main(argv: list[str] | None = None) -> None:
                     deep_diagnostics=bool(args.deep_diagnostics),
                     collect_performance=bool(args.perf),
                     perf_warmup_images=int(max(0, args.perf_warmup_images)),
+                    onnx_provider_policy=onnx_provider_policy if fmt == "onnx" else None,
+                    runtime_device=args.device,
                 )
                 results.append((fmt, result.success, result.error))
         except Exception as exc:

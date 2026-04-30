@@ -36,6 +36,13 @@ smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mod
 smartrain inference --weights dr-yolo:yolov8n --external-repo /opt/dr-yolo --data-mode folder --source-dir ./images
 ```
 
+## Выбор устройства
+
+- `--device` поддерживает `cpu`, индекс GPU (`0`) и `cuda:N`.
+- В интерактивном режиме можно вводить номер, токен или имя GPU.
+- Устройство по умолчанию: `GPU 0`, если CUDA доступна, иначе `cpu`.
+- Те же правила выбора применяются в `train` и `test`.
+
 ## Контракт метрик производительности
 
 Отчет содержит dual-профиль в `performance`:

@@ -11,6 +11,7 @@ from types import ModuleType
 from PIL import Image
 
 from smartrain.model_test_cli import (
+    _check_onnx_format_preflight,
     _discover_run_artifact_candidates,
     _resolve_existing_artifact,
     main as smartrain_test_main,
@@ -132,6 +133,7 @@ def test_model_test_cli_prints_selected_model_and_dataset(monkeypatch, tmp_path:
 
     monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", lambda **_kwargs: _FakeResult())
     monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli._check_onnx_format_preflight", lambda _policy: (True, None))
 
     smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "onnx", "-y"])
     out = capsys.readouterr().out
@@ -217,6 +219,64 @@ def test_model_test_cli_replay_contains_perf_flags(monkeypatch, tmp_path: Path, 
     assert "--perf" in out
     assert "--perf-warmup-images 7" in out
 
+
+def test_check_onnx_preflight_respects_gpu_strict(monkeypatch) -> None:
+    fake_mod = ModuleType("onnxruntime")
+    fake_mod.get_available_providers = lambda: ["CPUExecutionProvider"]
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_mod)
+    ok, reason = _check_onnx_format_preflight("gpu_strict")
+    assert ok is False
+    assert "CUDAExecutionProvider is unavailable" in str(reason)
+
+
+def test_model_test_cli_cpu_device_forces_cpu_only_onnx_policy(monkeypatch, tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_cpu"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    (run_dir / "train" / "weights" / "best.onnx").write_bytes(b"fake-onnx")
+    dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
+    dataset_yaml.write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"path_under_workspace": "datasets/ds_a"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    class _FakeResult:
+        success = True
+        error = None
+
+    captured: dict[str, str] = {}
+
+    def _fake_native(**kwargs):
+        captured["policy"] = str(kwargs.get("onnx_provider_policy"))
+        captured["device"] = str(kwargs.get("runtime_device"))
+        return _FakeResult()
+
+    monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", _fake_native)
+    monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli.has_matching_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli._check_onnx_format_preflight", lambda _policy: (True, None))
+
+    smartrain_test_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--run",
+            str(run_dir),
+            "--data",
+            str(dataset_yaml),
+            "--formats",
+            "onnx",
+            "--device",
+            "cpu",
+            "-y",
+        ]
+    )
+    assert captured.get("policy") == "cpu_only"
+    assert captured.get("device") == "cpu"
+
 def test_model_test_cli_skips_matching_existing_test_non_interactive(monkeypatch, tmp_path: Path, capsys) -> None:
     deploy_workspace(str(tmp_path))
     run_dir = tmp_path / "runs" / "ds_a" / "run_skip"
@@ -242,6 +302,7 @@ def test_model_test_cli_skips_matching_existing_test_non_interactive(monkeypatch
 
     monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", _fake_native)
     monkeypatch.setattr("smartrain.model_test_cli.has_matching_test_artifacts", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("smartrain.model_test_cli._check_onnx_format_preflight", lambda _policy: (True, None))
 
     smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "onnx", "-y"])
     out = capsys.readouterr().out
@@ -494,6 +555,7 @@ def test_model_test_cli_prompts_before_rerun_matching_existing_test_interactive(
     monkeypatch.setattr("smartrain.model_test_cli.prompt_yes_no", _fake_prompt_yes_no)
     monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", _fake_native)
     monkeypatch.setattr("smartrain.model_test_cli.has_matching_test_artifacts", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("smartrain.model_test_cli._check_onnx_format_preflight", lambda _policy: (True, None))
 
     smartrain_test_main(["--workspace", str(tmp_path)])
     _out = capsys.readouterr().out

@@ -20,6 +20,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--batch", type=int, default=None)
     p.add_argument("--perf", action="store_true")
     p.add_argument("--perf-warmup-images", type=int, default=5)
+    p.add_argument("--onnx-provider-policy", type=str, default=None)
+    p.add_argument("--device", type=str, default=None)
     return p
 
 
@@ -36,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         val_batch=args.batch,
         collect_performance=bool(args.perf),
         perf_warmup_images=int(max(0, args.perf_warmup_images)),
+        onnx_provider_policy=args.onnx_provider_policy,
+        runtime_device=args.device,
     )
     payload = {
         "success": bool(result.success),

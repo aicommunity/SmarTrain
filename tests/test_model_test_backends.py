@@ -298,6 +298,9 @@ def test_run_native_onnx_backend_subprocess_mode(monkeypatch, tmp_path: Path) ->
 
     assert result.success is True
     assert Path(format_metrics_path(str(root_dir), "onnx")).is_file()
+    manifest = json.loads(Path(manifest_path_fn(str(root_dir))).read_text(encoding="utf-8"))
+    runtime = ((manifest.get("formats") or {}).get("onnx") or {}).get("artifacts", [{}])[0].get("test_system_profile", {}).get("runtime", {})
+    assert runtime.get("provider_actual") == "CUDAExecutionProvider"
 
 
 def test_run_native_onnx_backend_subprocess_error_has_reason_code(monkeypatch, tmp_path: Path) -> None:
@@ -330,6 +333,50 @@ def test_run_native_onnx_backend_subprocess_error_has_reason_code(monkeypatch, t
     assert result.success is False
     assert isinstance(result.error, str)
     assert result.error.startswith("[oom_gpu]")
+
+
+def test_run_native_onnx_gpu_strict_fails_when_cuda_provider_unavailable(monkeypatch, tmp_path: Path) -> None:
+    fake_mod = ModuleType("onnxruntime")
+    fake_mod.get_available_providers = lambda: ["CPUExecutionProvider"]
+    fake_mod.InferenceSession = _FakeSession
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_mod)
+    monkeypatch.setenv("SMARTTRAIN_ONNX_USE_SUBPROCESS", "0")
+    root_dir = tmp_path / "run_onnx_gpu_strict_no_cuda"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.onnx"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_onnx_gpu_strict_no_cuda", with_test=True)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="onnx",
+        imgsz=640,
+        onnx_provider_policy="gpu_strict",
+    )
+    assert result.success is False
+    assert isinstance(result.error, str) and result.error.startswith("[provider_unavailable]")
+
+
+def test_run_native_onnx_auto_aligns_shape_mismatch(monkeypatch, tmp_path: Path) -> None:
+    _install_fake_onnxruntime(monkeypatch)
+    root_dir = tmp_path / "run_onnx_auto_align"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.onnx"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_onnx_auto_align", with_test=True)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="onnx",
+        imgsz=1280,
+    )
+    assert result.success is True
+    args_yaml = Path(format_test_dir(str(root_dir), "onnx")) / "args.yaml"
+    assert "imgsz: 640" in args_yaml.read_text(encoding="utf-8")
 
 
 def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path: Path) -> None:

@@ -148,6 +148,7 @@ def _collect_test_system_profile(
     format_name: str,
     backend_name: str,
     runtime_provider: str | None = None,
+    runtime_provider_actual: str | None = None,
     runtime_device: str | None = None,
 ) -> dict[str, Any]:
     try:
@@ -163,6 +164,7 @@ def _collect_test_system_profile(
         "format": str(format_name),
         "backend": str(backend_name),
         "provider": str(runtime_provider) if runtime_provider else None,
+        "provider_actual": str(runtime_provider_actual) if runtime_provider_actual else None,
         "device": str(runtime_device) if runtime_device else None,
         "captured_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -302,16 +304,25 @@ def _load_names(data_yaml_path: str) -> list[str]:
 
 
 def _resolve_imgsz_from_onnx(session: Any, imgsz: int | None) -> tuple[int, int]:
-    if imgsz is not None:
-        return int(imgsz), int(imgsz)
+    requested = int(imgsz) if isinstance(imgsz, (int, float)) and int(imgsz) > 0 else None
     try:
         shape = list(session.get_inputs()[0].shape)
         if len(shape) == 4:
             h = int(shape[2]) if isinstance(shape[2], (int, float)) else 640
             w = int(shape[3]) if isinstance(shape[3], (int, float)) else 640
-            return max(32, h), max(32, w)
+            model_h, model_w = max(32, h), max(32, w)
+            if requested is not None and requested != model_h and model_h == model_w:
+                print(
+                    f"[WARN] onnx imgsz mismatch: requested={requested}, model={model_h}. "
+                    "Auto-aligning to model input size."
+                )
+            if requested is not None and requested == model_h == model_w:
+                return requested, requested
+            return model_h, model_w
     except Exception:
         pass
+    if requested is not None:
+        return requested, requested
     return 640, 640
 
 
@@ -1356,6 +1367,12 @@ def _classify_onnx_error_text(message: str) -> str:
         return "signal_terminated"
     if "out of memory" in msg or "cudamalloc" in msg or "bfc_arena" in msg:
         return "oom_gpu"
+    if "cudaexecutionprovider" in msg and ("unavailable" in msg or "not found" in msg):
+        return "provider_unavailable"
+    if "cuda" in msg and ("init" in msg or "failed" in msg):
+        return "cuda_init_failed"
+    if "invalid_argument" in msg and "expected:" in msg and "got:" in msg:
+        return "shape_mismatch"
     if "inferencesession" in msg or "session init" in msg:
         return "init_session_failed"
     if "onnxruntimeerror" in msg or "runtime_exception" in msg:
@@ -1459,10 +1476,11 @@ def _run_onnx_split_in_subprocess(
     conf_thr: float,
     iou_thr: float,
     providers: list[str],
+    provider_policy: str = "gpu_preferred",
     timeout_s: int = 1800,
     collect_performance: bool = False,
     perf_warmup_images: int = 5,
-) -> tuple[list[_Pred], tuple[int, int], dict[str, Any] | None]:
+) -> tuple[list[_Pred], tuple[int, int], dict[str, Any] | None, str | None]:
     request = {
         "weights_path": weights_path,
         "dataset_yaml_path": dataset_yaml_path,
@@ -1472,6 +1490,7 @@ def _run_onnx_split_in_subprocess(
         "conf_thr": conf_thr,
         "iou_thr": iou_thr,
         "providers": providers,
+        "provider_policy": str(provider_policy),
         "max_retries": 3,
         "collect_performance": bool(collect_performance),
         "perf_warmup_images": int(max(0, perf_warmup_images)),
@@ -1526,11 +1545,13 @@ def _run_onnx_split_in_subprocess(
             )
     hw = payload.get("input_hw") if isinstance(payload, dict) else None
     perf_payload = payload.get("performance") if isinstance(payload.get("performance"), dict) else None
+    provider_used = str(payload.get("provider") or "").strip() if isinstance(payload, dict) else ""
+    provider_used = provider_used or None
     if isinstance(hw, list) and len(hw) == 2:
-        return preds, (int(hw[0]), int(hw[1])), perf_payload
+        return preds, (int(hw[0]), int(hw[1])), perf_payload, provider_used
     if isinstance(imgsz, int):
-        return preds, (int(imgsz), int(imgsz)), perf_payload
-    return preds, (640, 640), perf_payload
+        return preds, (int(imgsz), int(imgsz)), perf_payload, provider_used
+    return preds, (640, 640), perf_payload, provider_used
 
 
 def _infer_with_pt_model(
@@ -2112,6 +2133,8 @@ def run_native_format_backend(
     deep_diagnostics: bool = False,
     collect_performance: bool = False,
     perf_warmup_images: int = 5,
+    onnx_provider_policy: str | None = None,
+    runtime_device: str | None = None,
 ) -> BackendRunResult:
     backend_name = "onnxruntime" if format_name == "onnx" else ("unified_pt" if format_name == "pt_uni" else "tensorrt")
     provider_by_format = {
@@ -2179,6 +2202,7 @@ def run_native_format_backend(
                         format_name="pt_uni",
                         backend_name=backend_name,
                         runtime_provider="ultralytics",
+                        runtime_device=runtime_device,
                     ),
                     status="failed",
                     error=result.error,
@@ -2194,25 +2218,37 @@ def run_native_format_backend(
                 )
             return result
         if format_name == "onnx":
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            inferred_policy = "cpu_only" if str(runtime_device or "").strip().lower() == "cpu" else None
+            policy = str(onnx_provider_policy or inferred_policy or os.getenv("SMARTTRAIN_ONNX_PROVIDER_POLICY", "gpu_preferred")).strip().lower()
+            if policy not in {"gpu_strict", "gpu_preferred", "cpu_only"}:
+                policy = "gpu_preferred"
+            providers = (
+                ["CPUExecutionProvider"]
+                if policy == "cpu_only"
+                else ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            )
             names = _load_names(dataset_yaml_path)
             gt_rows, _by_image_gt, image_paths = _collect_gt(dataset_yaml_path, "test")
             eval_params = normalize_eval_params(imgsz=imgsz, conf=val_conf, iou=val_iou)
             conf_thr = float(eval_params["conf"])
             iou_thr = float(eval_params["iou"])
+            requested_imgsz = int(eval_params["imgsz"])
+            strict_imgsz = str(os.getenv("SMARTTRAIN_ONNX_IMGSZ_STRICT", "0")).strip().lower() in {"1", "true", "yes"}
             use_worker = str(os.getenv("SMARTTRAIN_ONNX_USE_SUBPROCESS", "1")).strip().lower() not in {"0", "false", "no"}
             perf_collector = PerfCollector(warmup_images=perf_warmup_images) if collect_performance else None
             perf_payload: dict[str, Any] | None = None
+            provider_actual: str | None = None
             if use_worker:
-                preds, input_hw, perf_payload = _run_onnx_split_in_subprocess(
+                preds, input_hw, perf_payload, provider_actual = _run_onnx_split_in_subprocess(
                     split_name="test",
                     image_paths=image_paths,
                     weights_path=weights_path,
                     dataset_yaml_path=dataset_yaml_path,
-                    imgsz=int(eval_params["imgsz"]),
+                    imgsz=requested_imgsz,
                     conf_thr=conf_thr,
                     iou_thr=iou_thr,
                     providers=providers,
+                    provider_policy=policy,
                     collect_performance=collect_performance,
                     perf_warmup_images=perf_warmup_images,
                 )
@@ -2221,15 +2257,23 @@ def run_native_format_backend(
 
                 available = list(ort.get_available_providers())
                 providers_local = [p for p in providers if p in available]
+                if policy == "gpu_strict" and "CUDAExecutionProvider" not in providers_local:
+                    raise RuntimeError(_format_onnx_error("provider_unavailable", f"CUDAExecutionProvider is unavailable. available={available}"))
                 try:
                     session = _build_onnx_session_with_retry(ort, weights_path, providers_local)
                 except Exception as primary_exc:
+                    if policy == "gpu_strict":
+                        raise RuntimeError(_format_onnx_error(_classify_onnx_error_text(str(primary_exc)), str(primary_exc))) from primary_exc
                     cpu_only = ["CPUExecutionProvider"] if "CPUExecutionProvider" in available else None
                     if not cpu_only:
                         raise primary_exc
                     print("[WARN] onnx: switching to CPUExecutionProvider after repeated initialization failures.")
                     session = ort.InferenceSession(weights_path, providers=cpu_only)
-                input_hw = _resolve_imgsz_from_onnx(session, int(eval_params["imgsz"]))
+                try:
+                    provider_actual = str((session.get_providers() or [None])[0] or "")
+                except Exception:
+                    provider_actual = None
+                input_hw = _resolve_imgsz_from_onnx(session, requested_imgsz)
                 preds = _run_onnx_split_with_retry(
                     split_name="test",
                     image_paths=image_paths,
@@ -2245,7 +2289,14 @@ def run_native_format_backend(
                 if perf_collector is not None:
                     perf_payload = perf_collector.to_payload()
             if not isinstance(input_hw, tuple):
-                input_hw = (int(eval_params["imgsz"]), int(eval_params["imgsz"]))
+                input_hw = (requested_imgsz, requested_imgsz)
+            if strict_imgsz and requested_imgsz != int(input_hw[0]):
+                raise RuntimeError(
+                    _format_onnx_error(
+                        "shape_mismatch",
+                        f"requested imgsz={requested_imgsz} does not match model input={int(input_hw[0])}",
+                    )
+                )
             if perf_payload:
                 _write_perf_artifact(root_dir, format_name, weights_path, perf_payload)
             inference = _write_native_eval_artifacts(
@@ -2290,7 +2341,7 @@ def run_native_format_backend(
             try:
                 gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
                 if use_worker:
-                    preds_val, _input_hw_val, _perf_val = _run_onnx_split_in_subprocess(
+                    preds_val, _input_hw_val, _perf_val, _provider_val = _run_onnx_split_in_subprocess(
                         split_name="val",
                         image_paths=image_paths_val,
                         weights_path=weights_path,
@@ -2299,6 +2350,7 @@ def run_native_format_backend(
                         conf_thr=conf_thr,
                         iou_thr=iou_thr,
                         providers=providers,
+                        provider_policy=policy,
                         collect_performance=False,
                     )
                 else:
@@ -2367,18 +2419,24 @@ def run_native_format_backend(
                     format_name=format_name,
                     backend_name=backend_name,
                     runtime_provider=("onnxruntime-worker" if use_worker else "onnxruntime-session"),
+                    runtime_provider_actual=provider_actual,
+                    runtime_device=runtime_device,
                 ),
                 status=overall_status,
                 error=overall_error,
                 split_status=split_status,
             )
             if isinstance(inference, dict):
+                inference["onnx_provider_policy"] = policy
+                inference["onnx_provider_actual"] = provider_actual
                 inference["performance"] = perf_payload
                 inference["test_system_profile"] = _collect_test_system_profile(
                     root_dir=root_dir,
                     format_name=format_name,
                     backend_name=backend_name,
                     runtime_provider=("onnxruntime-worker" if use_worker else "onnxruntime-session"),
+                    runtime_provider_actual=provider_actual,
+                    runtime_device=runtime_device,
                 )
             return BackendRunResult(
                 format=format_name,
@@ -2493,6 +2551,7 @@ def run_native_format_backend(
                     format_name=format_name,
                     backend_name=backend_name,
                     runtime_provider="tensorrt",
+                    runtime_device=runtime_device,
                 ),
                 status=overall_status,
                 error=overall_error,
@@ -2506,6 +2565,7 @@ def run_native_format_backend(
                     format_name=format_name,
                     backend_name=backend_name,
                     runtime_provider="tensorrt",
+                    runtime_device=runtime_device,
                 )
             return BackendRunResult(
                 format=format_name,
@@ -2518,6 +2578,9 @@ def run_native_format_backend(
             )
         raise RuntimeError(f"Unsupported native backend format: {format_name}")
     except Exception as exc:
+        err_text = str(exc)
+        if format_name == "onnx" and not err_text.strip().startswith("["):
+            err_text = _format_onnx_error(_classify_onnx_error_text(err_text), err_text)
         persist_target_test_artifacts_state(
             root_dir,
             format_name=format_name,
@@ -2529,9 +2592,10 @@ def run_native_format_backend(
                 format_name=format_name,
                 backend_name=backend_name,
                 runtime_provider=provider_by_format.get(format_name),
+                runtime_device=runtime_device,
             ),
             status="unavailable",
-            error=str(exc),
+            error=err_text,
         )
         return BackendRunResult(
             format=format_name,
@@ -2541,5 +2605,5 @@ def run_native_format_backend(
             test_end_time=datetime.now(),
             inference={"imgsz": imgsz, "conf": val_conf, "iou": val_iou, "batch": val_batch},
             target_path=weights_path,
-            error=str(exc),
+            error=err_text,
         )

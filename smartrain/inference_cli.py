@@ -31,7 +31,13 @@ from smartrain.external_model_ref import parse_external_model_ref, validate_exte
 from smartrain.external_providers.registry import list_provider_specs
 from smartrain.train_model_catalog import is_supported_external_provider_model, TrainModelCatalog
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
-from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
+from smartrain.device_selector import (
+    default_device_value,
+    device_display_name,
+    prompt_device_selection,
+    resolve_device_request,
+    validate_device_available,
+)
 from smartrain.model_context import infer_img_size_from_model_context
 from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
 from smartrain.run_artifacts import is_internal_conversion_artifact, scan_run_models
@@ -441,38 +447,19 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
     img_default = inferred_imgsz if inferred_imgsz is not None else (args.img_size if args.img_size is not None else 640)
     args.img_size = int(prompt_text("Input resolution (--img-size)", default=str(img_default)).strip() or str(img_default))
     args.conf = float(prompt_text("Inference conf", default=str(args.conf)).strip() or str(args.conf))
-    args.device = _prompt_inference_device(default=str(args.device or default_device_value()))
+    args.device = prompt_device_selection(
+        title="inference devices",
+        default_device=str(args.device or default_device_value()),
+    )
     args.half = prompt_yes_no("Use FP16 (--half)", default=bool(args.half))
     return True
 
 
-def _prompt_inference_device(default: str = "cpu") -> str:
-    options = discover_device_options()
-    labels = [o.label for o in options]
-    value_by_label = {o.label: o.value for o in options}
-    default_value = default if any(o.value == default for o in options) else default_device_value()
-    default_label = next((o.label for o in options if o.value == default_value), labels[0])
-    print_numbered_options("inference devices", labels)
-    picked = prompt_choice("Select inference device", labels, default=default_label, show_options=False)
-    return value_by_label[picked]
-
-
 def _ensure_device_available_or_exit(device: str | None) -> None:
-    if not is_cuda_device(device):
-        return
     try:
-        import torch
+        validate_device_available(device)
     except Exception as exc:
-        print(f"[ERROR] CUDA device requested ({device}), but torch import failed: {exc}", file=sys.stderr)
-        raise SystemExit(1)
-    if not torch.cuda.is_available():
-        print(
-            "[ERROR] CUDA device requested "
-            f"({device}), but torch.cuda.is_available()=False. "
-            f"torch={getattr(torch, '__version__', 'unknown')} "
-            f"cuda_runtime={getattr(torch.version, 'cuda', 'unknown')}",
-            file=sys.stderr,
-        )
+        print(f"[ERROR] {exc}", file=sys.stderr)
         raise SystemExit(1)
 
 
@@ -581,8 +568,7 @@ def main(argv: list[str] | None = None) -> None:
     argv = list(argv or [])
     parser = build_inference_arg_parser()
     args = parser.parse_args(argv)
-    if args.device is None:
-        args.device = default_device_value()
+    args.device = resolve_device_request(args.device or default_device_value())
 
     try:
         workspace_root = resolve_workspace_root(args.workspace)
@@ -609,6 +595,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         _validate_non_interactive_args(parser, args)
     _ensure_device_available_or_exit(args.device)
+    print(f"[INFO] Inference device: {device_display_name(args.device)}")
 
     known_provider_ids = {spec.id for spec in list_provider_specs()}
     try:

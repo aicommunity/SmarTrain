@@ -36,6 +36,13 @@ smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mod
 smartrain inference --weights dr-yolo:yolov8n --external-repo /opt/dr-yolo --data-mode folder --source-dir ./images
 ```
 
+## Device selection
+
+- `--device` supports `cpu`, GPU index (`0`), or `cuda:N`.
+- Interactive mode supports number, token, or GPU name input.
+- Default device is `GPU 0` when CUDA is available, otherwise `cpu`.
+- The same rules are used in `train` and `test`.
+
 ## Performance contract
 
 Report contains dual profile under `performance`:
