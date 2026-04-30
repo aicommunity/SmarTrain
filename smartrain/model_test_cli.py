@@ -28,6 +28,7 @@ from smartrain.model_test_service import (
 from smartrain.train_resume import resolve_dataset_path_for_resume
 from smartrain.run_artifacts import (
     canonical_run_model_path,
+    is_internal_conversion_artifact,
     materialize_canonical_run_model,
     scan_run_models,
     run_models_dir,
@@ -80,6 +81,8 @@ def _discover_run_artifact_candidates(root_dir: str, formats: list[str] | None =
         fmt = str(rec.get("format") or "").strip().lower()
         path = str(rec.get("path") or "").strip()
         if not fmt or not path:
+            continue
+        if is_internal_conversion_artifact(path):
             continue
         by_fmt.setdefault(fmt, []).append(path)
     for fmt in requested:
@@ -148,6 +151,25 @@ def _artifact_key(fmt: str, path: str) -> str:
     return f"{fmt}|{os.path.abspath(path)}"
 
 
+def _select_preferred_artifact(candidates: list[Path], fmt: str) -> Path | None:
+    if not candidates:
+        return None
+    fmt_l = str(fmt or "").strip().lower()
+    filtered = [p for p in candidates if p.is_file() and not is_internal_conversion_artifact(p)]
+    if not filtered:
+        return None
+
+    def _score(p: Path) -> tuple[int, float, str]:
+        name = p.name.lower()
+        variant_hint = 1 if "_imgsz" in name and "_b" in name else 0
+        # Prefer profile variants for ONNX, then freshest artifact.
+        if fmt_l == "onnx":
+            return (variant_hint, p.stat().st_mtime, name)
+        return (0, p.stat().st_mtime, name)
+
+    return max(filtered, key=_score)
+
+
 def _normalize_data_to_yaml(data_value: str) -> str:
     candidate = Path(str(data_value)).expanduser().resolve()
     if candidate.is_file():
@@ -204,9 +226,9 @@ def _resolve_existing_artifact(
         candidates.extend(sorted(root.glob(f"*{ext}")))
         candidates.extend(sorted(root.rglob(f"*{ext}")))
 
-    for cand in candidates:
-        if cand.is_file():
-            return str(cand.resolve())
+    preferred = _select_preferred_artifact(candidates, fmt)
+    if preferred is not None:
+        return str(preferred.resolve())
 
     if primary_path.lower().endswith(".pt"):
         raise RuntimeError(

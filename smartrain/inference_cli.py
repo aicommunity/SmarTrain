@@ -34,7 +34,7 @@ from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolv
 from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
 from smartrain.model_context import infer_img_size_from_model_context
 from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
-from smartrain.run_artifacts import scan_run_models
+from smartrain.run_artifacts import is_internal_conversion_artifact, scan_run_models
 from smartrain.inference_backends import InferenceBackendRegistry, ExternalProviderBackend
 from smartrain.inference_perf import DualPerfProfiler
 from smartrain.environment_profile import collect_environment_profile, write_environment_profile
@@ -133,7 +133,9 @@ def _discover_model_entries(layout: WorkspaceLayout) -> list[tuple[str, str, str
         files = sorted(
             p
             for p in d.rglob("*")
-            if p.is_file() and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS
+                if p.is_file()
+                and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS
+                and not is_internal_conversion_artifact(p)
         )
         if not files:
             out.append((f"{d.name}/(no model files)", d.name, d.name))
@@ -142,6 +144,21 @@ def _discover_model_entries(layout: WorkspaceLayout) -> list[tuple[str, str, str
             rel = fp.relative_to(root).as_posix()
             out.append((rel, rel, d.name))
     return out
+
+
+def _pick_preferred_model_path(candidates: list[Path], *, prefer_onnx_variant: bool = False) -> Path | None:
+    filtered = [p for p in candidates if p.is_file() and not is_internal_conversion_artifact(p)]
+    if not filtered:
+        return None
+
+    ext_rank = {".pt": 4, ".onnx": 3, ".engine": 2, ".trt": 1}
+
+    def _score(p: Path) -> tuple[int, int, float, str]:
+        variant_hint = 1 if "_imgsz" in p.name.lower() and "_b" in p.name.lower() else 0
+        onnx_variant_bonus = 2 if (prefer_onnx_variant and p.suffix.lower() == ".onnx" and variant_hint) else 0
+        return (onnx_variant_bonus, ext_rank.get(p.suffix.lower(), 0), p.stat().st_mtime, p.name.lower())
+
+    return max(filtered, key=_score)
 
 
 def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, str]:
@@ -172,11 +189,13 @@ def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, 
         + sorted([p for p in mdir.glob("*.engine") if p.is_file()])
         + sorted([p for p in mdir.glob("*.trt") if p.is_file()])
     )
-    if preferred:
-        return preferred[0].resolve(), name
+    picked = _pick_preferred_model_path(preferred, prefer_onnx_variant=True)
+    if picked is not None:
+        return picked.resolve(), name
     any_weight = sorted(p for p in mdir.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS)
-    if any_weight:
-        return any_weight[0].resolve(), name
+    picked_any = _pick_preferred_model_path(any_weight, prefer_onnx_variant=True)
+    if picked_any is not None:
+        return picked_any.resolve(), name
     raise FileNotFoundError(f"No supported model files found in: {mdir}")
 
 
@@ -196,7 +215,11 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
             )
             for rec in sorted_scanned:
                 p = Path(str(rec.get("path") or "")).expanduser()
-                if p.is_file() and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS:
+                if (
+                    p.is_file()
+                    and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS
+                    and not is_internal_conversion_artifact(p)
+                ):
                     candidates.append(p.resolve())
         if not candidates:
             best = Path(canonical_run_model_path(str(run_dir), ".pt"))
@@ -208,7 +231,10 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
                 candidates.append(best.resolve())
         if not candidates:
             raise FileNotFoundError(f"run model not found in run: {run_dir}")
-        return candidates[0], run_dir.name, "runs"
+        picked = _pick_preferred_model_path(candidates, prefer_onnx_variant=True)
+        if picked is None:
+            raise FileNotFoundError(f"run model not found in run: {run_dir}")
+        return picked, run_dir.name, "runs"
     if args.weights:
         w = Path(str(args.weights)).expanduser()
         if not w.is_absolute():

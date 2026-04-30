@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import pytest
@@ -9,7 +10,11 @@ from types import ModuleType
 
 from PIL import Image
 
-from smartrain.model_test_cli import main as smartrain_test_main
+from smartrain.model_test_cli import (
+    _discover_run_artifact_candidates,
+    _resolve_existing_artifact,
+    main as smartrain_test_main,
+)
 from smartrain.model_test_service import (
     format_metrics_path,
     format_recommendation_path,
@@ -695,3 +700,46 @@ def test_model_test_cli_run_builds_onnx_artifacts_end_to_end(monkeypatch, tmp_pa
     assert Path(format_recommendation_path(str(run_dir), "val", "onnx")).is_file()
     manifest = json.loads(Path(manifest_path_fn(str(run_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["onnx"]["status"] == "ok"
+
+
+def test_discover_run_artifact_candidates_hides_internal_trtprep(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_hidden_trtprep"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (models_dir / "run_hidden_trtprep.pt").write_bytes(b"pt")
+    public_onnx = models_dir / "run_hidden_trtprep.onnx"
+    public_onnx.write_bytes(b"onnx")
+    internal_onnx = models_dir / "run_hidden_trtprep_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0_trtprep.onnx"
+    internal_onnx.write_bytes(b"onnx")
+
+    candidates = _discover_run_artifact_candidates(str(run_dir), ["onnx"])
+    onnx_list = candidates.get("onnx", [])
+    assert str(public_onnx) in onnx_list
+    assert str(internal_onnx) not in onnx_list
+
+
+def test_resolve_existing_artifact_prefers_newest_profile_onnx(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_pref_onnx"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    old_variant = models_dir / "run_pref_onnx_imgsz640x640_b1_static_op17_fp32_simplify1_nms0.onnx"
+    new_variant = models_dir / "run_pref_onnx_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx"
+    internal = models_dir / "run_pref_onnx_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0_trtprep.onnx"
+    old_variant.write_bytes(b"old")
+    new_variant.write_bytes(b"new")
+    internal.write_bytes(b"cache")
+    os.utime(old_variant, (1_700_000_000, 1_700_000_000))
+    os.utime(new_variant, (1_800_000_000, 1_800_000_000))
+
+    selected = _resolve_existing_artifact(
+        root_dir=str(run_dir),
+        primary_path=str(models_dir / "run_pref_onnx.pt"),
+        format_name="onnx",
+        target_kind="runs",
+    )
+    assert selected == str(new_variant.resolve())

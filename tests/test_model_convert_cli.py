@@ -70,6 +70,28 @@ def test_discover_models_materializes_canonical_from_legacy_run(tmp_path: Path):
     assert not legacy_best.exists()
 
 
+def test_resolve_public_onnx_target_uses_variant_name_without_train_dir(tmp_path: Path):
+    run_dir = tmp_path / "runs" / "ds1" / "run-no-train"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    pt = models_dir / "run-no-train.pt"
+    pt.write_text("pt", encoding="utf-8")
+
+    expected = {
+        "h": 640,
+        "w": 640,
+        "batch": 1,
+        "dynamic": False,
+        "opset": 17,
+        "half": False,
+        "simplify": True,
+        "nms": False,
+    }
+    target = mcc._resolve_public_onnx_target(pt, models_dir, expected)
+    assert target.name == "run-no-train_imgsz640x640_b1_static_op17_fp32_simplify1_nms0.onnx"
+
+
 def _base_args(**overrides):
     import argparse
 
@@ -122,7 +144,8 @@ def test_convert_pt_to_trt_reuses_existing_onnx(monkeypatch, tmp_path: Path):
     assert failed_any is False
     assert artifacts_failed == 0
     assert artifacts_ok >= 1
-    assert used_onnx == [onnx]
+    assert len(used_onnx) == 1
+    assert used_onnx[0].name.endswith("_trtprep.onnx")
     assert (tmp_path / "m.trt").exists()
 
 
@@ -167,8 +190,350 @@ def test_convert_pt_to_trt_builds_dedicated_onnx_on_mismatch(monkeypatch, tmp_pa
     assert artifacts_ok >= 2  # dedicated ONNX + TRT
     assert built_onnx, "trtexec should receive dedicated onnx path"
     assert built_onnx[0].name.startswith("m_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0_trtprep")
-    assert onnx.read_text(encoding="utf-8") == "onnx"
+    assert onnx.read_text(encoding="utf-8") == "new_onnx"
     assert (tmp_path / "m.trt").exists()
+
+
+def test_cleanup_trtprep_artifacts_removes_stale_variants(tmp_path: Path):
+    out_dir = tmp_path
+    keep_unrelated = out_dir / "m_imgsz640x640_b1_static_op17_fp32_simplify1_nms0.onnx"
+    stale_a = out_dir / "m_imgsz640x640_b1_static_op17_fp32_simplify1_nms0_trtprep.onnx"
+    stale_b = out_dir / "m_imgsz640x640_b1_static_op17_fp32_simplify1_nms0_trtprep_v2.onnx"
+    other_model = out_dir / "n_imgsz640x640_b1_static_op17_fp32_simplify1_nms0_trtprep.onnx"
+    keep_unrelated.write_text("x", encoding="utf-8")
+    stale_a.write_text("x", encoding="utf-8")
+    stale_b.write_text("x", encoding="utf-8")
+    other_model.write_text("x", encoding="utf-8")
+
+    mcc._cleanup_trtprep_artifacts(out_dir, "m")
+
+    assert not stale_a.exists()
+    assert not stale_b.exists()
+    assert keep_unrelated.exists()
+    assert other_model.exists()
+
+
+def test_convert_trt_only_materializes_public_and_cache_onnx_for_run(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "runs" / "ds1" / "run-1"
+    models_dir = run_dir / "models"
+    train_dir = run_dir / "train"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    train_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    pt = models_dir / "run-1.pt"
+    pt.write_text("pt", encoding="utf-8")
+
+    monkeypatch.setattr(mcc, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (1280, "cli"))
+    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcc, "_check_trtexec_gpu_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcc, "_check_trtexec_runtime_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcc, "_extract_onnx_signature", lambda _p: None)
+    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            self.path = _path
+
+        def export(self, **_kwargs):
+            exported = tmp_path / "tmp_export_for_trt.onnx"
+            exported.write_text("onnx", encoding="utf-8")
+            return str(exported)
+
+    import ultralytics
+
+    monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
+    monkeypatch.setattr(
+        mcc,
+        "_trtexec_export_from_onnx",
+        lambda _onnx, engine_target, _args, _imgsz: (engine_target.write_text("trt", encoding="utf-8") or True, "ok"),
+    )
+
+    ok_any, failed_any, _skipped_any, artifacts_ok, artifacts_failed, _artifacts_skipped = mcc._convert_one(
+        pt, _base_args(format="tensorrt-trt")
+    )
+    assert ok_any is True
+    assert failed_any is False
+    assert artifacts_failed == 0
+    assert artifacts_ok >= 2
+    assert not (models_dir / "run-1.onnx").exists()
+    assert (models_dir / "run-1_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx").exists()
+    dedicated = sorted(models_dir.glob("*_trtprep.onnx"))
+    assert dedicated, "dedicated trtprep ONNX must exist"
+    assert not (models_dir / "run-1.trt").exists()
+    assert (models_dir / "run-1_imgsz1280x1280_b1_static_fp32.trt").exists()
+
+
+def test_convert_onnx_only_syncs_public_and_trtprep_for_run(monkeypatch, tmp_path: Path):
+    run_dir = tmp_path / "runs" / "ds1" / "run-1"
+    models_dir = run_dir / "models"
+    train_dir = run_dir / "train"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    train_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    pt = models_dir / "run-1.pt"
+    pt.write_text("pt", encoding="utf-8")
+
+    monkeypatch.setattr(mcc, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (1280, "cli"))
+    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            self.path = _path
+
+        def export(self, **_kwargs):
+            exported = tmp_path / "tmp_export_for_onnx.onnx"
+            exported.write_text("onnx", encoding="utf-8")
+            return str(exported)
+
+    import ultralytics
+
+    monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
+
+    ok_any, failed_any, _skipped_any, artifacts_ok, artifacts_failed, _artifacts_skipped = mcc._convert_one(
+        pt, _base_args(format="onnx")
+    )
+    assert ok_any is True
+    assert failed_any is False
+    assert artifacts_failed == 0
+    assert artifacts_ok >= 1
+    assert not (models_dir / "run-1.onnx").exists()
+    assert (models_dir / "run-1_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx").exists()
+    dedicated = sorted(models_dir.glob("*_trtprep.onnx"))
+    assert dedicated, "dedicated trtprep ONNX must be synchronized in onnx-only mode"
+
+
+def test_interactive_onnx_plus_trt_exports_onnx_once(monkeypatch, tmp_path: Path):
+    source_pt = tmp_path / "m.pt"
+    source_pt.write_text("pt", encoding="utf-8")
+    export_calls = {"onnx": 0}
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            self.path = _path
+
+        def export(self, **kwargs):
+            if kwargs.get("format") == "onnx":
+                export_calls["onnx"] += 1
+                exported = tmp_path / "single_export.onnx"
+                exported.write_text("onnx", encoding="utf-8")
+                return str(exported)
+            exported = tmp_path / "engine.engine"
+            exported.write_text("engine", encoding="utf-8")
+            return str(exported)
+
+    import ultralytics
+
+    monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
+    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
+    monkeypatch.setattr(
+        mcc,
+        "_trtexec_export_from_onnx",
+        lambda _onnx, trt_target, _args, _imgsz: (trt_target.write_text("trt", encoding="utf-8") or True, "ok"),
+    )
+
+    ctx = mcc.InteractiveContext(
+        source_kind="pt",
+        source_path=source_pt,
+        target_onnx=True,
+        target_engine=False,
+        target_trt=True,
+        output_dir=tmp_path,
+        force=True,
+        force_onnx=True,
+        force_engine=True,
+        force_trt=True,
+        onnx_imgsz=640,
+        onnx_imgsz_source="cli",
+        onnx_batch=1,
+        onnx_dynamic=False,
+        device=None,
+        engine_precision="fp32",
+        engine_workspace_gib=None,
+        trt_precision="fp32",
+        trt_workspace_gib=None,
+        data=None,
+        fraction=1.0,
+        opset=17,
+        simplify=True,
+        half=False,
+        nms=False,
+    )
+    result = mcc._run_interactive_pipeline(ctx)
+    assert result.stats.failed == 0
+    assert export_calls["onnx"] == 1
+    assert (tmp_path / "m.onnx").exists()
+    assert sorted(tmp_path.glob("*_trtprep.onnx"))
+
+
+def test_interactive_onnx_engine_trt_exports_onnx_once(monkeypatch, tmp_path: Path):
+    source_pt = tmp_path / "m.pt"
+    source_pt.write_text("pt", encoding="utf-8")
+    export_calls = {"onnx": 0, "engine": 0}
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            self.path = _path
+
+        def export(self, **kwargs):
+            fmt = kwargs.get("format")
+            if fmt == "onnx":
+                export_calls["onnx"] += 1
+                exported = tmp_path / "single_export.onnx"
+                exported.write_text("onnx", encoding="utf-8")
+                return str(exported)
+            if fmt == "engine":
+                export_calls["engine"] += 1
+                exported = tmp_path / "single_export.engine"
+                exported.write_text("engine", encoding="utf-8")
+                return str(exported)
+            raise AssertionError(f"unexpected format: {fmt}")
+
+    import ultralytics
+
+    monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
+    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
+    monkeypatch.setattr(
+        mcc,
+        "_trtexec_export_from_onnx",
+        lambda _onnx, trt_target, _args, _imgsz: (trt_target.write_text("trt", encoding="utf-8") or True, "ok"),
+    )
+
+    ctx = mcc.InteractiveContext(
+        source_kind="pt",
+        source_path=source_pt,
+        target_onnx=True,
+        target_engine=True,
+        target_trt=True,
+        output_dir=tmp_path,
+        force=True,
+        force_onnx=True,
+        force_engine=True,
+        force_trt=True,
+        onnx_imgsz=640,
+        onnx_imgsz_source="cli",
+        onnx_batch=1,
+        onnx_dynamic=False,
+        device=None,
+        engine_precision="fp32",
+        engine_workspace_gib=None,
+        trt_precision="fp32",
+        trt_workspace_gib=None,
+        data=None,
+        fraction=1.0,
+        opset=17,
+        simplify=True,
+        half=False,
+        nms=False,
+    )
+    result = mcc._run_interactive_pipeline(ctx)
+    assert result.stats.failed == 0
+    assert export_calls["onnx"] == 1
+    assert export_calls["engine"] == 1
+    assert (tmp_path / "m.onnx").exists()
+    assert sorted(tmp_path.glob("*_trtprep.onnx"))
+    assert (tmp_path / "m.engine").exists()
+    assert (tmp_path / "m.trt").exists()
+
+
+def test_interactive_onnx_decline_overwrite_skips_export(monkeypatch, tmp_path: Path):
+    source_pt = tmp_path / "m.pt"
+    source_pt.write_text("pt", encoding="utf-8")
+    public = tmp_path / "m.onnx"
+    dedicated = tmp_path / "m_imgsz640x640_b1_static_op17_fp32_simplify1_nms0_trtprep.onnx"
+    public.write_text("public", encoding="utf-8")
+    dedicated.write_text("cache", encoding="utf-8")
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            self.path = _path
+
+        def export(self, **_kwargs):
+            raise AssertionError("ONNX export must not run when overwrite is declined")
+
+    import ultralytics
+
+    monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
+
+    ctx = mcc.InteractiveContext(
+        source_kind="pt",
+        source_path=source_pt,
+        target_onnx=True,
+        target_engine=False,
+        target_trt=False,
+        output_dir=tmp_path,
+        force=False,
+        force_onnx=False,
+        force_engine=False,
+        force_trt=False,
+        onnx_imgsz=640,
+        onnx_imgsz_source="cli",
+        onnx_batch=1,
+        onnx_dynamic=False,
+        device=None,
+        engine_precision="fp32",
+        engine_workspace_gib=None,
+        trt_precision="fp32",
+        trt_workspace_gib=None,
+        data=None,
+        fraction=1.0,
+        opset=17,
+        simplify=True,
+        half=False,
+        nms=False,
+    )
+    result = mcc._run_interactive_pipeline(ctx)
+    assert result.stats.failed == 0
+    assert result.stats.artifacts_skipped == 1
+    assert dedicated.read_text(encoding="utf-8") == "cache"
+
+
+def test_interactive_trt_targets_existing_skip_without_onnx_export(monkeypatch, tmp_path: Path):
+    source_pt = tmp_path / "m.pt"
+    source_pt.write_text("pt", encoding="utf-8")
+    (tmp_path / "m.engine").write_text("engine", encoding="utf-8")
+    (tmp_path / "m.trt").write_text("trt", encoding="utf-8")
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            self.path = _path
+
+        def export(self, **_kwargs):
+            raise AssertionError("ONNX cache export must not run when all TRT targets are skipped")
+
+    import ultralytics
+
+    monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
+
+    ctx = mcc.InteractiveContext(
+        source_kind="pt",
+        source_path=source_pt,
+        target_onnx=False,
+        target_engine=True,
+        target_trt=True,
+        output_dir=tmp_path,
+        force=False,
+        force_onnx=False,
+        force_engine=False,
+        force_trt=False,
+        onnx_imgsz=640,
+        onnx_imgsz_source="cli",
+        onnx_batch=1,
+        onnx_dynamic=False,
+        device=None,
+        engine_precision="fp32",
+        engine_workspace_gib=None,
+        trt_precision="fp32",
+        trt_workspace_gib=None,
+        data=None,
+        fraction=1.0,
+        opset=17,
+        simplify=True,
+        half=False,
+        nms=False,
+    )
+    result = mcc._run_interactive_pipeline(ctx)
+    assert result.stats.failed == 0
+    assert result.stats.skipped == 2
 
 
 def test_parser_rejects_legacy_tensorrt_value():

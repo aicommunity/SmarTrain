@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -9,6 +10,7 @@ import pytest
 from PIL import Image
 
 from smartrain.inference_cli import main as inference_main
+from smartrain.inference_cli import _resolve_model
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
@@ -346,5 +348,53 @@ def test_inference_rejects_unsupported_model_for_external_provider(monkeypatch, 
     assert int(ex.value.code or 0) == 2
     err = capsys.readouterr().err
     assert "is not supported by external provider" in err
+
+
+def test_resolve_model_run_ignores_internal_trtprep(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    internal = models_dir / "run_a_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0_trtprep.onnx"
+    public = models_dir / "run_a.onnx"
+    internal.write_bytes(b"internal")
+    public.write_bytes(b"public")
+
+    from smartrain.workspace_paths import WorkspaceLayout
+    import argparse
+
+    args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
+    model_path, _name, source = _resolve_model(args, WorkspaceLayout(str(tmp_path)))
+    assert source == "runs"
+    assert model_path == public.resolve()
+
+
+def test_resolve_model_run_prefers_newest_profile_onnx_variant(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+
+    run_dir = tmp_path / "runs" / "ds_a" / "run_b"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    old_variant = models_dir / "run_b_imgsz640x640_b1_static_op17_fp32_simplify1_nms0.onnx"
+    new_variant = models_dir / "run_b_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx"
+    old_variant.write_bytes(b"old")
+    new_variant.write_bytes(b"new")
+    os.utime(old_variant, (1_700_000_000, 1_700_000_000))
+    os.utime(new_variant, (1_800_000_000, 1_800_000_000))
+
+    import argparse
+    from smartrain.workspace_paths import WorkspaceLayout
+
+    args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
+    model_path, _name, source = _resolve_model(args, WorkspaceLayout(str(tmp_path)))
+    assert source == "runs"
+    assert model_path == new_variant.resolve()
 
 

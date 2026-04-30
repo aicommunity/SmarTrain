@@ -232,6 +232,13 @@ def model_sidecar_metadata_path(model_path: str | Path) -> Path:
     return p.with_name(f"{p.name}.meta.json")
 
 
+def is_internal_conversion_artifact(model_path: str | Path) -> bool:
+    p = Path(model_path)
+    name = p.name.lower()
+    # Internal ONNX cache used only as an intermediate for TRT conversion.
+    return p.suffix.lower() == ".onnx" and ("_nms0_trtprep" in name or "_nms1_trtprep" in name)
+
+
 def _fingerprint_file(path: Path) -> str | None:
     try:
         h = hashlib.sha256()
