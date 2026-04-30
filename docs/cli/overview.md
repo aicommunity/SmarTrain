@@ -53,6 +53,13 @@ Model convert highlights:
 - Target selection is model-based (`onnx`, `engine`, `trt`) with multi-select input (`1,2` or `onnx,trt`), and unavailable targets are shown with reason.
 - For run sources, interactive discovery uses canonical run artifacts (`<run_dir>/<run_dir_name>.<ext>`). Legacy run layouts are canonized automatically on first access.
 
+Inference highlights:
+
+- `smartrain inference` supports local model artifacts `pt`, `pt_uni`, `onnx`, `engine`, `trt` through unified backend routing, plus external provider references.
+- Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
+- Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
+- Full inference JSON/artifact contract: [`inference.md`](inference.md).
+
 Model release highlights:
 
 - `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.

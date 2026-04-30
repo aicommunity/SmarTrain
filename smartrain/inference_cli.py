@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime
 from glob import glob
 from pathlib import Path
@@ -33,10 +34,15 @@ from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolv
 from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
 from smartrain.model_context import infer_img_size_from_model_context
 from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.run_artifacts import scan_run_models
+from smartrain.inference_backends import InferenceBackendRegistry, ExternalProviderBackend
+from smartrain.inference_perf import DualPerfProfiler
+from smartrain.environment_profile import collect_environment_profile, write_environment_profile
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
 DATA_MODES = ("folder", "dataset-split")
+SUPPORTED_INFERENCE_EXTS = {".pt", ".onnx", ".engine", ".trt"}
 
 
 def build_inference_arg_parser() -> argparse.ArgumentParser:
@@ -46,7 +52,7 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR}).")
     p.add_argument("--model-name", type=str, default=None, help="Promoted model directory name from workspace/models.")
     p.add_argument("--run", type=str, default=None, help="Run path or run index from workspace/runs list.")
-    p.add_argument("--weights", type=str, default=None, help="Explicit model weights path (.pt/.onnx).")
+    p.add_argument("--weights", type=str, default=None, help="Explicit model weights path (.pt/.onnx/.engine/.trt).")
     p.add_argument("--data-mode", choices=DATA_MODES, default="folder", help="Data source mode.")
     p.add_argument("--source-dir", type=str, default=None, help="Folder with images (recursive).")
     p.add_argument("--dataset", type=str, default=None, help="Dataset key from datasets/datasets_info.json.")
@@ -61,6 +67,7 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
         help="Ultralytics device (cpu, 0, etc). Default: GPU 0 if available, otherwise cpu.",
     )
     p.add_argument("--half", action="store_true", help="Enable FP16 where supported.")
+    p.add_argument("--perf-warmup-images", type=int, default=5, help="Warmup images excluded from steady perf statistics.")
     p.add_argument("--roi-pre-detect", action="store_true", help="Pre-detect ROI before inference (folder mode only).")
     p.add_argument("--roi-weights", type=str, default=None, help="ROI detector weights path (.pt/.onnx).")
     p.add_argument("--roi-conf", type=float, default=0.25, help="Confidence threshold for ROI detector.")
@@ -126,7 +133,7 @@ def _discover_model_entries(layout: WorkspaceLayout) -> list[tuple[str, str, str
         files = sorted(
             p
             for p in d.rglob("*")
-            if p.is_file() and p.suffix.lower() in {".pt", ".onnx"}
+            if p.is_file() and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS
         )
         if not files:
             out.append((f"{d.name}/(no model files)", d.name, d.name))
@@ -141,7 +148,7 @@ def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, 
     # Support direct file selection under models/ (used by interactive "models" mode).
     models_root = Path(layout.models).resolve()
     candidate_rel = Path(name)
-    if candidate_rel.suffix.lower() in {".pt", ".onnx"} and not candidate_rel.is_absolute():
+    if candidate_rel.suffix.lower() in SUPPORTED_INFERENCE_EXTS and not candidate_rel.is_absolute():
         file_path = (models_root / candidate_rel).resolve()
         if file_path.is_file():
             parts = candidate_rel.as_posix().split("/")
@@ -159,13 +166,18 @@ def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, 
             p = (mdir / wf).resolve()
             if p.is_file():
                 return p, name
-    preferred = sorted([p for p in mdir.glob("*.pt") if p.is_file()]) + sorted([p for p in mdir.glob("*.onnx") if p.is_file()])
+    preferred = (
+        sorted([p for p in mdir.glob("*.pt") if p.is_file()])
+        + sorted([p for p in mdir.glob("*.onnx") if p.is_file()])
+        + sorted([p for p in mdir.glob("*.engine") if p.is_file()])
+        + sorted([p for p in mdir.glob("*.trt") if p.is_file()])
+    )
     if preferred:
         return preferred[0].resolve(), name
-    any_weight = sorted(p for p in mdir.rglob("*") if p.is_file() and p.suffix.lower() in {".pt", ".onnx"})
+    any_weight = sorted(p for p in mdir.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS)
     if any_weight:
         return any_weight[0].resolve(), name
-    raise FileNotFoundError(f"No .pt/.onnx model files found in: {mdir}")
+    raise FileNotFoundError(f"No supported model files found in: {mdir}")
 
 
 def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Path, str, str]:
@@ -174,20 +186,37 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
         return p, model_key, "models"
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
-        best = Path(canonical_run_model_path(str(run_dir), ".pt"))
-        if not best.is_file():
-            materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
-            if materialized is not None:
-                best = Path(materialized)
-        if not best.is_file():
+        scanned = scan_run_models(str(run_dir))
+        preferred_order = {"pt": 0, "pt_uni": 1, "onnx": 2, "engine": 3, "trt": 4}
+        candidates: list[Path] = []
+        if scanned:
+            sorted_scanned = sorted(
+                scanned,
+                key=lambda x: preferred_order.get(str(x.get("format") or "").strip().lower(), 999),
+            )
+            for rec in sorted_scanned:
+                p = Path(str(rec.get("path") or "")).expanduser()
+                if p.is_file() and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS:
+                    candidates.append(p.resolve())
+        if not candidates:
+            best = Path(canonical_run_model_path(str(run_dir), ".pt"))
+            if not best.is_file():
+                materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
+                if materialized is not None:
+                    best = Path(materialized)
+            if best.is_file():
+                candidates.append(best.resolve())
+        if not candidates:
             raise FileNotFoundError(f"run model not found in run: {run_dir}")
-        return best.resolve(), run_dir.name, "runs"
+        return candidates[0], run_dir.name, "runs"
     if args.weights:
         w = Path(str(args.weights)).expanduser()
         if not w.is_absolute():
             w = (Path(layout.root) / w).resolve()
         if not w.is_file():
             raise FileNotFoundError(f"Weights not found: {w}")
+        if w.suffix.lower() not in SUPPORTED_INFERENCE_EXTS:
+            raise FileNotFoundError(f"Unsupported weights format: {w.suffix}")
         return w.resolve(), w.stem, "weights"
     raise ValueError("Specify one of --model-name, --run or --weights.")
 
@@ -457,6 +486,8 @@ def _build_report(
     images_input_count: int,
     image_rows: list[dict[str, Any]],
     skipped: int,
+    performance: dict[str, Any] | None = None,
+    environment_artifact_path: str | None = None,
 ) -> dict[str, Any]:
     return {
         "created_at": datetime.utcnow().isoformat() + "Z",
@@ -501,6 +532,15 @@ def _build_report(
             "images_processed": len(image_rows),
             "images_skipped": skipped,
             "detections_total": sum(len(x.get("detections", [])) for x in image_rows),
+        },
+        "performance": performance if isinstance(performance, dict) else None,
+        "artifacts": {
+            "environment_profile": {
+                "path_absolute": environment_artifact_path,
+                "path_relative": (
+                    relativize_if_under(layout.root, environment_artifact_path) if environment_artifact_path else None
+                ),
+            }
         },
         "images": image_rows,
     }
@@ -567,12 +607,6 @@ def main(argv: list[str] | None = None) -> None:
         args.weights = parsed_model_name_ref.model_ref
         print(f"[INFO] External provider inferred from --model-name: {parsed_model_name_ref.provider_id}")
 
-    try:
-        from ultralytics import YOLO
-    except ImportError as e:
-        print(f"[ERROR] Failed to import ultralytics: {e}", file=sys.stderr)
-        raise SystemExit(1)
-
     ext_provider = str(getattr(args, "external_provider", "") or "").strip()
     if ext_provider and args.weights:
         raw_weight = str(args.weights).strip()
@@ -637,10 +671,11 @@ def main(argv: list[str] | None = None) -> None:
         )
         out_root = _resolve_output_root(layout, model_name, source_short)
         report_path = os.path.join(out_root, "inference_results.json")
-        rc = run_external_infer(
-            ext_provider,
-            repo_path,
-            venv_path,
+        env_profile = collect_environment_profile()
+        env_path = os.path.join(out_root, "environment_profile.json")
+        write_environment_profile(env_path, env_profile)
+        ext_backend = ExternalProviderBackend(ext_provider, repo_path, venv_path)
+        rc = ext_backend.run_batch(
             model_path=str(model_path),
             source_path=source_for_external,
             conf=float(args.conf),
@@ -676,14 +711,40 @@ def main(argv: list[str] | None = None) -> None:
                 "return_code": int(rc),
             },
             "summary": {"images_input": None, "images_processed": None, "images_skipped": None, "detections_total": None},
+            "performance": {
+                "end_to_end": None,
+                "infer_only": None,
+                "stage_breakdown_ms": {},
+                "methodology": {
+                    "profile_mode": "dual",
+                    "caveats": ["External provider currently does not expose per-image performance telemetry."],
+                },
+            },
+            "artifacts": {
+                "environment_profile": {
+                    "path_absolute": env_path,
+                    "path_relative": relativize_if_under(layout.root, env_path) or env_path,
+                }
+            },
             "images": [],
         }
         _write_report(report_path, external_report)
         print(f"[OK] External inference report: {report_path}")
         raise SystemExit(rc)
-    model = YOLO(str(model_path))
+    registry = InferenceBackendRegistry()
+    model_format = "pt_uni" if str(model_path).lower().endswith("_uni.pt") else str(model_path.suffix).lower().lstrip(".")
+    if model_format not in {"pt", "pt_uni", "onnx", "engine", "trt"}:
+        print(f"[ERROR] Unsupported model format for inference: {model_format}", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        backend = registry.create_local_backend(model_format=model_format, model_path=str(model_path))
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize inference backend: {e}", file=sys.stderr)
+        raise SystemExit(1)
     roi_model = None
     if args.roi_pre_detect:
+        from ultralytics import YOLO
+
         if args.data_mode != "folder":
             print("[ERROR] --roi-pre-detect is supported only for --data-mode folder.", file=sys.stderr)
             raise SystemExit(1)
@@ -714,9 +775,21 @@ def main(argv: list[str] | None = None) -> None:
 
     out_root = _resolve_output_root(layout, model_name, source_short)
     report_path = os.path.join(out_root, "inference_results.json")
+    env_profile = collect_environment_profile()
+    env_path = os.path.join(out_root, "environment_profile.json")
+    write_environment_profile(env_path, env_profile)
 
     image_rows: list[dict[str, Any]] = []
     skipped = 0
+    perf = DualPerfProfiler(warmup_images=int(max(0, args.perf_warmup_images)))
+    perf_methodology = {
+        "profile_mode": "dual",
+        "warmup_images": int(max(0, args.perf_warmup_images)),
+        "end_to_end_includes": ["image_io", "roi_preprocess", "model_infer", "postprocess", "report_update"],
+        "infer_only_includes": ["model_infer_call"],
+        "backend": backend.name,
+        "model_format": model_format,
+    }
     # Initialize output file early to make progress durable.
     _write_report(
         report_path,
@@ -733,10 +806,13 @@ def main(argv: list[str] | None = None) -> None:
             images_input_count=len(images),
             image_rows=image_rows,
             skipped=skipped,
+            performance=perf.to_payload(methodology=perf_methodology),
+            environment_artifact_path=env_path,
         ),
     )
     progress_desc = f"inference:{args.data_mode}"
     for image_path in tqdm(images, desc=progress_desc, unit="img"):
+        loop_t0 = time.perf_counter_ns()
         image_path_abs = os.path.abspath(image_path)
         with Image.open(image_path_abs) as im:
             im_rgb = im.convert("RGB")
@@ -762,8 +838,11 @@ def main(argv: list[str] | None = None) -> None:
                             images_input_count=len(images),
                             image_rows=image_rows,
                             skipped=skipped,
+                            performance=perf.to_payload(methodology=perf_methodology),
+                            environment_artifact_path=env_path,
                         ),
                     )
+                    perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
                     continue
                 roi_box = rb
                 crop = im_rgb.crop((roi_box[0], roi_box[1], roi_box[2], roi_box[3]))
@@ -771,43 +850,35 @@ def main(argv: list[str] | None = None) -> None:
             elif args.data_mode == "folder":
                 roi_box = (0, 0, iw, ih)
 
-        preds = model.predict(
-            source=src_for_predict,
+        pred_result = backend.predict(
+            src_for_predict,
             conf=float(args.conf),
             imgsz=int(args.img_size),
-            verbose=False,
             device=str(args.device),
             half=bool(args.half),
         )
+        perf.record_infer_only(int(pred_result.infer_only_ns))
+        for stage, dt in pred_result.stage_ns.items():
+            perf.record_stage(stage, int(dt))
         boxes_payload: list[dict[str, Any]] = []
-        if preds:
-            r = preds[0]
-            boxes_obj = getattr(r, "boxes", None)
-            if boxes_obj is not None and len(boxes_obj) > 0:
-                xyxy = boxes_obj.xyxy.cpu().numpy()
-                cls = boxes_obj.cls.cpu().numpy()
-                confs = boxes_obj.conf.cpu().numpy()
-                names = getattr(model, "names", {})
-                for i in range(len(xyxy)):
-                    x1, y1, x2, y2 = [float(v) for v in xyxy[i]]
-                    cls_idx = int(cls[i])
-                    conf_v = float(confs[i])
-                    if roi_box is not None:
-                        ox1 = x1 + float(roi_box[0])
-                        oy1 = y1 + float(roi_box[1])
-                        ox2 = x2 + float(roi_box[0])
-                        oy2 = y2 + float(roi_box[1])
-                    else:
-                        ox1, oy1, ox2, oy2 = x1, y1, x2, y2
-                    boxes_payload.append(
-                        {
-                            "bbox_roi_xyxy": [x1, y1, x2, y2],
-                            "bbox_original_xyxy": [ox1, oy1, ox2, oy2],
-                            "class_index": cls_idx,
-                            "class_name": _class_name_from_names(names, cls_idx),
-                            "confidence": conf_v,
-                        }
-                    )
+        for det in pred_result.detections:
+            x1, y1, x2, y2 = [float(v) for v in det.get("bbox_roi_xyxy", [0.0, 0.0, 0.0, 0.0])]
+            if roi_box is not None:
+                ox1 = x1 + float(roi_box[0])
+                oy1 = y1 + float(roi_box[1])
+                ox2 = x2 + float(roi_box[0])
+                oy2 = y2 + float(roi_box[1])
+            else:
+                ox1, oy1, ox2, oy2 = x1, y1, x2, y2
+            boxes_payload.append(
+                {
+                    "bbox_roi_xyxy": [x1, y1, x2, y2],
+                    "bbox_original_xyxy": [ox1, oy1, ox2, oy2],
+                    "class_index": int(det.get("class_index", 0)),
+                    "class_name": str(det.get("class_name", det.get("class_index", ""))),
+                    "confidence": float(det.get("confidence", 0.0)),
+                }
+            )
         image_rows.append(
             {
                 "image_path_absolute": image_path_abs,
@@ -817,6 +888,7 @@ def main(argv: list[str] | None = None) -> None:
                 "detections": boxes_payload,
             }
         )
+        perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
         _write_report(
             report_path,
             _build_report(
@@ -832,6 +904,8 @@ def main(argv: list[str] | None = None) -> None:
                 images_input_count=len(images),
                 image_rows=image_rows,
                 skipped=skipped,
+                performance=perf.to_payload(methodology=perf_methodology),
+                environment_artifact_path=env_path,
             ),
         )
 

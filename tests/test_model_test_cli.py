@@ -153,6 +153,45 @@ def test_model_test_cli_interactive_replay_command_is_complete(monkeypatch, tmp_
     assert "--formats onnx" in out
 
 
+def test_model_test_cli_replay_contains_perf_flags(monkeypatch, tmp_path: Path, capsys) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_perf" / "run_perf"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    (run_dir / "train" / "weights" / "best.onnx").write_bytes(b"fake-onnx")
+    dataset_yaml = tmp_path / "datasets" / "ds_perf" / "data.yaml"
+    dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
+    dataset_yaml.write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"path_under_workspace": "datasets/ds_perf"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    class _FakeResult:
+        success = True
+        error = None
+
+    monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", lambda **_kwargs: _FakeResult())
+    smartrain_test_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--run",
+            str(run_dir),
+            "--data",
+            str(dataset_yaml),
+            "--formats",
+            "onnx",
+            "--perf",
+            "--perf-warmup-images",
+            "7",
+            "-y",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "--perf" in out
+    assert "--perf-warmup-images 7" in out
+
 def test_model_test_cli_skips_matching_existing_test_non_interactive(monkeypatch, tmp_path: Path, capsys) -> None:
     deploy_workspace(str(tmp_path))
     run_dir = tmp_path / "runs" / "ds_a" / "run_skip"

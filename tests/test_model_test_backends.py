@@ -98,7 +98,41 @@ def test_run_native_onnx_backend_writes_test_artifacts(monkeypatch, tmp_path: Pa
     assert Path(format_recommendation_path(str(root_dir), "val", "onnx")).is_file()
     manifest = json.loads(Path(manifest_path_fn(str(root_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["onnx"]["status"] == "ok"
+    artifacts = manifest["formats"]["onnx"].get("artifacts") or []
+    assert isinstance(artifacts, list) and isinstance(artifacts[0].get("test_system_profile"), dict)
+    runtime = artifacts[0]["test_system_profile"].get("runtime") or {}
+    assert runtime.get("stage") == "test"
+    assert runtime.get("format") == "onnx"
 
+
+def test_run_native_onnx_backend_collects_performance(monkeypatch, tmp_path: Path) -> None:
+    _install_fake_onnxruntime(monkeypatch)
+    root_dir = tmp_path / "run_perf_onnx"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.onnx"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_perf_onnx", with_test=True)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="onnx",
+        imgsz=640,
+        val_conf=0.25,
+        val_iou=0.5,
+        val_batch=1,
+        collect_performance=True,
+        perf_warmup_images=1,
+    )
+    assert result.success is True
+    perf = result.inference.get("performance")
+    assert isinstance(perf, dict)
+    assert perf.get("warmup_images") == 1
+    assert "latency_ms" in perf
+    manifest = json.loads(Path(manifest_path_fn(str(root_dir))).read_text(encoding="utf-8"))
+    artifacts = manifest["formats"]["onnx"].get("artifacts") or []
+    assert isinstance(artifacts, list) and isinstance(artifacts[0].get("performance"), dict)
 
 def test_run_native_onnx_backend_prints_progress(monkeypatch, tmp_path: Path, capsys) -> None:
     _install_fake_onnxruntime(monkeypatch)
@@ -301,6 +335,8 @@ def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path
     assert Path(format_recommendation_path(str(root_dir), "test", "engine")).is_file()
     manifest = json.loads(Path(manifest_path_fn(str(root_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["engine"]["status"] == "ok"
+    artifacts = manifest["formats"]["engine"].get("artifacts") or []
+    assert isinstance(artifacts, list) and isinstance(artifacts[0].get("test_system_profile"), dict)
 
 
 def test_run_native_onnx_backend_writes_deep_diagnostics_artifacts(monkeypatch, tmp_path: Path) -> None:

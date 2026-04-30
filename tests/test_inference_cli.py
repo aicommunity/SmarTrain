@@ -102,6 +102,11 @@ def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
     assert report["model"]["name"] == "demo_model"
     assert report["source"]["mode"] == "folder"
     assert report["images"][0]["detections"][0]["bbox_roi_xyxy"] == [10.0, 12.0, 40.0, 48.0]
+    assert isinstance(report.get("performance"), dict)
+    assert "end_to_end" in report["performance"]
+    assert "infer_only" in report["performance"]
+    env_path = Path(report["artifacts"]["environment_profile"]["path_absolute"])
+    assert env_path.is_file()
 
 
 def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monkeypatch) -> None:
@@ -184,6 +189,34 @@ def test_inference_dataset_split(tmp_path: Path, monkeypatch) -> None:
     assert report["summary"]["images_processed"] == 1
 
 
+def test_inference_supports_engine_weights(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+    engine_path = tmp_path / "models" / "demo_model" / "demo_model.engine"
+    engine_path.parent.mkdir(parents=True, exist_ok=True)
+    engine_path.write_bytes(b"fake-engine")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--weights",
+            str(engine_path),
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["model"]["weights_absolute"].endswith(".engine")
+    assert report["summary"]["images_processed"] == 1
+
+
 def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
@@ -239,7 +272,7 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
         captured["model_path"] = kwargs.get("model_path")
         return 0
 
-    monkeypatch.setattr("smartrain.inference_cli.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.inference_backends.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -262,6 +295,7 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
     assert report["model"]["provider"]["type"] == "external"
     assert report["model"]["provider"]["id"] == "dr-yolo"
     assert report["external_execution"]["provider_id"] == "dr-yolo"
+    assert Path(report["artifacts"]["environment_profile"]["path_absolute"]).is_file()
 
 
 def test_inference_unknown_provider_in_weights_returns_error(monkeypatch, tmp_path: Path, capsys) -> None:

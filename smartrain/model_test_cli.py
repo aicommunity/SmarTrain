@@ -52,6 +52,8 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--iou", type=float, default=None, help="Validation IoU threshold.")
     p.add_argument("--batch", type=int, default=None, help="Validation batch size.")
     p.add_argument("--deep-diagnostics", action="store_true", help="Save deep per-image diagnostics artifacts.")
+    p.add_argument("--perf", action="store_true", help="Collect inference performance metrics.")
+    p.add_argument("--perf-warmup-images", type=int, default=5, help="Warmup images excluded from steady perf stats.")
     p.add_argument("--non-interactive", "-y", action="store_true", help="Disable interactive prompts.")
     return p
 
@@ -426,6 +428,8 @@ def _run_native_backend_isolated(
     val_conf: float | None,
     val_iou: float | None,
     val_batch: int | None,
+    collect_performance: bool = False,
+    perf_warmup_images: int = 5,
 ) -> tuple[bool, str | None]:
     with tempfile.NamedTemporaryFile(prefix=f"smartrain_test_{format_name}_", suffix=".json", delete=False) as tmp:
         result_path = tmp.name
@@ -453,6 +457,9 @@ def _run_native_backend_isolated(
             cmd.extend(["--iou", str(val_iou)])
         if val_batch is not None:
             cmd.extend(["--batch", str(val_batch)])
+        if collect_performance:
+            cmd.append("--perf")
+            cmd.extend(["--perf-warmup-images", str(max(0, int(perf_warmup_images)))])
         # Stream child process output directly to the current terminal so tqdm
         # progress bars from native backends (engine/trt) remain visible.
         proc = subprocess.run(cmd, text=True)
@@ -714,6 +721,8 @@ def main(argv: list[str] | None = None) -> None:
                         val_iou=args.iou,
                         val_batch=args.batch,
                         deep_diagnostics=True,
+                        collect_performance=bool(args.perf),
+                        perf_warmup_images=int(max(0, args.perf_warmup_images)),
                     )
                     results.append(("pt", pt_result.success, pt_result.error))
                 else:
@@ -766,6 +775,8 @@ def main(argv: list[str] | None = None) -> None:
                     val_iou=args.iou,
                     val_batch=args.batch,
                     deep_diagnostics=bool(args.deep_diagnostics),
+                    collect_performance=bool(args.perf),
+                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
                 )
                 results.append(("pt", pt_result.success, pt_result.error))
 
@@ -846,6 +857,8 @@ def main(argv: list[str] | None = None) -> None:
                     val_conf=args.conf,
                     val_iou=args.iou,
                     val_batch=args.batch,
+                    collect_performance=bool(args.perf),
+                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
                 )
                 if not ok:
                     backend = "tensorrt"
@@ -870,6 +883,8 @@ def main(argv: list[str] | None = None) -> None:
                     val_iou=args.iou,
                     val_batch=args.batch,
                     deep_diagnostics=bool(args.deep_diagnostics),
+                    collect_performance=bool(args.perf),
+                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
                 )
                 results.append((fmt, result.success, result.error))
         except Exception as exc:

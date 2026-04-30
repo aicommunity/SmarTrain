@@ -54,7 +54,7 @@ Run artifact layout:
 | `smartrain scan` | Synchronize sources and update the dataset catalog |
 | `smartrain fusion` | Build the final training dataset |
 | `smartrain train` | Train and validate YOLO models |
-| `smartrain inference` | Run inference on folder or dataset split and save JSON report |
+| `smartrain inference` | Run inference on folder or dataset split, save JSON report, dual performance profile, and environment artifact |
 | `smartrain queue` / `smartrain queue-run` | Manage and run the command queue |
 | `smartrain analyze` | Summaries, run comparison, PR curves, and inference benchmarks |
 | `smartrain registry` | Catalog run artifacts and promoted models |
@@ -66,6 +66,7 @@ Current documentation is organized into sections in `docs/`:
 - [Documentation navigation](docs/index.md)
 - [Getting started and core workflows](docs/getting-started/quickstart.md)
 - [CLI guide](docs/cli/overview.md)
+- [Inference JSON/artifact contract](docs/cli/inference.md)
 - [API and format reference](docs/reference/api.md)
 - [Architecture and diagrams](docs/development/architecture.md)
 
@@ -140,6 +141,7 @@ Train and inference with explicit device:
 ```bash
 smartrain train --data my_dataset --model yolo11n.pt --device 0
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
+smartrain inference --weights ./runs/my_run/models/my_run.engine --data-mode folder --source-dir ./images --perf-warmup-images 10
 ```
 
 ## Running long jobs over SSH (tmux)

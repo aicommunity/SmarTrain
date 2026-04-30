@@ -8,6 +8,7 @@ from typing import Any
 from tqdm import tqdm
 
 from smartrain.model_test_backends import (
+    PerfCollector,
     _Pred,
     _infer_with_onnx_session,
     _is_onnx_cuda_oom_error,
@@ -41,6 +42,8 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
     iou_thr = float(request.get("iou_thr", 0.7))
     max_retries = int(request.get("max_retries", 3))
     providers = [str(x) for x in request.get("providers", [])]
+    collect_performance = bool(request.get("collect_performance", False))
+    perf_warmup_images = int(request.get("perf_warmup_images", 5))
 
     available = list(ort.get_available_providers())
     selected = [p for p in providers if p in available] or [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in available]
@@ -57,12 +60,19 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
             session = ort.InferenceSession(weights_path, providers=selected)
             input_hw = _resolve_imgsz_from_onnx(session, int(imgsz) if imgsz is not None else None)
             preds: list[_Pred] = []
+            perf_collector = PerfCollector(warmup_images=perf_warmup_images) if collect_performance else None
             print(
                 f"[INFO] onnx-worker: running {split_name} on {len(image_paths)} images with {weights_path}",
                 file=sys.stderr,
             )
             for image_path in tqdm(image_paths, desc=f"onnx:{split_name}", unit="img", file=sys.stderr):
-                preds.extend(_infer_with_onnx_session(session, image_path, input_hw, conf_thr, iou_thr, names))
+                image_preds, perf_ns = _infer_with_onnx_session(session, image_path, input_hw, conf_thr, iou_thr, names)
+                preds.extend(image_preds)
+                if perf_collector is not None:
+                    perf_collector.record_total_image(int(perf_ns.get("total", 0)))
+                    perf_collector.record_stage("preprocess_ms", int(perf_ns.get("preprocess", 0)))
+                    perf_collector.record_stage("infer_ms", int(perf_ns.get("infer", 0)))
+                    perf_collector.record_stage("decode_nms_ms", int(perf_ns.get("decode_nms", 0)))
             print(
                 f"[INFO] onnx-worker: completed {split_name} ({len(image_paths)}/{len(image_paths)} images).",
                 file=sys.stderr,
@@ -72,6 +82,7 @@ def _run(request: dict[str, Any]) -> dict[str, Any]:
                 "preds": [_pred_to_dict(p) for p in preds],
                 "input_hw": [int(input_hw[0]), int(input_hw[1])],
                 "provider": selected[0] if selected else None,
+                "performance": perf_collector.to_payload() if perf_collector is not None else None,
             }
         except Exception as exc:  # noqa: PERF203
             last_error = exc

@@ -60,6 +60,7 @@ from smartrain.metrics_reader import (
     read_test_metrics_by_format,
     read_metrics_by_format_for_split,
     read_metrics_by_format_for_split_artifacts,
+    read_test_system_profile_by_format_artifacts,
 )
 from smartrain.model_test_service import load_test_artifacts_manifest
 from smartrain.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
@@ -548,6 +549,62 @@ def _write_system_profile_compare_csv(run_dirs: list[str], out_csv: str) -> str 
                 "sys_hostname": row.get("sys_hostname"),
             }
         )
+    if not rows:
+        return None
+    os.makedirs(os.path.dirname(os.path.abspath(out_csv)) or ".", exist_ok=True)
+    pd.DataFrame(rows).to_csv(out_csv, index=False, encoding="utf-8")
+    return out_csv
+
+
+def _write_test_system_profile_compare_csv(run_dirs: list[str], out_csv: str) -> str | None:
+    rows: list[dict[str, Any]] = []
+    for run_dir in run_dirs:
+        try:
+            md = load_metadata(run_dir)
+            flat = flatten_metadata(md, run_dir)
+        except Exception:
+            flat = {}
+        by_fmt = read_test_system_profile_by_format_artifacts(run_dir)
+        run_name = os.path.basename(run_dir.rstrip(os.sep))
+        for fmt, records in by_fmt.items():
+            for rec in records:
+                profile = rec.get("test_system_profile") if isinstance(rec, dict) else None
+                if not isinstance(profile, dict):
+                    continue
+                runtime = profile.get("runtime") if isinstance(profile.get("runtime"), dict) else {}
+                cpu = profile.get("cpu") if isinstance(profile.get("cpu"), dict) else {}
+                ram = profile.get("ram") if isinstance(profile.get("ram"), dict) else {}
+                gpu = profile.get("gpu") if isinstance(profile.get("gpu"), dict) else {}
+                platform = profile.get("platform") if isinstance(profile.get("platform"), dict) else {}
+                devices = gpu.get("devices") if isinstance(gpu.get("devices"), list) else []
+                row = {
+                    "run_dir": run_dir,
+                    "run_name": run_name,
+                    "model": flat.get("model"),
+                    "dataset_name": flat.get("dataset_name"),
+                    "format": fmt,
+                    "target_path": rec.get("target_path"),
+                    "test_backend": runtime.get("backend"),
+                    "test_provider": runtime.get("provider"),
+                    "test_device": runtime.get("device"),
+                    "sys_cpu_model": cpu.get("model"),
+                    "sys_cpu_arch": cpu.get("architecture"),
+                    "sys_cpu_logical_cores": cpu.get("logical_cores"),
+                    "sys_cpu_physical_cores": cpu.get("physical_cores"),
+                    "sys_ram_total_gb": ram.get("total_gb"),
+                    "sys_gpu_cuda_available": gpu.get("cuda_available"),
+                    "sys_gpu_count": len(devices),
+                    "sys_gpu_total_vram_gb": gpu.get("total_vram_gb"),
+                    "sys_gpu_0_name": devices[0].get("name") if len(devices) >= 1 and isinstance(devices[0], dict) else None,
+                    "sys_gpu_0_vram_gb": (
+                        devices[0].get("total_vram_gb") if len(devices) >= 1 and isinstance(devices[0], dict) else None
+                    ),
+                    "sys_os": platform.get("os"),
+                    "sys_os_release": platform.get("os_release"),
+                    "sys_python_version": platform.get("python_version"),
+                    "sys_hostname": platform.get("hostname"),
+                }
+                rows.append(row)
     if not rows:
         return None
     os.makedirs(os.path.dirname(os.path.abspath(out_csv)) or ".", exist_ok=True)
@@ -1637,6 +1694,7 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         "status": item.get("status", entry.get("status")),
                         "error": item.get("error", entry.get("error")),
                         "backend": item.get("backend", entry.get("backend")),
+                        "performance": item.get("performance"),
                     }
                 )
         if not variants:
@@ -1648,6 +1706,7 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     "status": entry.get("status"),
                     "error": entry.get("error"),
                     "backend": entry.get("backend"),
+                    "performance": entry.get("performance"),
                 }
             )
         return variants
@@ -1785,6 +1844,13 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         "Box-P": metric_row.get("Box-P"),
                         "Box-R": metric_row.get("Box-R"),
                     }
+                    perf = var.get("performance") if isinstance(var.get("performance"), dict) else {}
+                    lat_all = perf.get("latency_ms") if isinstance(perf.get("latency_ms"), dict) else {}
+                    all_stats = lat_all.get("all") if isinstance(lat_all.get("all"), dict) else {}
+                    steady_stats = lat_all.get("steady") if isinstance(lat_all.get("steady"), dict) else {}
+                    row["throughput_img_s"] = perf.get("throughput_img_s")
+                    row["latency_p50_ms"] = steady_stats.get("p50", all_stats.get("p50"))
+                    row["latency_p95_ms"] = steady_stats.get("p95", all_stats.get("p95"))
                     eval_rows.append(
                         {
                             "run_dir": run_dir,
@@ -1879,6 +1945,13 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                             "Box-P": metric_row.get("Box-P"),
                             "Box-R": metric_row.get("Box-R"),
                         }
+                        perf = var.get("performance") if isinstance(var.get("performance"), dict) else {}
+                        lat_all = perf.get("latency_ms") if isinstance(perf.get("latency_ms"), dict) else {}
+                        all_stats = lat_all.get("all") if isinstance(lat_all.get("all"), dict) else {}
+                        steady_stats = lat_all.get("steady") if isinstance(lat_all.get("steady"), dict) else {}
+                        row["throughput_img_s"] = perf.get("throughput_img_s")
+                        row["latency_p50_ms"] = steady_stats.get("p50", all_stats.get("p50"))
+                        row["latency_p95_ms"] = steady_stats.get("p95", all_stats.get("p95"))
                         eval_rows.append(
                             {
                                 "run_dir": run_dir,
@@ -1961,6 +2034,12 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         out_csv = os.path.join(out_dir, "format_metrics_compare_test.csv")
         pd.DataFrame(test_rows).to_csv(out_csv, index=False, encoding="utf-8")
         out["test_csv"] = os.path.relpath(out_csv, session_root)
+        perf_test = pd.DataFrame(test_rows)
+        perf_test = perf_test.dropna(subset=["throughput_img_s", "latency_p50_ms", "latency_p95_ms"], how="all")
+        if len(perf_test) > 0:
+            perf_csv = os.path.join(out_dir, "format_performance_compare_test.csv")
+            perf_test.to_csv(perf_csv, index=False, encoding="utf-8")
+            out["perf_test_csv"] = os.path.relpath(perf_csv, session_root)
     if val_rows:
         out_csv = os.path.join(out_dir, "format_metrics_compare_val.csv")
         pd.DataFrame(val_rows).to_csv(out_csv, index=False, encoding="utf-8")
@@ -3013,6 +3092,12 @@ def cmd_all(args: argparse.Namespace) -> None:
     if written_sys_profile:
         artifacts.append(
             {"role": "system_profile_compare_csv", "path": os.path.relpath(sys_profile_csv, session_root)}
+        )
+    test_sys_profile_csv = os.path.join(session_root, "artifacts", "table", "test_system_profile_compare.csv")
+    written_test_sys_profile = _write_test_system_profile_compare_csv([baseline] + others, test_sys_profile_csv)
+    if written_test_sys_profile:
+        artifacts.append(
+            {"role": "test_system_profile_compare_csv", "path": os.path.relpath(test_sys_profile_csv, session_root)}
         )
 
     lb_csv = os.path.join(session_root, "artifacts", "leaderboard", "leaderboard.csv")

@@ -152,6 +152,60 @@ def read_test_metrics_by_format_artifacts(run_dir: str) -> dict[str, list[dict[s
     return out
 
 
+def read_test_performance_by_format_artifacts(run_dir: str) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    manifest = load_test_artifacts_manifest(run_dir)
+    formats = manifest.get("formats")
+    if not isinstance(formats, dict):
+        return out
+    for fmt in SUPPORTED_TEST_FORMATS:
+        entry = formats.get(fmt)
+        if not isinstance(entry, dict):
+            continue
+        records: list[dict[str, Any]] = []
+        artifacts = entry.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if not isinstance(item, dict):
+                    continue
+                perf = item.get("performance")
+                if not isinstance(perf, dict):
+                    continue
+                rel_target = item.get("target_path")
+                target_path = os.path.abspath(os.path.join(run_dir, rel_target)) if isinstance(rel_target, str) and rel_target else ""
+                records.append({"target_path": target_path, "performance": perf})
+        if records:
+            out[fmt] = records
+    return out
+
+
+def read_test_system_profile_by_format_artifacts(run_dir: str) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    manifest = load_test_artifacts_manifest(run_dir)
+    formats = manifest.get("formats")
+    if not isinstance(formats, dict):
+        return out
+    for fmt in SUPPORTED_TEST_FORMATS:
+        entry = formats.get(fmt)
+        if not isinstance(entry, dict):
+            continue
+        records: list[dict[str, Any]] = []
+        artifacts = entry.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if not isinstance(item, dict):
+                    continue
+                profile = item.get("test_system_profile")
+                if not isinstance(profile, dict):
+                    continue
+                rel_target = item.get("target_path")
+                target_path = os.path.abspath(os.path.join(run_dir, rel_target)) if isinstance(rel_target, str) and rel_target else ""
+                records.append({"target_path": target_path, "test_system_profile": profile})
+        if records:
+            out[fmt] = records
+    return out
+
+
 def read_metrics_by_format_for_split(run_dir: str, split: str) -> dict[str, str]:
     split_name = str(split).strip().lower()
     if split_name == "test":

@@ -55,6 +55,114 @@ class BackendRunResult:
 
 
 @dataclass
+class PerfCollector:
+    warmup_images: int = 5
+
+    def __post_init__(self) -> None:
+        self._per_image_ns: list[int] = []
+        self._stages_ns: dict[str, list[int]] = {}
+        self._started_ns = time.perf_counter_ns()
+        self._ended_ns: int | None = None
+
+    def record_total_image(self, dt_ns: int) -> None:
+        self._per_image_ns.append(int(max(0, dt_ns)))
+
+    def record_stage(self, stage: str, dt_ns: int) -> None:
+        key = str(stage).strip()
+        if not key:
+            return
+        self._stages_ns.setdefault(key, []).append(int(max(0, dt_ns)))
+
+    def finish(self) -> None:
+        if self._ended_ns is None:
+            self._ended_ns = time.perf_counter_ns()
+
+    @staticmethod
+    def _stats_ms(values_ns: list[int]) -> dict[str, float | int | None]:
+        if not values_ns:
+            return {
+                "count": 0,
+                "mean": None,
+                "p50": None,
+                "p90": None,
+                "p95": None,
+                "min": None,
+                "max": None,
+                "std": None,
+            }
+        arr = np.asarray(values_ns, dtype=np.float64) / 1_000_000.0
+        return {
+            "count": int(arr.size),
+            "mean": float(arr.mean()),
+            "p50": float(np.percentile(arr, 50)),
+            "p90": float(np.percentile(arr, 90)),
+            "p95": float(np.percentile(arr, 95)),
+            "min": float(arr.min()),
+            "max": float(arr.max()),
+            "std": float(arr.std()),
+        }
+
+    def to_payload(self) -> dict[str, Any]:
+        self.finish()
+        ended = self._ended_ns if self._ended_ns is not None else time.perf_counter_ns()
+        duration_s = max(0.0, float(ended - self._started_ns) / 1_000_000_000.0)
+        all_stats = self._stats_ms(self._per_image_ns)
+        steady_values = self._per_image_ns[int(max(0, self.warmup_images)) :]
+        steady_stats = self._stats_ms(steady_values)
+        throughput = (
+            float(len(steady_values) / duration_s) if duration_s > 0.0 and len(steady_values) > 0 else 0.0
+        )
+        stages: dict[str, dict[str, float | int | None]] = {}
+        for stage, vals in self._stages_ns.items():
+            stages[stage] = self._stats_ms(vals)
+        return {
+            "images_total": int(len(self._per_image_ns)),
+            "warmup_images": int(max(0, self.warmup_images)),
+            "duration_s": duration_s,
+            "throughput_img_s": throughput,
+            "latency_ms": {"all": all_stats, "steady": steady_stats},
+            "breakdown_ms": stages,
+        }
+
+
+def _write_perf_artifact(root_dir: str, format_name: str, target_path: str, performance: dict[str, Any]) -> str:
+    test_dir = format_test_dir(root_dir, format_name)
+    os.makedirs(test_dir, exist_ok=True)
+    stem = Path(target_path).stem if target_path else format_name
+    out_path = os.path.join(test_dir, f"perf_{stem}.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(performance, f, ensure_ascii=False, indent=2)
+    return out_path
+
+
+def _collect_test_system_profile(
+    *,
+    root_dir: str,
+    format_name: str,
+    backend_name: str,
+    runtime_provider: str | None = None,
+    runtime_device: str | None = None,
+) -> dict[str, Any]:
+    try:
+        from smartrain.model_training_module import collect_system_profile
+
+        payload = collect_system_profile(root_dir)
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload["runtime"] = {
+        "stage": "test",
+        "format": str(format_name),
+        "backend": str(backend_name),
+        "provider": str(runtime_provider) if runtime_provider else None,
+        "device": str(runtime_device) if runtime_device else None,
+        "captured_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    return payload
+
+
+@dataclass
 class _Pred:
     image_path: str
     cls_id: int
@@ -1147,12 +1255,25 @@ def _write_deep_diagnostics_artifacts(
     return params_payload
 
 
-def _infer_with_onnx_session(session: Any, image_path: str, input_hw: tuple[int, int], conf_thr: float, iou_thr: float, names: list[str]) -> list[_Pred]:
+def _infer_with_onnx_session(
+    session: Any,
+    image_path: str,
+    input_hw: tuple[int, int],
+    conf_thr: float,
+    iou_thr: float,
+    names: list[str],
+) -> tuple[list[_Pred], dict[str, int]]:
+    t0 = time.perf_counter_ns()
     input_name = str(session.get_inputs()[0].name)
+    t_pre0 = time.perf_counter_ns()
     tensor, orig_hw, gain, pad = _preprocess_image(image_path, input_hw)
+    t_pre1 = time.perf_counter_ns()
+    t_inf0 = time.perf_counter_ns()
     outputs = session.run(None, {input_name: tensor})
+    t_inf1 = time.perf_counter_ns()
     raw = _select_output_tensor([np.asarray(x) for x in outputs])
-    return _decode_onnx_predictions(
+    t_dec0 = time.perf_counter_ns()
+    preds = _decode_onnx_predictions(
         raw,
         image_path=image_path,
         names=names,
@@ -1162,6 +1283,13 @@ def _infer_with_onnx_session(session: Any, image_path: str, input_hw: tuple[int,
         gain=gain,
         pad=pad,
     )
+    t1 = time.perf_counter_ns()
+    return preds, {
+        "total": int(t1 - t0),
+        "preprocess": int(t_pre1 - t_pre0),
+        "infer": int(t_inf1 - t_inf0),
+        "decode_nms": int(t1 - t_dec0),
+    }
 
 
 def _is_onnx_cuda_oom_error(exc: Exception) -> bool:
@@ -1240,6 +1368,7 @@ def _run_onnx_split_with_retry(
     names: list[str],
     format_name: str,
     weights_path: str,
+    perf_collector: PerfCollector | None = None,
 ) -> list[_Pred]:
     last_error: Exception | None = None
     for attempt in range(1, 4):
@@ -1247,7 +1376,17 @@ def _run_onnx_split_with_retry(
         try:
             print(f"[INFO] {format_name}: running native {split_name} on {len(image_paths)} images with {weights_path}")
             for image_path in tqdm(image_paths, desc=f"{format_name}:{split_name}", unit="img", file=sys.stdout):
-                preds.extend(_infer_with_onnx_session(session, image_path, input_hw, conf_thr, iou_thr, names))
+                infer_out = _infer_with_onnx_session(session, image_path, input_hw, conf_thr, iou_thr, names)
+                if isinstance(infer_out, tuple) and len(infer_out) == 2:
+                    image_preds, perf_ns = infer_out
+                else:
+                    image_preds, perf_ns = infer_out, {}
+                preds.extend(image_preds)
+                if perf_collector is not None:
+                    perf_collector.record_total_image(int(perf_ns.get("total", 0)))
+                    perf_collector.record_stage("preprocess_ms", int(perf_ns.get("preprocess", 0)))
+                    perf_collector.record_stage("infer_ms", int(perf_ns.get("infer", 0)))
+                    perf_collector.record_stage("decode_nms_ms", int(perf_ns.get("decode_nms", 0)))
             print(f"[INFO] {format_name}: native {split_name} completed ({len(image_paths)}/{len(image_paths)} images).")
             return preds
         except Exception as exc:
@@ -1278,7 +1417,9 @@ def _run_onnx_split_in_subprocess(
     iou_thr: float,
     providers: list[str],
     timeout_s: int = 1800,
-) -> tuple[list[_Pred], tuple[int, int]]:
+    collect_performance: bool = False,
+    perf_warmup_images: int = 5,
+) -> tuple[list[_Pred], tuple[int, int], dict[str, Any] | None]:
     request = {
         "weights_path": weights_path,
         "dataset_yaml_path": dataset_yaml_path,
@@ -1289,6 +1430,8 @@ def _run_onnx_split_in_subprocess(
         "iou_thr": iou_thr,
         "providers": providers,
         "max_retries": 3,
+        "collect_performance": bool(collect_performance),
+        "perf_warmup_images": int(max(0, perf_warmup_images)),
     }
     cmd = [sys.executable, "-m", "smartrain.model_test_onnx_worker"]
     try:
@@ -1339,14 +1482,18 @@ def _run_onnx_split_in_subprocess(
                 )
             )
     hw = payload.get("input_hw") if isinstance(payload, dict) else None
+    perf_payload = payload.get("performance") if isinstance(payload.get("performance"), dict) else None
     if isinstance(hw, list) and len(hw) == 2:
-        return preds, (int(hw[0]), int(hw[1]))
+        return preds, (int(hw[0]), int(hw[1])), perf_payload
     if isinstance(imgsz, int):
-        return preds, (int(imgsz), int(imgsz))
-    return preds, (640, 640)
+        return preds, (int(imgsz), int(imgsz)), perf_payload
+    return preds, (640, 640), perf_payload
 
 
-def _infer_with_pt_model(model: Any, image_path: str, input_hw: tuple[int, int], conf_thr: float, iou_thr: float) -> list[_Pred]:
+def _infer_with_pt_model(
+    model: Any, image_path: str, input_hw: tuple[int, int], conf_thr: float, iou_thr: float
+) -> tuple[list[_Pred], dict[str, int]]:
+    t0 = time.perf_counter_ns()
     out: list[_Pred] = []
     try:
         results = model.predict(
@@ -1357,11 +1504,11 @@ def _infer_with_pt_model(model: Any, image_path: str, input_hw: tuple[int, int],
             verbose=False,
         )
         if not results:
-            return out
+            return out, {"total": int(time.perf_counter_ns() - t0), "infer": int(time.perf_counter_ns() - t0)}
         r0 = results[0]
         boxes = getattr(r0, "boxes", None)
         if boxes is None:
-            return out
+            return out, {"total": int(time.perf_counter_ns() - t0), "infer": int(time.perf_counter_ns() - t0)}
         xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, "cpu") else np.asarray(boxes.xyxy)
         confs = boxes.conf.cpu().numpy() if hasattr(boxes.conf, "cpu") else np.asarray(boxes.conf)
         clss = boxes.cls.cpu().numpy() if hasattr(boxes.cls, "cpu") else np.asarray(boxes.cls)
@@ -1378,8 +1525,10 @@ def _infer_with_pt_model(model: Any, image_path: str, input_hw: tuple[int, int],
                 )
             )
     except Exception:
-        return out
-    return out
+        return out, {"total": int(time.perf_counter_ns() - t0), "infer": int(time.perf_counter_ns() - t0)}
+    t1 = time.perf_counter_ns()
+    dt = int(t1 - t0)
+    return out, {"total": dt, "infer": dt}
 
 
 def _trt_volume(shape: tuple[int, ...]) -> int:
@@ -1403,7 +1552,8 @@ def _infer_with_trt_engine(
     conf_thr: float,
     iou_thr: float,
     names: list[str],
-) -> list[_Pred]:
+) -> tuple[list[_Pred], dict[str, int]]:
+    t0 = time.perf_counter_ns()
     import tensorrt as trt  # type: ignore
     try:
         cudart, _import_path = trt_checks.resolve_cuda_runtime_module()
@@ -1442,7 +1592,9 @@ def _infer_with_trt_engine(
     if context is None:
         raise RuntimeError("Failed to create TensorRT execution context")
 
+    t_pre0 = time.perf_counter_ns()
     tensor, orig_hw, gain, pad = _preprocess_image(image_path, input_hw)
+    t_pre1 = time.perf_counter_ns()
     input_array = np.ascontiguousarray(tensor.astype(np.float32))
     device_allocations: list[int] = []
     host_outputs: list[np.ndarray] = []
@@ -1484,6 +1636,7 @@ def _infer_with_trt_engine(
                     context.set_tensor_address(tensor_name, int(ptr))
                     host_outputs.append(host)
                     output_ptrs.append(int(ptr))
+            t_inf0 = time.perf_counter_ns()
             if not context.execute_async_v3(0):
                 raise RuntimeError("TensorRT execute_async_v3 returned False")
             for host, ptr in zip(host_outputs, output_ptrs):
@@ -1496,6 +1649,7 @@ def _infer_with_trt_engine(
                     ),
                     "cudaMemcpy(D2H)",
                 )
+            t_inf1 = time.perf_counter_ns()
         else:
             # TensorRT 8/9 legacy bindings API.
             bindings: list[int] = [0] * int(getattr(engine, "num_bindings"))
@@ -1530,6 +1684,7 @@ def _infer_with_trt_engine(
                     bindings[binding_idx] = int(ptr)
                     host_outputs.append(host)
                     output_ptrs.append(int(ptr))
+            t_inf0 = time.perf_counter_ns()
             if not context.execute_v2(bindings):
                 raise RuntimeError("TensorRT execute_v2 returned False")
             for host, ptr in zip(host_outputs, output_ptrs):
@@ -1542,6 +1697,7 @@ def _infer_with_trt_engine(
                     ),
                     "cudaMemcpy(D2H)",
                 )
+            t_inf1 = time.perf_counter_ns()
         raw = _select_output_tensor([np.asarray(x) for x in host_outputs])
     finally:
         for ptr in device_allocations:
@@ -1549,7 +1705,8 @@ def _infer_with_trt_engine(
                 cudart.cudaFree(int(ptr))
             except Exception:
                 pass
-    return _decode_onnx_predictions(
+    t_dec0 = time.perf_counter_ns()
+    preds = _decode_onnx_predictions(
         raw,
         image_path=image_path,
         names=names,
@@ -1559,6 +1716,13 @@ def _infer_with_trt_engine(
         gain=gain,
         pad=pad,
     )
+    t1 = time.perf_counter_ns()
+    return preds, {
+        "total": int(t1 - t0),
+        "preprocess": int(t_pre1 - t_pre0),
+        "infer": int(t_inf1 - t_inf0),
+        "decode_nms": int(t1 - t_dec0),
+    }
 
 
 def _ensure_confidence_recommendations_for_explicit_artifact(
@@ -1644,6 +1808,8 @@ def run_ultralytics_backend(
     conf_rec_beta_precision: float = 0.5,
     conf_rec_fallback: float = 0.25,
     deep_diagnostics: bool = False,
+    collect_performance: bool = False,
+    perf_warmup_images: int = 5,
 ) -> BackendRunResult:
     test_start_time = datetime.now()
     model = YOLO(weights_path)
@@ -1804,12 +1970,34 @@ def run_ultralytics_backend(
                     nms_profile="ultralytics_validator_multilabel",
                 )
         test_end_time = datetime.now()
+        test_system_profile = _collect_test_system_profile(
+            root_dir=root_dir,
+            format_name=format_name,
+            backend_name="ultralytics",
+            runtime_provider="ultralytics",
+            runtime_device=str(val_kwargs.get("device", "")) or None,
+        )
+        perf_payload: dict[str, Any] | None = None
+        if collect_performance:
+            duration_s = max(0.0, (test_end_time - test_start_time).total_seconds())
+            perf_payload = {
+                "images_total": None,
+                "warmup_images": int(max(0, perf_warmup_images)),
+                "duration_s": duration_s,
+                "throughput_img_s": 0.0,
+                "latency_ms": {"all": {}, "steady": {}},
+                "breakdown_ms": {"infer_total_only_ms": {}},
+                "infer_total_only": True,
+            }
+            _write_perf_artifact(root_dir, format_name, weights_path, perf_payload)
         persist_target_test_artifacts_state(
             root_dir,
             format_name=format_name,
             target_path=weights_path,
             dataset_yaml=dataset_yaml_path,
             backend="ultralytics",
+            performance=perf_payload,
+            test_system_profile=test_system_profile,
             status="ok",
         )
         return BackendRunResult(
@@ -1826,6 +2014,8 @@ def run_ultralytics_backend(
                 "inference_source": "ultralytics_model_val",
                 "gt_source": "ultralytics_validator",
                 "nms_profile": "ultralytics_validator_multilabel",
+                "performance": perf_payload,
+                "test_system_profile": test_system_profile,
             },
             target_path=weights_path,
         )
@@ -1836,6 +2026,12 @@ def run_ultralytics_backend(
             target_path=weights_path,
             dataset_yaml=dataset_yaml_path,
             backend="ultralytics",
+            test_system_profile=_collect_test_system_profile(
+                root_dir=root_dir,
+                format_name=format_name,
+                backend_name="ultralytics",
+                runtime_provider="ultralytics",
+            ),
             status="failed",
             error=str(exc),
         )
@@ -1870,6 +2066,8 @@ def run_native_format_backend(
     val_iou: float | None = None,
     val_batch: int | None = None,
     deep_diagnostics: bool = False,
+    collect_performance: bool = False,
+    perf_warmup_images: int = 5,
 ) -> BackendRunResult:
     backend_name = "onnxruntime" if format_name == "onnx" else ("unified_pt" if format_name == "pt_uni" else "tensorrt")
     try:
@@ -1885,6 +2083,8 @@ def run_native_format_backend(
                 val_iou=float(eval_params["iou"]),
                 val_batch=val_batch,
                 deep_diagnostics=deep_diagnostics,
+                collect_performance=collect_performance,
+                perf_warmup_images=perf_warmup_images,
             )
             if result.success:
                 test_dir = format_test_dir(root_dir, "pt_uni")
@@ -1909,6 +2109,12 @@ def run_native_format_backend(
                     target_path=weights_path,
                     dataset_yaml=dataset_yaml_path,
                     backend=backend_name,
+                    performance=result.inference.get("performance") if isinstance(result.inference, dict) else None,
+                    test_system_profile=(
+                        result.inference.get("test_system_profile")
+                        if isinstance(result.inference, dict)
+                        else None
+                    ),
                     status="ok",
                 )
             else:
@@ -1918,6 +2124,12 @@ def run_native_format_backend(
                     target_path=weights_path,
                     dataset_yaml=dataset_yaml_path,
                     backend=backend_name,
+                    test_system_profile=_collect_test_system_profile(
+                        root_dir=root_dir,
+                        format_name="pt_uni",
+                        backend_name=backend_name,
+                        runtime_provider="ultralytics",
+                    ),
                     status="failed",
                     error=result.error,
                 )
@@ -1939,8 +2151,10 @@ def run_native_format_backend(
             conf_thr = float(eval_params["conf"])
             iou_thr = float(eval_params["iou"])
             use_worker = str(os.getenv("SMARTTRAIN_ONNX_USE_SUBPROCESS", "1")).strip().lower() not in {"0", "false", "no"}
+            perf_collector = PerfCollector(warmup_images=perf_warmup_images) if collect_performance else None
+            perf_payload: dict[str, Any] | None = None
             if use_worker:
-                preds, input_hw = _run_onnx_split_in_subprocess(
+                preds, input_hw, perf_payload = _run_onnx_split_in_subprocess(
                     split_name="test",
                     image_paths=image_paths,
                     weights_path=weights_path,
@@ -1949,6 +2163,8 @@ def run_native_format_backend(
                     conf_thr=conf_thr,
                     iou_thr=iou_thr,
                     providers=providers,
+                    collect_performance=collect_performance,
+                    perf_warmup_images=perf_warmup_images,
                 )
             else:
                 import onnxruntime as ort  # type: ignore
@@ -1974,9 +2190,14 @@ def run_native_format_backend(
                     names=names,
                     format_name=format_name,
                     weights_path=weights_path,
+                    perf_collector=perf_collector,
                 )
+                if perf_collector is not None:
+                    perf_payload = perf_collector.to_payload()
             if not isinstance(input_hw, tuple):
                 input_hw = (int(eval_params["imgsz"]), int(eval_params["imgsz"]))
+            if perf_payload:
+                _write_perf_artifact(root_dir, format_name, weights_path, perf_payload)
             inference = _write_native_eval_artifacts(
                 root_dir=root_dir,
                 format_name=format_name,
@@ -2018,7 +2239,7 @@ def run_native_format_backend(
             try:
                 gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
                 if use_worker:
-                    preds_val, _input_hw_val = _run_onnx_split_in_subprocess(
+                    preds_val, _input_hw_val, _perf_val = _run_onnx_split_in_subprocess(
                         split_name="val",
                         image_paths=image_paths_val,
                         weights_path=weights_path,
@@ -2027,6 +2248,7 @@ def run_native_format_backend(
                         conf_thr=conf_thr,
                         iou_thr=iou_thr,
                         providers=providers,
+                        collect_performance=False,
                     )
                 else:
                     preds_val = _run_onnx_split_with_retry(
@@ -2086,8 +2308,23 @@ def run_native_format_backend(
                 target_path=weights_path,
                 dataset_yaml=dataset_yaml_path,
                 backend=backend_name,
+                performance=perf_payload,
+                test_system_profile=_collect_test_system_profile(
+                    root_dir=root_dir,
+                    format_name=format_name,
+                    backend_name=backend_name,
+                    runtime_provider=("onnxruntime-worker" if use_worker else "onnxruntime-session"),
+                ),
                 status="ok",
             )
+            if isinstance(inference, dict):
+                inference["performance"] = perf_payload
+                inference["test_system_profile"] = _collect_test_system_profile(
+                    root_dir=root_dir,
+                    format_name=format_name,
+                    backend_name=backend_name,
+                    runtime_provider=("onnxruntime-worker" if use_worker else "onnxruntime-session"),
+                )
             return BackendRunResult(
                 format=format_name,
                 backend=backend_name,
@@ -2104,12 +2341,26 @@ def run_native_format_backend(
             conf_thr = float(eval_params["conf"])
             iou_thr = float(eval_params["iou"])
             input_hw = (int(eval_params["imgsz"]), int(eval_params["imgsz"]))
+            perf_collector = PerfCollector(warmup_images=perf_warmup_images) if collect_performance else None
             preds: list[_Pred] = []
             total_images = len(image_paths)
             print(f"[INFO] {format_name}: running native test on {total_images} images with {weights_path}")
             for image_path in tqdm(image_paths, desc=f"{format_name}:test", unit="img", file=sys.stdout):
-                preds.extend(_infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names))
+                infer_out = _infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names)
+                if isinstance(infer_out, tuple) and len(infer_out) == 2:
+                    image_preds, perf_ns = infer_out
+                else:
+                    image_preds, perf_ns = infer_out, {}
+                preds.extend(image_preds)
+                if perf_collector is not None:
+                    perf_collector.record_total_image(int(perf_ns.get("total", 0)))
+                    perf_collector.record_stage("preprocess_ms", int(perf_ns.get("preprocess", 0)))
+                    perf_collector.record_stage("infer_ms", int(perf_ns.get("infer", 0)))
+                    perf_collector.record_stage("decode_nms_ms", int(perf_ns.get("decode_nms", 0)))
             print(f"[INFO] {format_name}: native test completed ({total_images}/{total_images} images).")
+            perf_payload = perf_collector.to_payload() if perf_collector is not None else None
+            if perf_payload:
+                _write_perf_artifact(root_dir, format_name, weights_path, perf_payload)
             inference = _write_native_eval_artifacts(
                 root_dir=root_dir,
                 format_name=format_name,
@@ -2133,7 +2384,11 @@ def run_native_format_backend(
                 preds_val: list[_Pred] = []
                 print(f"[INFO] {format_name}: running native val on {len(image_paths_val)} images with {weights_path}")
                 for image_path in tqdm(image_paths_val, desc=f"{format_name}:val", unit="img", file=sys.stdout):
-                    preds_val.extend(_infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names))
+                    infer_out = _infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names)
+                    if isinstance(infer_out, tuple) and len(infer_out) == 2:
+                        preds_val.extend(infer_out[0])
+                    else:
+                        preds_val.extend(infer_out)
                 print(f"[INFO] {format_name}: native val completed ({len(image_paths_val)}/{len(image_paths_val)} images).")
                 _write_native_eval_artifacts(
                     root_dir=root_dir,
@@ -2161,8 +2416,23 @@ def run_native_format_backend(
                 target_path=weights_path,
                 dataset_yaml=dataset_yaml_path,
                 backend=backend_name,
+                performance=perf_payload,
+                test_system_profile=_collect_test_system_profile(
+                    root_dir=root_dir,
+                    format_name=format_name,
+                    backend_name=backend_name,
+                    runtime_provider="tensorrt",
+                ),
                 status="ok",
             )
+            if isinstance(inference, dict):
+                inference["performance"] = perf_payload
+                inference["test_system_profile"] = _collect_test_system_profile(
+                    root_dir=root_dir,
+                    format_name=format_name,
+                    backend_name=backend_name,
+                    runtime_provider="tensorrt",
+                )
             return BackendRunResult(
                 format=format_name,
                 backend=backend_name,
@@ -2180,6 +2450,11 @@ def run_native_format_backend(
             target_path=weights_path,
             dataset_yaml=dataset_yaml_path,
             backend=backend_name,
+            test_system_profile=_collect_test_system_profile(
+                root_dir=root_dir,
+                format_name=format_name,
+                backend_name=backend_name,
+            ),
             status="unavailable",
             error=str(exc),
         )

@@ -46,6 +46,8 @@ class TestFormatArtifact:
     status: str
     missing: list[str]
     error: str | None = None
+    performance: dict[str, Any] | None = None
+    test_system_profile: dict[str, Any] | None = None
     updated_at: str | None = None
 
 
@@ -243,6 +245,8 @@ def update_test_artifacts_manifest(
     target_path: str | None,
     dataset_yaml: str | None = None,
     backend: str | None,
+    performance: dict[str, Any] | None = None,
+    test_system_profile: dict[str, Any] | None = None,
     status: str | None = None,
     error: str | None = None,
 ) -> dict[str, Any]:
@@ -264,6 +268,8 @@ def update_test_artifacts_manifest(
         status=status or ("ok" if snapshot.complete else "incomplete"),
         missing=list(snapshot.missing),
         error=error,
+        performance=performance if isinstance(performance, dict) else None,
+        test_system_profile=test_system_profile if isinstance(test_system_profile, dict) else None,
         updated_at=datetime.now().isoformat(timespec="seconds"),
     )
     payload = load_test_artifacts_manifest(root_dir)
@@ -391,6 +397,8 @@ def persist_target_test_artifacts_state(
     target_path: str | None,
     dataset_yaml: str | None = None,
     backend: str | None,
+    performance: dict[str, Any] | None = None,
+    test_system_profile: dict[str, Any] | None = None,
     status: str | None = None,
     error: str | None = None,
 ) -> None:
@@ -400,6 +408,8 @@ def persist_target_test_artifacts_state(
         target_path=target_path,
         dataset_yaml=dataset_yaml,
         backend=backend,
+        performance=performance,
+        test_system_profile=test_system_profile,
         status=status,
         error=error,
     )

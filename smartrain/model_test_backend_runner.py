@@ -18,6 +18,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--conf", type=float, default=None)
     p.add_argument("--iou", type=float, default=None)
     p.add_argument("--batch", type=int, default=None)
+    p.add_argument("--perf", action="store_true")
+    p.add_argument("--perf-warmup-images", type=int, default=5)
     return p
 
 
@@ -32,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
         val_conf=args.conf,
         val_iou=args.iou,
         val_batch=args.batch,
+        collect_performance=bool(args.perf),
+        perf_warmup_images=int(max(0, args.perf_warmup_images)),
     )
     payload = {
         "success": bool(result.success),

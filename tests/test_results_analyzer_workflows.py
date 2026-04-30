@@ -459,6 +459,57 @@ def test_analyze_all_creates_session_manifest_and_report(
     assert set(calls) >= {"benchmark", "plot", "pr"}
 
 
+def test_write_test_system_profile_compare_csv(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds_env" / "run_env"
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps(
+            {
+                "training_info": {"model": "yolo11n", "dataset": {"name": "ds_env"}},
+                "status": {"training": {"success": True}},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "onnx": {
+                        "artifacts": [
+                            {
+                                "target_path": "models/a.onnx",
+                                "test_system_profile": {
+                                    "cpu": {"model": "CPU-X", "logical_cores": 16},
+                                    "ram": {"total_gb": 64.0},
+                                    "gpu": {
+                                        "cuda_available": True,
+                                        "total_vram_gb": 24.0,
+                                        "devices": [{"name": "GPU-0", "total_vram_gb": 24.0}],
+                                    },
+                                    "platform": {"os": "Linux", "os_release": "6.8", "python_version": "3.10"},
+                                    "runtime": {"stage": "test", "format": "onnx", "backend": "onnxruntime"},
+                                },
+                            }
+                        ]
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    out_csv = tmp_path / "test_system_profile_compare.csv"
+    written = results_analyzer._write_test_system_profile_compare_csv([str(run_dir)], str(out_csv))
+    assert written is not None
+    df = pd.read_csv(out_csv)
+    assert len(df) == 1
+    assert str(df.iloc[0]["format"]) == "onnx"
+    assert str(df.iloc[0]["test_backend"]) == "onnxruntime"
+
+
 def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -810,6 +861,37 @@ def test_analyze_report_replaces_nan_with_dash_in_tables(tmp_path: Path) -> None
     assert " nan " not in en_md
 
 
+def test_analyze_report_format_section_contains_perf_subsection(tmp_path: Path) -> None:
+    from smartrain.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [{"alias": "ONNX1", "run_name": "run_a", "split": "test", "format": "onnx", "mAP50-95": 0.5}]
+    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare_test.csv", index=False)
+    pd.DataFrame(
+        [{"alias": "ONNX1", "run_name": "run_a", "split": "test", "format": "onnx", "throughput_img_s": 20.0, "latency_p50_ms": 12.0, "latency_p95_ms": 20.0}]
+    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_performance_compare_test.csv", index=False)
+    manifest = {
+        "session_name": "s_perf",
+        "profile": "quality",
+        "baseline": "run_a",
+        "others": [],
+        "tables": ["artifacts/format_compare/format_metrics_compare_test.csv"],
+        "images": [],
+        "artifacts": [],
+        "format_comparison": {
+            "test_csv": "artifacts/format_compare/format_metrics_compare_test.csv",
+            "perf_test_csv": "artifacts/format_compare/format_performance_compare_test.csv",
+        },
+        "abbreviations": {},
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    en_md = (tmp_path / "en" / "index.md").read_text(encoding="utf-8")
+    assert "### 4.1 Quality metrics comparison" in en_md
+    assert "### 4.2 Performance comparison" in en_md
+    assert "Format performance comparison (test)" in en_md
+
+
 def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> None:
     from smartrain.analyze_report import write_analysis_report
 
@@ -841,6 +923,38 @@ def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> Non
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
     assert "Системный профиль не показан" in ru_md
     assert "| run_name | model | dataset_name |" not in ru_md
+
+
+def test_analyze_report_renders_test_system_profile_table(tmp_path: Path) -> None:
+    from smartrain.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "run_name": "run_a",
+                "model": "yolo",
+                "dataset_name": "ds_a",
+                "format": "onnx",
+                "test_backend": "onnxruntime",
+                "test_provider": "onnxruntime-session",
+                "sys_cpu_model": "CPU-X",
+                "sys_ram_total_gb": 64.0,
+            }
+        ]
+    ).to_csv(tmp_path / "artifacts" / "table" / "test_system_profile_compare.csv", index=False)
+    manifest = {
+        "session_name": "s2_test_env",
+        "profile": "quality",
+        "baseline": "run_a",
+        "others": [],
+        "tables": ["artifacts/table/test_system_profile_compare.csv"],
+        "images": [],
+        "artifacts": [],
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "Сравнение окружения тестирования (железо)" in ru_md
 
 
 def test_analyze_report_per_class_headers_and_human_readable_ultralytics_captions(tmp_path: Path) -> None:

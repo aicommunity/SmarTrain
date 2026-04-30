@@ -4,7 +4,14 @@ import json
 from pathlib import Path
 
 from smartrain.confidence_recommendation import write_not_available_recommendations
-from smartrain.metrics_reader import flatten_metadata, latest_test_metrics_path, read_test_metrics_by_format, read_test_metrics_row
+from smartrain.metrics_reader import (
+    flatten_metadata,
+    latest_test_metrics_path,
+    read_test_metrics_by_format,
+    read_test_metrics_row,
+    read_test_performance_by_format_artifacts,
+    read_test_system_profile_by_format_artifacts,
+)
 
 
 def test_flatten_metadata_falls_back_to_args_yaml_model(tmp_path: Path) -> None:
@@ -90,3 +97,45 @@ def test_read_test_metrics_row_pt_uses_manifest_metrics_csv_when_default_missing
     )
     row = read_test_metrics_row(str(run_dir), "pt")
     assert float(row["mAP50-95"]) == 0.55
+
+
+def test_read_test_performance_by_format_artifacts(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_perf" / "run_perf"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "formats": {
+            "onnx": {
+                "artifacts": [
+                    {
+                        "target_path": "models/a.onnx",
+                        "performance": {"throughput_img_s": 12.3, "latency_ms": {"steady": {"p50": 9.9}}},
+                    }
+                ]
+            }
+        }
+    }
+    (run_dir / "test_artifacts_manifest.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    out = read_test_performance_by_format_artifacts(str(run_dir))
+    assert "onnx" in out
+    assert out["onnx"][0]["performance"]["throughput_img_s"] == 12.3
+
+
+def test_read_test_system_profile_by_format_artifacts(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_env" / "run_env"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "formats": {
+            "trt": {
+                "artifacts": [
+                    {
+                        "target_path": "models/a.trt",
+                        "test_system_profile": {"runtime": {"stage": "test", "format": "trt"}},
+                    }
+                ]
+            }
+        }
+    }
+    (run_dir / "test_artifacts_manifest.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    out = read_test_system_profile_by_format_artifacts(str(run_dir))
+    assert "trt" in out
+    assert out["trt"][0]["test_system_profile"]["runtime"]["format"] == "trt"
