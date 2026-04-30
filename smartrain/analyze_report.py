@@ -53,18 +53,24 @@ def _column_display_name(name: str, is_ru: bool) -> str:
         "delta_mAP50": "Дельта mAP50" if is_ru else "Delta mAP50",
         "delta_Box-P": "Дельта Box-P" if is_ru else "Delta Box-P",
         "delta_Box-R": "Дельта Box-R" if is_ru else "Delta Box-R",
+        "test_mAP50-95": "test mAP50-95" if is_ru else "test mAP50-95",
+        "test_mAP50": "test mAP50" if is_ru else "test mAP50",
+        "test_Box-F1": "test Box-F1" if is_ru else "test Box-F1",
+        "test_Box-P": "test Box-P" if is_ru else "test Box-P",
+        "test_Box-R": "test Box-R" if is_ru else "test Box-R",
         "backend_status": "Бэкенд" if is_ru else "Backend",
         "eval_imgsz": "Размер изображения" if is_ru else "Image size",
         "eval_conf": "Порог confidence" if is_ru else "Confidence threshold",
         "eval_iou": "Порог IoU" if is_ru else "IoU threshold",
         "recommended_conf": "Рекомендованный confidence" if is_ru else "Recommended confidence",
         "target_metric": "Целевая метрика" if is_ru else "Target metric",
-        "precision": "Precision",
-        "recall": "Recall",
+        "precision": "Точность" if is_ru else "Precision",
+        "recall": "Полнота" if is_ru else "Recall",
         "f1": "F1",
         "status": "Статус" if is_ru else "Status",
         "performance_status": "Статус performance" if is_ru else "Performance status",
         "class_name": "Класс" if is_ru else "Class",
+        "class_id": "ID класса" if is_ru else "Class ID",
         "best_run": "Лучший запуск" if is_ru else "Best run",
         "worst_run": "Худший запуск" if is_ru else "Worst run",
         "best_ap": "Лучший AP" if is_ru else "Best AP",
@@ -82,8 +88,8 @@ def _column_display_name(name: str, is_ru: bool) -> str:
         "avg_inference_fps": "FPS (инференс)" if is_ru else "FPS (inference)",
         "avg_total_fps": "FPS (полный)" if is_ru else "FPS (total)",
         "throughput_img_s": "Пропускная способность, img/s" if is_ru else "Throughput, img/s",
-        "latency_p50_ms": "Latency p50, ms",
-        "latency_p95_ms": "Latency p95, ms",
+        "latency_p50_ms": "Задержка p50, мс" if is_ru else "Latency p50, ms",
+        "latency_p95_ms": "Задержка p95, мс" if is_ru else "Latency p95, ms",
     }
     return common.get(name, name)
 
@@ -454,6 +460,10 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                             cp = col_style.find("style:table-column-properties", ns)
                             if cp is None:
                                 cp = ET.SubElement(col_style, f"{{{ns['style']}}}table-column-properties")
+                            # Pandoc often keeps rel-column-width on every column with equal star values.
+                            # LibreOffice prioritizes these relative widths and visually equalizes columns.
+                            # Remove relative sizing so explicit absolute column-width is respected.
+                            cp.attrib.pop(f"{{{ns['style']}}}rel-column-width", None)
                             cp.set(f"{{{ns['style']}}}column-width", widths[min(i, len(widths) - 1)])
                     changed = True
                 # Force blank line before table captions and after figure captions.
