@@ -48,6 +48,14 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
   - optional `report-ru.pdf|odt` and `report-en.pdf|odt`
   - `artifacts/compare|metrics|inference|pr|leaderboard|table|speed_quality`
   - `artifacts/table/system_profile_compare.csv` (hardware profile comparison by run)
+- Report structure updates:
+  - format alias legend and metric calculation settings are placed in section 1 (context/artifacts)
+  - speed analysis is embedded into `4.2` as a nested subsection
+  - leaderboard is rendered in the conclusion section
+- Table rendering updates:
+  - integer-valued fields are rendered as integers (without trailing `.0000`)
+  - table headers are normalized to consistent human-readable names (RU/EN)
+  - ODT post-processing enforces visible table borders, bold centered header row, and tuned column widths
 - Analyze reports are narrative-first (by comparison meaning), including:
   - executive summary, context, quality, speed, per-class analysis, conclusion
   - captions for tables/figures and optional abbreviations glossary for wide tables

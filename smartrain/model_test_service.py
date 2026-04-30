@@ -391,6 +391,7 @@ def sync_test_artifacts_manifest(
     backend_by_format = backend_by_format or {}
     for fmt in SUPPORTED_TEST_FORMATS:
         status = get_test_artifacts_status(root_dir, fmt)
+        existing_entry = formats.get(fmt) if isinstance(formats.get(fmt), dict) else {}
         if not any(
             (
                 status.metrics_exists,
@@ -401,7 +402,7 @@ def sync_test_artifacts_manifest(
             )
         ):
             continue
-        formats[fmt] = asdict(
+        synced = asdict(
             TestFormatArtifact(
                 format=fmt,
                 target_path=target_by_format.get(fmt),
@@ -420,6 +421,26 @@ def sync_test_artifacts_manifest(
                 updated_at=datetime.now().isoformat(timespec="seconds"),
             )
         )
+        # Keep rich telemetry fields already collected by test commands.
+        for keep_key in (
+            "artifacts",
+            "error",
+            "split_status",
+            "native_debug",
+            "performance",
+            "test_system_profile",
+            "target_metadata_json",
+        ):
+            if existing_entry.get(keep_key) is not None:
+                synced[keep_key] = existing_entry.get(keep_key)
+        # Prefer existing non-empty values if sync call doesn't provide explicit values.
+        if not synced.get("target_path") and existing_entry.get("target_path") is not None:
+            synced["target_path"] = existing_entry.get("target_path")
+        if not synced.get("backend") and existing_entry.get("backend") is not None:
+            synced["backend"] = existing_entry.get("backend")
+        if not synced.get("dataset_yaml") and existing_entry.get("dataset_yaml") is not None:
+            synced["dataset_yaml"] = existing_entry.get("dataset_yaml")
+        formats[fmt] = synced
     payload["updated_at"] = datetime.now().isoformat(timespec="seconds")
     _write_json_atomic(artifacts_manifest_path_for_write(root_dir), payload)
     return payload

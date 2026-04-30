@@ -1938,6 +1938,29 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
     def _build_format_rows(
         split_name: str,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        def _perf_fallback_for_variant(run_dir: str, fmt: str, target_path: Any) -> dict[str, Any]:
+            perf_map = read_test_performance_by_format_artifacts(run_dir)
+            records = perf_map.get(fmt) if isinstance(perf_map, dict) else None
+            if not isinstance(records, list) or not records:
+                return {}
+            target_abs = ""
+            if isinstance(target_path, str) and target_path.strip():
+                target_abs = os.path.abspath(os.path.join(run_dir, target_path))
+            target_name = os.path.basename(target_abs) if target_abs else ""
+            for rec in records:
+                if not isinstance(rec, dict):
+                    continue
+                rec_target = str(rec.get("target_path") or "")
+                rec_name = os.path.basename(rec_target) if rec_target else ""
+                perf = rec.get("performance")
+                if not isinstance(perf, dict) or not perf:
+                    continue
+                if target_abs and rec_target and os.path.abspath(rec_target) == target_abs:
+                    return perf
+                if target_name and rec_name and rec_name == target_name:
+                    return perf
+            return {}
+
         rows: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         eval_rows: list[dict[str, Any]] = []
@@ -2011,12 +2034,25 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         "Box-R": None if invalid_zero_metrics else metric_row.get("Box-R"),
                     }
                     perf = var.get("performance") if isinstance(var.get("performance"), dict) else {}
+                    if not perf:
+                        perf = _perf_fallback_for_variant(run_dir, fmt, var.get("target_path"))
                     lat_all = perf.get("latency_ms") if isinstance(perf.get("latency_ms"), dict) else {}
                     all_stats = lat_all.get("all") if isinstance(lat_all.get("all"), dict) else {}
                     steady_stats = lat_all.get("steady") if isinstance(lat_all.get("steady"), dict) else {}
                     row["throughput_img_s"] = perf.get("throughput_img_s")
                     row["latency_p50_ms"] = steady_stats.get("p50", all_stats.get("p50"))
                     row["latency_p95_ms"] = steady_stats.get("p95", all_stats.get("p95"))
+                    row["performance_status"] = "ok" if isinstance(perf, dict) and len(perf) > 0 else "performance_not_collected"
+                    try:
+                        thr = float(row["throughput_img_s"]) if row.get("throughput_img_s") is not None else None
+                    except (TypeError, ValueError):
+                        thr = None
+                    try:
+                        p50 = float(row["latency_p50_ms"]) if row.get("latency_p50_ms") is not None else None
+                    except (TypeError, ValueError):
+                        p50 = None
+                    row["avg_inference_fps"] = thr
+                    row["avg_inference_ms_per_frame"] = p50 if p50 is not None else ((1000.0 / thr) if thr and thr > 0 else None)
                     eval_rows.append(
                         {
                             "run_dir": run_dir,
@@ -2082,6 +2118,29 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         return rows, sources, eval_rows, issues
 
     def _build_pt_uni_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        def _perf_fallback_for_variant(run_dir: str, fmt: str, target_path: Any) -> dict[str, Any]:
+            perf_map = read_test_performance_by_format_artifacts(run_dir)
+            records = perf_map.get(fmt) if isinstance(perf_map, dict) else None
+            if not isinstance(records, list) or not records:
+                return {}
+            target_abs = ""
+            if isinstance(target_path, str) and target_path.strip():
+                target_abs = os.path.abspath(os.path.join(run_dir, target_path))
+            target_name = os.path.basename(target_abs) if target_abs else ""
+            for rec in records:
+                if not isinstance(rec, dict):
+                    continue
+                rec_target = str(rec.get("target_path") or "")
+                rec_name = os.path.basename(rec_target) if rec_target else ""
+                perf = rec.get("performance")
+                if not isinstance(perf, dict) or not perf:
+                    continue
+                if target_abs and rec_target and os.path.abspath(rec_target) == target_abs:
+                    return perf
+                if target_name and rec_name and rec_name == target_name:
+                    return perf
+            return {}
+
         rows: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         eval_rows: list[dict[str, Any]] = []
@@ -2153,12 +2212,25 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                             "Box-R": metric_row.get("Box-R"),
                         }
                         perf = var.get("performance") if isinstance(var.get("performance"), dict) else {}
+                        if not perf:
+                            perf = _perf_fallback_for_variant(run_dir, fmt, var.get("target_path"))
                         lat_all = perf.get("latency_ms") if isinstance(perf.get("latency_ms"), dict) else {}
                         all_stats = lat_all.get("all") if isinstance(lat_all.get("all"), dict) else {}
                         steady_stats = lat_all.get("steady") if isinstance(lat_all.get("steady"), dict) else {}
                         row["throughput_img_s"] = perf.get("throughput_img_s")
                         row["latency_p50_ms"] = steady_stats.get("p50", all_stats.get("p50"))
                         row["latency_p95_ms"] = steady_stats.get("p95", all_stats.get("p95"))
+                        row["performance_status"] = "ok" if isinstance(perf, dict) and len(perf) > 0 else "performance_not_collected"
+                        try:
+                            thr = float(row["throughput_img_s"]) if row.get("throughput_img_s") is not None else None
+                        except (TypeError, ValueError):
+                            thr = None
+                        try:
+                            p50 = float(row["latency_p50_ms"]) if row.get("latency_p50_ms") is not None else None
+                        except (TypeError, ValueError):
+                            p50 = None
+                        row["avg_inference_fps"] = thr
+                        row["avg_inference_ms_per_frame"] = p50 if p50 is not None else ((1000.0 / thr) if thr and thr > 0 else None)
                         eval_rows.append(
                             {
                                 "run_dir": run_dir,
@@ -2242,11 +2314,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         pd.DataFrame(test_rows).to_csv(out_csv, index=False, encoding="utf-8")
         out["test_csv"] = os.path.relpath(out_csv, session_root)
         perf_test = pd.DataFrame(test_rows)
-        perf_test = perf_test.dropna(subset=["throughput_img_s", "latency_p50_ms", "latency_p95_ms"], how="all")
-        if len(perf_test) > 0:
-            perf_csv = os.path.join(out_dir, "format_performance_compare_test.csv")
-            perf_test.to_csv(perf_csv, index=False, encoding="utf-8")
-            out["perf_test_csv"] = os.path.relpath(perf_csv, session_root)
+        perf_csv = os.path.join(out_dir, "format_performance_compare_test.csv")
+        perf_test.to_csv(perf_csv, index=False, encoding="utf-8")
+        out["perf_test_csv"] = os.path.relpath(perf_csv, session_root)
     if val_rows:
         out_csv = os.path.join(out_dir, "format_metrics_compare_val.csv")
         pd.DataFrame(val_rows).to_csv(out_csv, index=False, encoding="utf-8")

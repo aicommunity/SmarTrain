@@ -62,7 +62,12 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--batch", type=int, default=None, help="Validation batch size.")
     p.add_argument("--device", type=str, default=None, help="Compute device: cpu, 0, cuda:0, or GPU name.")
     p.add_argument("--deep-diagnostics", action="store_true", help="Save deep per-image diagnostics artifacts.")
-    p.add_argument("--perf", action="store_true", help="Collect inference performance metrics.")
+    p.add_argument(
+        "--perf",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Collect inference performance metrics.",
+    )
     p.add_argument("--perf-warmup-images", type=int, default=5, help="Warmup images excluded from steady perf stats.")
     p.add_argument(
         "--onnx-provider-policy",
