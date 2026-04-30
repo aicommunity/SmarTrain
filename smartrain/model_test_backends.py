@@ -5,6 +5,7 @@ import sys
 import gc
 import time
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,7 +42,7 @@ from smartrain.model_test_service import (
     format_test_dir_for_write,
     persist_target_test_artifacts_state,
 )
-from smartrain.run_artifacts import ensure_run_layout
+from smartrain.run_artifacts import ensure_run_layout, read_model_sidecar_metadata
 from smartrain import tensorrt_checks as trt_checks
 from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
 from smartrain.unified_validator_core import EvalProvenance, normalize_eval_params
@@ -311,6 +312,34 @@ def _resolve_imgsz_from_onnx(session: Any, imgsz: int | None) -> tuple[int, int]
             return max(32, h), max(32, w)
     except Exception:
         pass
+    return 640, 640
+
+
+def _resolve_input_hw_from_native_artifact(weights_path: str, requested_imgsz: int | None) -> tuple[int, int]:
+    req = int(requested_imgsz) if isinstance(requested_imgsz, (int, float)) and int(requested_imgsz) > 0 else None
+    artifact_imgsz: int | None = None
+    meta = read_model_sidecar_metadata(weights_path) or {}
+    if isinstance(meta, dict):
+        params = meta.get("params")
+        if isinstance(params, dict):
+            for key in ("imgsz", "image_size", "img_size"):
+                value = params.get(key)
+                if isinstance(value, (int, float)) and int(value) > 0:
+                    artifact_imgsz = int(value)
+                    break
+    if artifact_imgsz is None:
+        m = re.search(r"_imgsz(\d+)x(\d+)_", Path(weights_path).name)
+        if m and m.group(1) == m.group(2):
+            artifact_imgsz = int(m.group(1))
+    if artifact_imgsz is not None:
+        if req is not None and req != artifact_imgsz:
+            print(
+                "[WARN] native eval imgsz mismatch: "
+                f"requested={req}, artifact={artifact_imgsz}. Using artifact size."
+            )
+        return artifact_imgsz, artifact_imgsz
+    if req is not None:
+        return req, req
     return 640, 640
 
 
@@ -1142,6 +1171,11 @@ def _write_native_eval_artifacts(
         "inference_source": inference_source,
         "gt_source": gt_source,
         "nms_profile": nms_profile,
+        "mAP50-95": map5095,
+        "mAP50": map50,
+        "Box-F1": float(metrics_payload["box_f1"]),
+        "Box-P": float(metrics_payload["box_p"]),
+        "Box-R": float(metrics_payload["box_r"]),
     }
 
 
@@ -2080,6 +2114,12 @@ def run_native_format_backend(
     perf_warmup_images: int = 5,
 ) -> BackendRunResult:
     backend_name = "onnxruntime" if format_name == "onnx" else ("unified_pt" if format_name == "pt_uni" else "tensorrt")
+    provider_by_format = {
+        "onnx": "onnxruntime",
+        "engine": "tensorrt",
+        "trt": "tensorrt",
+        "pt_uni": "ultralytics",
+    }
     try:
         if format_name == "pt_uni":
             eval_params = normalize_eval_params(imgsz=imgsz, conf=val_conf, iou=val_iou)
@@ -2246,6 +2286,7 @@ def run_native_format_backend(
                     gt_source="ultralytics_verify_image_label",
                     nms_profile="ultralytics_nms_multilabel",
                 )
+            split_status: dict[str, Any] = {"test": {"status": "ok", "error": None}, "val": {"status": "ok", "error": None}}
             try:
                 gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
                 if use_worker:
@@ -2310,8 +2351,10 @@ def run_native_format_backend(
                         gt_source="ultralytics_verify_image_label",
                         nms_profile="ultralytics_nms_multilabel",
                     )
-            except Exception:
-                pass
+            except Exception as val_exc:
+                split_status["val"] = {"status": "failed", "error": str(val_exc)}
+            overall_status = "ok" if split_status["val"]["status"] == "ok" else "partial_ok"
+            overall_error = None if overall_status == "ok" else f"val split failed: {split_status['val']['error']}"
             persist_target_test_artifacts_state(
                 root_dir,
                 format_name=format_name,
@@ -2325,7 +2368,9 @@ def run_native_format_backend(
                     backend_name=backend_name,
                     runtime_provider=("onnxruntime-worker" if use_worker else "onnxruntime-session"),
                 ),
-                status="ok",
+                status=overall_status,
+                error=overall_error,
+                split_status=split_status,
             )
             if isinstance(inference, dict):
                 inference["performance"] = perf_payload
@@ -2350,7 +2395,7 @@ def run_native_format_backend(
             eval_params = normalize_eval_params(imgsz=imgsz, conf=val_conf, iou=val_iou)
             conf_thr = float(eval_params["conf"])
             iou_thr = float(eval_params["iou"])
-            input_hw = (int(eval_params["imgsz"]), int(eval_params["imgsz"]))
+            input_hw = _resolve_input_hw_from_native_artifact(weights_path, int(eval_params["imgsz"]))
             perf_collector = PerfCollector(warmup_images=perf_warmup_images) if collect_performance else None
             preds: list[_Pred] = []
             total_images = len(image_paths)
@@ -2389,6 +2434,18 @@ def run_native_format_backend(
                 gt_source="ultralytics_verify_image_label",
                 nms_profile="ultralytics_nms_multilabel",
             )
+            split_status: dict[str, Any] = {"test": {"status": "ok", "error": None}, "val": {"status": "ok", "error": None}}
+            native_debug: dict[str, Any] = {
+                "imgsz": input_hw[0],
+                "test_gt_count": len(gt_rows),
+                "test_pred_count": len(preds),
+            }
+            try:
+                native_debug["invalid_metrics_candidate"] = bool(
+                    all(abs(float(inference.get(k) or 0.0)) <= 1e-12 for k in ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R"))
+                )
+            except Exception:
+                native_debug["invalid_metrics_candidate"] = False
             try:
                 gt_rows_val, _bgv, image_paths_val = _collect_gt(dataset_yaml_path, "val")
                 preds_val: list[_Pred] = []
@@ -2418,8 +2475,12 @@ def run_native_format_backend(
                     gt_source="ultralytics_verify_image_label",
                     nms_profile="ultralytics_nms_multilabel",
                 )
-            except Exception:
-                pass
+                native_debug["val_gt_count"] = len(gt_rows_val)
+                native_debug["val_pred_count"] = len(preds_val)
+            except Exception as val_exc:
+                split_status["val"] = {"status": "failed", "error": str(val_exc)}
+            overall_status = "ok" if split_status["val"]["status"] == "ok" else "partial_ok"
+            overall_error = None if overall_status == "ok" else f"val split failed: {split_status['val']['error']}"
             persist_target_test_artifacts_state(
                 root_dir,
                 format_name=format_name,
@@ -2433,7 +2494,10 @@ def run_native_format_backend(
                     backend_name=backend_name,
                     runtime_provider="tensorrt",
                 ),
-                status="ok",
+                status=overall_status,
+                error=overall_error,
+                split_status=split_status,
+                native_debug=native_debug,
             )
             if isinstance(inference, dict):
                 inference["performance"] = perf_payload
@@ -2464,6 +2528,7 @@ def run_native_format_backend(
                 root_dir=root_dir,
                 format_name=format_name,
                 backend_name=backend_name,
+                runtime_provider=provider_by_format.get(format_name),
             ),
             status="unavailable",
             error=str(exc),

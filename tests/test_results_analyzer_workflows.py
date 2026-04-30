@@ -10,6 +10,7 @@ import pytest
 
 import smartrain.results_analyzer as results_analyzer
 from smartrain.results_analyzer import main as analyze_main
+from smartrain.run_artifacts import run_test_backend_dir
 
 
 def _write_run(
@@ -508,6 +509,109 @@ def test_write_test_system_profile_compare_csv(tmp_path: Path) -> None:
     assert len(df) == 1
     assert str(df.iloc[0]["format"]) == "onnx"
     assert str(df.iloc[0]["test_backend"]) == "onnxruntime"
+    assert str(df.iloc[0]["test_provider"]) == "onnxruntime"
+
+
+def test_leaderboard_uses_performance_fallback_for_speed_metric(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_lb", "run_speed_fallback", model="yolo11n.pt", map5095=0.62, box_f1=0.70)
+    pd.DataFrame([{"mAP50-95": 0.62, "Box-F1": 0.70}]).to_csv(run_dir / "test_metrics.csv", index=False)
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "onnx": {
+                        "artifacts": [
+                            {
+                                "target_path": "models/a.onnx",
+                                "performance": {"throughput_img_s": 77.7},
+                                "status": "ok",
+                                "backend": "onnxruntime",
+                            }
+                        ]
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    out_csv = tmp_path / "leaderboard_fallback.csv"
+    analyze_main(
+        [
+            "leaderboard",
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--out-csv",
+            str(out_csv),
+            "--quality-metric",
+            "mAP50-95",
+            "--speed-metric",
+            "avg_inference_fps",
+        ]
+    )
+    df = pd.read_csv(out_csv)
+    assert len(df) == 1
+    assert float(df.iloc[0]["speed_metric"]) == 77.7
+
+
+def test_format_compare_marks_invalid_zero_metrics_as_issue(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_inv", "run_invalid_zero", model="yolo11n.pt", map5095=0.51, box_f1=0.60)
+    (run_dir / "engine_ok.engine").write_bytes(b"engine")
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "tests" / "test_metrics_engine.csv").write_text(
+        "mAP50-95,mAP50,Box-F1,Box-P,Box-R\n0.0,0.0,0.0,0.0,0.0\n",
+        encoding="utf-8",
+    )
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "engine": {
+                        "artifacts": [
+                            {
+                                "target_path": "engine_ok.engine",
+                                "metrics_csv": "tests/test_metrics_engine.csv",
+                                "status": "ok",
+                                "backend": "tensorrt",
+                            }
+                        ]
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_invalid_metrics"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    cmp_df = pd.read_csv(session_root / "artifacts" / "format_compare" / "format_metrics_compare_test.csv")
+    row_engine = cmp_df[cmp_df["format"] == "engine"].iloc[0]
+    assert pd.isna(row_engine["mAP50-95"])
+    issues_rel = out.get("issues_json")
+    assert issues_rel
+    issues_payload = json.loads((session_root / issues_rel).read_text(encoding="utf-8"))
+    assert any(item.get("reason_code") == "invalid_metrics" and item.get("format") == "engine" for item in issues_payload)
+
+
+def test_collect_ultralytics_test_artifacts_prefers_new_layout(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_a", "run_new_layout", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    canonical = run_test_backend_dir(str(run_dir), "ultralytics")
+    canonical.mkdir(parents=True, exist_ok=True)
+    (canonical / "pr.csv").write_text("recall,precision\n0.5,0.6\n", encoding="utf-8")
+    rows, _arts = results_analyzer._collect_ultralytics_test_artifacts(
+        str(tmp_path / "analytics" / "analyze-reports" / "s"),
+        [str(run_dir)],
+        {"run_new_layout": "R1"},
+    )
+    assert rows and rows[0]["exists"] is True
+    assert str(rows[0]["test_dir"]).endswith("tests/test-ultralytics")
 
 
 def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
@@ -601,7 +705,31 @@ def test_format_compare_does_not_use_onnx_csv_as_pt_source(tmp_path: Path) -> No
     run_dir = tmp_path / "runs" / "ds_a" / "run_no_pt_csv"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
     (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
-    (run_dir / "test_metrics_onnx.csv").write_text("mAP50-95,mAP50,Box-F1,Box-P,Box-R\n0.4000,0.5,0.6,0.7,0.8\n", encoding="utf-8")
+    (run_dir / "model.onnx").write_bytes(b"onnx")
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "tests" / "test_metrics_onnx.csv").write_text(
+        "mAP50-95,mAP50,Box-F1,Box-P,Box-R\n0.4000,0.5,0.6,0.7,0.8\n",
+        encoding="utf-8",
+    )
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "onnx": {
+                        "artifacts": [
+                            {
+                                "target_path": "model.onnx",
+                                "metrics_csv": "tests/test_metrics_onnx.csv",
+                                "status": "ok",
+                                "backend": "onnxruntime",
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     session_root = tmp_path / "analytics" / "analyze-reports" / "session_no_pt_fallback"
     session_root.mkdir(parents=True, exist_ok=True)
 
@@ -674,6 +802,155 @@ def test_format_compare_builds_alias_legend_for_variants(tmp_path: Path) -> None
     assert any(str(v).startswith("ONNX") for v in alias_df["alias"].tolist())
     cmp_df = pd.read_csv(session_root / "artifacts" / "format_compare" / "format_metrics_compare_test.csv")
     assert "alias" in cmp_df.columns
+
+
+def test_format_compare_prefers_variants_with_metrics_and_avoids_duplicate_missing(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_a", "run_dedup", model="yolo11n.pt", map5095=0.51, box_f1=0.60)
+    (run_dir / "v1.onnx").write_bytes(b"onnx1")
+    (run_dir / "v2.onnx").write_bytes(b"onnx2")
+    pd.DataFrame([{"mAP50-95": 0.41, "mAP50": 0.5, "Box-F1": 0.6, "Box-P": 0.7, "Box-R": 0.8}]).to_csv(
+        run_dir / "test_metrics_onnx.csv", index=False
+    )
+    manifest = {
+        "formats": {
+            "onnx": {
+                "artifacts": [
+                    {"target_path": "v1.onnx", "metrics_csv": "", "status": "ok", "backend": "onnxruntime", "error": "metrics missing"},
+                    {"target_path": "v2.onnx", "metrics_csv": "test_metrics_onnx.csv", "status": "ok", "backend": "onnxruntime"},
+                ]
+            }
+        }
+    }
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_dedup"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    issues_rel = out.get("issues_json")
+    if issues_rel:
+        issues_payload = json.loads((session_root / issues_rel).read_text(encoding="utf-8"))
+        assert not any(
+            item.get("format") == "onnx"
+            and item.get("split") == "test"
+            and item.get("reason_code") == "missing_artifact"
+            for item in issues_payload
+        )
+
+
+def test_format_compare_skips_missing_metrics_without_explicit_failure(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_a", "run_skip_missing_no_fail", model="yolo11n.pt", map5095=0.51, box_f1=0.60)
+    (run_dir / "model.onnx").write_bytes(b"onnx")
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "onnx": {
+                        "artifacts": [
+                            {
+                                "target_path": "model.onnx",
+                                "metrics_csv": "",
+                                "status": "ok",
+                                "backend": "onnxruntime",
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_skip_missing_no_fail"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    cmp_df = pd.read_csv(session_root / "artifacts" / "format_compare" / "format_metrics_compare_test.csv")
+    assert "onnx" not in set(cmp_df["format"].tolist())
+
+
+def test_format_compare_val_skips_missing_metrics_without_failure(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_a", "run_val_skip_missing", model="yolo11n.pt", map5095=0.51, box_f1=0.60)
+    (run_dir / "model.onnx").write_bytes(b"onnx")
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "tests" / "test_metrics_onnx.csv").write_text(
+        "mAP50-95,mAP50,Box-F1,Box-P,Box-R\n0.44,0.55,0.66,0.77,0.88\n",
+        encoding="utf-8",
+    )
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "onnx": {
+                        "artifacts": [
+                            {
+                                "target_path": "model.onnx",
+                                "metrics_csv": "tests/test_metrics_onnx.csv",
+                                "status": "ok",
+                                "backend": "onnxruntime",
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_val_skip_missing"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    val_csv = session_root / "artifacts" / "format_compare" / "format_metrics_compare_val.csv"
+    if val_csv.is_file():
+        val_df = pd.read_csv(val_csv)
+        assert "onnx" not in set(val_df["format"].tolist())
+
+
+def test_format_compare_prefers_existing_target_path_variant(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "ds_a", "run_target_prefer_existing", model="yolo11n.pt", map5095=0.51, box_f1=0.60)
+    (run_dir / "existing.onnx").write_bytes(b"onnx")
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "tests" / "test_metrics_onnx.csv").write_text(
+        "mAP50-95,mAP50,Box-F1,Box-P,Box-R\n0.42,0.53,0.64,0.75,0.86\n",
+        encoding="utf-8",
+    )
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "onnx": {
+                        "artifacts": [
+                            {
+                                "target_path": "missing.onnx",
+                                "metrics_csv": "tests/test_metrics_onnx.csv",
+                                "status": "ok",
+                                "backend": "onnxruntime",
+                            },
+                            {
+                                "target_path": "existing.onnx",
+                                "metrics_csv": "tests/test_metrics_onnx.csv",
+                                "status": "ok",
+                                "backend": "onnxruntime",
+                            },
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_target_prefer_existing"
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    out = results_analyzer._write_format_compare_artifacts(str(session_root), [str(run_dir)])
+    assert out is not None
+    cmp_df = pd.read_csv(session_root / "artifacts" / "format_compare" / "format_metrics_compare_test.csv")
+    onnx_rows = cmp_df[cmp_df["format"] == "onnx"]
+    assert len(onnx_rows) == 1
+    assert onnx_rows.iloc[0]["target_path"] == "existing.onnx"
 
 
 def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_paths(
@@ -822,7 +1099,7 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     assert "## 2. Quality Analysis" in en_md
     assert "## 4. Model Format Comparison" in en_md
     assert "Format alias legend" in en_md
-    assert "| alias | format | run_name | target_path |" in en_md
+    assert "| alias | run_name | target_path |" in en_md
     assert "## 8. Executive Summary" in en_md
     assert "Datasets: D1 = ds_a" in en_md
     assert "### 6.1 Run R1" in en_md
@@ -890,6 +1167,39 @@ def test_analyze_report_format_section_contains_perf_subsection(tmp_path: Path) 
     assert "### 4.1 Quality metrics comparison" in en_md
     assert "### 4.2 Performance comparison" in en_md
     assert "Format performance comparison (test)" in en_md
+
+
+def test_analyze_report_perf_section_uses_benchmark_fallback(tmp_path: Path) -> None:
+    from smartrain.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "inference").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "model": "run_a",
+                "run_dir": "runs/ds_a/run_a",
+                "device": "cpu",
+                "avg_total_ms_per_frame": 10.0,
+                "avg_inference_ms_per_frame": 8.0,
+                "avg_total_fps": 100.0,
+                "avg_inference_fps": 125.0,
+            }
+        ]
+    ).to_csv(tmp_path / "artifacts" / "inference" / "benchmark.csv", index=False)
+    manifest = {
+        "session_name": "s_perf_fallback",
+        "profile": "quality",
+        "baseline": "run_a",
+        "others": [],
+        "tables": ["artifacts/inference/benchmark.csv"],
+        "images": [],
+        "artifacts": [],
+        "format_comparison": {},
+        "abbreviations": {},
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "Fallback: скорость инференса по benchmark" in ru_md
 
 
 def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> None:

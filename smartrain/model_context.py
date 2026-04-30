@@ -78,6 +78,23 @@ def _collect_context_candidates(model_path: Path) -> list[tuple[str, Path]]:
                     ("runtime_yaml", run_dir / "_runtime_data_test.yaml"),
                 ]
             )
+    # Canonical run model layout: runs/<dataset>/<run>/models/<artifact>
+    # Add run-level metadata candidates so auto-convert doesn't fall back to 640.
+    try:
+        if mp.parent.name.lower() == "models":
+            run_dir = mp.parent.parent
+            if run_dir.is_dir():
+                candidates.extend(
+                    [
+                        ("training_metadata", run_dir / "training_metadata.json"),
+                        ("args_yaml", run_dir / "train" / "args.yaml"),
+                        ("args_yaml", run_dir / "train" / "args.yml"),
+                        ("runtime_yaml", run_tmp_dir(str(run_dir)) / "_runtime_data_test.yaml"),
+                        ("runtime_yaml", run_dir / "_runtime_data_test.yaml"),
+                    ]
+                )
+    except Exception:
+        pass
 
     model_dir = mp.parent
     if model_dir.is_dir():

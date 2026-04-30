@@ -1051,6 +1051,12 @@ def _guess_run_root_for_path(path: Path) -> Path | None:
             return cand
         if (cand / "models").is_dir() and (cand / "test").is_dir():
             return cand
+        # Canonical layout fallback: runs/<dataset>/<run>/models/*
+        # Keep run-context even if metadata/test dir is temporarily absent.
+        if cand.name == "models":
+            run_dir = cand.parent
+            if run_dir.is_dir() and run_dir.parent.is_dir() and run_dir.parent.parent.name == "runs":
+                return run_dir
     return None
 
 
@@ -1230,10 +1236,30 @@ def _cleanup_trtprep_artifacts(out_dir: Path, source_stem: str) -> None:
 
 def _resolve_public_onnx_target(source_path: Path, out_dir: Path, expected: dict[str, Any]) -> Path:
     run_root = _guess_run_root_for_path(source_path)
-    if run_root is None:
+    in_runs_models = out_dir.name == "models" and out_dir.parent.parent.name == "runs"
+    if run_root is None and not in_runs_models:
         return out_dir / f"{source_path.stem}.onnx"
     public_name = _make_dedicated_onnx_name(source_path.stem, expected).replace("_trtprep", "")
     return out_dir / f"{public_name}.onnx"
+
+
+def _cleanup_legacy_plain_onnx_for_run(source_path: Path, target_onnx: Path) -> None:
+    try:
+        target = target_onnx.expanduser().resolve()
+        out_dir = target.parent
+        if out_dir.name != "models" or out_dir.parent.parent.parent.name != "runs":
+            return
+        plain = out_dir / f"{source_path.stem}.onnx"
+        plain = plain.resolve()
+        if plain == target or not plain.exists():
+            return
+        plain.unlink(missing_ok=True)
+        plain_meta = plain.with_suffix(plain.suffix + ".meta.json")
+        plain_meta.unlink(missing_ok=True)
+        print(f"[INFO] Removed legacy plain ONNX artifact: {plain}")
+    except Exception:
+        # Best-effort cleanup: must not fail conversion.
+        return
 
 
 def _resolve_interactive_variant_targets(
@@ -1303,6 +1329,7 @@ def _sync_onnx_artifact(
             tool="ultralytics",
             params=params,
         )
+        _cleanup_legacy_plain_onnx_for_run(source_path_for_meta, target_onnx)
         return True, "ok"
     except Exception as exc:
         return False, str(exc)

@@ -51,6 +51,9 @@ def _md_table_from_df(df: pd.DataFrame, abbreviations: dict[str, str], limit: in
                 vals.append(f"{v:.4f}")
             else:
                 sv = str(v)
+                if sv.strip().lower() in {"nan", "none", "null", ""}:
+                    vals.append("-")
+                    continue
                 vals.append(abbreviations.get(sv, sv))
         lines.append("| " + " | ".join(vals) + " |")
     if isinstance(limit, int) and limit > 0 and len(df) > limit:
@@ -387,7 +390,6 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
         ]
     elif "format_eval_settings" in lower:
         preferred = [
-            "alias",
             "run_name",
             "split",
             "format",
@@ -418,17 +420,13 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
         preferred = [
             "run_name",
             "model",
-            "dataset_name",
             "format",
             "test_backend",
             "test_provider",
-            "test_device",
             "sys_cpu_model",
-            "sys_cpu_logical_cores",
             "sys_ram_total_gb",
             "sys_gpu_0_name",
             "sys_gpu_0_vram_gb",
-            "sys_gpu_total_vram_gb",
             "sys_os",
             "sys_os_release",
         ]
@@ -499,6 +497,30 @@ def _should_hide_system_profile_table(df: pd.DataFrame) -> bool:
         return False
     empty = int(scoped.isna().sum().sum())
     return (empty / float(total)) > 0.70
+
+
+def _system_profile_text_summary(df: pd.DataFrame, is_ru: bool) -> list[str]:
+    lines: list[str] = []
+    if len(df) == 0:
+        return lines
+    for _, row in df.iterrows():
+        run_name = str(row.get("run_name") or row.get("run_dir") or "-")
+        cpu = str(row.get("sys_cpu_model") or "-")
+        gpu = str(row.get("sys_gpu_0_name") or "-")
+        ram = row.get("sys_ram_total_gb")
+        os_name = str(row.get("sys_os") or "-")
+        os_rel = str(row.get("sys_os_release") or "-")
+        ram_txt = "-"
+        try:
+            if pd.notna(ram):
+                ram_txt = f"{float(ram):.1f} GB"
+        except Exception:
+            ram_txt = str(ram)
+        if is_ru:
+            lines.append(f"- `{run_name}`: CPU={cpu}; GPU={gpu}; RAM={ram_txt}; OS={os_name} {os_rel}".strip())
+        else:
+            lines.append(f"- `{run_name}`: CPU={cpu}; GPU={gpu}; RAM={ram_txt}; OS={os_name} {os_rel}".strip())
+    return lines
 
 
 def _build_test_metrics_summary(df: pd.DataFrame, abbreviations: dict[str, str]) -> pd.DataFrame:
@@ -984,6 +1006,15 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             else "System profile table hidden: data is too sparse in hardware/os fields."
                         )
                     )
+                    summary_lines = _system_profile_text_summary(df, is_ru)
+                    if summary_lines:
+                        lines.append("")
+                        lines.append(
+                            "Доступные поля по запускам:"
+                            if is_ru
+                            else "Available fields by run:"
+                        )
+                        lines.extend(summary_lines)
                     lines.append("")
                     lines.append(
                         ("_Источник данных:_ " if is_ru else "_Data source:_ ")
@@ -1098,21 +1129,59 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append("")
                 lines.append(
                     (
-                        "- Детализация по run/split/format:"
+                        "- Краткая сводка по split/format:"
                         if is_ru
-                        else "- Detailed list by run/split/format:"
+                        else "- Compact summary by split/format:"
                     )
                 )
+                grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
                 for item in issues_payload:
                     if not isinstance(item, dict):
                         continue
-                    run_name = str(item.get("run_name") or "-")
                     split_name = str(item.get("split") or "-")
                     fmt = str(item.get("format") or "-")
-                    status = str(item.get("status") or "-")
                     reason_code = str(item.get("reason_code") or "unknown").strip() or "unknown"
-                    reason = str(item.get("reason") or "-").replace("\n", " ").strip()
-                    lines.append(f"- `{run_name}` / `{split_name}` / `{fmt}`: `{status}` / `{reason_code}` - {reason}")
+                    key = (split_name, fmt, reason_code)
+                    entry = grouped.setdefault(
+                        key,
+                        {
+                            "count": 0,
+                            "runs": set(),
+                            "statuses": set(),
+                            "reason": str(item.get("reason") or "-").replace("\n", " ").strip(),
+                        },
+                    )
+                    entry["count"] = int(entry.get("count", 0)) + 1
+                    entry["runs"].add(str(item.get("run_name") or "-"))
+                    entry["statuses"].add(str(item.get("status") or "-"))
+                    if entry.get("reason") in {"", "-"}:
+                        entry["reason"] = str(item.get("reason") or "-").replace("\n", " ").strip()
+                for (split_name, fmt, reason_code), entry in sorted(
+                    grouped.items(),
+                    key=lambda kv: (
+                        -int(kv[1].get("count", 0)),
+                        str(kv[0][0]),
+                        str(kv[0][1]),
+                        str(kv[0][2]),
+                    ),
+                ):
+                    runs_sorted = sorted(str(x) for x in entry.get("runs", set()))
+                    runs_txt = ", ".join(f"`{r}`" for r in runs_sorted[:4])
+                    if len(runs_sorted) > 4:
+                        runs_txt += f"{' и ещё ' if is_ru else ', plus '}{len(runs_sorted) - 4}"
+                    status_txt = "/".join(sorted(str(x) for x in entry.get("statuses", set())))
+                    reason = str(entry.get("reason") or "-")
+                    if reason and reason != "-" and len(reason) > 96:
+                        reason = reason[:93].rstrip() + "..."
+                    lines.append(
+                        f"- `{split_name}` / `{fmt}` / `{reason_code}`: "
+                        + (f"{entry['count']} шт." if is_ru else f"{entry['count']} item(s)")
+                        + (
+                            f"; runs: {runs_txt or '-'}; status: `{status_txt or '-'}`; причина: {reason}"
+                            if is_ru
+                            else f"; runs: {runs_txt or '-'}; status: `{status_txt or '-'}`; reason: {reason}"
+                        )
+                    )
                 lines.append("")
     eval_rel = str(fmt_cmp.get("eval_csv") or "")
     alias_rel = str(fmt_cmp.get("alias_legend_csv") or "")
@@ -1122,9 +1191,13 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             try:
                 alias_df = pd.read_csv(alias_abs)
                 alias_df = _filter_generic_table_for_selection(alias_df, manifest)
-                preferred_alias = [c for c in ("alias", "format", "run_name", "target_path") if c in alias_df.columns]
+                preferred_alias = [c for c in ("alias", "run_name", "target_path") if c in alias_df.columns]
                 if preferred_alias:
                     alias_df = alias_df[preferred_alias]
+                dedup_cols = [c for c in ("run_name", "target_path") if c in alias_df.columns]
+                if dedup_cols:
+                    alias_df = alias_df.sort_values(by=[c for c in ("run_name", "alias") if c in alias_df.columns])
+                    alias_df = alias_df.drop_duplicates(subset=dedup_cols, keep="first")
                 alias_df = _abbrev_df(alias_df, abbreviations)
                 lines.extend(_center_open())
                 lines.append("")
@@ -1171,6 +1244,17 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     ("_Источник данных:_ " if is_ru else "_Data source:_ ")
                     + f"`{fmt_csv_rel}`"
                 )
+                low_rel = fmt_csv_rel.lower()
+                if "format_metrics_compare_test" in low_rel or "format_metrics_compare_val" in low_rel:
+                    lines.append(
+                        (
+                            "- Пустые quality-ячейки для `engine/trt` могут означать `invalid_metrics`: файл метрик найден, "
+                            "но все ключевые метрики равны нулю и помечены как невалидные."
+                            if is_ru
+                            else "- Empty quality cells for `engine/trt` may indicate `invalid_metrics`: metrics file exists, "
+                            "but all key metrics are zeros and treated as invalid."
+                        )
+                    )
                 lines.extend(_center_close())
                 table_no += 1
             except Exception as e:
@@ -1178,6 +1262,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append("")
     lines.append("### 4.2 " + ("Сравнение производительности" if is_ru else "Performance comparison"))
     lines.append("")
+    rendered_perf_table = False
     for key in ("perf_test_csv",):
         perf_csv_rel = str(fmt_cmp.get(key) or "")
         if not perf_csv_rel:
@@ -1198,14 +1283,88 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
                 lines.extend(_center_close())
                 table_no += 1
+                rendered_perf_table = True
             except Exception as e:
                 lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
+    if not rendered_perf_table:
+        fallback_perf_rel = ""
+        for rel in tables:
+            if isinstance(rel, str) and rel.lower().endswith("artifacts/inference/benchmark.csv"):
+                fallback_perf_rel = rel
+                break
+        if fallback_perf_rel:
+            fallback_perf_abs = os.path.join(report_root, fallback_perf_rel)
+            if os.path.isfile(fallback_perf_abs):
+                try:
+                    perf_df = pd.read_csv(fallback_perf_abs)
+                    perf_df = _filter_generic_table_for_selection(perf_df, manifest)
+                    keep = [
+                        c
+                        for c in (
+                            "model",
+                            "run_dir",
+                            "device",
+                            "avg_total_ms_per_frame",
+                            "avg_inference_ms_per_frame",
+                            "avg_total_fps",
+                            "avg_inference_fps",
+                        )
+                        if c in perf_df.columns
+                    ]
+                    if keep:
+                        perf_df = perf_df[keep]
+                    perf_df = _abbrev_df(perf_df, abbreviations)
+                    lines.extend(_center_open())
+                    lines.append("")
+                    lines.append(
+                        f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                        + ("Fallback: скорость инференса по benchmark" if is_ru else "Fallback: inference benchmark speed")
+                        + "**"
+                    )
+                    lines.append("")
+                    lines.extend(_md_table_from_df(perf_df, abbreviations, limit=None))
+                    lines.append("")
+                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{fallback_perf_rel}`"))
+                    lines.extend(_center_close())
+                    table_no += 1
+                    rendered_perf_table = True
+                except Exception as e:
+                    lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
+    if not rendered_perf_table:
+        lines.append(
+            "- "
+            + (
+                "Таблица производительности форматов отсутствует: для format compare не найден `perf_test_csv` "
+                "и fallback `artifacts/inference/benchmark.csv` недоступен."
+                if is_ru
+                else "Format performance table is unavailable: `perf_test_csv` is missing and fallback "
+                "`artifacts/inference/benchmark.csv` is not available."
+            )
+        )
+        lines.append("")
     if eval_rel:
         eval_abs = os.path.join(report_root, eval_rel)
         if os.path.isfile(eval_abs):
             try:
                 eval_df = pd.read_csv(eval_abs)
                 eval_df = _filter_generic_table_for_selection(eval_df, manifest)
+                dedup_eval_cols = [
+                    c
+                    for c in (
+                        "run_name",
+                        "split",
+                        "format",
+                        "eval_imgsz",
+                        "eval_conf",
+                        "eval_iou",
+                        "inference_source",
+                        "gt_source",
+                        "nms_profile",
+                    )
+                    if c in eval_df.columns
+                ]
+                if dedup_eval_cols:
+                    eval_df = eval_df.drop_duplicates(subset=dedup_eval_cols, keep="first")
                 eval_df = _select_table_columns(eval_rel, eval_df)
                 eval_df = _abbrev_df(eval_df, abbreviations)
                 lines.extend(_center_open())

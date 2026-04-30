@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import os
 from dataclasses import asdict, dataclass
@@ -50,6 +51,8 @@ class TestFormatArtifact:
     status: str
     missing: list[str]
     error: str | None = None
+    split_status: dict[str, Any] | None = None
+    native_debug: dict[str, Any] | None = None
     performance: dict[str, Any] | None = None
     test_system_profile: dict[str, Any] | None = None
     updated_at: str | None = None
@@ -305,6 +308,8 @@ def update_test_artifacts_manifest(
     test_system_profile: dict[str, Any] | None = None,
     status: str | None = None,
     error: str | None = None,
+    split_status: dict[str, Any] | None = None,
+    native_debug: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ensure_run_layout(root_dir)
     fmt = _normalize_format_name(format_name)
@@ -325,6 +330,8 @@ def update_test_artifacts_manifest(
         status=status or ("ok" if snapshot.complete else "incomplete"),
         missing=list(snapshot.missing),
         error=error,
+        split_status=split_status if isinstance(split_status, dict) else None,
+        native_debug=native_debug if isinstance(native_debug, dict) else None,
         performance=performance if isinstance(performance, dict) else None,
         test_system_profile=test_system_profile if isinstance(test_system_profile, dict) else None,
         updated_at=datetime.now().isoformat(timespec="seconds"),
@@ -459,6 +466,8 @@ def persist_target_test_artifacts_state(
     test_system_profile: dict[str, Any] | None = None,
     status: str | None = None,
     error: str | None = None,
+    split_status: dict[str, Any] | None = None,
+    native_debug: dict[str, Any] | None = None,
 ) -> None:
     update_test_artifacts_manifest(
         root_dir,
@@ -470,6 +479,8 @@ def persist_target_test_artifacts_state(
         test_system_profile=test_system_profile,
         status=status,
         error=error,
+        split_status=split_status,
+        native_debug=native_debug,
     )
     _update_run_metadata_after_test(root_dir)
     _update_model_manifest_after_test(root_dir)
@@ -523,6 +534,32 @@ def _read_inference_params_from_test_args(root_dir: str, format_name: str) -> di
             except Exception:
                 out[key] = None
     return out
+
+
+def _has_all_zero_native_metrics(root_dir: str, fmt: str) -> bool:
+    metric_cols = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
+    for split in ("test", "val"):
+        path = format_metrics_path_for_split(root_dir, split, fmt)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            if not rows:
+                continue
+            row = rows[0]
+            vals: list[float] = []
+            for key in metric_cols:
+                raw = row.get(key)
+                if raw is None or str(raw).strip() == "":
+                    vals = []
+                    break
+                vals.append(float(raw))
+            if vals and all(abs(v) <= 1e-12 for v in vals):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def has_matching_test_artifacts(
@@ -579,6 +616,8 @@ def has_matching_test_artifacts(
             continue
         if recorded.get(key) != value:
             return False
+    if fmt in {"engine", "trt"} and _has_all_zero_native_metrics(root_dir, fmt):
+        return False
     return True
 
 

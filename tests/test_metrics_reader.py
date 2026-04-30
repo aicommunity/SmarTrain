@@ -87,6 +87,13 @@ def test_latest_test_metrics_path_pt_does_not_fallback_to_format_specific(tmp_pa
     assert latest_test_metrics_path(str(run_dir), "pt") is None
 
 
+def test_latest_test_metrics_path_prefers_canonical_tests_dir(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_e2" / "run_pt_canonical"
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "tests" / "test_metrics.csv").write_text("mAP50-95\n0.55\n", encoding="utf-8")
+    assert latest_test_metrics_path(str(run_dir), "pt") == str(run_dir / "tests" / "test_metrics.csv")
+
+
 def test_read_test_metrics_row_pt_uses_manifest_metrics_csv_when_default_missing(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "dataset_f" / "run_manifest_pt"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -98,6 +105,19 @@ def test_read_test_metrics_row_pt_uses_manifest_metrics_csv_when_default_missing
     )
     row = read_test_metrics_row(str(run_dir), "pt")
     assert float(row["mAP50-95"]) == 0.55
+
+
+def test_read_test_metrics_by_format_normalizes_legacy_manifest_paths(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_f2" / "run_manifest_legacy_paths"
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "tests" / "test_metrics_pt_uni.csv").write_text("mAP50-95\n0.56\n", encoding="utf-8")
+    (run_dir / "test_artifacts_manifest.json").write_text(
+        json.dumps({"formats": {"pt_uni": {"metrics_csv": "test_metrics_pt_uni.csv"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with_internal = read_test_metrics_by_format(str(run_dir), include_internal=True)
+    assert with_internal["pt_uni"] == str(run_dir / "tests" / "test_metrics_pt_uni.csv")
 
 
 def test_read_test_performance_by_format_artifacts(tmp_path: Path) -> None:

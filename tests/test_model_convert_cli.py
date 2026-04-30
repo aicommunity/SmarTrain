@@ -70,6 +70,21 @@ def test_discover_models_materializes_canonical_from_legacy_run(tmp_path: Path):
     assert not legacy_best.exists()
 
 
+def test_resolve_imgsz_from_run_models_uses_training_metadata(tmp_path: Path):
+    run_dir = tmp_path / "runs" / "ds1" / "run-1"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text(
+        '{"training_info":{"hyperparameters":{"image_size":1280}}}',
+        encoding="utf-8",
+    )
+    pt = models_dir / "run-1.pt"
+    pt.write_text("pt", encoding="utf-8")
+    value, source = mcc._resolve_imgsz_from_args_and_model(_base_args(imgsz=None), pt)
+    assert value == 1280
+    assert source == "training_metadata"
+
+
 def test_resolve_public_onnx_target_uses_variant_name_without_train_dir(tmp_path: Path):
     run_dir = tmp_path / "runs" / "ds1" / "run-no-train"
     models_dir = run_dir / "models"
@@ -90,6 +105,26 @@ def test_resolve_public_onnx_target_uses_variant_name_without_train_dir(tmp_path
     }
     target = mcc._resolve_public_onnx_target(pt, models_dir, expected)
     assert target.name == "run-no-train_imgsz640x640_b1_static_op17_fp32_simplify1_nms0.onnx"
+
+
+def test_resolve_public_onnx_target_uses_variant_name_for_runs_models_without_metadata(tmp_path: Path):
+    run_dir = tmp_path / "runs" / "ds1" / "run-no-meta"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    pt = models_dir / "run-no-meta.pt"
+    pt.write_text("pt", encoding="utf-8")
+    expected = {
+        "h": 640,
+        "w": 640,
+        "batch": 1,
+        "dynamic": False,
+        "opset": 17,
+        "half": False,
+        "simplify": True,
+        "nms": False,
+    }
+    target = mcc._resolve_public_onnx_target(pt, models_dir, expected)
+    assert target.name == "run-no-meta_imgsz640x640_b1_static_op17_fp32_simplify1_nms0.onnx"
 
 
 def _base_args(**overrides):
@@ -300,6 +335,32 @@ def test_convert_onnx_only_syncs_public_and_trtprep_for_run(monkeypatch, tmp_pat
     assert (models_dir / "run-1_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx").exists()
     dedicated = sorted(models_dir.glob("*_trtprep.onnx"))
     assert dedicated, "dedicated trtprep ONNX must be synchronized in onnx-only mode"
+
+
+def test_sync_onnx_artifact_removes_legacy_plain_onnx_for_run(tmp_path: Path):
+    run_dir = tmp_path / "runs" / "ds1" / "run-cleanup"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    source_pt = models_dir / "run-cleanup.pt"
+    source_pt.write_text("pt", encoding="utf-8")
+    src_onnx = models_dir / "tmp_src.onnx"
+    src_onnx.write_text("onnx", encoding="utf-8")
+    plain = models_dir / "run-cleanup.onnx"
+    plain.write_text("legacy", encoding="utf-8")
+    (models_dir / "run-cleanup.onnx.meta.json").write_text("{}", encoding="utf-8")
+    target = models_dir / "run-cleanup_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx"
+    ok, reason = mcc._sync_onnx_artifact(
+        src_onnx,
+        target,
+        force=True,
+        source_path_for_meta=source_pt,
+        run_root=run_dir,
+        params={"imgsz": "1280", "batch": 1, "dynamic": False, "opset": 17, "simplify": True, "half": False, "nms": False},
+    )
+    assert ok is True, reason
+    assert target.exists()
+    assert not plain.exists()
+    assert not (models_dir / "run-cleanup.onnx.meta.json").exists()
 
 
 def test_interactive_onnx_plus_trt_exports_onnx_once(monkeypatch, tmp_path: Path):

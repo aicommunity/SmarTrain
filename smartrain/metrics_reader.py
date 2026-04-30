@@ -70,12 +70,33 @@ def latest_test_metrics_path(run_dir: str, format_name: str | None = "pt") -> st
     if format_name not in (None, "", "pt"):
         p = format_metrics_path(run_dir, format_name)
         return p if os.path.isfile(p) else None
-    pt_metrics = os.path.join(run_dir, "test_metrics.csv")
-    return pt_metrics if os.path.isfile(pt_metrics) else None
+    # Prefer canonical layout produced by current test pipeline.
+    canonical_pt_metrics = format_metrics_path(run_dir, "pt")
+    if os.path.isfile(canonical_pt_metrics):
+        return canonical_pt_metrics
+    # Fallback for legacy runs that still store metrics in run root.
+    legacy_pt_metrics = os.path.join(run_dir, "test_metrics.csv")
+    return legacy_pt_metrics if os.path.isfile(legacy_pt_metrics) else None
 
 
 def _iter_test_formats(include_internal: bool = False) -> tuple[str, ...]:
     return SUPPORTED_TEST_FORMATS + INTERNAL_TEST_FORMATS if include_internal else SUPPORTED_TEST_FORMATS
+
+
+def _resolve_manifest_metrics_path(run_dir: str, rel_path: str) -> str | None:
+    rel = str(rel_path or "").strip()
+    if not rel:
+        return None
+    candidate = os.path.abspath(os.path.join(run_dir, rel))
+    if os.path.isfile(candidate):
+        return candidate
+    # Legacy manifests may keep root-relative names while files already moved under tests/.
+    basename = os.path.basename(rel)
+    if basename:
+        tests_candidate = os.path.join(run_dir, "tests", basename)
+        if os.path.isfile(tests_candidate):
+            return os.path.abspath(tests_candidate)
+    return None
 
 
 def read_test_metrics_by_format(run_dir: str, *, include_internal: bool = False) -> dict[str, str]:
@@ -90,8 +111,8 @@ def read_test_metrics_by_format(run_dir: str, *, include_internal: bool = False)
             rel = entry.get("metrics_csv")
             selected: str | None = None
             if isinstance(rel, str) and rel.strip():
-                p = os.path.abspath(os.path.join(run_dir, rel))
-                if os.path.isfile(p):
+                p = _resolve_manifest_metrics_path(run_dir, rel)
+                if p:
                     selected = p
             if selected is None:
                 artifacts = entry.get("artifacts")
@@ -102,8 +123,8 @@ def read_test_metrics_by_format(run_dir: str, *, include_internal: bool = False)
                         rel_item = item.get("metrics_csv")
                         if not isinstance(rel_item, str) or not rel_item.strip():
                             continue
-                        p = os.path.abspath(os.path.join(run_dir, rel_item))
-                        if os.path.isfile(p):
+                        p = _resolve_manifest_metrics_path(run_dir, rel_item)
+                        if p:
                             selected = p
                             break
             if selected is not None:
@@ -138,8 +159,8 @@ def read_test_metrics_by_format_artifacts(
                 rel_metrics = item.get("metrics_csv")
                 if not isinstance(rel_metrics, str) or not rel_metrics.strip():
                     continue
-                metrics_path = os.path.abspath(os.path.join(run_dir, rel_metrics))
-                if not os.path.isfile(metrics_path):
+                metrics_path = _resolve_manifest_metrics_path(run_dir, rel_metrics)
+                if not metrics_path:
                     continue
                 rel_target = item.get("target_path")
                 target_path = os.path.abspath(os.path.join(run_dir, rel_target)) if isinstance(rel_target, str) and rel_target else ""
@@ -147,8 +168,8 @@ def read_test_metrics_by_format_artifacts(
         if not records:
             rel = entry.get("metrics_csv")
             if isinstance(rel, str) and rel.strip():
-                metrics_path = os.path.abspath(os.path.join(run_dir, rel))
-                if os.path.isfile(metrics_path):
+                metrics_path = _resolve_manifest_metrics_path(run_dir, rel)
+                if metrics_path:
                     rel_target = entry.get("target_path")
                     target_path = (
                         os.path.abspath(os.path.join(run_dir, rel_target))

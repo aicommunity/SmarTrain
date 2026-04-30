@@ -37,6 +37,7 @@ from smartrain.run_artifacts import (
     canonical_run_model_path,
     materialize_canonical_run_model,
     resolve_run_model_with_legacy_fallback,
+    run_test_backend_dir,
     run_tmp_dir,
 )
 from smartrain.analyze_cache import (
@@ -60,6 +61,7 @@ from smartrain.metrics_reader import (
     read_test_metrics_by_format,
     read_metrics_by_format_for_split,
     read_metrics_by_format_for_split_artifacts,
+    read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
 from smartrain.model_test_service import load_test_artifacts_manifest
@@ -585,7 +587,7 @@ def _write_test_system_profile_compare_csv(run_dirs: list[str], out_csv: str) ->
                     "format": fmt,
                     "target_path": rec.get("target_path"),
                     "test_backend": runtime.get("backend"),
-                    "test_provider": runtime.get("provider"),
+                    "test_provider": runtime.get("provider") or runtime.get("backend"),
                     "test_device": runtime.get("device"),
                     "sys_cpu_model": cpu.get("model"),
                     "sys_cpu_arch": cpu.get("architecture"),
@@ -999,12 +1001,65 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
         runs = [r for r in runs if os.path.abspath(r) in selected_norm]
         print(f"[INFO] Leaderboard scope: {len(runs)} run(s) selected")
     records = []
+
+    def _resolve_speed_metric_from_performance(run_dir: str, metric_name: str) -> float | None:
+        metric = str(metric_name or "").strip().lower()
+        if not metric:
+            return None
+        perf_by_fmt = read_test_performance_by_format_artifacts(run_dir)
+        candidates: list[float] = []
+        for rows in perf_by_fmt.values():
+            for row in rows:
+                perf = row.get("performance") if isinstance(row, dict) else None
+                if not isinstance(perf, dict):
+                    continue
+                value: Any = None
+                if metric in {"avg_inference_fps", "throughput_img_s"}:
+                    value = perf.get("throughput_img_s")
+                elif metric in {"avg_inference_ms_per_frame", "latency_p50_ms"}:
+                    latency_ms = perf.get("latency_ms")
+                    if isinstance(latency_ms, dict):
+                        steady = latency_ms.get("steady")
+                        all_stats = latency_ms.get("all")
+                        if isinstance(steady, dict) and steady.get("p50") is not None:
+                            value = steady.get("p50")
+                        elif isinstance(all_stats, dict):
+                            value = all_stats.get("p50")
+                elif metric == "latency_p95_ms":
+                    latency_ms = perf.get("latency_ms")
+                    if isinstance(latency_ms, dict):
+                        steady = latency_ms.get("steady")
+                        all_stats = latency_ms.get("all")
+                        if isinstance(steady, dict) and steady.get("p95") is not None:
+                            value = steady.get("p95")
+                        elif isinstance(all_stats, dict):
+                            value = all_stats.get("p95")
+                try:
+                    if value is None:
+                        continue
+                    fv = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if np.isfinite(fv):
+                    candidates.append(fv)
+        if not candidates:
+            return None
+        # Prefer best attainable speed for run-level leaderboard.
+        if "fps" in metric or "throughput" in metric:
+            return float(max(candidates))
+        return float(min(candidates))
+
     for run_dir in runs:
         try:
             rec = build_run_record(run_dir)
         except Exception as e:
             print(f"[WARN] {run_dir}: failed to load run ({e})")
             continue
+        speed_value = rec.test_metrics.get(args.speed_metric)
+        if speed_value is None or (isinstance(speed_value, float) and pd.isna(speed_value)):
+            fallback_speed = _resolve_speed_metric_from_performance(run_dir, str(args.speed_metric or ""))
+            if fallback_speed is not None:
+                rec.test_metrics[args.speed_metric] = fallback_speed
         score = compute_composite_score(
             rec,
             weight_quality=args.weight_quality,
@@ -1497,7 +1552,9 @@ def _collect_ultralytics_test_artifacts(
     for rd in run_dirs:
         run_name = os.path.basename(rd.rstrip(os.sep))
         run_code = abbreviations.get(run_name, run_name)
-        test_dir = os.path.join(rd, "test")
+        preferred_test_dir = str(run_test_backend_dir(rd, "ultralytics"))
+        legacy_test_dir = os.path.join(rd, "test")
+        test_dir = preferred_test_dir if os.path.isdir(preferred_test_dir) else legacy_test_dir
         run_info: dict[str, Any] = {}
         machine_info: dict[str, Any] = {}
         try:
@@ -1657,7 +1714,23 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         fmt: str,
         entry: dict[str, Any],
         split_metrics: list[dict[str, str]],
+        split_name: str,
     ) -> list[dict[str, Any]]:
+        def _resolve_metrics_candidate(path_value: str | None) -> str | None:
+            raw = str(path_value or "").strip()
+            if not raw:
+                return None
+            candidate = os.path.abspath(os.path.join(run_dir, raw)) if not os.path.isabs(raw) else raw
+            if os.path.isfile(candidate):
+                return candidate
+            # Legacy manifest values may omit "tests/" prefix after migration.
+            base = os.path.basename(raw)
+            if base:
+                migrated = os.path.join(run_dir, "tests", base)
+                if os.path.isfile(migrated):
+                    return os.path.abspath(migrated)
+            return candidate
+
         variants: list[dict[str, Any]] = []
         artifacts = entry.get("artifacts")
         if isinstance(artifacts, list):
@@ -1671,22 +1744,31 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     else (target_rel or None)
                 )
                 metrics_rel = str(item.get("metrics_csv") or "").strip()
-                metrics_abs = (
-                    os.path.abspath(os.path.join(run_dir, metrics_rel))
-                    if metrics_rel and not os.path.isabs(metrics_rel)
-                    else (metrics_rel or None)
-                )
+                metrics_abs = _resolve_metrics_candidate(metrics_rel)
                 matched = None
+                preferred_split_metrics = list(split_metrics)
+                split_token = f"{split_name}_metrics"
+                split_specific = [
+                    rec
+                    for rec in split_metrics
+                    if split_token in os.path.basename(str(rec.get("metrics_path") or "")).lower()
+                ]
+                if split_specific:
+                    preferred_split_metrics = split_specific
                 if target_abs:
-                    for rec in split_metrics:
+                    for rec in preferred_split_metrics:
                         if rec.get("target_path") == target_abs:
                             matched = rec
                             break
                 if matched is None and metrics_abs:
-                    for rec in split_metrics:
+                    for rec in preferred_split_metrics:
                         if rec.get("metrics_path") == metrics_abs:
                             matched = rec
                             break
+                if matched is None and preferred_split_metrics:
+                    # Split-specific metrics should take precedence (e.g. val for pt_uni)
+                    # even when artifact-level metrics_csv points to legacy test path.
+                    matched = preferred_split_metrics[0]
                 variants.append(
                     {
                         "target_path": target_rel or None,
@@ -1709,6 +1791,41 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     "performance": entry.get("performance"),
                 }
             )
+        # Deduplicate by target+metrics and prefer variants with resolved metrics.
+        deduped: dict[tuple[str, str], dict[str, Any]] = {}
+        for item in variants:
+            key = (
+                str(item.get("target_path") or ""),
+                str(item.get("metrics_path") or ""),
+            )
+            existing = deduped.get(key)
+            if existing is None:
+                deduped[key] = item
+                continue
+            cur_has_metrics = bool(str(item.get("metrics_path") or "").strip())
+            prev_has_metrics = bool(str(existing.get("metrics_path") or "").strip())
+            if cur_has_metrics and not prev_has_metrics:
+                deduped[key] = item
+        variants = list(deduped.values())
+        if len(variants) > 1:
+            # Prefer entries with concrete target path when empty placeholders exist.
+            with_target = [v for v in variants if str(v.get("target_path") or "").strip()]
+            if with_target:
+                variants = with_target
+        if len(variants) > 1:
+            # If at least one target exists on disk, drop non-existing targets.
+            existing_target_variants = []
+            for v in variants:
+                t = str(v.get("target_path") or "").strip()
+                if not t:
+                    continue
+                candidate = t if os.path.isabs(t) else os.path.join(run_dir, t)
+                if os.path.isfile(candidate):
+                    existing_target_variants.append(v)
+            if existing_target_variants:
+                variants = existing_target_variants
+        # Stable order: metric-bearing entries first.
+        variants.sort(key=lambda v: (0 if str(v.get("metrics_path") or "").strip() else 1, str(v.get("target_path") or "")))
         return variants
 
     def _read_eval_args(run_dir: str, fmt: str) -> dict[str, Any]:
@@ -1775,6 +1892,13 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         except Exception:
             return {}
 
+    def _metrics_path_matches_split(metrics_path: str | None, split_name: str) -> bool:
+        if not metrics_path:
+            return False
+        base = os.path.basename(str(metrics_path)).lower()
+        token = f"{split_name}_metrics"
+        return token in base
+
     def _normalize_issue_reason(reason: str) -> tuple[str, str]:
         raw = str(reason or "").strip()
         if raw.startswith("[") and "]" in raw:
@@ -1797,6 +1921,20 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
             return "missing_artifact", raw
         return "unknown", raw
 
+    def _is_invalid_zero_metrics(fmt: str, metric_row: dict[str, Any]) -> bool:
+        if fmt not in {"engine", "trt"}:
+            return False
+        vals: list[float] = []
+        for col in METRIC_AGG_COLUMNS:
+            raw_v = metric_row.get(col)
+            if raw_v is None or (isinstance(raw_v, float) and pd.isna(raw_v)):
+                return False
+            try:
+                vals.append(float(raw_v))
+            except (TypeError, ValueError):
+                return False
+        return bool(vals) and all(abs(v) <= 1e-12 for v in vals)
+
     def _build_format_rows(
         split_name: str,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1817,16 +1955,44 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                 fmt_metrics = list(metrics_artifacts.get(fmt) or [])
                 if not fmt_metrics and metrics_paths.get(fmt):
                     fmt_metrics = [{"metrics_path": str(metrics_paths[fmt]), "target_path": ""}]
-                variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics)
+                variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics, split_name)
+                if len(variants) > 1:
+                    with_metrics = [v for v in variants if str(v.get("metrics_path") or "").strip()]
+                    if with_metrics:
+                        variants = with_metrics
                 if not variants and not _has_model_artifact(run_dir, fmt, entry):
                     continue
                 eval_args = _read_eval_args(run_dir, fmt)
+                has_any_metrics_variant = False
+                for _v in variants:
+                    _mp = str(_v.get("metrics_path") or "").strip()
+                    if _mp and os.path.isfile(_mp):
+                        has_any_metrics_variant = True
+                        break
                 for var in variants:
                     metrics_path = str(var.get("metrics_path") or "").strip() or None
                     metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
+                    if split_name == "val" and metrics_exists and not _metrics_path_matches_split(metrics_path, split_name):
+                        metrics_exists = False
                     if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
                         continue
+                    status_raw = str(var.get("status") or "").strip()
+                    err_raw = str(var.get("error") or "").strip()
+                    status_lower = status_raw.lower()
+                    has_explicit_failure = bool(err_raw) or status_lower in {
+                        "failed",
+                        "error",
+                        "timeout",
+                        "terminated",
+                        "unavailable",
+                    }
+                    if not metrics_exists:
+                        if split_name == "val" and not has_explicit_failure:
+                            continue
+                        if split_name != "val" and not has_explicit_failure:
+                            continue
                     metric_row = _read_metric_row(metrics_path)
+                    invalid_zero_metrics = metrics_exists and _is_invalid_zero_metrics(fmt, metric_row)
                     row: dict[str, Any] = {
                         "run_dir": run_dir,
                         "run_name": run_name,
@@ -1838,11 +2004,11 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         "inference_source": eval_args.get("inference_source"),
                         "gt_source": eval_args.get("gt_source"),
                         "nms_profile": eval_args.get("nms_profile"),
-                        "mAP50-95": metric_row.get("mAP50-95"),
-                        "mAP50": metric_row.get("mAP50"),
-                        "Box-F1": metric_row.get("Box-F1"),
-                        "Box-P": metric_row.get("Box-P"),
-                        "Box-R": metric_row.get("Box-R"),
+                        "mAP50-95": None if invalid_zero_metrics else metric_row.get("mAP50-95"),
+                        "mAP50": None if invalid_zero_metrics else metric_row.get("mAP50"),
+                        "Box-F1": None if invalid_zero_metrics else metric_row.get("Box-F1"),
+                        "Box-P": None if invalid_zero_metrics else metric_row.get("Box-P"),
+                        "Box-R": None if invalid_zero_metrics else metric_row.get("Box-R"),
                     }
                     perf = var.get("performance") if isinstance(var.get("performance"), dict) else {}
                     lat_all = perf.get("latency_ms") if isinstance(perf.get("latency_ms"), dict) else {}
@@ -1869,10 +2035,24 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     if metrics_exists:
                         if not row.get("backend_status"):
                             row["backend_status"] = backend_fallback.get(fmt)
+                        if invalid_zero_metrics:
+                            issues.append(
+                                {
+                                    "run_name": run_name,
+                                    "split": split_name,
+                                    "format": fmt,
+                                    "target_path": var.get("target_path"),
+                                    "status": str(var.get("status") or "ok"),
+                                    "reason": "metrics are all zeros; treated as invalid native evaluation output",
+                                    "reason_code": "invalid_metrics",
+                                }
+                            )
                     else:
-                        status_raw = str(var.get("status") or "").strip()
-                        err_raw = str(var.get("error") or "").strip()
                         if status_raw or err_raw:
+                            if has_any_metrics_variant:
+                                # Do not report missing duplicates when at least one
+                                # variant for the same run/split/format has metrics.
+                                continue
                             reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
                             issues.append(
                                 {
@@ -1920,13 +2100,40 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     fmt_metrics = list(metrics_artifacts.get(fmt) or [])
                     if not fmt_metrics and metrics_paths.get(fmt):
                         fmt_metrics = [{"metrics_path": str(metrics_paths[fmt]), "target_path": ""}]
-                    variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics)
+                    variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics, split_name)
+                    if len(variants) > 1:
+                        with_metrics = [v for v in variants if str(v.get("metrics_path") or "").strip()]
+                        if with_metrics:
+                            variants = with_metrics
                     eval_args = _read_eval_args(run_dir, fmt)
+                    has_any_metrics_variant = False
+                    for _v in variants:
+                        _mp = str(_v.get("metrics_path") or "").strip()
+                        if _mp and os.path.isfile(_mp):
+                            has_any_metrics_variant = True
+                            break
                     for var in variants:
                         metrics_path = str(var.get("metrics_path") or "").strip() or None
                         metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
+                        if split_name == "val" and metrics_exists and not _metrics_path_matches_split(metrics_path, split_name):
+                            metrics_exists = False
                         if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
                             continue
+                        status_raw = str(var.get("status") or "").strip()
+                        err_raw = str(var.get("error") or "").strip()
+                        status_lower = status_raw.lower()
+                        has_explicit_failure = bool(err_raw) or status_lower in {
+                            "failed",
+                            "error",
+                            "timeout",
+                            "terminated",
+                            "unavailable",
+                        }
+                        if not metrics_exists:
+                            if split_name == "val" and not has_explicit_failure:
+                                continue
+                            if split_name != "val" and not has_explicit_failure:
+                                continue
                         metric_row = _read_metric_row(metrics_path)
                         row: dict[str, Any] = {
                             "run_dir": run_dir,
@@ -1971,9 +2178,9 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                             if not row.get("backend_status"):
                                 row["backend_status"] = backend_fallback.get(fmt)
                         else:
-                            status_raw = str(var.get("status") or "").strip()
-                            err_raw = str(var.get("error") or "").strip()
                             if status_raw or err_raw:
+                                if has_any_metrics_variant:
+                                    continue
                                 reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
                                 issues.append(
                                     {
@@ -2074,6 +2281,29 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         pd.DataFrame(alias_legend).to_csv(alias_csv, index=False, encoding="utf-8")
         out["alias_legend_csv"] = os.path.relpath(alias_csv, session_root)
     issues = test_issues + val_issues + pt_uni_issues
+    if issues:
+        deduped_issues: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            key = (
+                str(issue.get("run_name") or ""),
+                str(issue.get("split") or ""),
+                str(issue.get("format") or ""),
+                str(issue.get("reason_code") or ""),
+            )
+            existing = deduped_issues.get(key)
+            if existing is None:
+                deduped_issues[key] = issue
+                continue
+            # Prefer richer records with concrete artifact path and non-failed status.
+            cur_target = str(issue.get("target_path") or "").strip()
+            prev_target = str(existing.get("target_path") or "").strip()
+            cur_failed = str(issue.get("status") or "").strip().lower() in {"failed", "unavailable"}
+            prev_failed = str(existing.get("status") or "").strip().lower() in {"failed", "unavailable"}
+            if (cur_target and not prev_target) or (prev_failed and not cur_failed):
+                deduped_issues[key] = issue
+        issues = list(deduped_issues.values())
     if issues:
         issues_json = os.path.join(out_dir, "format_compare_issues.json")
         with open(issues_json, "w", encoding="utf-8") as f:
@@ -3083,7 +3313,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         output=exp_csv,
         workspace=args.workspace,
         models_root=args.models_root,
-        analytics_session=args.analytics_session,
+        analytics_session=None,
     )
     cmd_export_table(exp_ns)
     artifacts.append({"role": "summary_csv", "path": os.path.relpath(exp_csv, session_root)})
@@ -3214,6 +3444,50 @@ def cmd_all(args: argparse.Namespace) -> None:
             cache_stats_out=os.path.join(session_root, "artifacts", "inference", "cache_stats.json"),
         )
         cmd_inference_benchmark(ib_ns)
+        if os.path.isfile(lb_csv) and os.path.isfile(inf_csv):
+            try:
+                lb_df = pd.read_csv(lb_csv)
+                inf_df = pd.read_csv(inf_csv)
+                if "run_dir" in lb_df.columns and "run_dir" in inf_df.columns:
+                    speed_series = (
+                        inf_df.assign(
+                            speed_metric=pd.to_numeric(inf_df.get("avg_inference_fps"), errors="coerce")
+                        )
+                        .dropna(subset=["run_dir", "speed_metric"])
+                        .groupby("run_dir", as_index=True)["speed_metric"]
+                        .max()
+                    )
+                    if not speed_series.empty:
+                        existing_speed = pd.to_numeric(lb_df.get("speed_metric"), errors="coerce")
+                        direct_speed = lb_df["run_dir"].map(speed_series)
+                        bench_by_name = {
+                            os.path.basename(str(k).rstrip(os.sep)): float(v)
+                            for k, v in speed_series.items()
+                        }
+                        by_name_speed = lb_df["run_dir"].astype(str).map(
+                            lambda p: bench_by_name.get(os.path.basename(str(p).rstrip(os.sep)))
+                        )
+                        lb_df["speed_metric"] = direct_speed.combine_first(by_name_speed).combine_first(existing_speed)
+                        if "quality_metric" in lb_df.columns:
+                            qv = pd.to_numeric(lb_df.get("quality_metric"), errors="coerce")
+                            sv = pd.to_numeric(lb_df.get("speed_metric"), errors="coerce")
+                            stable = (
+                                pd.Series([1.0] * len(lb_df))
+                                if "training_ok" not in lb_df.columns and "testing_ok" not in lb_df.columns
+                                else (
+                                    pd.to_numeric(lb_df.get("training_ok"), errors="coerce").fillna(0.0)
+                                    * pd.to_numeric(lb_df.get("testing_ok"), errors="coerce").fillna(0.0)
+                                )
+                            )
+                            speed_component = sv.where(sv.isna(), sv)
+                            denom = 0.6 + 0.25 + 0.15
+                            lb_df["composite_score"] = (
+                                (0.6 * qv.fillna(0.0)) + (0.25 * speed_component.fillna(0.0)) + (0.15 * stable.fillna(0.0))
+                            ) / denom
+                        lb_df = lb_df.sort_values("composite_score", ascending=False)
+                        lb_df.to_csv(lb_csv, index=False, encoding="utf-8")
+            except Exception:
+                pass
         ip_ns = argparse.Namespace(
             csv=inf_csv,
             metric="avg_inference_ms_per_frame",

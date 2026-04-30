@@ -7,11 +7,13 @@ from types import ModuleType
 
 from PIL import Image
 
+import smartrain.model_test_backends as model_test_backends
 from smartrain.model_test_backends import run_native_format_backend
 from smartrain.model_test_service import (
     format_metrics_path,
     format_recommendation_path,
     format_test_dir,
+    has_matching_test_artifacts,
     test_artifacts_manifest_path as manifest_path_fn,
 )
 from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
@@ -364,6 +366,154 @@ def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path
     assert manifest["formats"]["engine"]["status"] == "ok"
     artifacts = manifest["formats"]["engine"].get("artifacts") or []
     assert isinstance(artifacts, list) and isinstance(artifacts[0].get("test_system_profile"), dict)
+
+
+def test_run_native_tensorrt_backend_marks_partial_ok_when_val_fails(monkeypatch, tmp_path: Path) -> None:
+    root_dir = tmp_path / "run_trt_partial"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.engine"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_trt_partial", with_test=True)
+    (ds / "val" / "images").mkdir(parents=True, exist_ok=True)
+    (ds / "val" / "labels").mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (100, 100), color=(128, 128, 128)).save(ds / "val" / "images" / "a.jpg")
+    (ds / "val" / "labels" / "a.txt").write_text("0 0.2 0.2 0.2 0.2\n", encoding="utf-8")
+
+    def _fake_trt_infer(_engine_path, image_path, _input_hw, _conf_thr, _iou_thr, _names):
+        from smartrain.model_test_backends import _Pred
+
+        return [_Pred(image_path=image_path, cls_id=0, conf=0.95, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
+
+    orig_collect_gt = model_test_backends._collect_gt
+
+    def _collect_gt_with_val_failure(data_yaml: str, split: str):
+        if split == "val":
+            raise RuntimeError("val split forced failure")
+        return orig_collect_gt(data_yaml, split)
+
+    monkeypatch.setattr("smartrain.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
+    monkeypatch.setattr("smartrain.model_test_backends._collect_gt", _collect_gt_with_val_failure)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="engine",
+        imgsz=640,
+        val_conf=0.25,
+        val_iou=0.5,
+        val_batch=1,
+    )
+    assert result.success is True
+    manifest = json.loads(Path(manifest_path_fn(str(root_dir))).read_text(encoding="utf-8"))
+    fmt_payload = manifest["formats"]["engine"]
+    assert fmt_payload["status"] == "partial_ok"
+    assert "val split failed" in str(fmt_payload.get("error") or "")
+    split_status = fmt_payload.get("split_status") or {}
+    assert (split_status.get("val") or {}).get("status") == "failed"
+
+
+def test_has_matching_test_artifacts_rejects_all_zero_native_metrics(tmp_path: Path) -> None:
+    root_dir = tmp_path / "run_match_zero"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    (root_dir / "models").mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "models" / "model.engine"
+    weights_path.write_bytes(b"fake")
+    data_yaml = tmp_path / "datasets" / "ds_match_zero" / "data.yaml"
+    data_yaml.parent.mkdir(parents=True, exist_ok=True)
+    data_yaml.write_text("train: train/images\nval: val/images\ntest: test/images\nnames: ['obj']\n", encoding="utf-8")
+    (root_dir / "tests" / "test_engine").mkdir(parents=True, exist_ok=True)
+    (root_dir / "tests" / "test_engine" / "args.yaml").write_text(
+        "\n".join(
+            [
+                "backend: tensorrt",
+                "format: engine",
+                f"weights: {weights_path}",
+                f"data: {data_yaml}",
+                "imgsz: 640",
+                "conf: 0.25",
+                "iou: 0.5",
+                "batch: 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for split_name in ("test", "val"):
+        metrics_name = "test_metrics_engine.csv" if split_name == "test" else "val_metrics_engine.csv"
+        (root_dir / "tests" / metrics_name).write_text(
+            "mAP50-95,mAP50,Box-F1,Box-P,Box-R\n0.0,0.0,0.0,0.0,0.0\n",
+            encoding="utf-8",
+        )
+    (root_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "engine": {
+                        "format": "engine",
+                        "target_path": "models/model.engine",
+                        "dataset_yaml": str(data_yaml),
+                        "backend": "tensorrt",
+                        "status": "ok",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        has_matching_test_artifacts(
+            str(root_dir),
+            format_name="engine",
+            target_path=str(weights_path),
+            dataset_yaml=str(data_yaml),
+            imgsz=640,
+            conf=0.25,
+            iou=0.5,
+        )
+        is False
+    )
+
+
+def test_run_native_tensorrt_uses_artifact_imgsz_when_requested_differs(monkeypatch, tmp_path: Path, capsys) -> None:
+    root_dir = tmp_path / "run_trt_imgsz_override"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    weights_path = root_dir / "model.engine"
+    weights_path.write_bytes(b"fake")
+    ds = _make_dataset(tmp_path, "ds_trt_imgsz_override", with_test=True)
+    (ds / "val" / "images").mkdir(parents=True, exist_ok=True)
+    (ds / "val" / "labels").mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (100, 100), color=(128, 128, 128)).save(ds / "val" / "images" / "a.jpg")
+    (ds / "val" / "labels" / "a.txt").write_text("0 0.2 0.2 0.2 0.2\n", encoding="utf-8")
+
+    def _fake_trt_infer(_engine_path, image_path, input_hw, _conf_thr, _iou_thr, _names):
+        from smartrain.model_test_backends import _Pred
+
+        assert input_hw == (640, 640)
+        return [_Pred(image_path=image_path, cls_id=0, conf=0.95, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
+
+    monkeypatch.setattr(
+        "smartrain.model_test_backends.read_model_sidecar_metadata",
+        lambda _path: {"params": {"imgsz": 640}},
+    )
+    monkeypatch.setattr("smartrain.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
+
+    result = run_native_format_backend(
+        root_dir=str(root_dir),
+        weights_path=str(weights_path),
+        dataset_yaml_path=str(ds / "data.yaml"),
+        format_name="engine",
+        imgsz=1280,
+        val_conf=0.25,
+        val_iou=0.5,
+        val_batch=1,
+    )
+    out = capsys.readouterr().out
+    assert result.success is True
+    assert "native eval imgsz mismatch" in out
+    args_yaml = Path(format_test_dir(str(root_dir), "engine")) / "args.yaml"
+    payload = json.loads(json.dumps(__import__("yaml").safe_load(args_yaml.read_text(encoding="utf-8")) or {}))
+    assert int(payload.get("imgsz")) == 640
 
 
 def test_run_native_onnx_backend_writes_deep_diagnostics_artifacts(monkeypatch, tmp_path: Path) -> None:
