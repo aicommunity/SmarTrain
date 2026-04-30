@@ -12,6 +12,7 @@ from smartrain.analyze_models import RunRecord
 from smartrain.model_test_service import (
     INTERNAL_TEST_FORMATS,
     SUPPORTED_TEST_FORMATS,
+    format_test_dir,
     format_metrics_path,
     format_metrics_path_for_split,
     load_test_artifacts_manifest,
@@ -187,6 +188,20 @@ def read_test_performance_by_format_artifacts(
     *,
     include_internal: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
+    def _perf_target_guess(run_dir_local: str, fmt_local: str, stem: str) -> str:
+        ext_by_fmt = {
+            "pt": ".pt",
+            "pt_uni": ".pt",
+            "onnx": ".onnx",
+            "engine": ".engine",
+            "trt": ".trt",
+        }
+        ext = ext_by_fmt.get(fmt_local, "")
+        if not ext:
+            return stem
+        candidate = os.path.abspath(os.path.join(run_dir_local, "models", f"{stem}{ext}"))
+        return candidate if os.path.isfile(candidate) else stem
+
     out: dict[str, list[dict[str, Any]]] = {}
     manifest = load_test_artifacts_manifest(run_dir)
     formats = manifest.get("formats")
@@ -208,6 +223,26 @@ def read_test_performance_by_format_artifacts(
                 rel_target = item.get("target_path")
                 target_path = os.path.abspath(os.path.join(run_dir, rel_target)) if isinstance(rel_target, str) and rel_target else ""
                 records.append({"target_path": target_path, "performance": perf})
+        # Secondary source for legacy runs: perf_*.json files in test directories.
+        test_dir = format_test_dir(run_dir, fmt)
+        if os.path.isdir(test_dir):
+            for name in sorted(os.listdir(test_dir)):
+                if not (name.startswith("perf_") and name.endswith(".json")):
+                    continue
+                perf_path = os.path.join(test_dir, name)
+                try:
+                    with open(perf_path, "r", encoding="utf-8") as f:
+                        payload = json.load(f)
+                except Exception:
+                    continue
+                if not isinstance(payload, dict) or not payload:
+                    continue
+                stem = name[len("perf_") : -len(".json")]
+                guessed_target = _perf_target_guess(run_dir, fmt, stem)
+                # Avoid duplicate target entries from manifest and file fallback.
+                if any(str(r.get("target_path") or "") == str(guessed_target) for r in records):
+                    continue
+                records.append({"target_path": guessed_target, "performance": payload})
         if records:
             out[fmt] = records
     return out

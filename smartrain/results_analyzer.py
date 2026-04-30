@@ -1765,7 +1765,7 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         if rec.get("metrics_path") == metrics_abs:
                             matched = rec
                             break
-                if matched is None and preferred_split_metrics:
+                if matched is None and preferred_split_metrics and (not target_abs or fmt in {"pt", "pt_uni"}):
                     # Split-specific metrics should take precedence (e.g. val for pt_uni)
                     # even when artifact-level metrics_csv points to legacy test path.
                     matched = preferred_split_metrics[0]
@@ -1935,31 +1935,115 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                 return False
         return bool(vals) and all(abs(v) <= 1e-12 for v in vals)
 
+    def _perf_context_for_variant(run_dir: str, fmt: str, target_path: Any) -> dict[str, Any]:
+        profile_map = read_test_system_profile_by_format_artifacts(run_dir)
+        records = profile_map.get(fmt) if isinstance(profile_map, dict) else None
+        if not isinstance(records, list) or not records:
+            return {}
+        target_abs = ""
+        if isinstance(target_path, str) and target_path.strip():
+            target_abs = os.path.abspath(os.path.join(run_dir, target_path))
+        target_name = os.path.basename(target_abs) if target_abs else ""
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            rec_target = str(rec.get("target_path") or "")
+            rec_name = os.path.basename(rec_target) if rec_target else ""
+            profile = rec.get("test_system_profile")
+            if not isinstance(profile, dict) or not profile:
+                continue
+            if target_abs and rec_target and os.path.abspath(rec_target) == target_abs:
+                return profile
+            if target_name and rec_name and rec_name == target_name:
+                return profile
+        return {}
+
+    def _extract_perf_details(
+        perf: dict[str, Any], eval_args: dict[str, Any], profile: dict[str, Any]
+    ) -> dict[str, Any]:
+        lat_all = perf.get("latency_ms") if isinstance(perf.get("latency_ms"), dict) else {}
+        all_stats = lat_all.get("all") if isinstance(lat_all.get("all"), dict) else {}
+        steady_stats = lat_all.get("steady") if isinstance(lat_all.get("steady"), dict) else {}
+        breakdown = perf.get("breakdown_ms") if isinstance(perf.get("breakdown_ms"), dict) else {}
+
+        def _stage(*names: str) -> dict[str, Any]:
+            for name in names:
+                candidate = breakdown.get(name)
+                if isinstance(candidate, dict):
+                    return candidate
+            return {}
+
+        # Backends may serialize stage keys with different naming conventions.
+        preprocess = _stage("preprocess", "preprocess_ms")
+        inference = _stage("infer", "inference", "infer_ms")
+        postprocess = _stage("postprocess", "decode_nms", "decode_nms_ms")
+        total = _stage("total", "total_ms", "infer_total_only_ms")
+
+        runtime = profile.get("runtime") if isinstance(profile.get("runtime"), dict) else {}
+        device = runtime.get("device")
+        batch_raw = eval_args.get("batch")
+        try:
+            batch_val = int(batch_raw) if batch_raw is not None else None
+        except (TypeError, ValueError):
+            batch_val = None
+        return {
+            "throughput_img_s": perf.get("throughput_img_s"),
+            "latency_p50_ms": steady_stats.get("p50", all_stats.get("p50")),
+            "latency_p95_ms": steady_stats.get("p95", all_stats.get("p95")),
+            "perf_preprocess_ms_per_frame": preprocess.get("mean"),
+            "perf_inference_ms_per_frame": inference.get("mean"),
+            "perf_postprocess_ms_per_frame": postprocess.get("mean"),
+            "perf_total_ms_per_frame": total.get("mean", steady_stats.get("mean", all_stats.get("mean"))),
+            "perf_warmup_images": perf.get("warmup_images"),
+            "perf_sample_count": perf.get("images_total"),
+            "perf_batch": batch_val,
+            "perf_device": device,
+        }
+
+    def _resolve_perf_and_reason(
+        run_dir: str,
+        fmt: str,
+        target_path: Any,
+        perf_candidate: Any,
+        entry: dict[str, Any],
+    ) -> tuple[dict[str, Any], str]:
+        perf = perf_candidate if isinstance(perf_candidate, dict) else {}
+        if perf:
+            return perf, "perf_present"
+        perf_map = read_test_performance_by_format_artifacts(run_dir)
+        records = perf_map.get(fmt) if isinstance(perf_map, dict) else None
+        if not isinstance(records, list) or not records:
+            artifacts = entry.get("artifacts") if isinstance(entry, dict) else None
+            if isinstance(artifacts, list) and artifacts:
+                return {}, "perf_not_collected_for_target"
+            return {}, "perf_missing_manifest_entry"
+        target_abs = ""
+        if isinstance(target_path, str) and target_path.strip():
+            target_abs = os.path.abspath(os.path.join(run_dir, target_path))
+        target_name = os.path.basename(target_abs) if target_abs else ""
+        target_stem = os.path.splitext(target_name)[0] if target_name else ""
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            rec_perf = rec.get("performance")
+            if not isinstance(rec_perf, dict) or not rec_perf:
+                continue
+            rec_target = str(rec.get("target_path") or "")
+            rec_name = os.path.basename(rec_target) if rec_target else ""
+            rec_stem = os.path.splitext(rec_name)[0] if rec_name else ""
+            if target_abs and rec_target and os.path.abspath(rec_target) == target_abs:
+                return rec_perf, "perf_present"
+            if target_name and rec_name and rec_name == target_name:
+                return rec_perf, "perf_present"
+            if target_stem and rec_stem and rec_stem == target_stem:
+                return rec_perf, "perf_present"
+        if target_abs:
+            return {}, "perf_target_mismatch_legacy_variant"
+        return {}, "perf_not_collected_for_target"
+
     def _build_format_rows(
         split_name: str,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-        def _perf_fallback_for_variant(run_dir: str, fmt: str, target_path: Any) -> dict[str, Any]:
-            perf_map = read_test_performance_by_format_artifacts(run_dir)
-            records = perf_map.get(fmt) if isinstance(perf_map, dict) else None
-            if not isinstance(records, list) or not records:
-                return {}
-            target_abs = ""
-            if isinstance(target_path, str) and target_path.strip():
-                target_abs = os.path.abspath(os.path.join(run_dir, target_path))
-            target_name = os.path.basename(target_abs) if target_abs else ""
-            for rec in records:
-                if not isinstance(rec, dict):
-                    continue
-                rec_target = str(rec.get("target_path") or "")
-                rec_name = os.path.basename(rec_target) if rec_target else ""
-                perf = rec.get("performance")
-                if not isinstance(perf, dict) or not perf:
-                    continue
-                if target_abs and rec_target and os.path.abspath(rec_target) == target_abs:
-                    return perf
-                if target_name and rec_name and rec_name == target_name:
-                    return perf
-            return {}
 
         rows: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
@@ -2033,16 +2117,13 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                         "Box-P": None if invalid_zero_metrics else metric_row.get("Box-P"),
                         "Box-R": None if invalid_zero_metrics else metric_row.get("Box-R"),
                     }
-                    perf = var.get("performance") if isinstance(var.get("performance"), dict) else {}
-                    if not perf:
-                        perf = _perf_fallback_for_variant(run_dir, fmt, var.get("target_path"))
-                    lat_all = perf.get("latency_ms") if isinstance(perf.get("latency_ms"), dict) else {}
-                    all_stats = lat_all.get("all") if isinstance(lat_all.get("all"), dict) else {}
-                    steady_stats = lat_all.get("steady") if isinstance(lat_all.get("steady"), dict) else {}
-                    row["throughput_img_s"] = perf.get("throughput_img_s")
-                    row["latency_p50_ms"] = steady_stats.get("p50", all_stats.get("p50"))
-                    row["latency_p95_ms"] = steady_stats.get("p95", all_stats.get("p95"))
+                    perf, perf_reason = _resolve_perf_and_reason(
+                        run_dir, fmt, var.get("target_path"), var.get("performance"), entry
+                    )
+                    profile = _perf_context_for_variant(run_dir, fmt, var.get("target_path"))
+                    row.update(_extract_perf_details(perf, eval_args, profile))
                     row["performance_status"] = "ok" if isinstance(perf, dict) and len(perf) > 0 else "performance_not_collected"
+                    row["performance_reason"] = perf_reason
                     try:
                         thr = float(row["throughput_img_s"]) if row.get("throughput_img_s") is not None else None
                     except (TypeError, ValueError):
@@ -2118,29 +2199,6 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         return rows, sources, eval_rows, issues
 
     def _build_pt_uni_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-        def _perf_fallback_for_variant(run_dir: str, fmt: str, target_path: Any) -> dict[str, Any]:
-            perf_map = read_test_performance_by_format_artifacts(run_dir)
-            records = perf_map.get(fmt) if isinstance(perf_map, dict) else None
-            if not isinstance(records, list) or not records:
-                return {}
-            target_abs = ""
-            if isinstance(target_path, str) and target_path.strip():
-                target_abs = os.path.abspath(os.path.join(run_dir, target_path))
-            target_name = os.path.basename(target_abs) if target_abs else ""
-            for rec in records:
-                if not isinstance(rec, dict):
-                    continue
-                rec_target = str(rec.get("target_path") or "")
-                rec_name = os.path.basename(rec_target) if rec_target else ""
-                perf = rec.get("performance")
-                if not isinstance(perf, dict) or not perf:
-                    continue
-                if target_abs and rec_target and os.path.abspath(rec_target) == target_abs:
-                    return perf
-                if target_name and rec_name and rec_name == target_name:
-                    return perf
-            return {}
-
         rows: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         eval_rows: list[dict[str, Any]] = []
@@ -2211,16 +2269,13 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                             "Box-P": metric_row.get("Box-P"),
                             "Box-R": metric_row.get("Box-R"),
                         }
-                        perf = var.get("performance") if isinstance(var.get("performance"), dict) else {}
-                        if not perf:
-                            perf = _perf_fallback_for_variant(run_dir, fmt, var.get("target_path"))
-                        lat_all = perf.get("latency_ms") if isinstance(perf.get("latency_ms"), dict) else {}
-                        all_stats = lat_all.get("all") if isinstance(lat_all.get("all"), dict) else {}
-                        steady_stats = lat_all.get("steady") if isinstance(lat_all.get("steady"), dict) else {}
-                        row["throughput_img_s"] = perf.get("throughput_img_s")
-                        row["latency_p50_ms"] = steady_stats.get("p50", all_stats.get("p50"))
-                        row["latency_p95_ms"] = steady_stats.get("p95", all_stats.get("p95"))
+                        perf, perf_reason = _resolve_perf_and_reason(
+                            run_dir, fmt, var.get("target_path"), var.get("performance"), entry
+                        )
+                        profile = _perf_context_for_variant(run_dir, fmt, var.get("target_path"))
+                        row.update(_extract_perf_details(perf, eval_args, profile))
                         row["performance_status"] = "ok" if isinstance(perf, dict) and len(perf) > 0 else "performance_not_collected"
+                        row["performance_reason"] = perf_reason
                         try:
                             thr = float(row["throughput_img_s"]) if row.get("throughput_img_s") is not None else None
                         except (TypeError, ValueError):

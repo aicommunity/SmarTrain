@@ -797,7 +797,7 @@ def main(argv: list[str] | None = None) -> None:
             if not should_rerun:
                 results.append(("pt", True, None))
             else:
-                if bool(args.deep_diagnostics):
+                if bool(args.deep_diagnostics) or bool(args.perf):
                     pt_result = run_ultralytics_backend(
                         root_dir=root_dir,
                         weights_path=primary_path,
@@ -807,7 +807,7 @@ def main(argv: list[str] | None = None) -> None:
                         val_conf=args.conf,
                         val_iou=args.iou,
                         val_batch=args.batch,
-                        deep_diagnostics=True,
+                        deep_diagnostics=bool(args.deep_diagnostics),
                         collect_performance=bool(args.perf),
                         perf_warmup_images=int(max(0, args.perf_warmup_images)),
                     )

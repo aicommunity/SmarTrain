@@ -90,17 +90,25 @@ def _column_display_name(name: str, is_ru: bool) -> str:
         "throughput_img_s": "Пропускная способность, img/s" if is_ru else "Throughput, img/s",
         "latency_p50_ms": "Задержка p50, мс" if is_ru else "Latency p50, ms",
         "latency_p95_ms": "Задержка p95, мс" if is_ru else "Latency p95, ms",
+        "perf_preprocess_ms_per_frame": "мс/кадр (preprocess)" if is_ru else "ms/frame (preprocess)",
+        "perf_inference_ms_per_frame": "мс/кадр (inference stage)" if is_ru else "ms/frame (inference stage)",
+        "perf_postprocess_ms_per_frame": "мс/кадр (postprocess)" if is_ru else "ms/frame (postprocess)",
+        "perf_total_ms_per_frame": "мс/кадр (pipeline total)" if is_ru else "ms/frame (pipeline total)",
+        "perf_warmup_images": "Warmup (кадров)" if is_ru else "Warmup images",
+        "perf_sample_count": "Измерено кадров" if is_ru else "Measured frames",
+        "perf_batch": "Batch (eval)" if is_ru else "Batch (eval)",
+        "perf_device": "Устройство" if is_ru else "Device",
     }
     return common.get(name, name)
 
 
-def _pretty_value(v: Any, abbreviations: dict[str, str], *, is_ru: bool) -> str:
+def _pretty_value(v: Any, abbreviations: dict[str, str], *, is_ru: bool, float_decimals: int = 4) -> str:
     if pd.isna(v):
         return "нет данных" if is_ru else "no data"
     if isinstance(v, float):
         if abs(v - round(v)) < 1e-9:
             return str(int(round(v)))
-        return f"{v:.4f}"
+        return f"{v:.{int(max(0, float_decimals))}f}"
     if isinstance(v, (int, np.integer)):
         return str(int(v))
     sv = str(v)
@@ -109,7 +117,14 @@ def _pretty_value(v: Any, abbreviations: dict[str, str], *, is_ru: bool) -> str:
     return abbreviations.get(sv, sv)
 
 
-def _md_table_from_df(df: pd.DataFrame, abbreviations: dict[str, str], limit: int | None = None, *, is_ru: bool = True) -> list[str]:
+def _md_table_from_df(
+    df: pd.DataFrame,
+    abbreviations: dict[str, str],
+    limit: int | None = None,
+    *,
+    is_ru: bool = True,
+    float_decimals: int = 4,
+) -> list[str]:
     if len(df) == 0:
         return ["_No data._"]
     preview = df.head(limit).copy() if isinstance(limit, int) and limit > 0 else df.copy()
@@ -119,7 +134,7 @@ def _md_table_from_df(df: pd.DataFrame, abbreviations: dict[str, str], limit: in
         vals = []
         for real_col in preview.columns:
             v = row.get(real_col)
-            vals.append(_pretty_value(v, abbreviations, is_ru=is_ru))
+            vals.append(_pretty_value(v, abbreviations, is_ru=is_ru, float_decimals=float_decimals))
         lines.append("| " + " | ".join(vals) + " |")
     if isinstance(limit, int) and limit > 0 and len(df) > limit:
         lines.append(f"_Showing first {limit} rows out of {len(df)}._")
@@ -575,7 +590,14 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "avg_inference_ms_per_frame",
             "avg_inference_fps",
             "latency_p95_ms",
-            "performance_status",
+            "perf_preprocess_ms_per_frame",
+            "perf_inference_ms_per_frame",
+            "perf_postprocess_ms_per_frame",
+            "perf_total_ms_per_frame",
+            "perf_warmup_images",
+            "perf_sample_count",
+            "perf_batch",
+            "perf_device",
         ]
     elif "format_eval_settings" in lower:
         preferred = [
@@ -790,6 +812,7 @@ def _quality_metric_comments(df: pd.DataFrame, is_ru: bool) -> list[str]:
         s = pd.to_numeric(df[metric], errors="coerce")
         if s.notna().sum() < 2:
             continue
+        metric_label = _column_display_name(metric, is_ru)
         best_idx = int(s.idxmax())
         worst_idx = int(s.idxmin())
         best_run = str(df.loc[best_idx, "run"])
@@ -797,9 +820,13 @@ def _quality_metric_comments(df: pd.DataFrame, is_ru: bool) -> list[str]:
         best_val = float(s.loc[best_idx])
         worst_val = float(s.loc[worst_idx])
         if is_ru:
-            lines.append(f"- {metric}: лучший запуск **{best_run}** ({best_val:.4f}), худший **{worst_run}** ({worst_val:.4f}).")
+            lines.append(
+                f"- {metric_label}: лучший запуск **{best_run}** ({best_val:.4f}), худший **{worst_run}** ({worst_val:.4f})."
+            )
         else:
-            lines.append(f"- {metric}: best run **{best_run}** ({best_val:.4f}), worst **{worst_run}** ({worst_val:.4f}).")
+            lines.append(
+                f"- {metric_label}: best run **{best_run}** ({best_val:.4f}), worst **{worst_run}** ({worst_val:.4f})."
+            )
     return lines
 
 
@@ -1548,15 +1575,76 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             try:
                 perf_df = pd.read_csv(perf_csv_abs)
                 perf_df = _filter_generic_table_for_selection(perf_df, manifest)
+                # Hide legacy target-mismatch rows in the report table to keep
+                # the performance view focused on current comparable artifacts.
+                if "performance_reason" in perf_df.columns:
+                    perf_df = perf_df[
+                        perf_df["performance_reason"].astype(str) != "perf_target_mismatch_legacy_variant"
+                    ].copy()
                 perf_df = _select_table_columns(perf_csv_rel, perf_df)
                 perf_df = _abbrev_df(perf_df, abbreviations)
                 lines.extend(_center_open())
                 lines.append("")
                 lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(perf_csv_rel, is_ru)}**")
                 lines.append("")
-                lines.extend(_md_table_from_df(perf_df, abbreviations, limit=None, is_ru=is_ru))
+                lines.extend(_md_table_from_df(perf_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
                 lines.append("")
                 lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
+                lines.append(
+                    (
+                        "- `мс/кадр (инференс)` и `FPS (инференс)` вычисляются по разной методике: "
+                        "latency берётся из steady p50, а FPS — как throughput по времени прогона. "
+                        "Поэтому они могут не быть строго обратными."
+                        if is_ru
+                        else "- `ms/frame (inference)` and `FPS (inference)` follow different methodologies: "
+                        "latency uses steady p50, while FPS uses throughput over run duration. "
+                        "Therefore they are not guaranteed to be strict reciprocals."
+                    )
+                )
+                lines.append("")
+                legend = [
+                    ("Алиас", "Короткий идентификатор артефакта формата") if is_ru else ("Alias", "Short format artifact identifier"),
+                    ("Запуск", "Сравниваемый run") if is_ru else ("Run", "Compared run"),
+                    ("Подвыборка", "Подмножество датасета (обычно test)") if is_ru else ("Split", "Dataset subset (usually test)"),
+                    ("Формат", "Тип экспортированного артефакта") if is_ru else ("Format", "Exported artifact format"),
+                    (
+                        "мс/кадр (инференс)",
+                        "Latency steady p50 на кадр; не обязана быть обратной к FPS",
+                    )
+                    if is_ru
+                    else ("ms/frame (inference)", "Latency steady p50 per frame; not guaranteed reciprocal to FPS"),
+                    ("FPS (инференс)", "Throughput по времени прогона, кадр/с")
+                    if is_ru
+                    else ("FPS (inference)", "Throughput over run duration, frames/s"),
+                    ("Задержка p95, мс", "95-й перцентиль latency (steady/all fallback)")
+                    if is_ru
+                    else ("Latency p95, ms", "95th percentile latency (steady/all fallback)"),
+                    ("мс/кадр (preprocess)", "Среднее время preprocess на кадр")
+                    if is_ru
+                    else ("ms/frame (preprocess)", "Average preprocess time per frame"),
+                    ("мс/кадр (inference stage)", "Среднее время ядра инференса на кадр")
+                    if is_ru
+                    else ("ms/frame (inference stage)", "Average core inference time per frame"),
+                    ("мс/кадр (postprocess)", "Среднее время decode/NMS на кадр")
+                    if is_ru
+                    else ("ms/frame (postprocess)", "Average decode/NMS time per frame"),
+                    ("мс/кадр (pipeline total)", "Среднее суммарное время конвейера")
+                    if is_ru
+                    else ("ms/frame (pipeline total)", "Average end-to-end pipeline time"),
+                    ("Warmup (кадров)", "Число warmup-кадров, исключённых из steady latency")
+                    if is_ru
+                    else ("Warmup images", "Warmup frames excluded from steady latency"),
+                    ("Измерено кадров", "Количество кадров в perf-замере")
+                    if is_ru
+                    else ("Measured frames", "Number of frames used in perf sampling"),
+                    ("Batch (eval)", "Batch из eval args") if is_ru else ("Batch (eval)", "Batch from eval args"),
+                    ("Устройство", "Устройство исполнения (например cpu/0)")
+                    if is_ru
+                    else ("Device", "Execution device (e.g. cpu/0)"),
+                ]
+                lines.append("**" + ("Легенда колонок:" if is_ru else "Column legend:") + "**")
+                for title, descr in legend:
+                    lines.append(f"- {title} — {descr}")
                 lines.extend(_center_close())
                 table_no += 1
                 rendered_perf_table = True

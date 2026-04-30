@@ -1876,6 +1876,87 @@ def run_ultralytics_backend(
     collect_performance: bool = False,
     perf_warmup_images: int = 5,
 ) -> BackendRunResult:
+    def _ultralytics_perf_payload_from_result(
+        val_result: Any, *, duration_s: float, warmup_images: int
+    ) -> dict[str, Any]:
+        speed = getattr(val_result, "speed", None)
+        speed_map = speed if isinstance(speed, dict) else {}
+
+        def _as_float(v: Any) -> float | None:
+            try:
+                if v is None:
+                    return None
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        preprocess_ms = _as_float(speed_map.get("preprocess"))
+        infer_ms = _as_float(speed_map.get("inference"))
+        postprocess_ms = _as_float(speed_map.get("postprocess"))
+        total_ms = _as_float(speed_map.get("total"))
+        if total_ms is None:
+            parts = [x for x in (preprocess_ms, infer_ms, postprocess_ms) if x is not None]
+            total_ms = float(sum(parts)) if parts else None
+
+        throughput = None
+        if infer_ms is not None and infer_ms > 0:
+            throughput = 1000.0 / infer_ms
+        elif total_ms is not None and total_ms > 0:
+            throughput = 1000.0 / total_ms
+
+        count_guess = None
+        for attr in ("nt_per_class", "nt_per_image"):
+            raw = getattr(val_result, attr, None)
+            try:
+                if raw is None:
+                    continue
+                if hasattr(raw, "sum"):
+                    count_guess = int(raw.sum())
+                elif isinstance(raw, (list, tuple)):
+                    count_guess = int(sum(int(x) for x in raw))
+                else:
+                    count_guess = int(raw)
+            except Exception:
+                count_guess = None
+            if count_guess and count_guess > 0:
+                break
+
+        def _stats(val_ms: float | None) -> dict[str, Any]:
+            if val_ms is None:
+                return {}
+            return {
+                "count": int(count_guess or 0),
+                "mean": float(val_ms),
+                "p50": float(val_ms),
+                "p90": float(val_ms),
+                "p95": float(val_ms),
+                "min": float(val_ms),
+                "max": float(val_ms),
+                "std": 0.0,
+            }
+
+        breakdown: dict[str, Any] = {}
+        if preprocess_ms is not None:
+            breakdown["preprocess_ms"] = _stats(preprocess_ms)
+        if infer_ms is not None:
+            breakdown["infer_ms"] = _stats(infer_ms)
+        if postprocess_ms is not None:
+            breakdown["decode_nms_ms"] = _stats(postprocess_ms)
+        if total_ms is not None:
+            breakdown["infer_total_only_ms"] = _stats(total_ms)
+
+        latency_stats = _stats(infer_ms if infer_ms is not None else total_ms)
+        return {
+            "images_total": int(count_guess) if isinstance(count_guess, int) and count_guess > 0 else None,
+            "warmup_images": int(max(0, warmup_images)),
+            "duration_s": float(max(0.0, duration_s)),
+            "throughput_img_s": float(throughput) if throughput is not None else 0.0,
+            "latency_ms": {"all": latency_stats, "steady": latency_stats},
+            "breakdown_ms": breakdown,
+            "infer_total_only": True,
+            "source": "ultralytics_speed_dict",
+        }
+
     test_start_time = datetime.now()
     model = YOLO(weights_path)
     val_kwargs = {
@@ -2045,15 +2126,9 @@ def run_ultralytics_backend(
         perf_payload: dict[str, Any] | None = None
         if collect_performance:
             duration_s = max(0.0, (test_end_time - test_start_time).total_seconds())
-            perf_payload = {
-                "images_total": None,
-                "warmup_images": int(max(0, perf_warmup_images)),
-                "duration_s": duration_s,
-                "throughput_img_s": 0.0,
-                "latency_ms": {"all": {}, "steady": {}},
-                "breakdown_ms": {"infer_total_only_ms": {}},
-                "infer_total_only": True,
-            }
+            perf_payload = _ultralytics_perf_payload_from_result(
+                result, duration_s=duration_s, warmup_images=perf_warmup_images
+            )
             _write_perf_artifact(root_dir, format_name, weights_path, perf_payload)
         persist_target_test_artifacts_state(
             root_dir,
