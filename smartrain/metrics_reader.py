@@ -10,6 +10,7 @@ import yaml
 
 from smartrain.analyze_models import RunRecord
 from smartrain.model_test_service import (
+    INTERNAL_TEST_FORMATS,
     SUPPORTED_TEST_FORMATS,
     format_metrics_path,
     format_metrics_path_for_split,
@@ -73,12 +74,16 @@ def latest_test_metrics_path(run_dir: str, format_name: str | None = "pt") -> st
     return pt_metrics if os.path.isfile(pt_metrics) else None
 
 
-def read_test_metrics_by_format(run_dir: str) -> dict[str, str]:
+def _iter_test_formats(include_internal: bool = False) -> tuple[str, ...]:
+    return SUPPORTED_TEST_FORMATS + INTERNAL_TEST_FORMATS if include_internal else SUPPORTED_TEST_FORMATS
+
+
+def read_test_metrics_by_format(run_dir: str, *, include_internal: bool = False) -> dict[str, str]:
     out: dict[str, str] = {}
     manifest = load_test_artifacts_manifest(run_dir)
     formats = manifest.get("formats")
     if isinstance(formats, dict):
-        for fmt in SUPPORTED_TEST_FORMATS:
+        for fmt in _iter_test_formats(include_internal):
             entry = formats.get(fmt)
             if not isinstance(entry, dict):
                 continue
@@ -103,20 +108,24 @@ def read_test_metrics_by_format(run_dir: str) -> dict[str, str]:
                             break
             if selected is not None:
                 out[fmt] = selected
-    for fmt in SUPPORTED_TEST_FORMATS:
+    for fmt in _iter_test_formats(include_internal):
         p = latest_test_metrics_path(run_dir, fmt)
         if p and os.path.isfile(p):
             out.setdefault(fmt, p)
     return out
 
 
-def read_test_metrics_by_format_artifacts(run_dir: str) -> dict[str, list[dict[str, str]]]:
+def read_test_metrics_by_format_artifacts(
+    run_dir: str,
+    *,
+    include_internal: bool = False,
+) -> dict[str, list[dict[str, str]]]:
     out: dict[str, list[dict[str, str]]] = {}
     manifest = load_test_artifacts_manifest(run_dir)
     formats = manifest.get("formats")
     if not isinstance(formats, dict):
         return out
-    for fmt in SUPPORTED_TEST_FORMATS:
+    for fmt in _iter_test_formats(include_internal):
         entry = formats.get(fmt)
         if not isinstance(entry, dict):
             continue
@@ -152,13 +161,17 @@ def read_test_metrics_by_format_artifacts(run_dir: str) -> dict[str, list[dict[s
     return out
 
 
-def read_test_performance_by_format_artifacts(run_dir: str) -> dict[str, list[dict[str, Any]]]:
+def read_test_performance_by_format_artifacts(
+    run_dir: str,
+    *,
+    include_internal: bool = False,
+) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {}
     manifest = load_test_artifacts_manifest(run_dir)
     formats = manifest.get("formats")
     if not isinstance(formats, dict):
         return out
-    for fmt in SUPPORTED_TEST_FORMATS:
+    for fmt in _iter_test_formats(include_internal):
         entry = formats.get(fmt)
         if not isinstance(entry, dict):
             continue
@@ -179,13 +192,17 @@ def read_test_performance_by_format_artifacts(run_dir: str) -> dict[str, list[di
     return out
 
 
-def read_test_system_profile_by_format_artifacts(run_dir: str) -> dict[str, list[dict[str, Any]]]:
+def read_test_system_profile_by_format_artifacts(
+    run_dir: str,
+    *,
+    include_internal: bool = False,
+) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = {}
     manifest = load_test_artifacts_manifest(run_dir)
     formats = manifest.get("formats")
     if not isinstance(formats, dict):
         return out
-    for fmt in SUPPORTED_TEST_FORMATS:
+    for fmt in _iter_test_formats(include_internal):
         entry = formats.get(fmt)
         if not isinstance(entry, dict):
             continue
@@ -206,24 +223,34 @@ def read_test_system_profile_by_format_artifacts(run_dir: str) -> dict[str, list
     return out
 
 
-def read_metrics_by_format_for_split(run_dir: str, split: str) -> dict[str, str]:
+def read_metrics_by_format_for_split(
+    run_dir: str,
+    split: str,
+    *,
+    include_internal: bool = False,
+) -> dict[str, str]:
     split_name = str(split).strip().lower()
     if split_name == "test":
-        return read_test_metrics_by_format(run_dir)
+        return read_test_metrics_by_format(run_dir, include_internal=include_internal)
     out: dict[str, str] = {}
-    for fmt in SUPPORTED_TEST_FORMATS:
+    for fmt in _iter_test_formats(include_internal):
         p = format_metrics_path_for_split(run_dir, split_name, fmt)
         if os.path.isfile(p):
             out[fmt] = p
     return out
 
 
-def read_metrics_by_format_for_split_artifacts(run_dir: str, split: str) -> dict[str, list[dict[str, str]]]:
+def read_metrics_by_format_for_split_artifacts(
+    run_dir: str,
+    split: str,
+    *,
+    include_internal: bool = False,
+) -> dict[str, list[dict[str, str]]]:
     split_name = str(split).strip().lower()
     if split_name == "test":
-        return read_test_metrics_by_format_artifacts(run_dir)
+        return read_test_metrics_by_format_artifacts(run_dir, include_internal=include_internal)
     out: dict[str, list[dict[str, str]]] = {}
-    for fmt in SUPPORTED_TEST_FORMATS:
+    for fmt in _iter_test_formats(include_internal):
         p = format_metrics_path_for_split(run_dir, split_name, fmt)
         if os.path.isfile(p):
             out[fmt] = [{"metrics_path": p, "target_path": ""}]

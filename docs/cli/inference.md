@@ -18,7 +18,6 @@ Both files are saved under:
 Local model artifacts:
 
 - `pt`
-- `pt_uni`
 - `onnx`
 - `engine`
 - `trt`
@@ -26,6 +25,8 @@ Local model artifacts:
 External model references:
 
 - provider-scoped refs like `provider:model` (`--weights` / `--model-name`) with `--external-provider` flow.
+
+Note: `pt_uni` is an internal metrics-comparison mode (PT vs PT-uni, test/val) and is not a user-facing inference model type.
 
 ## Quick examples
 

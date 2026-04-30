@@ -79,10 +79,29 @@ def test_model_test_cli_run_uses_existing_resume_logic(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr("smartrain.model_test_cli.complete_missing_test_artifacts", _fake_complete)
     monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
+    class _FakeResult:
+        success = True
+        error = None
+    monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", lambda **_kwargs: _FakeResult())
 
     smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "pt", "-y"])
     assert called["run_dir"] == str(run_dir)
     assert called["workspace_root"] == str(tmp_path)
+
+
+def test_model_test_cli_rejects_public_pt_uni_format(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
+    ((tmp_path / "datasets" / "ds_a") / "data.yaml").write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"path_under_workspace": "datasets/ds_a"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "pt_uni", "-y"])
 
 
 def test_model_test_cli_prints_selected_model_and_dataset(monkeypatch, tmp_path: Path, capsys) -> None:

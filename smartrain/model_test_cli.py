@@ -44,7 +44,7 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--model-name", type=str, default=None, help="Promoted model directory name from workspace/models.")
     p.add_argument("--weights", type=str, default=None, help="Explicit weights path (.pt/.onnx/.engine/.trt).")
     p.add_argument("--data", type=str, default=None, help="Dataset directory or path to data.yaml.")
-    p.add_argument("--formats", type=str, default="pt", help="Comma-separated formats: pt,pt_uni,onnx,engine,trt")
+    p.add_argument("--formats", type=str, default="pt", help="Comma-separated formats: pt,onnx,engine,trt")
     p.add_argument("--missing-only", action="store_true", help="Only build artifacts that are currently missing.")
     p.add_argument("--force", action="store_true", help="Force re-test even if matching artifacts already exist.")
     p.add_argument("--imgsz", type=int, default=None, help="Validation image size.")
@@ -537,7 +537,7 @@ def _collect_interactive_rerun_decisions(
     if selected_artifacts:
         entries.extend(selected_artifacts)
     else:
-        for fmt in ("pt_uni", "onnx", "engine", "trt"):
+        for fmt in ("onnx", "engine", "trt"):
             if fmt not in formats:
                 continue
             if missing_only and has_complete_test_artifacts(root_dir, fmt):
@@ -597,7 +597,7 @@ def main(argv: list[str] | None = None) -> None:
         if not interactive:
             parser.error("Specify one of --run, --model-name or --weights in non-interactive mode.")
         root_dir, primary_path, target_kind, target_label = _pick_interactive_target(layout)
-        formats = _parse_formats("pt,pt_uni,onnx,engine,trt")
+        formats = _parse_formats("pt,onnx,engine,trt")
         default_data_yaml: str | None = None
         try:
             default_data_yaml = _resolve_data_yaml_for_target(
@@ -780,13 +780,47 @@ def main(argv: list[str] | None = None) -> None:
                 )
                 results.append(("pt", pt_result.success, pt_result.error))
 
+    # Internal-only unified PT evaluation for PT vs PT-uni compare table.
+    if "pt" in formats:
+        run_internal_pt_uni = bool(args.force) or (not args.missing_only) or (not has_complete_test_artifacts(root_dir, "pt_uni"))
+        if run_internal_pt_uni:
+            should_rerun_pt_uni = _should_rerun_existing_match(
+                interactive=False,
+                force=bool(args.force),
+                root_dir=root_dir,
+                format_name="pt_uni",
+                target_path=primary_path,
+                dataset_yaml=data_yaml,
+                imgsz=requested_imgsz,
+                conf=requested_conf,
+                iou=requested_iou,
+                deep_diagnostics=bool(args.deep_diagnostics),
+            )
+            if should_rerun_pt_uni:
+                print("[INFO] Generating internal PT-vs-PT-uni comparison artifacts.")
+                pt_uni_result = run_native_format_backend(
+                    root_dir=root_dir,
+                    weights_path=primary_path,
+                    dataset_yaml_path=data_yaml,
+                    format_name="pt_uni",
+                    imgsz=args.imgsz,
+                    val_conf=args.conf,
+                    val_iou=args.iou,
+                    val_batch=args.batch,
+                    deep_diagnostics=bool(args.deep_diagnostics),
+                    collect_performance=bool(args.perf),
+                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
+                )
+                if not pt_uni_result.success:
+                    print(f"[WARN] Internal pt_uni compare artifacts failed: {pt_uni_result.error}")
+
     queued: list[tuple[str, str]] = []
     if selected_artifacts:
         for fmt, path in selected_artifacts:
-            if fmt in {"pt", "pt_uni", "onnx", "engine", "trt"}:
+            if fmt in {"pt", "onnx", "engine", "trt"}:
                 queued.append((fmt, path))
     else:
-        for fmt in ("pt_uni", "onnx", "engine", "trt"):
+        for fmt in ("onnx", "engine", "trt"):
             if fmt not in formats:
                 continue
             if args.missing_only and has_complete_test_artifacts(root_dir, fmt):

@@ -1911,8 +1911,8 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                 run_name = os.path.basename(run_dir.rstrip(os.sep))
                 manifest = load_test_artifacts_manifest(run_dir)
                 formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
-                metrics_paths = read_metrics_by_format_for_split(run_dir, split_name)
-                metrics_artifacts = read_metrics_by_format_for_split_artifacts(run_dir, split_name)
+                metrics_paths = read_metrics_by_format_for_split(run_dir, split_name, include_internal=True)
+                metrics_artifacts = read_metrics_by_format_for_split_artifacts(run_dir, split_name, include_internal=True)
                 for fmt in ("pt", "pt_uni"):
                     entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
                     if not isinstance(entry, dict):

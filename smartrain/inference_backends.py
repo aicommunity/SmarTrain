@@ -73,7 +73,7 @@ class ExternalProviderBackend:
 class InferenceBackendRegistry:
     def create_local_backend(self, *, model_format: str, model_path: str) -> InferenceBackend:
         fmt = str(model_format or "").strip().lower()
-        if fmt in {"pt", "pt_uni", "onnx", "engine", "trt"}:
+        if fmt in {"pt", "onnx", "engine", "trt"}:
             return UltralyticsBackend(model_path, backend_name=f"ultralytics:{fmt}")
         raise ValueError(f"Unsupported model format for local inference backend: {model_format}")
 

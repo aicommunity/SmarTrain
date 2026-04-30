@@ -18,7 +18,6 @@
 Локальные артефакты моделей:
 
 - `pt`
-- `pt_uni`
 - `onnx`
 - `engine`
 - `trt`
@@ -26,6 +25,8 @@
 Внешние ссылки моделей:
 
 - provider-scoped refs вида `provider:model` (`--weights` / `--model-name`) через flow с `--external-provider`.
+
+Примечание: `pt_uni` — внутренний режим сравнения метрик (PT vs PT-uni, test/val), а не пользовательский тип модели для инференса.
 
 ## Быстрые примеры
 

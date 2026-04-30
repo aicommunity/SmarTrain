@@ -55,10 +55,11 @@ Model convert highlights:
 
 Inference highlights:
 
-- `smartrain inference` supports local model artifacts `pt`, `pt_uni`, `onnx`, `engine`, `trt` through unified backend routing, plus external provider references.
+- `smartrain inference` supports local model artifacts `pt`, `onnx`, `engine`, `trt` through unified backend routing, plus external provider references.
 - Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
 - Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
 - Full inference JSON/artifact contract: [`inference.md`](inference.md).
+- `pt_uni` is internal-only and used for PT vs PT-uni comparison table generation (test/val), not as a user-facing inference format.
 
 Model release highlights:
 

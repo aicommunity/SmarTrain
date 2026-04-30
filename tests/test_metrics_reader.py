@@ -7,6 +7,7 @@ from smartrain.confidence_recommendation import write_not_available_recommendati
 from smartrain.metrics_reader import (
     flatten_metadata,
     latest_test_metrics_path,
+    read_metrics_by_format_for_split,
     read_test_metrics_by_format,
     read_test_metrics_row,
     read_test_performance_by_format_artifacts,
@@ -139,3 +140,26 @@ def test_read_test_system_profile_by_format_artifacts(tmp_path: Path) -> None:
     out = read_test_system_profile_by_format_artifacts(str(run_dir))
     assert "trt" in out
     assert out["trt"][0]["test_system_profile"]["runtime"]["format"] == "trt"
+
+
+def test_read_metrics_excludes_pt_uni_by_default_and_allows_internal(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "dataset_internal" / "run_internal"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "test_metrics.csv").write_text("mAP50-95\n0.5\n", encoding="utf-8")
+    (run_dir / "test_metrics_pt_uni.csv").write_text("mAP50-95\n0.51\n", encoding="utf-8")
+    payload = {
+        "formats": {
+            "pt": {"metrics_csv": "test_metrics.csv"},
+            "pt_uni": {"metrics_csv": "test_metrics_pt_uni.csv"},
+        }
+    }
+    (run_dir / "test_artifacts_manifest.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    by_default = read_test_metrics_by_format(str(run_dir))
+    assert "pt" in by_default
+    assert "pt_uni" not in by_default
+
+    with_internal = read_test_metrics_by_format(str(run_dir), include_internal=True)
+    assert "pt_uni" in with_internal
+    split_with_internal = read_metrics_by_format_for_split(str(run_dir), "test", include_internal=True)
+    assert "pt_uni" in split_with_internal

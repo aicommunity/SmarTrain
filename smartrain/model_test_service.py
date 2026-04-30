@@ -20,7 +20,10 @@ import yaml
 from smartrain.confidence_recommendation import read_recommendation_file, recommendations_complete
 
 TEST_ARTIFACTS_MANIFEST = "test_artifacts_manifest.json"
-SUPPORTED_TEST_FORMATS = ("pt", "pt_uni", "onnx", "engine", "trt")
+PUBLIC_TEST_FORMATS = ("pt", "onnx", "engine", "trt")
+INTERNAL_TEST_FORMATS = ("pt_uni",)
+SUPPORTED_TEST_FORMATS = PUBLIC_TEST_FORMATS
+ALL_TEST_FORMATS = PUBLIC_TEST_FORMATS + INTERNAL_TEST_FORMATS
 _RICH_TEST_FILES = (
     "args.yaml",
     "pr.csv",
@@ -76,7 +79,7 @@ def _normalize_format_name(format_name: str | None) -> str:
         return "engine"
     if raw in {"tensorrt-trt"}:
         return "trt"
-    if raw not in SUPPORTED_TEST_FORMATS:
+    if raw not in ALL_TEST_FORMATS:
         raise ValueError(f"Unsupported test format: {format_name}")
     return raw
 

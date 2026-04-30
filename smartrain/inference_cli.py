@@ -187,7 +187,7 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
         scanned = scan_run_models(str(run_dir))
-        preferred_order = {"pt": 0, "pt_uni": 1, "onnx": 2, "engine": 3, "trt": 4}
+        preferred_order = {"pt": 0, "onnx": 1, "engine": 2, "trt": 3}
         candidates: list[Path] = []
         if scanned:
             sorted_scanned = sorted(
@@ -732,8 +732,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[OK] External inference report: {report_path}")
         raise SystemExit(rc)
     registry = InferenceBackendRegistry()
-    model_format = "pt_uni" if str(model_path).lower().endswith("_uni.pt") else str(model_path.suffix).lower().lstrip(".")
-    if model_format not in {"pt", "pt_uni", "onnx", "engine", "trt"}:
+    model_format = str(model_path.suffix).lower().lstrip(".")
+    if model_format not in {"pt", "onnx", "engine", "trt"}:
         print(f"[ERROR] Unsupported model format for inference: {model_format}", file=sys.stderr)
         raise SystemExit(1)
     try:
