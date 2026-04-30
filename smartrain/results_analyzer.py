@@ -33,7 +33,12 @@ from smartrain.compare_service import (
     generate_compare_insights,
 )
 from smartrain.analyze_report import write_analysis_report, write_manifest
-from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model, run_tmp_dir
+from smartrain.run_artifacts import (
+    canonical_run_model_path,
+    materialize_canonical_run_model,
+    resolve_run_model_with_legacy_fallback,
+    run_tmp_dir,
+)
 from smartrain.analyze_cache import (
     append_cache_entry,
     compute_fingerprint,
@@ -145,7 +150,9 @@ def _resolve_run_val_profile(
     default_imgsz: int = 640,
     default_half: bool = True,
 ) -> tuple[int, int, bool]:
-    args_yaml = os.path.join(run_dir, "train", "args.yaml")
+    args_yaml = os.path.join(run_dir, "train-ultralytics", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        args_yaml = os.path.join(run_dir, "train", "args.yaml")
     batch = int(default_batch)
     imgsz = int(default_imgsz)
     half = bool(default_half)
@@ -237,7 +244,9 @@ def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | Non
         seen.add(ap)
         out.append((ap, src))
 
-    args_yaml = os.path.join(rd, "train", "args.yaml")
+    args_yaml = os.path.join(rd, "train-ultralytics", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        args_yaml = os.path.join(rd, "train", "args.yaml")
     if os.path.isfile(args_yaml):
         try:
             payload = yaml.safe_load(open(args_yaml, encoding="utf-8")) or {}
@@ -1557,7 +1566,7 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                 if os.path.isfile(candidate):
                     return True
         if fmt in {"pt", "pt_uni"}:
-            return os.path.isfile(canonical_run_model_path(run_dir, ".pt"))
+            return resolve_run_model_with_legacy_fallback(run_dir, ".pt") is not None
         ext = ext_by_format.get(fmt)
         if not ext:
             return False
@@ -1644,7 +1653,14 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         return variants
 
     def _read_eval_args(run_dir: str, fmt: str) -> dict[str, Any]:
-        args_yaml = os.path.join(run_dir, "test" if fmt == "pt" else f"test_{fmt}", "args.yaml")
+        if fmt == "pt":
+            args_yaml = os.path.join(run_dir, "tests", "test-ultralytics", "args.yaml")
+            if not os.path.isfile(args_yaml):
+                args_yaml = os.path.join(run_dir, "test", "args.yaml")
+        else:
+            args_yaml = os.path.join(run_dir, "tests", f"test_{fmt}", "args.yaml")
+            if not os.path.isfile(args_yaml):
+                args_yaml = os.path.join(run_dir, f"test_{fmt}", "args.yaml")
         if not os.path.isfile(args_yaml):
             if fmt != "pt":
                 return {}
@@ -2190,7 +2206,9 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
             _clear_gpu_memory()
 
         curves.append((label, recall, precision))
-        pr_dir = os.path.join(run_dir, "test")
+        pr_dir = os.path.join(run_dir, "tests", "test-ultralytics")
+        if not os.path.isdir(pr_dir):
+            pr_dir = os.path.join(run_dir, "test")
         os.makedirs(pr_dir, exist_ok=True)
         pr_csv = os.path.join(pr_dir, "pr.csv")
         pd.DataFrame({"recall": recall, "precision": precision}).to_csv(pr_csv, index=False, encoding="utf-8")

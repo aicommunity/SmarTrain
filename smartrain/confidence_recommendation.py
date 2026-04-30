@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 import numpy as np
+from smartrain.run_artifacts import run_tests_dir
 
 
 DEFAULT_FALLBACK_CONFIDENCE = 0.25
@@ -296,7 +297,11 @@ def compute_confidence_recommendations(
 
 
 def recommendation_file_path(model_dir: str, split: str) -> str:
-    return os.path.join(model_dir, f"confidence_recommendations_{split}.json")
+    preferred = run_tests_dir(model_dir) / f"confidence_recommendations_{split}.json"
+    legacy = os.path.join(model_dir, f"confidence_recommendations_{split}.json")
+    if os.path.isfile(legacy) and not preferred.is_file():
+        return legacy
+    return str(preferred)
 
 
 def write_recommendation_file(path: str, payload: dict[str, Any]) -> None:

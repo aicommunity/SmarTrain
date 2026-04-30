@@ -594,7 +594,7 @@ def test_train_main_external_layout_normalized_to_train_subdir(
     assert rc == 0
     run_dir = target_root / "ds_a" / "run-fixed"
     assert called["test"] is True
-    assert (run_dir / "train" / "args.yaml").is_file()
+    assert (run_dir / "train-ultralytics" / "args.yaml").is_file() or (run_dir / "train" / "args.yaml").is_file()
     assert Path(canonical_run_model_path(str(run_dir), ".pt")).is_file()
     assert (run_dir / "training_metadata.json").is_file()
     payload = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))

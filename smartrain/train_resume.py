@@ -72,7 +72,9 @@ def _is_results_csv_readable(path: str) -> bool:
 
 def diagnose_run(run_dir: str) -> RunDiagnosis:
     rd = os.path.abspath(run_dir)
-    args_yaml = os.path.join(rd, "train", "args.yaml")
+    args_yaml = os.path.join(rd, "train-ultralytics", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        args_yaml = os.path.join(rd, "train", "args.yaml")
     results_csv = os.path.join(rd, "train", "results.csv")
     last_pt = os.path.join(rd, "train", "weights", "last.pt")
     best_pt = canonical_run_model_path(rd, ".pt")
@@ -216,7 +218,9 @@ def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
 
 
 def _load_train_args_yaml(run_dir: str) -> dict[str, Any]:
-    args_yaml = os.path.join(run_dir, "train", "args.yaml")
+    args_yaml = os.path.join(run_dir, "train-ultralytics", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        args_yaml = os.path.join(run_dir, "train", "args.yaml")
     if not os.path.isfile(args_yaml):
         return {}
     try:

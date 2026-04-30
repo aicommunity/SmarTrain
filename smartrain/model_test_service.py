@@ -7,7 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.run_artifacts import (
+    canonical_run_model_path,
+    materialize_canonical_run_model,
+    run_test_backend_dir,
+    run_test_format_dir,
+    run_tests_dir,
+)
 from smartrain.run_artifacts import model_sidecar_metadata_path
 
 import yaml
@@ -79,11 +85,21 @@ def format_suffix(format_name: str | None) -> str:
 
 
 def format_test_dir(root_dir: str, format_name: str | None = "pt") -> str:
-    return os.path.join(root_dir, f"test{format_suffix(format_name)}")
+    fmt = _normalize_format_name(format_name)
+    preferred = run_test_backend_dir(root_dir, "ultralytics") if fmt == "pt" else run_test_format_dir(root_dir, fmt)
+    legacy = os.path.join(root_dir, f"test{format_suffix(fmt)}")
+    if os.path.isdir(legacy) and not preferred.exists():
+        return legacy
+    return str(preferred)
 
 
 def format_metrics_path(root_dir: str, format_name: str | None = "pt") -> str:
-    return os.path.join(root_dir, f"test_metrics{format_suffix(format_name)}.csv")
+    fmt = _normalize_format_name(format_name)
+    preferred = run_tests_dir(root_dir) / f"test_metrics{format_suffix(fmt)}.csv"
+    legacy = os.path.join(root_dir, f"test_metrics{format_suffix(fmt)}.csv")
+    if os.path.isfile(legacy) and not preferred.is_file():
+        return legacy
+    return str(preferred)
 
 
 def format_metrics_path_for_split(root_dir: str, split: str, format_name: str | None = "pt") -> str:
@@ -91,7 +107,12 @@ def format_metrics_path_for_split(root_dir: str, split: str, format_name: str | 
     if split_name == "test":
         return format_metrics_path(root_dir, format_name)
     if split_name == "val":
-        return os.path.join(root_dir, f"val_metrics{format_suffix(format_name)}.csv")
+        fmt = _normalize_format_name(format_name)
+        preferred = run_tests_dir(root_dir) / f"val_metrics{format_suffix(fmt)}.csv"
+        legacy = os.path.join(root_dir, f"val_metrics{format_suffix(fmt)}.csv")
+        if os.path.isfile(legacy) and not preferred.is_file():
+            return legacy
+        return str(preferred)
     raise ValueError(f"Unsupported split: {split}")
 
 
@@ -99,11 +120,20 @@ def format_recommendation_path(root_dir: str, split: str, format_name: str | Non
     split_name = str(split).strip().lower()
     if split_name not in {"test", "val"}:
         raise ValueError(f"Unsupported split: {split}")
-    return os.path.join(root_dir, f"confidence_recommendations_{split_name}{format_suffix(format_name)}.json")
+    fmt = _normalize_format_name(format_name)
+    preferred = run_tests_dir(root_dir) / f"confidence_recommendations_{split_name}{format_suffix(fmt)}.json"
+    legacy = os.path.join(root_dir, f"confidence_recommendations_{split_name}{format_suffix(fmt)}.json")
+    if os.path.isfile(legacy) and not preferred.is_file():
+        return legacy
+    return str(preferred)
 
 
 def test_artifacts_manifest_path(root_dir: str) -> str:
-    return os.path.join(root_dir, TEST_ARTIFACTS_MANIFEST)
+    preferred = run_tests_dir(root_dir) / TEST_ARTIFACTS_MANIFEST
+    legacy = os.path.join(root_dir, TEST_ARTIFACTS_MANIFEST)
+    if os.path.isfile(legacy) and not preferred.is_file():
+        return legacy
+    return str(preferred)
 
 
 def load_test_artifacts_manifest(root_dir: str) -> dict[str, Any]:

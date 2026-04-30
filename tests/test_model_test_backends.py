@@ -8,6 +8,12 @@ from types import ModuleType
 from PIL import Image
 
 from smartrain.model_test_backends import run_native_format_backend
+from smartrain.model_test_service import (
+    format_metrics_path,
+    format_recommendation_path,
+    format_test_dir,
+    test_artifacts_manifest_path as manifest_path_fn,
+)
 from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
 
 
@@ -78,18 +84,19 @@ def test_run_native_onnx_backend_writes_test_artifacts(monkeypatch, tmp_path: Pa
     )
 
     assert result.success is True
-    assert (root_dir / "test_metrics_onnx.csv").is_file()
-    assert (root_dir / "test_onnx" / "pr.csv").is_file()
-    assert (root_dir / "test_onnx" / "pr_per_class.csv").is_file()
-    assert (root_dir / "test_onnx" / "BoxPR_curve.png").is_file()
-    assert (root_dir / "test_onnx" / "BoxF1_curve.png").is_file()
-    assert (root_dir / "test_onnx" / "BoxP_curve.png").is_file()
-    assert (root_dir / "test_onnx" / "BoxR_curve.png").is_file()
-    assert (root_dir / "test_onnx" / "confusion_matrix.png").is_file()
-    assert (root_dir / "test_onnx" / "confusion_matrix_normalized.png").is_file()
-    assert (root_dir / "confidence_recommendations_test_onnx.json").is_file()
-    assert (root_dir / "confidence_recommendations_val_onnx.json").is_file()
-    manifest = json.loads((root_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
+    assert Path(format_metrics_path(str(root_dir), "onnx")).is_file()
+    onnx_test_dir = Path(format_test_dir(str(root_dir), "onnx"))
+    assert (onnx_test_dir / "pr.csv").is_file()
+    assert (onnx_test_dir / "pr_per_class.csv").is_file()
+    assert (onnx_test_dir / "BoxPR_curve.png").is_file()
+    assert (onnx_test_dir / "BoxF1_curve.png").is_file()
+    assert (onnx_test_dir / "BoxP_curve.png").is_file()
+    assert (onnx_test_dir / "BoxR_curve.png").is_file()
+    assert (onnx_test_dir / "confusion_matrix.png").is_file()
+    assert (onnx_test_dir / "confusion_matrix_normalized.png").is_file()
+    assert Path(format_recommendation_path(str(root_dir), "test", "onnx")).is_file()
+    assert Path(format_recommendation_path(str(root_dir), "val", "onnx")).is_file()
+    manifest = json.loads(Path(manifest_path_fn(str(root_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["onnx"]["status"] == "ok"
 
 
@@ -140,7 +147,7 @@ def test_run_native_onnx_backend_without_test_split_marks_unavailable(monkeypatc
     )
 
     assert result.success is False
-    manifest = json.loads((root_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(Path(manifest_path_fn(str(root_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["onnx"]["status"] == "unavailable"
     assert "data.yaml has no split='test'" in str(manifest["formats"]["onnx"]["error"])
 
@@ -179,7 +186,7 @@ def test_run_native_onnx_backend_retries_after_cuda_oom(monkeypatch, tmp_path: P
     out = capsys.readouterr().out
     assert result.success is True
     assert "CUDA OOM during test on attempt 1/3" in out
-    assert (root_dir / "test_metrics_onnx.csv").is_file()
+    assert Path(format_metrics_path(str(root_dir), "onnx")).is_file()
 
 
 def test_run_native_onnx_backend_subprocess_mode(monkeypatch, tmp_path: Path) -> None:
@@ -227,7 +234,7 @@ def test_run_native_onnx_backend_subprocess_mode(monkeypatch, tmp_path: Path) ->
     )
 
     assert result.success is True
-    assert (root_dir / "test_metrics_onnx.csv").is_file()
+    assert Path(format_metrics_path(str(root_dir), "onnx")).is_file()
 
 
 def test_run_native_onnx_backend_subprocess_error_has_reason_code(monkeypatch, tmp_path: Path) -> None:
@@ -288,10 +295,11 @@ def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path
     )
 
     assert result.success is True
-    assert (root_dir / "test_metrics_engine.csv").is_file()
-    assert (root_dir / "test_engine" / "pr.csv").is_file()
-    assert (root_dir / "confidence_recommendations_test_engine.json").is_file()
-    manifest = json.loads((root_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
+    assert Path(format_metrics_path(str(root_dir), "engine")).is_file()
+    engine_test_dir = Path(format_test_dir(str(root_dir), "engine"))
+    assert (engine_test_dir / "pr.csv").is_file()
+    assert Path(format_recommendation_path(str(root_dir), "test", "engine")).is_file()
+    manifest = json.loads(Path(manifest_path_fn(str(root_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["engine"]["status"] == "ok"
 
 
@@ -318,7 +326,7 @@ def test_run_native_onnx_backend_writes_deep_diagnostics_artifacts(monkeypatch, 
 
     assert result.success is True
 
-    deep_dir = root_dir / "test_onnx" / "deep_diagnostics"
+    deep_dir = Path(format_test_dir(str(root_dir), "onnx")) / "deep_diagnostics"
     assert deep_dir.is_dir()
     assert (deep_dir / "debug_params.json").is_file()
     assert (deep_dir / "debug_test.jsonl").is_file()

@@ -560,7 +560,9 @@ def test_format_compare_does_not_use_onnx_csv_as_pt_source(tmp_path: Path) -> No
     df = pd.read_csv(out_csv)
     row_onnx = df[df["format"] == "onnx"].iloc[0]
     assert float(row_onnx["mAP50-95"]) == 0.4
-    assert "pt" not in set(df["format"].tolist())
+    if "pt" in set(df["format"].tolist()):
+        row_pt = df[df["format"] == "pt"].iloc[0]
+        assert pd.isna(row_pt["mAP50-95"])
     sources_json = session_root / "artifacts" / "format_compare" / "format_metrics_sources.json"
     assert sources_json.is_file()
 

@@ -10,12 +10,18 @@ from typing import Any
 def _normalize_run_root(run_dir: str | Path) -> Path:
     root = Path(run_dir).expanduser().resolve()
     # Defensive normalization: callers may accidentally pass runs/<run>/models
-    # or runs/<run>/tmp instead of runs/<run>. Collapse such paths to run root.
-    while root.name in {"models", "tmp"}:
+    # or runs/<run>/tmp/tests/train-* instead of runs/<run>.
+    # Collapse such paths to run root.
+    while root.name in {"models", "tmp", "tests"} or root.name.startswith("train-") or root.name.startswith("test-"):
         parent = root.parent
         if parent == root:
             break
-        if (parent / "training_metadata.json").is_file() or (parent / "train").is_dir():
+        if (
+            (parent / "training_metadata.json").is_file()
+            or (parent / "train").is_dir()
+            or (parent / "models").is_dir()
+            or (parent / "tests").is_dir()
+        ):
             root = parent
             continue
         break
@@ -32,12 +38,43 @@ def run_tmp_dir(run_dir: str) -> Path:
     return root / "tmp"
 
 
+def run_tests_dir(run_dir: str) -> Path:
+    root = _normalize_run_root(run_dir)
+    return root / "tests"
+
+
+def run_train_backend_dir(run_dir: str, backend: str = "ultralytics") -> Path:
+    root = _normalize_run_root(run_dir)
+    safe_backend = str(backend or "ultralytics").strip().lower().replace("/", "-").replace("\\", "-")
+    return root / f"train-{safe_backend}"
+
+
+def run_test_backend_dir(run_dir: str, backend: str = "ultralytics") -> Path:
+    safe_backend = str(backend or "ultralytics").strip().lower().replace("/", "-").replace("\\", "-")
+    return run_tests_dir(run_dir) / f"test-{safe_backend}"
+
+
+def run_test_format_dir(run_dir: str, format_name: str) -> Path:
+    safe_fmt = str(format_name or "pt").strip().lower().replace("/", "-").replace("\\", "-")
+    return run_tests_dir(run_dir) / f"test_{safe_fmt}"
+
+
+def _migrate_legacy_run_layout(root: Path) -> None:
+    # Non-destructive lazy migration: create new layout folders and let
+    # producers/consumers progressively switch to them with legacy fallbacks.
+    run_tests_dir(str(root)).mkdir(parents=True, exist_ok=True)
+    run_train_backend_dir(str(root), "ultralytics").mkdir(parents=True, exist_ok=True)
+
+
 def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:
     root = _normalize_run_root(run_dir)
     models = run_models_dir(str(root))
     tmp = run_tmp_dir(str(root))
+    tests = run_tests_dir(str(root))
     models.mkdir(parents=True, exist_ok=True)
     tmp.mkdir(parents=True, exist_ok=True)
+    tests.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_run_layout(root)
     for runtime_name in ("_runtime_data_train.yaml", "_runtime_data_test.yaml"):
         src = root / runtime_name
         dst = tmp / runtime_name
@@ -61,6 +98,8 @@ def _legacy_run_model_candidates(run_dir: str, ext: str = ".pt") -> list[Path]:
     suffix = ext if str(ext).startswith(".") else f".{ext}"
     suffix_l = suffix.lower()
     candidates = [
+        root / "train-ultralytics" / "weights" / f"best{suffix}",
+        root / "train-ultralytics" / f"best{suffix}",
         root / "train" / "weights" / f"best{suffix}",
         root / "weights" / f"best{suffix}",
         root / "train" / f"best{suffix}",

@@ -27,7 +27,10 @@ def _infer_model_from_run_dir_name(run_dir: str) -> str | None:
 
 
 def _infer_model_from_args_yaml(run_dir: str) -> str | None:
-    args_yaml = os.path.join(run_dir, "train", "args.yaml")
+    args_yaml = os.path.join(run_dir, "train-ultralytics", "args.yaml")
+    legacy_args = os.path.join(run_dir, "train", "args.yaml")
+    if not os.path.isfile(args_yaml) and os.path.isfile(legacy_args):
+        args_yaml = legacy_args
     if not os.path.isfile(args_yaml):
         return None
     try:
@@ -174,8 +177,11 @@ def read_metrics_by_format_for_split_artifacts(run_dir: str, split: str) -> dict
 
 
 def results_csv_path(run_dir: str) -> str | None:
-    p = os.path.join(run_dir, "train", "results.csv")
-    return p if os.path.exists(p) else None
+    p = os.path.join(run_dir, "train-ultralytics", "results.csv")
+    if os.path.exists(p):
+        return p
+    legacy = os.path.join(run_dir, "train", "results.csv")
+    return legacy if os.path.exists(legacy) else None
 
 
 def pick_map_column(df: pd.DataFrame) -> str | None:

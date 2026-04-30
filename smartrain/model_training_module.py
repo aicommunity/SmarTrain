@@ -84,6 +84,9 @@ from smartrain.run_artifacts import (
     materialize_canonical_run_model,
     resolve_run_model_with_legacy_fallback,
     run_tmp_dir,
+    run_tests_dir,
+    run_test_backend_dir,
+    run_train_backend_dir,
     ensure_run_layout,
 )
 
@@ -1159,11 +1162,14 @@ def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str)
         for run_dir in sorted(ds_dir.iterdir()):
             if not run_dir.is_dir():
                 continue
-            args_train = run_dir / "train" / "args.yaml"
+            args_train = run_dir / "train-ultralytics" / "args.yaml"
+            legacy_args_train = run_dir / "train" / "args.yaml"
             args_root = run_dir / "args.yaml"
             args_path: Path | None = None
             if args_train.is_file():
                 args_path = args_train
+            elif legacy_args_train.is_file():
+                args_path = legacy_args_train
             elif args_root.is_file():
                 args_path = args_root
             if args_path is None:
@@ -1641,7 +1647,7 @@ def _finalize_train_kwargs(ultralytics_cfg: dict[str, Any], data_yaml: str, mode
     k.pop("data", None)
     k["data"] = data_yaml
     k["project"] = model_dir
-    k["name"] = "train"
+    k["name"] = "train-ultralytics"
     k["exist_ok"] = False
     k.setdefault("mode", "train")
     if overwritten:
@@ -1723,10 +1729,10 @@ def _normalize_external_run_layout(run_dir: str) -> None:
     root = Path(run_dir).expanduser().resolve()
     if not root.is_dir():
         return
-    train_dir = root / "train"
+    train_dir = run_train_backend_dir(str(root), "ultralytics")
     train_dir.mkdir(parents=True, exist_ok=True)
     for entry in list(root.iterdir()):
-        if entry.name in {"train", "training_metadata.json"}:
+        if entry.name in {"training_metadata.json", "models", "tmp", "tests"} or entry.name.startswith("train-"):
             continue
         target = train_dir / entry.name
         if target.exists():
@@ -1769,12 +1775,12 @@ def _resolve_external_eval_source(dataset_path: str) -> str:
 
 
 def _write_external_fallback_metrics(model_dir: str, *, provider_id: str, rc: int) -> str:
-    test_dir = os.path.join(model_dir, "test")
+    test_dir = str(run_test_backend_dir(model_dir, "ultralytics"))
     os.makedirs(test_dir, exist_ok=True)
     marker = os.path.join(test_dir, "fallback_infer.txt")
     with open(marker, "w", encoding="utf-8") as f:
         f.write("external infer fallback was used for test stage\n")
-    csv_path = os.path.join(model_dir, "test_metrics.csv")
+    csv_path = os.path.join(str(run_tests_dir(model_dir)), "test_metrics.csv")
     with open(csv_path, "w", encoding="utf-8") as f:
         f.write("provider,test_mode,return_code\n")
         f.write(f"{provider_id},external_infer_fallback,{int(rc)}\n")
@@ -2009,7 +2015,7 @@ def train_yolo(
         register_weighted_sampling_callback(model)
 
     training_end_time = None
-    raw_best_path = os.path.join(model_dir, "train", "weights", "best.pt")
+    raw_best_path = os.path.join(model_dir, "train-ultralytics", "weights", "best.pt")
     canonical_best_path = canonical_run_model_path(model_dir, ".pt")
     try:
         model.train(**train_kw)
@@ -2079,8 +2085,8 @@ def test_yolo(
     val_kwargs = {
         "data": data_yaml,
         "split": "test",
-        "project": model_dir,
-        "name": "test",
+        "project": str(run_tests_dir(model_dir)),
+        "name": "test-ultralytics",
         "exist_ok": False,
     }
     if imgsz is not None:
@@ -2240,7 +2246,7 @@ def _ensure_confidence_recommendations(
 
 
 def save_metrics_csv(test_result, model_dir):
-    csv_file = os.path.join(model_dir, "test_metrics.csv")
+    csv_file = os.path.join(str(run_tests_dir(model_dir)), "test_metrics.csv")
 
     csv_data = test_result.to_csv()
     with open(csv_file, "w", encoding="utf-8") as f:
@@ -2813,10 +2819,12 @@ def main(argv=None):
                     if fallback_rc == 0:
                         if external_provider == "mfel-yolo":
                             # keep test metrics contract in run root
-                            test_results_csv = os.path.join(external_run_dir, "test", "results.csv")
+                            test_results_csv = os.path.join(
+                                str(run_test_backend_dir(external_run_dir, "ultralytics")), "results.csv"
+                            )
                             if os.path.isfile(test_results_csv):
                                 shutil.copy2(
-                                    test_results_csv, os.path.join(external_run_dir, "test_metrics.csv")
+                                    test_results_csv, os.path.join(str(run_tests_dir(external_run_dir)), "test_metrics.csv")
                                 )
                             else:
                                 _write_external_fallback_metrics(

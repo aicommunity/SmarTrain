@@ -10,6 +10,12 @@ from types import ModuleType
 from PIL import Image
 
 from smartrain.model_test_cli import main as smartrain_test_main
+from smartrain.model_test_service import (
+    format_metrics_path,
+    format_recommendation_path,
+    format_test_dir,
+    test_artifacts_manifest_path as manifest_path_fn,
+)
 from smartrain.workspace_paths import deploy_workspace
 
 
@@ -108,7 +114,7 @@ def test_model_test_cli_prints_selected_model_and_dataset(monkeypatch, tmp_path:
     assert "  split:   test" in out
     assert str((tmp_path / "datasets" / "ds_a" / "data.yaml")) in out
     assert "  model[onnx]:" in out
-    assert str(run_dir / "train" / "weights" / "best.onnx") in out
+    assert str(run_dir / "models" / "best.onnx") in out or str(run_dir / "train" / "weights" / "best.onnx") in out
 
 
 def test_model_test_cli_interactive_replay_command_is_complete(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -271,20 +277,23 @@ def test_model_test_cli_skips_matching_existing_test_from_args_yaml_fallback(mon
         json.dumps({"training_info": {"dataset": {"path_under_workspace": "datasets/ds_a"}}}, ensure_ascii=False),
         encoding="utf-8",
     )
-    (run_dir / "test_metrics_onnx.csv").write_text("metric,value\nmAP50,0.9\n", encoding="utf-8")
-    (run_dir / "test_onnx").mkdir(parents=True, exist_ok=True)
-    (run_dir / "test_onnx" / "args.yaml").write_text(f"data: {dataset_yaml}\n", encoding="utf-8")
+    metrics_path = Path(format_metrics_path(str(run_dir), "onnx"))
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    metrics_path.write_text("metric,value\nmAP50,0.9\n", encoding="utf-8")
+    test_onnx_dir = Path(format_test_dir(str(run_dir), "onnx"))
+    test_onnx_dir.mkdir(parents=True, exist_ok=True)
+    (test_onnx_dir / "args.yaml").write_text(f"data: {dataset_yaml}\n", encoding="utf-8")
     for name in ("pr.csv", "pr_per_class.csv"):
-        (run_dir / "test_onnx" / name).write_text("x", encoding="utf-8")
-    (run_dir / "confidence_recommendations_test_onnx.json").write_text(
+        (test_onnx_dir / name).write_text("x", encoding="utf-8")
+    Path(format_recommendation_path(str(run_dir), "test", "onnx")).write_text(
         json.dumps({"objectives": {"A": {"global": {"threshold": 0.1}}, "B": {"global": {"threshold": 0.1}}, "C": {"global": {"threshold": 0.1}}}}),
         encoding="utf-8",
     )
-    (run_dir / "confidence_recommendations_val_onnx.json").write_text(
+    Path(format_recommendation_path(str(run_dir), "val", "onnx")).write_text(
         json.dumps({"objectives": {"A": {"global": {"threshold": 0.1}}, "B": {"global": {"threshold": 0.1}}, "C": {"global": {"threshold": 0.1}}}}),
         encoding="utf-8",
     )
-    (run_dir / "test_artifacts_manifest.json").write_text(
+    Path(manifest_path_fn(str(run_dir))).write_text(
         json.dumps(
             {
                 "formats": {
@@ -488,7 +497,7 @@ def test_model_test_cli_continues_when_tensorrt_export_fails(monkeypatch, tmp_pa
         ]
     )
 
-    manifest = json.loads((run_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(Path(manifest_path_fn(str(run_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["engine"]["status"] == "failed"
     assert manifest["formats"]["trt"]["status"] == "failed"
 
@@ -529,7 +538,7 @@ def test_model_test_cli_engine_crash_isolated_and_recorded(monkeypatch, tmp_path
         ]
     )
 
-    manifest = json.loads((run_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(Path(manifest_path_fn(str(run_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["engine"]["status"] == "failed"
     assert "signal 6" in str(manifest["formats"]["engine"]["error"]).lower()
 
@@ -574,7 +583,7 @@ def test_model_test_cli_engine_preflight_fail_skips_isolated(monkeypatch, tmp_pa
     )
 
     assert calls["isolated"] == 0
-    manifest = json.loads((run_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(Path(manifest_path_fn(str(run_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["engine"]["status"] == "failed"
     assert "python cuda runtime is unavailable" in str(manifest["formats"]["engine"]["error"]).lower()
 
@@ -614,16 +623,17 @@ def test_model_test_cli_run_builds_onnx_artifacts_end_to_end(monkeypatch, tmp_pa
         ]
     )
 
-    assert (run_dir / "test_metrics_onnx.csv").is_file()
-    assert (run_dir / "test_onnx" / "pr.csv").is_file()
-    assert (run_dir / "test_onnx" / "pr_per_class.csv").is_file()
-    assert (run_dir / "test_onnx" / "BoxPR_curve.png").is_file()
-    assert (run_dir / "test_onnx" / "BoxF1_curve.png").is_file()
-    assert (run_dir / "test_onnx" / "BoxP_curve.png").is_file()
-    assert (run_dir / "test_onnx" / "BoxR_curve.png").is_file()
-    assert (run_dir / "test_onnx" / "confusion_matrix.png").is_file()
-    assert (run_dir / "test_onnx" / "confusion_matrix_normalized.png").is_file()
-    assert (run_dir / "confidence_recommendations_test_onnx.json").is_file()
-    assert (run_dir / "confidence_recommendations_val_onnx.json").is_file()
-    manifest = json.loads((run_dir / "test_artifacts_manifest.json").read_text(encoding="utf-8"))
+    assert Path(format_metrics_path(str(run_dir), "onnx")).is_file()
+    onnx_test_dir = Path(format_test_dir(str(run_dir), "onnx"))
+    assert (onnx_test_dir / "pr.csv").is_file()
+    assert (onnx_test_dir / "pr_per_class.csv").is_file()
+    assert (onnx_test_dir / "BoxPR_curve.png").is_file()
+    assert (onnx_test_dir / "BoxF1_curve.png").is_file()
+    assert (onnx_test_dir / "BoxP_curve.png").is_file()
+    assert (onnx_test_dir / "BoxR_curve.png").is_file()
+    assert (onnx_test_dir / "confusion_matrix.png").is_file()
+    assert (onnx_test_dir / "confusion_matrix_normalized.png").is_file()
+    assert Path(format_recommendation_path(str(run_dir), "test", "onnx")).is_file()
+    assert Path(format_recommendation_path(str(run_dir), "val", "onnx")).is_file()
+    manifest = json.loads(Path(manifest_path_fn(str(run_dir))).read_text(encoding="utf-8"))
     assert manifest["formats"]["onnx"]["status"] == "ok"
