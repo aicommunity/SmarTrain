@@ -34,21 +34,122 @@ def _read_template(lang: str) -> dict[str, str]:
     return out
 
 
-def _md_table_from_df(df: pd.DataFrame, abbreviations: dict[str, str], limit: int | None = None) -> list[str]:
+def _column_display_name(name: str, is_ru: bool) -> str:
+    common = {
+        "run_dir": "Запуск" if is_ru else "Run",
+        "run_name": "Запуск" if is_ru else "Run",
+        "run": "Запуск" if is_ru else "Run",
+        "baseline": "Базовый запуск" if is_ru else "Baseline run",
+        "other": "Сравниваемый запуск" if is_ru else "Compared run",
+        "model": "Модель" if is_ru else "Model",
+        "dataset_name": "Имя датасета" if is_ru else "Dataset name",
+        "dataset_hash": "Хэш датасета" if is_ru else "Dataset hash",
+        "alias": "Алиас" if is_ru else "Alias",
+        "format": "Формат" if is_ru else "Format",
+        "split": "Подвыборка" if is_ru else "Split",
+        "target_path": "Путь артефакта" if is_ru else "Target path",
+        "delta_mAP50-95": "Дельта mAP50-95" if is_ru else "Delta mAP50-95",
+        "delta_Box-F1": "Дельта Box-F1" if is_ru else "Delta Box-F1",
+        "delta_mAP50": "Дельта mAP50" if is_ru else "Delta mAP50",
+        "delta_Box-P": "Дельта Box-P" if is_ru else "Delta Box-P",
+        "delta_Box-R": "Дельта Box-R" if is_ru else "Delta Box-R",
+        "test_mAP50-95": "test mAP50-95" if is_ru else "test mAP50-95",
+        "test_mAP50": "test mAP50" if is_ru else "test mAP50",
+        "test_Box-F1": "test Box-F1" if is_ru else "test Box-F1",
+        "test_Box-P": "test Box-P" if is_ru else "test Box-P",
+        "test_Box-R": "test Box-R" if is_ru else "test Box-R",
+        "backend_status": "Бэкенд" if is_ru else "Backend",
+        "eval_imgsz": "Размер изображения" if is_ru else "Image size",
+        "eval_conf": "Порог confidence" if is_ru else "Confidence threshold",
+        "eval_iou": "Порог IoU" if is_ru else "IoU threshold",
+        "recommended_conf": "Рекомендованный confidence" if is_ru else "Recommended confidence",
+        "target_metric": "Целевая метрика" if is_ru else "Target metric",
+        "precision": "Точность" if is_ru else "Precision",
+        "recall": "Полнота" if is_ru else "Recall",
+        "f1": "F1",
+        "status": "Статус" if is_ru else "Status",
+        "performance_status": "Статус performance" if is_ru else "Performance status",
+        "class_name": "Класс" if is_ru else "Class",
+        "class_id": "ID класса" if is_ru else "Class ID",
+        "best_run": "Лучший запуск" if is_ru else "Best run",
+        "worst_run": "Худший запуск" if is_ru else "Worst run",
+        "best_ap": "Лучший AP" if is_ru else "Best AP",
+        "worst_ap": "Худший AP" if is_ru else "Worst AP",
+        "ap_gap": "Разница AP" if is_ru else "AP gap",
+        "composite_score": "Итоговый балл" if is_ru else "Composite score",
+        "quality_metric": "Метрика качества" if is_ru else "Quality metric",
+        "speed_metric": "Метрика скорости" if is_ru else "Speed metric",
+        "epochs": "Эпохи" if is_ru else "Epochs",
+        "batch_size": "Размер batch" if is_ru else "Batch size",
+        "train_image_size": "Размер train image" if is_ru else "Train image size",
+        "val_imgsz": "Размер val image" if is_ru else "Val image size",
+        "avg_inference_ms_per_frame": "мс/кадр (инференс)" if is_ru else "ms/frame (inference)",
+        "avg_total_ms_per_frame": "мс/кадр (полный)" if is_ru else "ms/frame (total)",
+        "avg_inference_fps": "FPS (инференс)" if is_ru else "FPS (inference)",
+        "avg_total_fps": "FPS (полный)" if is_ru else "FPS (total)",
+        "throughput_img_s": "Пропускная способность, img/s" if is_ru else "Throughput, img/s",
+        "latency_p50_ms": "Задержка p50, мс" if is_ru else "Latency p50, ms",
+        "latency_p95_ms": "Задержка p95, мс" if is_ru else "Latency p95, ms",
+        "perf_preprocess_ms_per_frame": "мс/кадр (preprocess)" if is_ru else "ms/frame (preprocess)",
+        "perf_inference_ms_per_frame": "мс/кадр (inference stage)" if is_ru else "ms/frame (inference stage)",
+        "perf_postprocess_ms_per_frame": "мс/кадр (postprocess)" if is_ru else "ms/frame (postprocess)",
+        "perf_total_ms_per_frame": "мс/кадр (pipeline total)" if is_ru else "ms/frame (pipeline total)",
+        "perf_warmup_images": "Warmup (кадров)" if is_ru else "Warmup images",
+        "perf_sample_count": "Измерено кадров" if is_ru else "Measured frames",
+        "perf_batch": "Batch (eval)" if is_ru else "Batch (eval)",
+        "perf_device": "Устройство" if is_ru else "Device",
+        "pure_inference_ms_per_frame": "мс/кадр (чистый инференс)" if is_ru else "ms/frame (pure inference)",
+        "pure_inference_fps": "FPS (чистый инференс)" if is_ru else "FPS (pure inference)",
+        "pipeline_end_to_end_ms_per_frame": "мс/кадр (pipeline e2e)" if is_ru else "ms/frame (pipeline e2e)",
+        "pipeline_end_to_end_fps": "FPS (pipeline e2e)" if is_ru else "FPS (pipeline e2e)",
+        "perf_io_load_ms_per_frame": "мс/кадр (I/O загрузка, diag)" if is_ru else "ms/frame (I/O load, diag)",
+        "perf_diag_alloc_ms_per_frame": "мс/кадр (alloc, diag)" if is_ru else "ms/frame (alloc, diag)",
+        "perf_diag_h2d_ms_per_frame": "мс/кадр (H2D, diag)" if is_ru else "ms/frame (H2D, diag)",
+        "perf_diag_execute_ms_per_frame": "мс/кадр (execute, diag)" if is_ru else "ms/frame (execute, diag)",
+        "perf_diag_d2h_ms_per_frame": "мс/кадр (D2H, diag)" if is_ru else "ms/frame (D2H, diag)",
+        "perf_diag_session_init_ms": "Инициализация сессии, мс (diag)" if is_ru else "Session init, ms (diag)",
+        "perf_diag_engine_init_ms": "Инициализация engine, мс (diag)" if is_ru else "Engine init, ms (diag)",
+        "perf_diag_worker_wall_ms": "Время worker, мс (diag)" if is_ru else "Worker wall time, ms (diag)",
+        "perf_diag_retries_count": "Повторы, шт (diag)" if is_ru else "Retries, count (diag)",
+        "perf_diag_retry_sleep_ms": "Сон при повторе, мс (diag)" if is_ru else "Retry sleep, ms (diag)",
+        "perf_diag_provider_switched_to_cpu": "Переключение на CPU (diag)" if is_ru else "Switched to CPU (diag)",
+    }
+    return common.get(name, name)
+
+
+def _pretty_value(v: Any, abbreviations: dict[str, str], *, is_ru: bool, float_decimals: int = 4) -> str:
+    if pd.isna(v):
+        return "нет данных" if is_ru else "no data"
+    if isinstance(v, float):
+        if abs(v - round(v)) < 1e-9:
+            return str(int(round(v)))
+        return f"{v:.{int(max(0, float_decimals))}f}"
+    if isinstance(v, (int, np.integer)):
+        return str(int(v))
+    sv = str(v)
+    if sv.strip().lower() in {"nan", "none", "null", "", "-"}:
+        return "нет данных" if is_ru else "no data"
+    return abbreviations.get(sv, sv)
+
+
+def _md_table_from_df(
+    df: pd.DataFrame,
+    abbreviations: dict[str, str],
+    limit: int | None = None,
+    *,
+    is_ru: bool = True,
+    float_decimals: int = 4,
+) -> list[str]:
     if len(df) == 0:
         return ["_No data._"]
     preview = df.head(limit).copy() if isinstance(limit, int) and limit > 0 else df.copy()
-    cols = [abbreviations.get(str(c), str(c)) for c in preview.columns]
+    cols = [_column_display_name(abbreviations.get(str(c), str(c)), is_ru) for c in preview.columns]
     lines = ["| " + " | ".join(cols) + " |", "| " + " | ".join(["---"] * len(cols)) + " |"]
     for _, row in preview.iterrows():
         vals = []
         for real_col in preview.columns:
             v = row.get(real_col)
-            if isinstance(v, float):
-                vals.append(f"{v:.4f}")
-            else:
-                sv = str(v)
-                vals.append(abbreviations.get(sv, sv))
+            vals.append(_pretty_value(v, abbreviations, is_ru=is_ru, float_decimals=float_decimals))
         lines.append("| " + " | ".join(vals) + " |")
     if isinstance(limit, int) and limit > 0 and len(df) > limit:
         lines.append(f"_Showing first {limit} rows out of {len(df)}._")
@@ -247,6 +348,62 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                 tpp = ET.SubElement(ts, f"{{{ns['style']}}}paragraph-properties")
                 tpp.set(f"{{{ns['fo']}}}text-align", "start")
                 tpp.set(f"{{{ns['fo']}}}text-indent", "0cm")
+            table_header_text_style = "SmarTrainTableHeaderText"
+            if not any(
+                s.attrib.get(f"{{{ns['style']}}}name") == table_header_text_style
+                for s in auto_styles.findall("style:style", ns)
+            ):
+                ths = ET.SubElement(
+                    auto_styles,
+                    f"{{{ns['style']}}}style",
+                    {
+                        f"{{{ns['style']}}}name": table_header_text_style,
+                        f"{{{ns['style']}}}family": "paragraph",
+                    },
+                )
+                thpp = ET.SubElement(ths, f"{{{ns['style']}}}paragraph-properties")
+                thpp.set(f"{{{ns['fo']}}}text-align", "center")
+                thpp.set(f"{{{ns['fo']}}}text-indent", "0cm")
+                thtp = ET.SubElement(ths, f"{{{ns['style']}}}text-properties")
+                thtp.set(f"{{{ns['fo']}}}font-weight", "bold")
+                thtp.set(f"{{{ns['style']}}}font-weight-asian", "bold")
+                thtp.set(f"{{{ns['style']}}}font-weight-complex", "bold")
+            for cell_style, border, background in (
+                ("SmarTrainTableBodyCell", "0.5pt solid #666666", None),
+                ("SmarTrainTableHeaderCell", "0.75pt solid #444444", "#f2f2f2"),
+            ):
+                if not any(
+                    s.attrib.get(f"{{{ns['style']}}}name") == cell_style
+                    for s in auto_styles.findall("style:style", ns)
+                ):
+                    cs = ET.SubElement(
+                        auto_styles,
+                        f"{{{ns['style']}}}style",
+                        {
+                            f"{{{ns['style']}}}name": cell_style,
+                            f"{{{ns['style']}}}family": "table-cell",
+                        },
+                    )
+                    csp = ET.SubElement(cs, f"{{{ns['style']}}}table-cell-properties")
+                    csp.set(f"{{{ns['fo']}}}border", border)
+                    if background:
+                        csp.set(f"{{{ns['fo']}}}background-color", background)
+            caption_style_name = "SmarTrainCaption"
+            if not any(
+                s.attrib.get(f"{{{ns['style']}}}name") == caption_style_name
+                for s in auto_styles.findall("style:style", ns)
+            ):
+                cap = ET.SubElement(
+                    auto_styles,
+                    f"{{{ns['style']}}}style",
+                    {
+                        f"{{{ns['style']}}}name": caption_style_name,
+                        f"{{{ns['style']}}}family": "paragraph",
+                    },
+                )
+                capp = ET.SubElement(cap, f"{{{ns['style']}}}paragraph-properties")
+                capp.set(f"{{{ns['fo']}}}text-align", "center")
+                capp.set(f"{{{ns['fo']}}}margin-bottom", "0.15cm")
             body = ct_root.find("office:body", ns)
             text_root = body.find("office:text", ns) if body is not None else None
             if text_root is not None:
@@ -258,7 +415,7 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                         changed = True
                         continue
                     if raw.startswith(("Рисунок ", "Figure ", "Таблица ", "Table ")):
-                        p.set(f"{{{ns['text']}}}style-name", center_style_name)
+                        p.set(f"{{{ns['text']}}}style-name", caption_style_name)
                         changed = True
                         continue
                     if p.find("draw:frame", ns) is not None:
@@ -270,6 +427,74 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                         changed = True
                 for tbl in text_root.iterfind(".//table:table", ns):
                     tbl.set(f"{{{ns['table']}}}align", "center")
+                    header_rows_parent = tbl.find("table:table-header-rows", ns)
+                    header_rows = (
+                        list(header_rows_parent.findall("table:table-row", ns)) if header_rows_parent is not None else []
+                    )
+                    body_rows = list(tbl.findall("table:table-row", ns))
+                    # Some tables may miss table-header-rows. In that case, treat first body row as header.
+                    fallback_header = not header_rows and bool(body_rows)
+                    for ridx, row in enumerate(header_rows):
+                        for cell in row.findall("table:table-cell", ns):
+                            cell.set(f"{{{ns['table']}}}style-name", "SmarTrainTableHeaderCell")
+                            p = cell.find("text:p", ns)
+                            if p is not None:
+                                p.set(f"{{{ns['text']}}}style-name", table_header_text_style)
+                    for ridx, row in enumerate(body_rows):
+                        is_header = fallback_header and ridx == 0
+                        for cell in row.findall("table:table-cell", ns):
+                            cell.set(
+                                f"{{{ns['table']}}}style-name",
+                                "SmarTrainTableHeaderCell" if is_header else "SmarTrainTableBodyCell",
+                            )
+                            p = cell.find("text:p", ns)
+                            if p is not None:
+                                p.set(
+                                    f"{{{ns['text']}}}style-name",
+                                    table_header_text_style if is_header else table_text_style_name,
+                                )
+                    cols = list(tbl.findall("table:table-column", ns))
+                    if cols:
+                        header_row = header_rows[0] if header_rows else (body_rows[0] if body_rows else None)
+                        headers = header_row.findall("table:table-cell", ns) if header_row is not None else []
+                        headers_txt = [("".join(h.itertext()) or "").strip().lower() for h in headers]
+                        widths = ["2.7cm"] * len(cols)
+                        for idx, htxt in enumerate(headers_txt):
+                            if "alias" in htxt or "алиас" in htxt:
+                                widths[idx] = "1.8cm"
+                            elif htxt in {"запуск", "run", "модель", "model"}:
+                                widths[idx] = "2.3cm"
+                            elif "target path" in htxt or "путь артефакта" in htxt:
+                                widths[idx] = "9.5cm"
+                            elif any(x in htxt for x in ("status", "статус", "split", "подвыборка", "format", "формат")):
+                                widths[idx] = "2.4cm"
+                            elif any(x in htxt for x in ("fps", "latency", "мс/кадр", "precision", "recall", "f1", "map")):
+                                widths[idx] = "2.6cm"
+                        if len(cols) == 3 and any("alias" in h or "алиас" in h for h in headers_txt):
+                            widths = ["1.8cm", "2.3cm", "12.4cm"]
+                        elif len(cols) <= 4 and all(w == "2.7cm" for w in widths):
+                            widths = ["4.0cm"] * len(cols)
+                        elif len(cols) > 8 and all(w == "2.7cm" for w in widths):
+                            widths = ["2.2cm"] * len(cols)
+                        for i, col in enumerate(cols):
+                            col_style_name = col.attrib.get(f"{{{ns['table']}}}style-name")
+                            if not col_style_name:
+                                continue
+                            col_style = None
+                            for s in auto_styles.findall("style:style", ns):
+                                if s.attrib.get(f"{{{ns['style']}}}name") == col_style_name:
+                                    col_style = s
+                                    break
+                            if col_style is None:
+                                continue
+                            cp = col_style.find("style:table-column-properties", ns)
+                            if cp is None:
+                                cp = ET.SubElement(col_style, f"{{{ns['style']}}}table-column-properties")
+                            # Pandoc often keeps rel-column-width on every column with equal star values.
+                            # LibreOffice prioritizes these relative widths and visually equalizes columns.
+                            # Remove relative sizing so explicit absolute column-width is respected.
+                            cp.attrib.pop(f"{{{ns['style']}}}rel-column-width", None)
+                            cp.set(f"{{{ns['style']}}}column-width", widths[min(i, len(widths) - 1)])
                     changed = True
                 # Force blank line before table captions and after figure captions.
                 for parent in text_root.iter():
@@ -358,8 +583,90 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "scatter_y_value",
             "quality_source",
         ]
+    elif "format_metrics_compare" in lower:
+        preferred = [
+            "alias",
+            "run_name",
+            "split",
+            "format",
+            "backend_status",
+            "mAP50-95",
+            "mAP50",
+            "Box-F1",
+            "Box-P",
+            "Box-R",
+        ]
+    elif "format_performance_compare" in lower:
+        preferred = [
+            "alias",
+            "run_name",
+            "split",
+            "format",
+            "avg_inference_ms_per_frame",
+            "avg_inference_fps",
+            "latency_p95_ms",
+            "perf_preprocess_ms_per_frame",
+            "perf_inference_ms_per_frame",
+            "perf_postprocess_ms_per_frame",
+            "perf_total_ms_per_frame",
+            "perf_warmup_images",
+            "perf_sample_count",
+            "perf_batch",
+            "perf_device",
+            "perf_io_load_ms_per_frame",
+            "perf_diag_alloc_ms_per_frame",
+            "perf_diag_h2d_ms_per_frame",
+            "perf_diag_execute_ms_per_frame",
+            "perf_diag_d2h_ms_per_frame",
+            "perf_diag_session_init_ms",
+            "perf_diag_engine_init_ms",
+            "perf_diag_worker_wall_ms",
+            "perf_diag_retries_count",
+            "perf_diag_retry_sleep_ms",
+            "perf_diag_provider_switched_to_cpu",
+        ]
+    elif "format_eval_settings" in lower:
+        preferred = [
+            "run_name",
+            "split",
+            "format",
+            "eval_imgsz",
+            "eval_conf",
+            "eval_iou",
+            "inference_source",
+            "gt_source",
+            "nms_profile",
+        ]
     elif "pr_per_class" in lower:
         preferred = ["model", "class_id", "class_name", "ap", "recall", "precision"]
+    elif "confidence_recommendations_" in lower:
+        preferred = [
+            "run_name",
+            "split",
+            "level",
+            "class_id",
+            "class_name",
+            "recommended_conf",
+            "target_metric",
+            "precision",
+            "recall",
+            "f1",
+            "status",
+        ]
+    elif "test_system_profile" in lower:
+        preferred = [
+            "run_name",
+            "model",
+            "format",
+            "test_backend",
+            "test_provider",
+            "sys_cpu_model",
+            "sys_ram_total_gb",
+            "sys_gpu_0_name",
+            "sys_gpu_0_vram_gb",
+            "sys_os",
+            "sys_os_release",
+        ]
     elif "system_profile" in lower:
         preferred = [
             "run_name",
@@ -429,6 +736,30 @@ def _should_hide_system_profile_table(df: pd.DataFrame) -> bool:
     return (empty / float(total)) > 0.70
 
 
+def _system_profile_text_summary(df: pd.DataFrame, is_ru: bool) -> list[str]:
+    lines: list[str] = []
+    if len(df) == 0:
+        return lines
+    for _, row in df.iterrows():
+        run_name = str(row.get("run_name") or row.get("run_dir") or "-")
+        cpu = str(row.get("sys_cpu_model") or "-")
+        gpu = str(row.get("sys_gpu_0_name") or "-")
+        ram = row.get("sys_ram_total_gb")
+        os_name = str(row.get("sys_os") or "-")
+        os_rel = str(row.get("sys_os_release") or "-")
+        ram_txt = "-"
+        try:
+            if pd.notna(ram):
+                ram_txt = f"{float(ram):.1f} GB"
+        except Exception:
+            ram_txt = str(ram)
+        if is_ru:
+            lines.append(f"- `{run_name}`: CPU={cpu}; GPU={gpu}; RAM={ram_txt}; OS={os_name} {os_rel}".strip())
+        else:
+            lines.append(f"- `{run_name}`: CPU={cpu}; GPU={gpu}; RAM={ram_txt}; OS={os_name} {os_rel}".strip())
+    return lines
+
+
 def _build_test_metrics_summary(df: pd.DataFrame, abbreviations: dict[str, str]) -> pd.DataFrame:
     metric_cols = ["test_mAP50-95", "test_mAP50", "test_Box-F1", "test_Box-P", "test_Box-R"]
     present = [c for c in metric_cols if c in df.columns]
@@ -478,6 +809,27 @@ def _filter_runs_summary_for_selection(df: pd.DataFrame, manifest: dict[str, Any
     return filtered
 
 
+def _filter_generic_table_for_selection(df: pd.DataFrame, manifest: dict[str, Any]) -> pd.DataFrame:
+    if len(df) == 0:
+        return df
+    selected_dirs, selected_names = _selected_run_identity(manifest)
+    if not selected_dirs and not selected_names:
+        return df
+    work = df.copy()
+    keep = pd.Series([False] * len(work), index=work.index)
+    candidate_cols = ["run_dir", "run_name", "model", "baseline", "other", "best_run", "worst_run"]
+    for col in candidate_cols:
+        if col not in work.columns:
+            continue
+        values = work[col].astype(str).str.strip()
+        keep = keep | values.isin(selected_dirs) | values.isin(selected_names)
+        keep = keep | values.str.rstrip("/").str.split("/").str[-1].isin(selected_names)
+    filtered = work[keep].copy()
+    if len(filtered) == 0:
+        return work
+    return filtered
+
+
 def _quality_metric_comments(df: pd.DataFrame, is_ru: bool) -> list[str]:
     lines: list[str] = []
     if len(df) == 0 or "run" not in df.columns:
@@ -486,6 +838,7 @@ def _quality_metric_comments(df: pd.DataFrame, is_ru: bool) -> list[str]:
         s = pd.to_numeric(df[metric], errors="coerce")
         if s.notna().sum() < 2:
             continue
+        metric_label = _column_display_name(metric, is_ru)
         best_idx = int(s.idxmax())
         worst_idx = int(s.idxmin())
         best_run = str(df.loc[best_idx, "run"])
@@ -493,9 +846,13 @@ def _quality_metric_comments(df: pd.DataFrame, is_ru: bool) -> list[str]:
         best_val = float(s.loc[best_idx])
         worst_val = float(s.loc[worst_idx])
         if is_ru:
-            lines.append(f"- {metric}: лучший запуск **{best_run}** ({best_val:.4f}), худший **{worst_run}** ({worst_val:.4f}).")
+            lines.append(
+                f"- {metric_label}: лучший запуск **{best_run}** ({best_val:.4f}), худший **{worst_run}** ({worst_val:.4f})."
+            )
         else:
-            lines.append(f"- {metric}: best run **{best_run}** ({best_val:.4f}), worst **{worst_run}** ({worst_val:.4f}).")
+            lines.append(
+                f"- {metric_label}: best run **{best_run}** ({best_val:.4f}), worst **{worst_run}** ({worst_val:.4f})."
+            )
     return lines
 
 
@@ -539,13 +896,50 @@ def _table_title(rel: str, is_ru: bool) -> str:
         return "Рейтинг моделей" if is_ru else "Model leaderboard"
     if "speed_quality" in low:
         return "Соотношение скорости и качества" if is_ru else "Speed-quality trade-off"
+    if "format_metrics_compare_test" in low:
+        return "Сравнение метрик по форматам (test)" if is_ru else "Format metrics comparison (test)"
+    if "format_performance_compare_test" in low:
+        return "Сравнение производительности форматов (test)" if is_ru else "Format performance comparison (test)"
+    if "format_metrics_compare_val" in low:
+        return "Сравнение метрик по форматам (val)" if is_ru else "Format metrics comparison (val)"
+    if "format_metrics_compare_pt_uni" in low:
+        return "Сравнение PT и PT-uni (test/val)" if is_ru else "PT vs PT-uni comparison (test/val)"
+    if "format_eval_settings" in low:
+        return "Параметры расчета метрик по форматам" if is_ru else "Metric calculation settings by format"
+    if "format_metrics_compare" in low:
+        return "Сравнение метрик по форматам" if is_ru else "Format metrics comparison"
     if "pr_per_class" in low:
         return "Сводка AP по классам" if is_ru else "Per-class AP summary"
+    if "confidence_recommendations_" in low:
+        m = re.search(r"confidence_recommendations_([abc])\.csv$", low)
+        suffix = m.group(1).upper() if m else "?"
+        objective_map_ru = {
+            "A": "A: максимум F1",
+            "B": "B: F-beta (приоритет Recall)",
+            "C": "C: F-beta (приоритет Precision)",
+        }
+        objective_map_en = {
+            "A": "A: max F1",
+            "B": "B: F-beta (recall-priority)",
+            "C": "C: F-beta (precision-priority)",
+        }
+        objective_label = objective_map_ru.get(suffix, suffix) if is_ru else objective_map_en.get(suffix, suffix)
+        return (
+            f"Рекомендации confidence ({objective_label})"
+            if is_ru
+            else f"Confidence recommendations ({objective_label})"
+        )
     if "runs_summary" in low:
         return (
             "Сводка параметров и метрик выбранных запусков"
             if is_ru
             else "Selected runs metrics and configuration summary"
+        )
+    if "test_system_profile" in low:
+        return (
+            "Сравнение окружения тестирования (железо)"
+            if is_ru
+            else "Test environment comparison (hardware)"
         )
     if "system_profile" in low:
         return (
@@ -745,12 +1139,12 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         "exec": "Краткое резюме" if is_ru else "Executive Summary",
         "context": "Контекст и цель сравнения" if is_ru else "Comparison Context",
         "quality": "Анализ качества" if is_ru else "Quality Analysis",
-        "speed": "Анализ скорости" if is_ru else "Speed Analysis",
+        "format_compare": "Сравнение форматов моделей" if is_ru else "Model Format Comparison",
         "per_class": "Анализ по классам" if is_ru else "Per-class Analysis",
         "ultra": "Результаты Ultralytics test" if is_ru else "Ultralytics Test Results",
         "conclusion": "Заключение и рекомендации" if is_ru else "Conclusions and Actions",
     }
-    section_order = ["context", "quality", "speed", "per_class", "ultra", "conclusion", "exec"]
+    section_order = ["context", "quality", "format_compare", "per_class", "ultra", "conclusion", "exec"]
     section_index = {k: i + 1 for i, k in enumerate(section_order)}
     def _sec(key: str) -> str:
         return f"## {section_index[key]}. {section_titles[key]}"
@@ -761,6 +1155,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append(f"- {('Профиль' if is_ru else 'Profile')}: `{manifest.get('profile', '')}`")
     lines.append(f"- {('Рабочая папка' if is_ru else 'Workspace root')}: `{workspace_root}`")
     lines.append("")
+    report_root = manifest.get("_report_root") or ""
     lines.append(_sec("context"))
     lines.append("")
     if tpl.get("INTRO"):
@@ -795,27 +1190,117 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             + "; ".join(sorted(dataset_pairs))
         )
     lines.append("")
+    context_idx = section_index["context"]
+    lines.append(
+        f"### {context_idx}.1 " + ("Датасет" if is_ru else "Dataset")
+    )
+    lines.append("")
+    if dataset_pairs:
+        for pair in sorted(dataset_pairs):
+            lines.append(f"- {pair}")
+    lines.append("")
+    lines.append(
+        f"### {context_idx}.2 " + ("Модели и артефакты" if is_ru else "Models and artifacts")
+    )
+    lines.append("")
+    fmt_cmp = manifest.get("format_comparison") if isinstance(manifest.get("format_comparison"), dict) else {}
+    alias_rel = str(fmt_cmp.get("alias_legend_csv") or "")
+    eval_rel = str(fmt_cmp.get("eval_csv") or "")
+    table_no = 1
+    if alias_rel:
+        alias_abs = os.path.join(report_root, alias_rel)
+        if os.path.isfile(alias_abs):
+            try:
+                alias_df = pd.read_csv(alias_abs)
+                alias_df = _filter_generic_table_for_selection(alias_df, manifest)
+                preferred_alias = [c for c in ("alias", "run_name", "target_path") if c in alias_df.columns]
+                if preferred_alias:
+                    alias_df = alias_df[preferred_alias]
+                dedup_cols = [c for c in ("run_name", "target_path") if c in alias_df.columns]
+                if dedup_cols:
+                    alias_df = alias_df.sort_values(by=[c for c in ("run_name", "alias") if c in alias_df.columns])
+                    alias_df = alias_df.drop_duplicates(subset=dedup_cols, keep="first")
+                alias_df = _abbrev_df(alias_df, abbreviations)
+                lines.extend(_center_open())
+                lines.append("")
+                lines.append(
+                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                    + ("Легенда алиасов форматов" if is_ru else "Format alias legend")
+                    + "**"
+                )
+                lines.append("")
+                lines.extend(_md_table_from_df(alias_df, abbreviations, limit=None, is_ru=is_ru))
+                lines.append("")
+                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{alias_rel}`"))
+                lines.extend(_center_close())
+                table_no += 1
+            except Exception:
+                pass
+    if eval_rel:
+        eval_abs = os.path.join(report_root, eval_rel)
+        if os.path.isfile(eval_abs):
+            try:
+                eval_df = pd.read_csv(eval_abs)
+                eval_df = _filter_generic_table_for_selection(eval_df, manifest)
+                keep_cols = [c for c in ("alias", "run_name", "split", "format", "eval_imgsz", "eval_conf", "eval_iou") if c in eval_df.columns]
+                if keep_cols:
+                    eval_df = eval_df[keep_cols]
+                eval_df = eval_df.drop_duplicates()
+                eval_df = _abbrev_df(eval_df, abbreviations)
+                lines.extend(_center_open())
+                lines.append("")
+                lines.append(
+                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                    + ("Параметры расчета метрик по форматам" if is_ru else "Metric calculation settings by format")
+                    + "**"
+                )
+                lines.append("")
+                lines.extend(_md_table_from_df(eval_df, abbreviations, limit=None, is_ru=is_ru))
+                lines.append("")
+                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{eval_rel}`"))
+                lines.extend(_center_close())
+                table_no += 1
+            except Exception:
+                pass
+    lines.append("")
     lines.append(_sec("quality"))
+    lines.append("")
+    quality_idx = section_index["quality"]
+    lines.append(f"### {quality_idx}.1 " + ("Общие метрики" if is_ru else "General metrics"))
     lines.append("")
     if tpl.get("QUALITY"):
         lines.extend(_justify_block(tpl["QUALITY"]))
-    report_root = manifest.get("_report_root") or ""
     tables = manifest.get("tables") or []
-    table_no = 1
     figure_no = 1
+    env_subsection_opened = False
+    leaderboard_rel = ""
     for rel in tables:
         if not isinstance(rel, str):
+            continue
+        if "format_metrics_compare" in rel.lower() or "format_eval_settings" in rel.lower():
+            # Format-comparison tables/settings are rendered in section 4 only.
+            continue
+        if "leaderboard" in rel.lower():
+            leaderboard_rel = rel
             continue
         abs_path = os.path.join(report_root, rel) if report_root else ""
         if not any(
             k in rel
             for k in ("compare", "leaderboard", "metrics", "speed_quality", "pr_per_class", "system_profile", "runs_summary")
         ):
-            continue
+            if "confidence_recommendations_" not in rel:
+                continue
+        if "confidence_recommendations_" in rel:
+            # In quality section show only global rows.
+            pass
         title = os.path.basename(rel)
         if "pr_per_class" in rel:
             # raw long-format table is too noisy; use aggregated class metrics below
             continue
+        if ("system_profile" in rel.lower() or "test_system_profile" in rel.lower()) and not env_subsection_opened:
+            lines.append(f"### {quality_idx}.2 " + ("Сравнение окружения" if is_ru else "Environment comparison"))
+            lines.append("")
+            env_subsection_opened = True
         lines.extend(_center_open())
         lines.append("")
         lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(rel, is_ru)}**")
@@ -824,8 +1309,60 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         if abs_path and os.path.isfile(abs_path):
             try:
                 df = pd.read_csv(abs_path)
-                if "runs_summary" in rel.lower():
+                rel_lower = rel.lower()
+                if "runs_summary" in rel_lower:
                     df = _filter_runs_summary_for_selection(df, manifest)
+                elif any(k in rel_lower for k in ("leaderboard", "speed_quality", "pr_per_class")):
+                    df = _filter_generic_table_for_selection(df, manifest)
+                elif "confidence_recommendations_" in rel_lower:
+                    df = _filter_generic_table_for_selection(df, manifest)
+                    if "level" in df.columns:
+                        df = df[df["level"].astype(str) == "global"].copy()
+                    for col in ("level", "class_id", "class_name"):
+                        if col in df.columns:
+                            df = df.drop(columns=[col])
+                if "system_profile_compare.csv" in rel_lower and "test_system_profile" not in rel_lower:
+                    lines.append(
+                        "#### " + ("Профиль запуска " if is_ru else "Run profile ") + "(train)"
+                    )
+                    lines.append("")
+                    for _, row in df.iterrows():
+                        run_label = str(row.get("run_name") or row.get("run_dir") or "-")
+                        lines.append(f"**{('Запуск' if is_ru else 'Run')} `{run_label}`**")
+                        lines.append("")
+                        card = pd.DataFrame(
+                            [
+                                {"Параметр" if is_ru else "Parameter": "CPU", "Значение" if is_ru else "Value": row.get("sys_cpu_model")},
+                                {"Параметр" if is_ru else "Parameter": "GPU", "Значение" if is_ru else "Value": row.get("sys_gpu_0_name")},
+                                {"Параметр" if is_ru else "Parameter": "RAM, GB", "Значение" if is_ru else "Value": row.get("sys_ram_total_gb")},
+                                {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": f"{row.get('sys_os')} {row.get('sys_os_release')}"},
+                            ]
+                        )
+                        lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
+                        lines.append("")
+                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{rel}`"))
+                    lines.extend(_center_close())
+                    continue
+                if "test_system_profile" in rel_lower:
+                    grouped = df.groupby("run_name", dropna=False) if "run_name" in df.columns else [("-", df)]
+                    for run_name, g in grouped:
+                        lines.append(f"#### {('Запуск' if is_ru else 'Run')} `{run_name}`")
+                        lines.append("")
+                        model_name = str(g.iloc[0].get("model") or "-") if len(g) > 0 and "model" in g.columns else "-"
+                        card_rows = [
+                            {"Параметр" if is_ru else "Parameter": ("Модель" if is_ru else "Model"), "Значение" if is_ru else "Value": model_name},
+                            {"Параметр" if is_ru else "Parameter": ("Форматы" if is_ru else "Formats"), "Значение" if is_ru else "Value": ", ".join(sorted(set(g.get("format", pd.Series(dtype=str)).astype(str))))},
+                            {"Параметр" if is_ru else "Parameter": "CPU", "Значение" if is_ru else "Value": g.iloc[0].get("sys_cpu_model") if "sys_cpu_model" in g.columns else None},
+                            {"Параметр" if is_ru else "Parameter": "GPU", "Значение" if is_ru else "Value": g.iloc[0].get("sys_gpu_0_name") if "sys_gpu_0_name" in g.columns else None},
+                            {"Параметр" if is_ru else "Parameter": "RAM, GB", "Значение" if is_ru else "Value": g.iloc[0].get("sys_ram_total_gb") if "sys_ram_total_gb" in g.columns else None},
+                            {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": f"{g.iloc[0].get('sys_os')} {g.iloc[0].get('sys_os_release')}" if len(g) > 0 else None},
+                        ]
+                        card = pd.DataFrame(card_rows)
+                        lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
+                        lines.append("")
+                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{rel}`"))
+                    lines.extend(_center_close())
+                    continue
                 df = _select_table_columns(rel, df)
                 if "system_profile" in rel.lower() and _should_hide_system_profile_table(df):
                     lines.append(
@@ -836,6 +1373,15 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             else "System profile table hidden: data is too sparse in hardware/os fields."
                         )
                     )
+                    summary_lines = _system_profile_text_summary(df, is_ru)
+                    if summary_lines:
+                        lines.append("")
+                        lines.append(
+                            "Доступные поля по запускам:"
+                            if is_ru
+                            else "Available fields by run:"
+                        )
+                        lines.extend(summary_lines)
                     lines.append("")
                     lines.append(
                         ("_Источник данных:_ " if is_ru else "_Data source:_ ")
@@ -844,7 +1390,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     lines.extend(_center_close())
                     continue
                 df = _abbrev_df(df, abbreviations)
-                lines.extend(_md_table_from_df(df, abbreviations, limit=None))
+                lines.extend(_md_table_from_df(df, abbreviations, limit=None, is_ru=is_ru))
                 lines.append("")
                 lines.append(
                     ("_Источник данных:_ " if is_ru else "_Data source:_ ")
@@ -868,7 +1414,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         + "**"
                     )
                     lines.append("")
-                    lines.extend(_md_table_from_df(test_summary, abbreviations, limit=None))
+                    lines.extend(_md_table_from_df(test_summary, abbreviations, limit=None, is_ru=is_ru))
                     lines.append("")
                     lines.append(
                         ("_Источник данных:_ " if is_ru else "_Data source:_ ")
@@ -883,11 +1429,158 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     table_no += 1
             except Exception:
                 pass
-    lines.append(_sec("speed"))
+    images = manifest.get("images") or []
+    lines.append(_sec("format_compare"))
+    lines.append("")
+    format_idx = section_index["format_compare"]
+    lines.append(f"### {format_idx}.1 " + ("Сравнение метрик качества" if is_ru else "Quality metrics comparison"))
+    lines.append("")
+    # Optional deep-diagnostics report (generated by scripts/deep_diagnostics_onnx_map50_95.py).
+    baseline_root = str(manifest.get("baseline") or "")
+    if baseline_root:
+        deep_md = os.path.join(baseline_root, "deep_diagnostics_report", "deep_diagnostics_report.md")
+        if os.path.isfile(deep_md):
+            lines.append("### " + ("Deep diagnostics (подробный анализ)" if is_ru else "Deep diagnostics (detailed analysis)"))
+            lines.append("")
+            lines.append(
+                "- "
+                + (
+                    "Отчёт deep-диагностики: "
+                    if is_ru
+                    else "Deep diagnostics report: "
+                )
+                + f"`{_path_for_report(deep_md, workspace_root)}`"
+            )
+            lines.append("")
+    fmt_cmp = manifest.get("format_comparison") if isinstance(manifest.get("format_comparison"), dict) else {}
+    issues_rel = str(fmt_cmp.get("issues_json") or "")
+    if issues_rel:
+        issues_abs = os.path.join(report_root, issues_rel)
+        if os.path.isfile(issues_abs):
+            try:
+                with open(issues_abs, "r", encoding="utf-8") as f:
+                    issues_payload = json.load(f)
+            except Exception:
+                issues_payload = []
+            if isinstance(issues_payload, list) and issues_payload:
+                lines.append("### " + ("Проблемы вычисления форматов" if is_ru else "Format evaluation issues"))
+                lines.append("")
+                lines.append(
+                    (
+                        "- Сводка причин (код -> количество):"
+                        if is_ru
+                        else "- Reason summary (code -> count):"
+                    )
+                )
+                reason_counts: dict[str, int] = {}
+                for item in issues_payload:
+                    if not isinstance(item, dict):
+                        continue
+                    reason_code = str(item.get("reason_code") or "unknown").strip() or "unknown"
+                    reason_counts[reason_code] = int(reason_counts.get(reason_code, 0)) + 1
+                for code, cnt in sorted(reason_counts.items(), key=lambda x: (-x[1], x[0])):
+                    lines.append(f"  - `{code}`: {cnt}")
+                lines.append("")
+                lines.append(
+                    (
+                        "- Краткая сводка по split/format:"
+                        if is_ru
+                        else "- Compact summary by split/format:"
+                    )
+                )
+                grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+                for item in issues_payload:
+                    if not isinstance(item, dict):
+                        continue
+                    split_name = str(item.get("split") or "-")
+                    fmt = str(item.get("format") or "-")
+                    reason_code = str(item.get("reason_code") or "unknown").strip() or "unknown"
+                    key = (split_name, fmt, reason_code)
+                    entry = grouped.setdefault(
+                        key,
+                        {
+                            "count": 0,
+                            "runs": set(),
+                            "statuses": set(),
+                            "reason": str(item.get("reason") or "-").replace("\n", " ").strip(),
+                        },
+                    )
+                    entry["count"] = int(entry.get("count", 0)) + 1
+                    entry["runs"].add(str(item.get("run_name") or "-"))
+                    entry["statuses"].add(str(item.get("status") or "-"))
+                    if entry.get("reason") in {"", "-"}:
+                        entry["reason"] = str(item.get("reason") or "-").replace("\n", " ").strip()
+                for (split_name, fmt, reason_code), entry in sorted(
+                    grouped.items(),
+                    key=lambda kv: (
+                        -int(kv[1].get("count", 0)),
+                        str(kv[0][0]),
+                        str(kv[0][1]),
+                        str(kv[0][2]),
+                    ),
+                ):
+                    runs_sorted = sorted(str(x) for x in entry.get("runs", set()))
+                    runs_txt = ", ".join(f"`{r}`" for r in runs_sorted[:4])
+                    if len(runs_sorted) > 4:
+                        runs_txt += f"{' и ещё ' if is_ru else ', plus '}{len(runs_sorted) - 4}"
+                    status_txt = "/".join(sorted(str(x) for x in entry.get("statuses", set())))
+                    reason = str(entry.get("reason") or "-")
+                    if reason and reason != "-" and len(reason) > 96:
+                        reason = reason[:93].rstrip() + "..."
+                    lines.append(
+                        f"- `{split_name}` / `{fmt}` / `{reason_code}`: "
+                        + (f"{entry['count']} шт." if is_ru else f"{entry['count']} item(s)")
+                        + (
+                            f"; runs: {runs_txt or '-'}; status: `{status_txt or '-'}`; причина: {reason}"
+                            if is_ru
+                            else f"; runs: {runs_txt or '-'}; status: `{status_txt or '-'}`; reason: {reason}"
+                        )
+                    )
+                lines.append("")
+    eval_rel = str(fmt_cmp.get("eval_csv") or "")
+    for key in ("test_csv", "val_csv", "pt_uni_csv", "csv"):
+        fmt_csv_rel = str(fmt_cmp.get(key) or "")
+        if not fmt_csv_rel:
+            continue
+        fmt_csv_abs = os.path.join(report_root, fmt_csv_rel)
+        if os.path.isfile(fmt_csv_abs):
+            try:
+                fmt_df = pd.read_csv(fmt_csv_abs)
+                fmt_df = _filter_generic_table_for_selection(fmt_df, manifest)
+                fmt_df = _select_table_columns(fmt_csv_rel, fmt_df)
+                fmt_df = _abbrev_df(fmt_df, abbreviations)
+                lines.extend(_center_open())
+                lines.append("")
+                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(fmt_csv_rel, is_ru)}**")
+                lines.append("")
+                lines.extend(_md_table_from_df(fmt_df, abbreviations, limit=None, is_ru=is_ru))
+                lines.append("")
+                lines.append(
+                    ("_Источник данных:_ " if is_ru else "_Data source:_ ")
+                    + f"`{fmt_csv_rel}`"
+                )
+                low_rel = fmt_csv_rel.lower()
+                if "format_metrics_compare_test" in low_rel or "format_metrics_compare_val" in low_rel:
+                    lines.append(
+                        (
+                            "- Пустые quality-ячейки для `engine/trt` могут означать `invalid_metrics`: файл метрик найден, "
+                            "но все ключевые метрики равны нулю и помечены как невалидные."
+                            if is_ru
+                            else "- Empty quality cells for `engine/trt` may indicate `invalid_metrics`: metrics file exists, "
+                            "but all key metrics are zeros and treated as invalid."
+                        )
+                    )
+                lines.extend(_center_close())
+                table_no += 1
+            except Exception as e:
+                lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
+    lines.append("")
+    lines.append(f"### {format_idx}.2 " + ("Сравнение производительности" if is_ru else "Performance comparison"))
+    lines.append("")
+    lines.append("#### " + ("Анализ скорости" if is_ru else "Speed analysis"))
     lines.append("")
     if tpl.get("SPEED"):
         lines.extend(_justify_block(tpl["SPEED"]))
-    images = manifest.get("images") or []
     for rel in images:
         if isinstance(rel, str):
             if not any(k in rel for k in ("compare", "inference", "speed_quality")):
@@ -898,6 +1591,318 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             figure_no += 1
             lines.append("")
             lines.extend(_center_close())
+    rendered_perf_table = False
+    for key in ("perf_test_csv",):
+        perf_csv_rel = str(fmt_cmp.get(key) or "")
+        if not perf_csv_rel:
+            continue
+        perf_csv_abs = os.path.join(report_root, perf_csv_rel)
+        if os.path.isfile(perf_csv_abs):
+            try:
+                perf_df = pd.read_csv(perf_csv_abs)
+                perf_df = _filter_generic_table_for_selection(perf_df, manifest)
+                # Hide legacy target-mismatch rows in the report table to keep
+                # the performance view focused on current comparable artifacts.
+                if "performance_reason" in perf_df.columns:
+                    perf_df = perf_df[
+                        perf_df["performance_reason"].astype(str) != "perf_target_mismatch_legacy_variant"
+                    ].copy()
+                perf_df = _select_table_columns(perf_csv_rel, perf_df)
+                perf_df = _abbrev_df(perf_df, abbreviations)
+                def _num_or_none(v: Any) -> float | None:
+                    try:
+                        if v is None or (isinstance(v, float) and pd.isna(v)):
+                            return None
+                        out = float(v)
+                        if pd.isna(out):
+                            return None
+                        return out
+                    except Exception:
+                        return None
+
+                # Explicitly separate pure inference timing from full pipeline timing.
+                pure_ms_series = (
+                    perf_df.get("perf_inference_ms_per_frame")
+                    if "perf_inference_ms_per_frame" in perf_df.columns
+                    else None
+                )
+                if pure_ms_series is None and "avg_inference_ms_per_frame" in perf_df.columns:
+                    pure_ms_series = perf_df.get("avg_inference_ms_per_frame")
+                if pure_ms_series is None and "latency_p50_ms" in perf_df.columns:
+                    pure_ms_series = perf_df.get("latency_p50_ms")
+                if pure_ms_series is None:
+                    pure_ms_series = pd.Series([None] * len(perf_df), index=perf_df.index)
+                perf_df["pure_inference_ms_per_frame"] = pure_ms_series
+
+                if "throughput_img_s" in perf_df.columns:
+                    pure_fps_series = perf_df["throughput_img_s"]
+                else:
+                    pure_fps_series = perf_df["pure_inference_ms_per_frame"].apply(
+                        lambda x: (1000.0 / x) if (_num_or_none(x) is not None and _num_or_none(x) > 0.0) else None
+                    )
+                perf_df["pure_inference_fps"] = pure_fps_series
+
+                pipeline_ms_series = (
+                    perf_df.get("perf_total_ms_per_frame")
+                    if "perf_total_ms_per_frame" in perf_df.columns
+                    else None
+                )
+                if pipeline_ms_series is None and "avg_total_ms_per_frame" in perf_df.columns:
+                    pipeline_ms_series = perf_df.get("avg_total_ms_per_frame")
+                if pipeline_ms_series is None:
+                    pipeline_ms_series = pd.Series([None] * len(perf_df), index=perf_df.index)
+                perf_df["pipeline_end_to_end_ms_per_frame"] = pipeline_ms_series
+                perf_df["pipeline_end_to_end_fps"] = perf_df["pipeline_end_to_end_ms_per_frame"].apply(
+                    lambda x: (1000.0 / x) if (_num_or_none(x) is not None and _num_or_none(x) > 0.0) else None
+                )
+
+                pure_cols = [
+                    c
+                    for c in (
+                        "alias",
+                        "run_name",
+                        "split",
+                        "format",
+                        "pure_inference_ms_per_frame",
+                        "pure_inference_fps",
+                        "latency_p95_ms",
+                        "perf_batch",
+                        "perf_device",
+                    )
+                    if c in perf_df.columns
+                ]
+                pipeline_cols = [
+                    c
+                    for c in (
+                        "alias",
+                        "run_name",
+                        "split",
+                        "format",
+                        "perf_preprocess_ms_per_frame",
+                        "perf_inference_ms_per_frame",
+                        "perf_postprocess_ms_per_frame",
+                        "pipeline_end_to_end_ms_per_frame",
+                        "pipeline_end_to_end_fps",
+                        "perf_warmup_images",
+                        "perf_sample_count",
+                    )
+                    if c in perf_df.columns
+                ]
+                pure_df = perf_df[pure_cols].copy() if pure_cols else perf_df.copy()
+                pipeline_df = perf_df[pipeline_cols].copy() if pipeline_cols else perf_df.copy()
+                lines.extend(_center_open())
+                lines.append("")
+                lines.append(
+                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                    + (
+                        "Производительность форматов: чистый инференс"
+                        if is_ru
+                        else "Format performance: pure inference"
+                    )
+                    + "**"
+                )
+                lines.append("")
+                lines.extend(_md_table_from_df(pure_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                lines.append("")
+                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
+                lines.append(
+                    (
+                        "- Основной KPI: сопоставимые runtime-этапы по методике Ultralytics-like. "
+                        "I/O загрузки источника и одноразовая инициализация бэкенда сюда не входят."
+                        if is_ru
+                        else "- Primary KPI: comparable runtime stages in Ultralytics-like methodology. "
+                        "Source I/O and one-time backend initialization are excluded."
+                    )
+                )
+                lines.append("")
+                legend = [
+                    ("Алиас", "Короткий идентификатор артефакта формата") if is_ru else ("Alias", "Short format artifact identifier"),
+                    ("Запуск", "Сравниваемый run") if is_ru else ("Run", "Compared run"),
+                    ("Подвыборка", "Подмножество датасета (обычно test)") if is_ru else ("Split", "Dataset subset (usually test)"),
+                    ("Формат", "Тип экспортированного артефакта") if is_ru else ("Format", "Exported artifact format"),
+                    (
+                        "мс/кадр (чистый инференс)",
+                        "Среднее время ядра инференса на кадр (без preprocess/postprocess)",
+                    )
+                    if is_ru
+                    else ("ms/frame (pure inference)", "Average core inference time per frame (without preprocess/postprocess)"),
+                    ("FPS (чистый инференс)", "Расчёт как 1000 / мс на кадр чистого инференса")
+                    if is_ru
+                    else ("FPS (pure inference)", "Computed as 1000 / pure inference ms per frame"),
+                    ("Задержка p95, мс", "95-й перцентиль latency (steady/all fallback)")
+                    if is_ru
+                    else ("Latency p95, ms", "95th percentile latency (steady/all fallback)"),
+                    ("Batch (eval)", "Batch из eval args") if is_ru else ("Batch (eval)", "Batch from eval args"),
+                    ("Устройство", "Устройство исполнения (например cpu/0)")
+                    if is_ru
+                    else ("Device", "Execution device (e.g. cpu/0)"),
+                ]
+                lines.append("**" + ("Легенда колонок:" if is_ru else "Column legend:") + "**")
+                lines.append("")
+                for idx, (title, descr) in enumerate(legend, start=1):
+                    lines.append(f"{idx}. **{title}** — {descr}")
+                lines.append("")
+                table_no += 1
+                lines.append(
+                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                    + (
+                        "Производительность форматов: полный e2e pipeline"
+                        if is_ru
+                        else "Format performance: full e2e pipeline"
+                    )
+                    + "**"
+                )
+                lines.append("")
+                lines.extend(_md_table_from_df(pipeline_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                lines.append("")
+                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
+                lines.append(
+                    (
+                        "- Здесь показан полный runtime-конвейер (preprocess + inference + postprocess), "
+                        "но без одноразовой инициализации."
+                        if is_ru
+                        else "- This table shows full runtime pipeline "
+                        "(preprocess + inference + postprocess), without one-time initialization."
+                    )
+                )
+                lines.append("")
+                legend2 = [
+                    ("Алиас", "Короткий идентификатор артефакта формата") if is_ru else ("Alias", "Short format artifact identifier"),
+                    ("Запуск", "Сравниваемый run") if is_ru else ("Run", "Compared run"),
+                    ("Подвыборка", "Подмножество датасета (обычно test)") if is_ru else ("Split", "Dataset subset (usually test)"),
+                    ("Формат", "Тип экспортированного артефакта") if is_ru else ("Format", "Exported artifact format"),
+                    ("мс/кадр (preprocess)", "Среднее время preprocess на кадр")
+                    if is_ru
+                    else ("ms/frame (preprocess)", "Average preprocess time per frame"),
+                    ("мс/кадр (inference stage)", "Среднее время ядра инференса на кадр")
+                    if is_ru
+                    else ("ms/frame (inference stage)", "Average core inference time per frame"),
+                    ("мс/кадр (postprocess)", "Среднее время decode/NMS на кадр")
+                    if is_ru
+                    else ("ms/frame (postprocess)", "Average decode/NMS time per frame"),
+                    ("мс/кадр (pipeline e2e)", "Среднее суммарное время полного конвейера на кадр")
+                    if is_ru
+                    else ("ms/frame (pipeline e2e)", "Average total end-to-end pipeline time per frame"),
+                    ("FPS (pipeline e2e)", "Расчёт как 1000 / мс полного конвейера")
+                    if is_ru
+                    else ("FPS (pipeline e2e)", "Computed as 1000 / total e2e ms per frame"),
+                    ("Warmup (кадров)", "Число warmup-кадров, исключённых из steady latency")
+                    if is_ru
+                    else ("Warmup images", "Warmup frames excluded from steady latency"),
+                    ("Измерено кадров", "Количество кадров в perf-замере")
+                    if is_ru
+                    else ("Measured frames", "Number of frames used in perf sampling"),
+                ]
+                lines.append("**" + ("Легенда колонок (e2e):" if is_ru else "Column legend (e2e):") + "**")
+                lines.append("")
+                for idx, (title, descr) in enumerate(legend2, start=1):
+                    lines.append(f"{idx}. **{title}** — {descr}")
+                diag_cols = [
+                    c
+                    for c in (
+                        "alias",
+                        "run_name",
+                        "split",
+                        "format",
+                        "perf_io_load_ms_per_frame",
+                        "perf_diag_alloc_ms_per_frame",
+                        "perf_diag_h2d_ms_per_frame",
+                        "perf_diag_execute_ms_per_frame",
+                        "perf_diag_d2h_ms_per_frame",
+                        "perf_diag_session_init_ms",
+                        "perf_diag_engine_init_ms",
+                        "perf_diag_worker_wall_ms",
+                        "perf_diag_retries_count",
+                        "perf_diag_retry_sleep_ms",
+                        "perf_diag_provider_switched_to_cpu",
+                    )
+                    if c in perf_df.columns
+                ]
+                if diag_cols:
+                    diag_df = perf_df[diag_cols].copy()
+                    lines.append("")
+                    table_no += 1
+                    lines.append(
+                        f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                        + (
+                            "Диагностика несопоставимых накладных расходов"
+                            if is_ru
+                            else "Diagnostics of non-comparable overheads"
+                        )
+                        + "**"
+                    )
+                    lines.append("")
+                    lines.extend(_md_table_from_df(diag_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                    lines.append("")
+                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
+                    lines.append(
+                        (
+                            "- Эти метрики диагностические и не используются в основном сравнении форматов."
+                            if is_ru
+                            else "- These metrics are diagnostic and are not used for primary format comparison."
+                        )
+                    )
+                lines.extend(_center_close())
+                table_no += 1
+                rendered_perf_table = True
+            except Exception as e:
+                lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
+    if not rendered_perf_table:
+        fallback_perf_rel = ""
+        for rel in tables:
+            if isinstance(rel, str) and rel.lower().endswith("artifacts/inference/benchmark.csv"):
+                fallback_perf_rel = rel
+                break
+        if fallback_perf_rel:
+            fallback_perf_abs = os.path.join(report_root, fallback_perf_rel)
+            if os.path.isfile(fallback_perf_abs):
+                try:
+                    perf_df = pd.read_csv(fallback_perf_abs)
+                    perf_df = _filter_generic_table_for_selection(perf_df, manifest)
+                    keep = [
+                        c
+                        for c in (
+                            "model",
+                            "run_dir",
+                            "device",
+                            "avg_total_ms_per_frame",
+                            "avg_inference_ms_per_frame",
+                            "avg_total_fps",
+                            "avg_inference_fps",
+                        )
+                        if c in perf_df.columns
+                    ]
+                    if keep:
+                        perf_df = perf_df[keep]
+                    perf_df = _abbrev_df(perf_df, abbreviations)
+                    lines.extend(_center_open())
+                    lines.append("")
+                    lines.append(
+                        f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                        + ("Fallback: скорость инференса по benchmark" if is_ru else "Fallback: inference benchmark speed")
+                        + "**"
+                    )
+                    lines.append("")
+                    lines.extend(_md_table_from_df(perf_df, abbreviations, limit=None, is_ru=is_ru))
+                    lines.append("")
+                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{fallback_perf_rel}`"))
+                    lines.extend(_center_close())
+                    table_no += 1
+                    rendered_perf_table = True
+                except Exception as e:
+                    lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
+    if not rendered_perf_table:
+        lines.append(
+            "- "
+            + (
+                "Таблица производительности форматов отсутствует: для format compare не найден `perf_test_csv` "
+                "и fallback `artifacts/inference/benchmark.csv` недоступен."
+                if is_ru
+                else "Format performance table is unavailable: `perf_test_csv` is missing and fallback "
+                "`artifacts/inference/benchmark.csv` is not available."
+            )
+        )
+        lines.append("")
     lines.append(_sec("per_class"))
     lines.append("")
     if tpl.get("PER_CLASS"):
@@ -908,6 +1913,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         if os.path.isfile(pr_abs):
             try:
                 pr_df = pd.read_csv(pr_abs)
+                pr_df = _filter_generic_table_for_selection(pr_df, manifest)
                 pr_sum = _build_pr_per_class_summary(pr_df)
                 if len(pr_sum) > 0:
                     lines.extend(_center_open())
@@ -915,7 +1921,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(pr_csv_rel, is_ru)}**")
                     lines.append("")
                     pr_sum = _abbrev_df(pr_sum, abbreviations)
-                    lines.extend(_md_table_from_df(pr_sum, abbreviations, limit=None))
+                    lines.extend(_md_table_from_df(pr_sum, abbreviations, limit=None, is_ru=is_ru))
                     lines.append("")
                     lines.append(
                         ("_Источник данных:_ " if is_ru else "_Data source:_ ")
@@ -925,6 +1931,73 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     table_no += 1
             except Exception:
                 pass
+    conf_map = (
+        manifest.get("confidence_recommendations")
+        if isinstance(manifest.get("confidence_recommendations"), dict)
+        else {}
+    )
+    for objective in ("A", "B", "C"):
+        rel = str(conf_map.get(objective) or "")
+        if not rel:
+            continue
+        abs_path = os.path.join(report_root, rel) if report_root else ""
+        if not abs_path or not os.path.isfile(abs_path):
+            continue
+        try:
+            cdf = pd.read_csv(abs_path)
+            cdf = _filter_generic_table_for_selection(cdf, manifest)
+            if "level" in cdf.columns:
+                cdf = cdf[cdf["level"].astype(str) == "class"].copy()
+            if len(cdf) == 0:
+                continue
+            group_col = "run_name" if "run_name" in cdf.columns else None
+            grouped_items: list[tuple[str, pd.DataFrame]]
+            if group_col:
+                grouped_items = []
+                for run_name, gdf in cdf.groupby(group_col, dropna=False):
+                    grouped_items.append((str(run_name), gdf.copy()))
+            else:
+                grouped_items = [("-", cdf.copy())]
+
+            for run_name, run_df in grouped_items:
+                local_df = run_df.copy()
+                for col in ("run_name", "objective", "level"):
+                    if col in local_df.columns:
+                        local_df = local_df.drop(columns=[col])
+                preferred_pc = [
+                    "class_name",
+                    "split",
+                    "class_id",
+                    "recommended_conf",
+                    "target_metric",
+                    "precision",
+                    "recall",
+                    "f1",
+                    "status",
+                ]
+                chosen_pc = [c for c in preferred_pc if c in local_df.columns]
+                if chosen_pc:
+                    local_df = local_df[chosen_pc]
+                local_df = _abbrev_df(local_df, abbreviations)
+                lines.extend(_center_open())
+                lines.append("")
+                objective_title = _table_title(rel, is_ru)
+                if is_ru:
+                    full_title = f"{objective_title} — run {run_name}"
+                else:
+                    full_title = f"{objective_title} — run {run_name}"
+                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {full_title}**")
+                lines.append("")
+                lines.extend(_md_table_from_df(local_df, abbreviations, limit=None, is_ru=is_ru))
+                lines.append("")
+                lines.append(
+                    ("_Источник данных:_ " if is_ru else "_Data source:_ ")
+                    + f"`{rel}`"
+                )
+                lines.extend(_center_close())
+                table_no += 1
+        except Exception:
+            pass
     for rel in images:
         if isinstance(rel, str) and rel.endswith("artifacts/pr/pr_all_classes.png"):
             lines.extend(_center_open())
@@ -1042,6 +2115,27 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         lines.append("")
     lines.append(_sec("conclusion"))
     lines.append("")
+    if leaderboard_rel:
+        lb_abs = os.path.join(report_root, leaderboard_rel)
+        if os.path.isfile(lb_abs):
+            try:
+                lb_df = pd.read_csv(lb_abs)
+                lb_df = _filter_generic_table_for_selection(lb_df, manifest)
+                lb_keep = [c for c in ("model", "run_name", "run_dir", "composite_score", "quality_metric", "speed_metric") if c in lb_df.columns]
+                if lb_keep:
+                    lb_df = lb_df[lb_keep]
+                lb_df = _abbrev_df(lb_df, abbreviations)
+                lines.extend(_center_open())
+                lines.append("")
+                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(leaderboard_rel, is_ru)}**")
+                lines.append("")
+                lines.extend(_md_table_from_df(lb_df, abbreviations, limit=None, is_ru=is_ru))
+                lines.append("")
+                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{leaderboard_rel}`"))
+                lines.extend(_center_close())
+                table_no += 1
+            except Exception:
+                pass
     if tpl.get("CONCLUSION"):
         lines.extend(_justify_block(tpl["CONCLUSION"]))
     else:

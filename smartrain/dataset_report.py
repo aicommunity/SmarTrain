@@ -300,7 +300,8 @@ def _padded_roi(
 def _crop_phash(img: Image.Image) -> int:
     """Average hash (64 bits) of grayscale 8x8 — same spirit as dataset_stats."""
     g = img.convert("L").resize((8, 8), Image.Resampling.BILINEAR)
-    pixels = list(g.getdata())
+    get_flat = getattr(g, "get_flattened_data", None)
+    pixels = list(get_flat() if callable(get_flat) else g.getdata())
     mean = sum(pixels) / len(pixels)
     bits = 0
     for px in pixels:

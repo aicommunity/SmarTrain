@@ -33,6 +33,13 @@ from smartrain.compare_service import (
     generate_compare_insights,
 )
 from smartrain.analyze_report import write_analysis_report, write_manifest
+from smartrain.run_artifacts import (
+    canonical_run_model_path,
+    materialize_canonical_run_model,
+    resolve_run_model_with_legacy_fallback,
+    run_test_backend_dir,
+    run_tmp_dir,
+)
 from smartrain.analyze_cache import (
     append_cache_entry,
     compute_fingerprint,
@@ -51,9 +58,18 @@ from smartrain.metrics_reader import (
     pick_map_column,
     read_test_metrics_row,
     results_csv_path,
+    read_test_metrics_by_format,
+    read_metrics_by_format_for_split,
+    read_metrics_by_format_for_split_artifacts,
+    read_test_performance_by_format_artifacts,
+    read_test_system_profile_by_format_artifacts,
 )
+from smartrain.model_test_service import load_test_artifacts_manifest
 from smartrain.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.confidence_recommendation import recommendation_file_path, read_recommendation_file
+
+METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
 
 def _clear_gpu_memory() -> None:
@@ -137,7 +153,9 @@ def _resolve_run_val_profile(
     default_imgsz: int = 640,
     default_half: bool = True,
 ) -> tuple[int, int, bool]:
-    args_yaml = os.path.join(run_dir, "train", "args.yaml")
+    args_yaml = os.path.join(run_dir, "train-ultralytics", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        args_yaml = os.path.join(run_dir, "train", "args.yaml")
     batch = int(default_batch)
     imgsz = int(default_imgsz)
     half = bool(default_half)
@@ -229,7 +247,9 @@ def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | Non
         seen.add(ap)
         out.append((ap, src))
 
-    args_yaml = os.path.join(rd, "train", "args.yaml")
+    args_yaml = os.path.join(rd, "train-ultralytics", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        args_yaml = os.path.join(rd, "train", "args.yaml")
     if os.path.isfile(args_yaml):
         try:
             payload = yaml.safe_load(open(args_yaml, encoding="utf-8")) or {}
@@ -251,9 +271,13 @@ def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | Non
         except Exception:
             pass
 
-    runtime_yaml = os.path.join(rd, "_runtime_data_train.yaml")
+    runtime_yaml = os.path.join(str(run_tmp_dir(rd)), "_runtime_data_train.yaml")
     if os.path.isfile(runtime_yaml):
         _add(runtime_yaml, "_runtime_data_train.yaml")
+    else:
+        runtime_yaml = os.path.join(rd, "_runtime_data_train.yaml")
+        if os.path.isfile(runtime_yaml):
+            _add(runtime_yaml, "_runtime_data_train.yaml(legacy)")
 
     try:
         md = load_metadata(rd)
@@ -343,9 +367,13 @@ def _recompute_run_test_metrics(
 ) -> dict[str, Any]:
     from ultralytics import YOLO
 
-    best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+    best_pt = canonical_run_model_path(run_dir, ".pt")
     if not os.path.isfile(best_pt):
-        raise FileNotFoundError(f"best.pt not found: {best_pt}")
+        materialized = materialize_canonical_run_model(run_dir, ext=".pt", move=True, normalize_metadata=True)
+        if materialized is not None:
+            best_pt = str(materialized)
+    if not os.path.isfile(best_pt):
+        raise FileNotFoundError(f"run model not found: {best_pt}")
     model = YOLO(best_pt)
     _clear_gpu_memory()
     rb, ri, rh = _resolve_run_val_profile(
@@ -523,6 +551,62 @@ def _write_system_profile_compare_csv(run_dirs: list[str], out_csv: str) -> str 
                 "sys_hostname": row.get("sys_hostname"),
             }
         )
+    if not rows:
+        return None
+    os.makedirs(os.path.dirname(os.path.abspath(out_csv)) or ".", exist_ok=True)
+    pd.DataFrame(rows).to_csv(out_csv, index=False, encoding="utf-8")
+    return out_csv
+
+
+def _write_test_system_profile_compare_csv(run_dirs: list[str], out_csv: str) -> str | None:
+    rows: list[dict[str, Any]] = []
+    for run_dir in run_dirs:
+        try:
+            md = load_metadata(run_dir)
+            flat = flatten_metadata(md, run_dir)
+        except Exception:
+            flat = {}
+        by_fmt = read_test_system_profile_by_format_artifacts(run_dir)
+        run_name = os.path.basename(run_dir.rstrip(os.sep))
+        for fmt, records in by_fmt.items():
+            for rec in records:
+                profile = rec.get("test_system_profile") if isinstance(rec, dict) else None
+                if not isinstance(profile, dict):
+                    continue
+                runtime = profile.get("runtime") if isinstance(profile.get("runtime"), dict) else {}
+                cpu = profile.get("cpu") if isinstance(profile.get("cpu"), dict) else {}
+                ram = profile.get("ram") if isinstance(profile.get("ram"), dict) else {}
+                gpu = profile.get("gpu") if isinstance(profile.get("gpu"), dict) else {}
+                platform = profile.get("platform") if isinstance(profile.get("platform"), dict) else {}
+                devices = gpu.get("devices") if isinstance(gpu.get("devices"), list) else []
+                row = {
+                    "run_dir": run_dir,
+                    "run_name": run_name,
+                    "model": flat.get("model"),
+                    "dataset_name": flat.get("dataset_name"),
+                    "format": fmt,
+                    "target_path": rec.get("target_path"),
+                    "test_backend": runtime.get("backend"),
+                    "test_provider": runtime.get("provider") or runtime.get("backend"),
+                    "test_device": runtime.get("device"),
+                    "sys_cpu_model": cpu.get("model"),
+                    "sys_cpu_arch": cpu.get("architecture"),
+                    "sys_cpu_logical_cores": cpu.get("logical_cores"),
+                    "sys_cpu_physical_cores": cpu.get("physical_cores"),
+                    "sys_ram_total_gb": ram.get("total_gb"),
+                    "sys_gpu_cuda_available": gpu.get("cuda_available"),
+                    "sys_gpu_count": len(devices),
+                    "sys_gpu_total_vram_gb": gpu.get("total_vram_gb"),
+                    "sys_gpu_0_name": devices[0].get("name") if len(devices) >= 1 and isinstance(devices[0], dict) else None,
+                    "sys_gpu_0_vram_gb": (
+                        devices[0].get("total_vram_gb") if len(devices) >= 1 and isinstance(devices[0], dict) else None
+                    ),
+                    "sys_os": platform.get("os"),
+                    "sys_os_release": platform.get("os_release"),
+                    "sys_python_version": platform.get("python_version"),
+                    "sys_hostname": platform.get("hostname"),
+                }
+                rows.append(row)
     if not rows:
         return None
     os.makedirs(os.path.dirname(os.path.abspath(out_csv)) or ".", exist_ok=True)
@@ -841,7 +925,7 @@ def cmd_interactive(args: argparse.Namespace) -> None:
                 )
                 if missing_runs:
                     choice = prompt_choice(
-                        "Found missing metrics. Recompute from best.pt + data.yaml now?",
+                        "Found missing metrics. Recompute from run model + data.yaml now?",
                         ["yes", "no"],
                         default="yes",
                         show_options=False,
@@ -908,13 +992,74 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
     if not getattr(args, "speed_metric", None) and sys.stdin.isatty():
         args.speed_metric = prompt_text("Speed metric", default="avg_inference_fps").strip() or "avg_inference_fps"
     runs = find_run_directories(args.models_root)
+    selected_norm = {
+        os.path.abspath(os.path.expanduser(str(p)))
+        for p in (getattr(args, "selected_run_dirs", None) or [])
+        if str(p).strip()
+    }
+    if selected_norm:
+        runs = [r for r in runs if os.path.abspath(r) in selected_norm]
+        print(f"[INFO] Leaderboard scope: {len(runs)} run(s) selected")
     records = []
+
+    def _resolve_speed_metric_from_performance(run_dir: str, metric_name: str) -> float | None:
+        metric = str(metric_name or "").strip().lower()
+        if not metric:
+            return None
+        perf_by_fmt = read_test_performance_by_format_artifacts(run_dir)
+        candidates: list[float] = []
+        for rows in perf_by_fmt.values():
+            for row in rows:
+                perf = row.get("performance") if isinstance(row, dict) else None
+                if not isinstance(perf, dict):
+                    continue
+                value: Any = None
+                if metric in {"avg_inference_fps", "throughput_img_s"}:
+                    value = perf.get("throughput_img_s")
+                elif metric in {"avg_inference_ms_per_frame", "latency_p50_ms"}:
+                    latency_ms = perf.get("latency_ms")
+                    if isinstance(latency_ms, dict):
+                        steady = latency_ms.get("steady")
+                        all_stats = latency_ms.get("all")
+                        if isinstance(steady, dict) and steady.get("p50") is not None:
+                            value = steady.get("p50")
+                        elif isinstance(all_stats, dict):
+                            value = all_stats.get("p50")
+                elif metric == "latency_p95_ms":
+                    latency_ms = perf.get("latency_ms")
+                    if isinstance(latency_ms, dict):
+                        steady = latency_ms.get("steady")
+                        all_stats = latency_ms.get("all")
+                        if isinstance(steady, dict) and steady.get("p95") is not None:
+                            value = steady.get("p95")
+                        elif isinstance(all_stats, dict):
+                            value = all_stats.get("p95")
+                try:
+                    if value is None:
+                        continue
+                    fv = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if np.isfinite(fv):
+                    candidates.append(fv)
+        if not candidates:
+            return None
+        # Prefer best attainable speed for run-level leaderboard.
+        if "fps" in metric or "throughput" in metric:
+            return float(max(candidates))
+        return float(min(candidates))
+
     for run_dir in runs:
         try:
             rec = build_run_record(run_dir)
         except Exception as e:
             print(f"[WARN] {run_dir}: failed to load run ({e})")
             continue
+        speed_value = rec.test_metrics.get(args.speed_metric)
+        if speed_value is None or (isinstance(speed_value, float) and pd.isna(speed_value)):
+            fallback_speed = _resolve_speed_metric_from_performance(run_dir, str(args.speed_metric or ""))
+            if fallback_speed is not None:
+                rec.test_metrics[args.speed_metric] = fallback_speed
         score = compute_composite_score(
             rec,
             weight_quality=args.weight_quality,
@@ -976,7 +1121,11 @@ def _extract_pr_curve_from_metrics(metrics_obj: Any) -> tuple[np.ndarray, np.nda
 
             if y.ndim >= 2:
                 # Usually shape: (num_classes, points); average across classes.
-                y = np.nanmean(y, axis=0)
+                valid_rows = ~np.all(np.isnan(y), axis=1)
+                if bool(np.any(valid_rows)):
+                    y = np.nanmean(y[valid_rows], axis=0)
+                else:
+                    continue
             if x.ndim > 1:
                 x = np.ravel(x)
             if y.ndim > 1:
@@ -1022,6 +1171,105 @@ def _extract_pr_curve_per_class_from_metrics(metrics_obj: Any) -> tuple[np.ndarr
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^\w.\-+]+", "_", value, flags=re.UNICODE).strip("._") or "class"
+
+
+def _collect_confidence_recommendation_tables(run_dirs: list[str], out_dir: str) -> dict[str, str]:
+    rows_by_objective: dict[str, list[dict[str, Any]]] = {"A": [], "B": [], "C": []}
+    for run_dir in run_dirs:
+        md = {}
+        try:
+            md = load_metadata(run_dir)
+        except Exception:
+            md = {}
+        model_name = (
+            md.get("training_info", {}).get("model")
+            if isinstance(md, dict)
+            else None
+        ) or os.path.basename(run_dir.rstrip(os.sep))
+        dataset_name = (
+            md.get("training_info", {}).get("dataset", {}).get("name")
+            if isinstance(md, dict)
+            else None
+        ) or os.path.basename(os.path.dirname(run_dir.rstrip(os.sep)))
+
+        for split in ("val", "test"):
+            payload = read_recommendation_file(recommendation_file_path(run_dir, split))
+            if not isinstance(payload, dict):
+                continue
+            objectives = payload.get("objectives")
+            if not isinstance(objectives, dict):
+                continue
+            for objective in ("A", "B", "C"):
+                item = objectives.get(objective)
+                if not isinstance(item, dict):
+                    continue
+                beta = item.get("beta")
+                global_row = item.get("global")
+                if isinstance(global_row, dict):
+                    rows_by_objective[objective].append(
+                        {
+                            "run_dir": run_dir,
+                            "run_name": os.path.basename(run_dir.rstrip(os.sep)),
+                            "model": model_name,
+                            "dataset": dataset_name,
+                            "split": split,
+                            "objective": objective,
+                            "beta": beta,
+                            "level": "global",
+                            "class_id": -1,
+                            "class_name": "all",
+                            "recommended_conf": global_row.get("threshold"),
+                            "target_metric": global_row.get("metric_value"),
+                            "precision": global_row.get("precision"),
+                            "recall": global_row.get("recall"),
+                            "f1": global_row.get("f1"),
+                            "support_instances": None,
+                            "status": global_row.get("status") or payload.get("status"),
+                            "reason": global_row.get("reason") or payload.get("reason"),
+                        }
+                    )
+                per_class = item.get("per_class")
+                if isinstance(per_class, list):
+                    for row in per_class:
+                        if not isinstance(row, dict):
+                            continue
+                        rows_by_objective[objective].append(
+                            {
+                                "run_dir": run_dir,
+                                "run_name": os.path.basename(run_dir.rstrip(os.sep)),
+                                "model": model_name,
+                                "dataset": dataset_name,
+                                "split": split,
+                                "objective": objective,
+                                "beta": beta,
+                                "level": "class",
+                                "class_id": row.get("class_id"),
+                                "class_name": row.get("class_name"),
+                                "recommended_conf": row.get("threshold"),
+                                "target_metric": row.get("metric_value"),
+                                "precision": row.get("precision"),
+                                "recall": row.get("recall"),
+                                "f1": row.get("f1"),
+                                "support_instances": row.get("support_instances"),
+                                "status": row.get("status") or payload.get("status"),
+                                "reason": row.get("reason") or payload.get("reason"),
+                            }
+                        )
+
+    out: dict[str, str] = {}
+    os.makedirs(out_dir, exist_ok=True)
+    sort_cols = ["run_name", "split", "level", "class_id"]
+    for objective in ("A", "B", "C"):
+        rows = rows_by_objective.get(objective) or []
+        if not rows:
+            continue
+        df = pd.DataFrame(rows)
+        if set(sort_cols).issubset(df.columns):
+            df = df.sort_values(sort_cols, ascending=[True, True, True, True])
+        out_path = os.path.join(out_dir, f"confidence_recommendations_{objective}.csv")
+        df.to_csv(out_path, index=False, encoding="utf-8")
+        out[objective] = out_path
+    return out
 
 
 def _write_speed_quality_artifacts(
@@ -1140,7 +1388,7 @@ def _collect_missing_metrics_recompute_plan(
             resolved_yaml = _resolve_data_yaml_for_run(run_dir, workspace)[0]
             if not resolved_yaml:
                 resolved_yaml = data_yaml
-            best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+            best_pt = canonical_run_model_path(run_dir, ".pt")
             if not resolved_yaml:
                 print(
                     "[INFO] "
@@ -1159,7 +1407,7 @@ def _collect_missing_metrics_recompute_plan(
                 print(
                     "[INFO] "
                     + os.path.basename(run_dir.rstrip(os.sep))
-                    + ": skip recompute prompt (best.pt not found)."
+                    + ": skip recompute prompt (run model not found)."
                 )
                 skipped.append(
                     {
@@ -1304,7 +1552,9 @@ def _collect_ultralytics_test_artifacts(
     for rd in run_dirs:
         run_name = os.path.basename(rd.rstrip(os.sep))
         run_code = abbreviations.get(run_name, run_name)
-        test_dir = os.path.join(rd, "test")
+        preferred_test_dir = str(run_test_backend_dir(rd, "ultralytics"))
+        legacy_test_dir = os.path.join(rd, "test")
+        test_dir = preferred_test_dir if os.path.isdir(preferred_test_dir) else legacy_test_dir
         run_info: dict[str, Any] = {}
         machine_info: dict[str, Any] = {}
         try:
@@ -1396,6 +1646,841 @@ def _collect_ultralytics_test_artifacts(
     return rows, artifacts
 
 
+def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> dict[str, str] | None:
+    backend_fallback = {
+        "pt": "ultralytics",
+        "pt_uni": "unified_pt",
+        "onnx": "onnxruntime",
+        "engine": "tensorrt",
+        "trt": "tensorrt",
+    }
+    ext_by_format = {
+        "pt": ".pt",
+        "pt_uni": ".pt",
+        "onnx": ".onnx",
+        "engine": ".engine",
+        "trt": ".trt",
+    }
+
+    def _has_model_artifact(run_dir: str, fmt: str, entry: dict[str, Any]) -> bool:
+        target = entry.get("target_path")
+        if isinstance(target, str) and target.strip():
+            candidate = target if os.path.isabs(target) else os.path.join(run_dir, target)
+            if os.path.isfile(candidate):
+                return True
+        artifacts = entry.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if not isinstance(item, dict):
+                    continue
+                target_item = item.get("target_path")
+                if not isinstance(target_item, str) or not target_item.strip():
+                    continue
+                candidate = target_item if os.path.isabs(target_item) else os.path.join(run_dir, target_item)
+                if os.path.isfile(candidate):
+                    return True
+        if fmt in {"pt", "pt_uni"}:
+            return resolve_run_model_with_legacy_fallback(run_dir, ".pt") is not None
+        ext = ext_by_format.get(fmt)
+        if not ext:
+            return False
+        return any(os.path.isfile(p) for p in glob(os.path.join(run_dir, "**", f"*{ext}"), recursive=True))
+
+    def _pick_target_path(entry: dict[str, Any]) -> str | None:
+        target = entry.get("target_path")
+        if isinstance(target, str) and target.strip():
+            return target
+        artifacts = entry.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if not isinstance(item, dict):
+                    continue
+                t = item.get("target_path")
+                if isinstance(t, str) and t.strip():
+                    return t
+        return None
+
+    def _format_alias_prefix(fmt: str) -> str:
+        return {
+            "pt": "PT",
+            "pt_uni": "PTUNI",
+            "onnx": "ONNX",
+            "engine": "ENGINE",
+            "trt": "TRT",
+        }.get(fmt, str(fmt).upper())
+
+    def _iter_entry_variants(
+        run_dir: str,
+        fmt: str,
+        entry: dict[str, Any],
+        split_metrics: list[dict[str, str]],
+        split_name: str,
+    ) -> list[dict[str, Any]]:
+        def _resolve_metrics_candidate(path_value: str | None) -> str | None:
+            raw = str(path_value or "").strip()
+            if not raw:
+                return None
+            candidate = os.path.abspath(os.path.join(run_dir, raw)) if not os.path.isabs(raw) else raw
+            if os.path.isfile(candidate):
+                return candidate
+            # Legacy manifest values may omit "tests/" prefix after migration.
+            base = os.path.basename(raw)
+            if base:
+                migrated = os.path.join(run_dir, "tests", base)
+                if os.path.isfile(migrated):
+                    return os.path.abspath(migrated)
+            return candidate
+
+        variants: list[dict[str, Any]] = []
+        artifacts = entry.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if not isinstance(item, dict):
+                    continue
+                target_rel = str(item.get("target_path") or "").strip()
+                target_abs = (
+                    os.path.abspath(os.path.join(run_dir, target_rel))
+                    if target_rel and not os.path.isabs(target_rel)
+                    else (target_rel or None)
+                )
+                metrics_rel = str(item.get("metrics_csv") or "").strip()
+                metrics_abs = _resolve_metrics_candidate(metrics_rel)
+                matched = None
+                preferred_split_metrics = list(split_metrics)
+                split_token = f"{split_name}_metrics"
+                split_specific = [
+                    rec
+                    for rec in split_metrics
+                    if split_token in os.path.basename(str(rec.get("metrics_path") or "")).lower()
+                ]
+                if split_specific:
+                    preferred_split_metrics = split_specific
+                if target_abs:
+                    for rec in preferred_split_metrics:
+                        if rec.get("target_path") == target_abs:
+                            matched = rec
+                            break
+                if matched is None and metrics_abs:
+                    for rec in preferred_split_metrics:
+                        if rec.get("metrics_path") == metrics_abs:
+                            matched = rec
+                            break
+                if matched is None and preferred_split_metrics and (not target_abs or fmt in {"pt", "pt_uni"}):
+                    # Split-specific metrics should take precedence (e.g. val for pt_uni)
+                    # even when artifact-level metrics_csv points to legacy test path.
+                    matched = preferred_split_metrics[0]
+                variants.append(
+                    {
+                        "target_path": target_rel or None,
+                        "metrics_path": (matched or {}).get("metrics_path") or metrics_abs,
+                        "status": item.get("status", entry.get("status")),
+                        "error": item.get("error", entry.get("error")),
+                        "backend": item.get("backend", entry.get("backend")),
+                        "performance": item.get("performance"),
+                    }
+                )
+        if not variants:
+            fallback_metrics = split_metrics[0].get("metrics_path") if split_metrics else None
+            variants.append(
+                {
+                    "target_path": _pick_target_path(entry),
+                    "metrics_path": fallback_metrics,
+                    "status": entry.get("status"),
+                    "error": entry.get("error"),
+                    "backend": entry.get("backend"),
+                    "performance": entry.get("performance"),
+                }
+            )
+        # Deduplicate by target+metrics and prefer variants with resolved metrics.
+        deduped: dict[tuple[str, str], dict[str, Any]] = {}
+        for item in variants:
+            key = (
+                str(item.get("target_path") or ""),
+                str(item.get("metrics_path") or ""),
+            )
+            existing = deduped.get(key)
+            if existing is None:
+                deduped[key] = item
+                continue
+            cur_has_metrics = bool(str(item.get("metrics_path") or "").strip())
+            prev_has_metrics = bool(str(existing.get("metrics_path") or "").strip())
+            if cur_has_metrics and not prev_has_metrics:
+                deduped[key] = item
+        variants = list(deduped.values())
+        if len(variants) > 1:
+            # Prefer entries with concrete target path when empty placeholders exist.
+            with_target = [v for v in variants if str(v.get("target_path") or "").strip()]
+            if with_target:
+                variants = with_target
+        if len(variants) > 1:
+            # If at least one target exists on disk, drop non-existing targets.
+            existing_target_variants = []
+            for v in variants:
+                t = str(v.get("target_path") or "").strip()
+                if not t:
+                    continue
+                candidate = t if os.path.isabs(t) else os.path.join(run_dir, t)
+                if os.path.isfile(candidate):
+                    existing_target_variants.append(v)
+            if existing_target_variants:
+                variants = existing_target_variants
+        # Stable order: metric-bearing entries first.
+        variants.sort(key=lambda v: (0 if str(v.get("metrics_path") or "").strip() else 1, str(v.get("target_path") or "")))
+        return variants
+
+    def _read_eval_args(run_dir: str, fmt: str) -> dict[str, Any]:
+        if fmt == "pt":
+            args_yaml = os.path.join(run_dir, "tests", "test-ultralytics", "args.yaml")
+            if not os.path.isfile(args_yaml):
+                args_yaml = os.path.join(run_dir, "test", "args.yaml")
+        else:
+            args_yaml = os.path.join(run_dir, "tests", f"test_{fmt}", "args.yaml")
+            if not os.path.isfile(args_yaml):
+                args_yaml = os.path.join(run_dir, f"test_{fmt}", "args.yaml")
+        if not os.path.isfile(args_yaml):
+            if fmt != "pt":
+                return {}
+            metadata_path = os.path.join(run_dir, "training_metadata.json")
+            try:
+                with open(metadata_path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception:
+                payload = {}
+            inf = payload.get("inference") if isinstance(payload, dict) else {}
+            if isinstance(inf, dict):
+                return {
+                    "imgsz": inf.get("imgsz"),
+                    "conf": inf.get("conf", 0.001 if inf.get("conf") is None else inf.get("conf")),
+                    "iou": inf.get("iou"),
+                    "inference_source": "ultralytics_model_val",
+                    "gt_source": "ultralytics_validator",
+                    "nms_profile": "ultralytics_validator_multilabel",
+                }
+            return {}
+        try:
+            with open(args_yaml, "r", encoding="utf-8") as f:
+                payload = yaml.safe_load(f) or {}
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+
+    def _read_metric_row(metrics_path: str | None) -> dict[str, Any]:
+        if not metrics_path or not os.path.isfile(metrics_path):
+            return {}
+        try:
+            mdf = pd.read_csv(metrics_path)
+            if len(mdf) == 0:
+                return {}
+            mdf.columns = [str(c).strip() for c in mdf.columns]
+            # Prefer explicit aggregate row for Ultralytics-like CSVs.
+            if "Class" in mdf.columns:
+                cls = mdf["Class"].astype(str).str.strip().str.lower()
+                all_mask = cls.eq("all")
+                if bool(all_mask.any()):
+                    return dict(mdf.loc[all_mask].iloc[0].to_dict())
+            # Some generated pt/pt_uni metrics CSVs are per-class only.
+            # For compare tables we need run-level aggregate, so use macro mean.
+            if "Class" in mdf.columns and len(mdf) > 1:
+                out: dict[str, Any] = {}
+                for col in METRIC_AGG_COLUMNS:
+                    if col in mdf.columns:
+                        out[col] = pd.to_numeric(mdf[col], errors="coerce").mean()
+                if out:
+                    out["Class"] = "all"
+                    return out
+            return dict(mdf.iloc[0].to_dict())
+        except Exception:
+            return {}
+
+    def _metrics_path_matches_split(metrics_path: str | None, split_name: str) -> bool:
+        if not metrics_path:
+            return False
+        base = os.path.basename(str(metrics_path)).lower()
+        token = f"{split_name}_metrics"
+        return token in base
+
+    def _normalize_issue_reason(reason: str) -> tuple[str, str]:
+        raw = str(reason or "").strip()
+        if raw.startswith("[") and "]" in raw:
+            maybe_code = raw[1 : raw.index("]")].strip().lower()
+            detail = raw[raw.index("]") + 1 :].strip()
+            if maybe_code:
+                return maybe_code, detail or raw
+        lower = raw.lower()
+        if "timeout" in lower:
+            return "timeout", raw
+        if "out of memory" in lower or "bfc_arena" in lower or "cudamalloc" in lower:
+            return "oom_gpu", raw
+        if "terminated by signal" in lower:
+            return "signal_terminated", raw
+        if "runtime_exception" in lower or "onnxruntimeerror" in lower:
+            return "runtime_exception", raw
+        if "session init" in lower or "inferencesession" in lower:
+            return "init_session_failed", raw
+        if "missing" in lower:
+            return "missing_artifact", raw
+        return "unknown", raw
+
+    def _is_invalid_zero_metrics(fmt: str, metric_row: dict[str, Any]) -> bool:
+        if fmt not in {"engine", "trt"}:
+            return False
+        vals: list[float] = []
+        for col in METRIC_AGG_COLUMNS:
+            raw_v = metric_row.get(col)
+            if raw_v is None or (isinstance(raw_v, float) and pd.isna(raw_v)):
+                return False
+            try:
+                vals.append(float(raw_v))
+            except (TypeError, ValueError):
+                return False
+        return bool(vals) and all(abs(v) <= 1e-12 for v in vals)
+
+    def _perf_context_for_variant(run_dir: str, fmt: str, target_path: Any) -> dict[str, Any]:
+        profile_map = read_test_system_profile_by_format_artifacts(run_dir)
+        records = profile_map.get(fmt) if isinstance(profile_map, dict) else None
+        if not isinstance(records, list) or not records:
+            return {}
+        target_abs = ""
+        if isinstance(target_path, str) and target_path.strip():
+            target_abs = os.path.abspath(os.path.join(run_dir, target_path))
+        target_name = os.path.basename(target_abs) if target_abs else ""
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            rec_target = str(rec.get("target_path") or "")
+            rec_name = os.path.basename(rec_target) if rec_target else ""
+            profile = rec.get("test_system_profile")
+            if not isinstance(profile, dict) or not profile:
+                continue
+            if target_abs and rec_target and os.path.abspath(rec_target) == target_abs:
+                return profile
+            if target_name and rec_name and rec_name == target_name:
+                return profile
+        return {}
+
+    def _extract_perf_details(
+        perf: dict[str, Any], eval_args: dict[str, Any], profile: dict[str, Any]
+    ) -> dict[str, Any]:
+        lat_all = perf.get("latency_ms") if isinstance(perf.get("latency_ms"), dict) else {}
+        all_stats = lat_all.get("all") if isinstance(lat_all.get("all"), dict) else {}
+        steady_stats = lat_all.get("steady") if isinstance(lat_all.get("steady"), dict) else {}
+        breakdown = perf.get("breakdown_ms") if isinstance(perf.get("breakdown_ms"), dict) else {}
+
+        def _stage(*names: str) -> dict[str, Any]:
+            for name in names:
+                candidate = breakdown.get(name)
+                if isinstance(candidate, dict):
+                    return candidate
+            return {}
+
+        # Backends may serialize stage keys with different naming conventions.
+        preprocess = _stage("preprocess", "preprocess_ms")
+        inference = _stage("infer", "inference", "infer_ms")
+        postprocess = _stage("postprocess", "decode_nms", "decode_nms_ms")
+        total = _stage("total", "total_ms", "infer_total_only_ms")
+        io_load = _stage("io_load_ms")
+        diag_alloc = _stage("diagnostics_alloc_ms")
+        diag_h2d = _stage("diagnostics_h2d_ms")
+        diag_exec = _stage("diagnostics_execute_ms")
+        diag_d2h = _stage("diagnostics_d2h_ms")
+        diagnostics = (
+            perf.get("diagnostics_overhead")
+            if isinstance(perf.get("diagnostics_overhead"), dict)
+            else {}
+        )
+
+        runtime = profile.get("runtime") if isinstance(profile.get("runtime"), dict) else {}
+        device = (
+            perf.get("eval_device")
+            if perf.get("eval_device") is not None
+            else (runtime.get("device") if runtime.get("device") is not None else eval_args.get("device"))
+        )
+        batch_raw = perf.get("eval_batch") if perf.get("eval_batch") is not None else eval_args.get("batch")
+        try:
+            batch_val = int(batch_raw) if batch_raw is not None else None
+        except (TypeError, ValueError):
+            batch_val = None
+        if batch_val is None:
+            batch_val = 1
+        if device is None and batch_val is not None:
+            # Keep device explicit for PT rows where runtime profile may not expose it.
+            device = "0"
+
+        infer_p50 = inference.get("p50") if inference.get("p50") is not None else inference.get("mean")
+        infer_p95 = inference.get("p95") if inference.get("p95") is not None else inference.get("p90")
+        try:
+            infer_ms = float(inference.get("mean")) if inference.get("mean") is not None else None
+        except (TypeError, ValueError):
+            infer_ms = None
+        pure_infer_throughput = (1000.0 / infer_ms) if (infer_ms is not None and infer_ms > 0) else None
+        throughput_value = pure_infer_throughput if pure_infer_throughput is not None else perf.get("throughput_img_s")
+        return {
+            # For cross-format comparability prefer pure inference stage timing.
+            "throughput_img_s": throughput_value,
+            "latency_p50_ms": infer_p50 if infer_p50 is not None else steady_stats.get("p50", all_stats.get("p50")),
+            "latency_p95_ms": infer_p95 if infer_p95 is not None else steady_stats.get("p95", all_stats.get("p95")),
+            "perf_preprocess_ms_per_frame": preprocess.get("mean"),
+            "perf_inference_ms_per_frame": inference.get("mean"),
+            "perf_postprocess_ms_per_frame": postprocess.get("mean"),
+            "perf_total_ms_per_frame": total.get("mean", steady_stats.get("mean", all_stats.get("mean"))),
+            "perf_warmup_images": perf.get("warmup_images"),
+            "perf_sample_count": perf.get("images_total"),
+            "perf_batch": batch_val,
+            "perf_device": device,
+            # Non-comparable diagnostics: overhead excluded from primary KPI.
+            "perf_io_load_ms_per_frame": io_load.get("mean"),
+            "perf_diag_alloc_ms_per_frame": diag_alloc.get("mean"),
+            "perf_diag_h2d_ms_per_frame": diag_h2d.get("mean"),
+            "perf_diag_execute_ms_per_frame": diag_exec.get("mean"),
+            "perf_diag_d2h_ms_per_frame": diag_d2h.get("mean"),
+            "perf_diag_session_init_ms": diagnostics.get("session_init_ms"),
+            "perf_diag_engine_init_ms": diagnostics.get("engine_init_ms"),
+            "perf_diag_worker_wall_ms": diagnostics.get("worker_wall_ms"),
+            "perf_diag_retries_count": diagnostics.get("retries_count"),
+            "perf_diag_retry_sleep_ms": diagnostics.get("retry_sleep_ms"),
+            "perf_diag_provider_switched_to_cpu": diagnostics.get("provider_switched_to_cpu"),
+        }
+
+    def _resolve_perf_and_reason(
+        run_dir: str,
+        fmt: str,
+        target_path: Any,
+        perf_candidate: Any,
+        entry: dict[str, Any],
+    ) -> tuple[dict[str, Any], str]:
+        perf = perf_candidate if isinstance(perf_candidate, dict) else {}
+        if perf:
+            return perf, "perf_present"
+        perf_map = read_test_performance_by_format_artifacts(run_dir)
+        records = perf_map.get(fmt) if isinstance(perf_map, dict) else None
+        if not isinstance(records, list) or not records:
+            artifacts = entry.get("artifacts") if isinstance(entry, dict) else None
+            if isinstance(artifacts, list) and artifacts:
+                return {}, "perf_not_collected_for_target"
+            return {}, "perf_missing_manifest_entry"
+        target_abs = ""
+        if isinstance(target_path, str) and target_path.strip():
+            target_abs = os.path.abspath(os.path.join(run_dir, target_path))
+        target_name = os.path.basename(target_abs) if target_abs else ""
+        target_stem = os.path.splitext(target_name)[0] if target_name else ""
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            rec_perf = rec.get("performance")
+            if not isinstance(rec_perf, dict) or not rec_perf:
+                continue
+            rec_target = str(rec.get("target_path") or "")
+            rec_name = os.path.basename(rec_target) if rec_target else ""
+            rec_stem = os.path.splitext(rec_name)[0] if rec_name else ""
+            if target_abs and rec_target and os.path.abspath(rec_target) == target_abs:
+                return rec_perf, "perf_present"
+            if target_name and rec_name and rec_name == target_name:
+                return rec_perf, "perf_present"
+            if target_stem and rec_stem and rec_stem == target_stem:
+                return rec_perf, "perf_present"
+        if target_abs:
+            return {}, "perf_target_mismatch_legacy_variant"
+        return {}, "perf_not_collected_for_target"
+
+    def _build_format_rows(
+        split_name: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+
+        rows: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
+        eval_rows: list[dict[str, Any]] = []
+        issues: list[dict[str, Any]] = []
+        for run_dir in run_dirs:
+            run_name = os.path.basename(run_dir.rstrip(os.sep))
+            manifest = load_test_artifacts_manifest(run_dir)
+            formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
+            metrics_paths = read_metrics_by_format_for_split(run_dir, split_name)
+            metrics_artifacts = read_metrics_by_format_for_split_artifacts(run_dir, split_name)
+            for fmt in ("pt", "onnx", "engine", "trt"):
+                entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
+                if not isinstance(entry, dict):
+                    entry = {}
+                fmt_metrics = list(metrics_artifacts.get(fmt) or [])
+                if not fmt_metrics and metrics_paths.get(fmt):
+                    fmt_metrics = [{"metrics_path": str(metrics_paths[fmt]), "target_path": ""}]
+                variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics, split_name)
+                if len(variants) > 1:
+                    with_metrics = [v for v in variants if str(v.get("metrics_path") or "").strip()]
+                    if with_metrics:
+                        variants = with_metrics
+                if not variants and not _has_model_artifact(run_dir, fmt, entry):
+                    continue
+                eval_args = _read_eval_args(run_dir, fmt)
+                has_any_metrics_variant = False
+                for _v in variants:
+                    _mp = str(_v.get("metrics_path") or "").strip()
+                    if _mp and os.path.isfile(_mp):
+                        has_any_metrics_variant = True
+                        break
+                for var in variants:
+                    metrics_path = str(var.get("metrics_path") or "").strip() or None
+                    metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
+                    if split_name == "val" and metrics_exists and not _metrics_path_matches_split(metrics_path, split_name):
+                        metrics_exists = False
+                    if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
+                        continue
+                    status_raw = str(var.get("status") or "").strip()
+                    err_raw = str(var.get("error") or "").strip()
+                    status_lower = status_raw.lower()
+                    has_explicit_failure = bool(err_raw) or status_lower in {
+                        "failed",
+                        "error",
+                        "timeout",
+                        "terminated",
+                        "unavailable",
+                    }
+                    if not metrics_exists:
+                        if split_name == "val" and not has_explicit_failure:
+                            continue
+                        if split_name != "val" and not has_explicit_failure:
+                            continue
+                    metric_row = _read_metric_row(metrics_path)
+                    invalid_zero_metrics = metrics_exists and _is_invalid_zero_metrics(fmt, metric_row)
+                    row: dict[str, Any] = {
+                        "run_dir": run_dir,
+                        "run_name": run_name,
+                        "split": split_name,
+                        "format": fmt,
+                        "backend_status": var.get("backend"),
+                        "target_path": var.get("target_path"),
+                        "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
+                        "inference_source": eval_args.get("inference_source"),
+                        "gt_source": eval_args.get("gt_source"),
+                        "nms_profile": eval_args.get("nms_profile"),
+                        "mAP50-95": None if invalid_zero_metrics else metric_row.get("mAP50-95"),
+                        "mAP50": None if invalid_zero_metrics else metric_row.get("mAP50"),
+                        "Box-F1": None if invalid_zero_metrics else metric_row.get("Box-F1"),
+                        "Box-P": None if invalid_zero_metrics else metric_row.get("Box-P"),
+                        "Box-R": None if invalid_zero_metrics else metric_row.get("Box-R"),
+                    }
+                    perf, perf_reason = _resolve_perf_and_reason(
+                        run_dir, fmt, var.get("target_path"), var.get("performance"), entry
+                    )
+                    profile = _perf_context_for_variant(run_dir, fmt, var.get("target_path"))
+                    row.update(_extract_perf_details(perf, eval_args, profile))
+                    row["performance_status"] = "ok" if isinstance(perf, dict) and len(perf) > 0 else "performance_not_collected"
+                    row["performance_reason"] = perf_reason
+                    try:
+                        thr = float(row["throughput_img_s"]) if row.get("throughput_img_s") is not None else None
+                    except (TypeError, ValueError):
+                        thr = None
+                    try:
+                        p50 = float(row["latency_p50_ms"]) if row.get("latency_p50_ms") is not None else None
+                    except (TypeError, ValueError):
+                        p50 = None
+                    row["avg_inference_fps"] = thr
+                    row["avg_inference_ms_per_frame"] = p50 if p50 is not None else ((1000.0 / thr) if thr and thr > 0 else None)
+                    eval_rows.append(
+                        {
+                            "run_dir": run_dir,
+                            "run_name": run_name,
+                            "split": split_name,
+                            "format": fmt,
+                            "target_path": var.get("target_path"),
+                            "eval_imgsz": eval_args.get("imgsz"),
+                            "eval_conf": eval_args.get("conf"),
+                            "eval_iou": eval_args.get("iou"),
+                            "inference_source": eval_args.get("inference_source"),
+                            "gt_source": eval_args.get("gt_source"),
+                            "nms_profile": eval_args.get("nms_profile"),
+                        }
+                    )
+                    if metrics_exists:
+                        if not row.get("backend_status"):
+                            row["backend_status"] = backend_fallback.get(fmt)
+                        if invalid_zero_metrics:
+                            issues.append(
+                                {
+                                    "run_name": run_name,
+                                    "split": split_name,
+                                    "format": fmt,
+                                    "target_path": var.get("target_path"),
+                                    "status": str(var.get("status") or "ok"),
+                                    "reason": "metrics are all zeros; treated as invalid native evaluation output",
+                                    "reason_code": "invalid_metrics",
+                                }
+                            )
+                    else:
+                        if status_raw or err_raw:
+                            if has_any_metrics_variant:
+                                # Do not report missing duplicates when at least one
+                                # variant for the same run/split/format has metrics.
+                                continue
+                            reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
+                            issues.append(
+                                {
+                                    "run_name": run_name,
+                                    "split": split_name,
+                                    "format": fmt,
+                                    "target_path": var.get("target_path"),
+                                    "status": status_raw or "unknown",
+                                    "reason": reason_detail,
+                                    "reason_code": reason_code,
+                                }
+                            )
+                    rows.append(row)
+                    sources.append(
+                        {
+                            "run_dir": run_dir,
+                            "run_name": run_name,
+                            "split": split_name,
+                            "format": fmt,
+                            "target_path": var.get("target_path"),
+                            "metrics_source": row.get("metrics_source"),
+                            "inference_source": row.get("inference_source"),
+                            "gt_source": row.get("gt_source"),
+                            "nms_profile": row.get("nms_profile"),
+                        }
+                    )
+        return rows, sources, eval_rows, issues
+
+    def _build_pt_uni_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        rows: list[dict[str, Any]] = []
+        sources: list[dict[str, Any]] = []
+        eval_rows: list[dict[str, Any]] = []
+        issues: list[dict[str, Any]] = []
+        for split_name in ("test", "val"):
+            for run_dir in run_dirs:
+                run_name = os.path.basename(run_dir.rstrip(os.sep))
+                manifest = load_test_artifacts_manifest(run_dir)
+                formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
+                metrics_paths = read_metrics_by_format_for_split(run_dir, split_name, include_internal=True)
+                metrics_artifacts = read_metrics_by_format_for_split_artifacts(run_dir, split_name, include_internal=True)
+                for fmt in ("pt", "pt_uni"):
+                    entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
+                    if not isinstance(entry, dict):
+                        entry = {}
+                    fmt_metrics = list(metrics_artifacts.get(fmt) or [])
+                    if not fmt_metrics and metrics_paths.get(fmt):
+                        fmt_metrics = [{"metrics_path": str(metrics_paths[fmt]), "target_path": ""}]
+                    variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics, split_name)
+                    if len(variants) > 1:
+                        with_metrics = [v for v in variants if str(v.get("metrics_path") or "").strip()]
+                        if with_metrics:
+                            variants = with_metrics
+                    eval_args = _read_eval_args(run_dir, fmt)
+                    has_any_metrics_variant = False
+                    for _v in variants:
+                        _mp = str(_v.get("metrics_path") or "").strip()
+                        if _mp and os.path.isfile(_mp):
+                            has_any_metrics_variant = True
+                            break
+                    for var in variants:
+                        metrics_path = str(var.get("metrics_path") or "").strip() or None
+                        metrics_exists = bool(metrics_path and os.path.isfile(metrics_path))
+                        if split_name == "val" and metrics_exists and not _metrics_path_matches_split(metrics_path, split_name):
+                            metrics_exists = False
+                        if not metrics_exists and not _has_model_artifact(run_dir, fmt, entry):
+                            continue
+                        status_raw = str(var.get("status") or "").strip()
+                        err_raw = str(var.get("error") or "").strip()
+                        status_lower = status_raw.lower()
+                        has_explicit_failure = bool(err_raw) or status_lower in {
+                            "failed",
+                            "error",
+                            "timeout",
+                            "terminated",
+                            "unavailable",
+                        }
+                        if not metrics_exists:
+                            if split_name == "val" and not has_explicit_failure:
+                                continue
+                            if split_name != "val" and not has_explicit_failure:
+                                continue
+                        metric_row = _read_metric_row(metrics_path)
+                        row: dict[str, Any] = {
+                            "run_dir": run_dir,
+                            "run_name": run_name,
+                            "split": split_name,
+                            "format": fmt,
+                            "backend_status": var.get("backend"),
+                            "target_path": var.get("target_path"),
+                            "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
+                            "inference_source": eval_args.get("inference_source"),
+                            "gt_source": eval_args.get("gt_source"),
+                            "nms_profile": eval_args.get("nms_profile"),
+                            "mAP50-95": metric_row.get("mAP50-95"),
+                            "mAP50": metric_row.get("mAP50"),
+                            "Box-F1": metric_row.get("Box-F1"),
+                            "Box-P": metric_row.get("Box-P"),
+                            "Box-R": metric_row.get("Box-R"),
+                        }
+                        perf, perf_reason = _resolve_perf_and_reason(
+                            run_dir, fmt, var.get("target_path"), var.get("performance"), entry
+                        )
+                        profile = _perf_context_for_variant(run_dir, fmt, var.get("target_path"))
+                        row.update(_extract_perf_details(perf, eval_args, profile))
+                        row["performance_status"] = "ok" if isinstance(perf, dict) and len(perf) > 0 else "performance_not_collected"
+                        row["performance_reason"] = perf_reason
+                        try:
+                            thr = float(row["throughput_img_s"]) if row.get("throughput_img_s") is not None else None
+                        except (TypeError, ValueError):
+                            thr = None
+                        try:
+                            p50 = float(row["latency_p50_ms"]) if row.get("latency_p50_ms") is not None else None
+                        except (TypeError, ValueError):
+                            p50 = None
+                        row["avg_inference_fps"] = thr
+                        row["avg_inference_ms_per_frame"] = p50 if p50 is not None else ((1000.0 / thr) if thr and thr > 0 else None)
+                        eval_rows.append(
+                            {
+                                "run_dir": run_dir,
+                                "run_name": run_name,
+                                "split": split_name,
+                                "format": fmt,
+                                "target_path": var.get("target_path"),
+                                "eval_imgsz": eval_args.get("imgsz"),
+                                "eval_conf": eval_args.get("conf"),
+                                "eval_iou": eval_args.get("iou"),
+                                "inference_source": eval_args.get("inference_source"),
+                                "gt_source": eval_args.get("gt_source"),
+                                "nms_profile": eval_args.get("nms_profile"),
+                            }
+                        )
+                        if metrics_exists:
+                            if not row.get("backend_status"):
+                                row["backend_status"] = backend_fallback.get(fmt)
+                        else:
+                            if status_raw or err_raw:
+                                if has_any_metrics_variant:
+                                    continue
+                                reason_code, reason_detail = _normalize_issue_reason(err_raw or "metrics missing")
+                                issues.append(
+                                    {
+                                        "run_name": run_name,
+                                        "split": split_name,
+                                        "format": fmt,
+                                        "target_path": var.get("target_path"),
+                                        "status": status_raw or "unknown",
+                                        "reason": reason_detail,
+                                        "reason_code": reason_code,
+                                    }
+                                )
+                        rows.append(row)
+                        sources.append(
+                            {
+                                "run_dir": run_dir,
+                                "run_name": run_name,
+                                "split": split_name,
+                                "format": fmt,
+                                "target_path": var.get("target_path"),
+                                "metrics_source": row.get("metrics_source"),
+                                "inference_source": row.get("inference_source"),
+                                "gt_source": row.get("gt_source"),
+                                "nms_profile": row.get("nms_profile"),
+                            }
+                        )
+        return rows, sources, eval_rows, issues
+
+    test_rows, test_sources, test_eval_rows, test_issues = _build_format_rows("test")
+    val_rows, val_sources, val_eval_rows, val_issues = _build_format_rows("val")
+    pt_uni_rows, pt_uni_sources, pt_uni_eval_rows, pt_uni_issues = _build_pt_uni_rows()
+    if not test_rows and not val_rows and not pt_uni_rows:
+        return None
+    out_dir = os.path.join(session_root, "artifacts", "format_compare")
+    os.makedirs(out_dir, exist_ok=True)
+    out: dict[str, str] = {}
+    all_rows = test_rows + val_rows + pt_uni_rows
+    alias_legend: list[dict[str, str]] = []
+    alias_counters: dict[str, int] = {}
+    for row in sorted(
+        all_rows,
+        key=lambda r: (str(r.get("format") or ""), str(r.get("run_name") or ""), str(r.get("target_path") or "")),
+    ):
+        fmt = str(row.get("format") or "")
+        prefix = _format_alias_prefix(fmt)
+        alias_counters[prefix] = int(alias_counters.get(prefix, 0)) + 1
+        alias = f"{prefix}{alias_counters[prefix]}"
+        row["alias"] = alias
+        alias_legend.append(
+            {
+                "alias": alias,
+                "format": fmt,
+                "run_name": str(row.get("run_name") or ""),
+                "target_path": str(row.get("target_path") or ""),
+            }
+        )
+    if test_rows:
+        out_csv = os.path.join(out_dir, "format_metrics_compare_test.csv")
+        pd.DataFrame(test_rows).to_csv(out_csv, index=False, encoding="utf-8")
+        out["test_csv"] = os.path.relpath(out_csv, session_root)
+        perf_test = pd.DataFrame(test_rows)
+        perf_csv = os.path.join(out_dir, "format_performance_compare_test.csv")
+        perf_test.to_csv(perf_csv, index=False, encoding="utf-8")
+        out["perf_test_csv"] = os.path.relpath(perf_csv, session_root)
+    if val_rows:
+        out_csv = os.path.join(out_dir, "format_metrics_compare_val.csv")
+        pd.DataFrame(val_rows).to_csv(out_csv, index=False, encoding="utf-8")
+        out["val_csv"] = os.path.relpath(out_csv, session_root)
+    if pt_uni_rows:
+        out_csv = os.path.join(out_dir, "format_metrics_compare_pt_uni.csv")
+        pd.DataFrame(pt_uni_rows).to_csv(out_csv, index=False, encoding="utf-8")
+        out["pt_uni_csv"] = os.path.relpath(out_csv, session_root)
+    eval_rows = test_eval_rows + val_eval_rows + pt_uni_eval_rows
+    alias_by_key = {
+        (str(r.get("run_name") or ""), str(r.get("split") or ""), str(r.get("format") or ""), str(r.get("target_path") or "")): str(
+            r.get("alias") or ""
+        )
+        for r in all_rows
+    }
+    for er in eval_rows:
+        er["alias"] = alias_by_key.get(
+            (
+                str(er.get("run_name") or ""),
+                str(er.get("split") or ""),
+                str(er.get("format") or ""),
+                str(er.get("target_path") or ""),
+            ),
+            "",
+        )
+    if eval_rows:
+        eval_csv = os.path.join(out_dir, "format_eval_settings.csv")
+        pd.DataFrame(eval_rows).drop_duplicates().to_csv(eval_csv, index=False, encoding="utf-8")
+        out["eval_csv"] = os.path.relpath(eval_csv, session_root)
+    if alias_legend:
+        alias_csv = os.path.join(out_dir, "format_alias_legend.csv")
+        pd.DataFrame(alias_legend).to_csv(alias_csv, index=False, encoding="utf-8")
+        out["alias_legend_csv"] = os.path.relpath(alias_csv, session_root)
+    issues = test_issues + val_issues + pt_uni_issues
+    if issues:
+        deduped_issues: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            key = (
+                str(issue.get("run_name") or ""),
+                str(issue.get("split") or ""),
+                str(issue.get("format") or ""),
+                str(issue.get("reason_code") or ""),
+            )
+            existing = deduped_issues.get(key)
+            if existing is None:
+                deduped_issues[key] = issue
+                continue
+            # Prefer richer records with concrete artifact path and non-failed status.
+            cur_target = str(issue.get("target_path") or "").strip()
+            prev_target = str(existing.get("target_path") or "").strip()
+            cur_failed = str(issue.get("status") or "").strip().lower() in {"failed", "unavailable"}
+            prev_failed = str(existing.get("status") or "").strip().lower() in {"failed", "unavailable"}
+            if (cur_target and not prev_target) or (prev_failed and not cur_failed):
+                deduped_issues[key] = issue
+        issues = list(deduped_issues.values())
+    if issues:
+        issues_json = os.path.join(out_dir, "format_compare_issues.json")
+        with open(issues_json, "w", encoding="utf-8") as f:
+            json.dump(issues, f, ensure_ascii=False, indent=2)
+        out["issues_json"] = os.path.relpath(issues_json, session_root)
+    out_sources = os.path.join(out_dir, "format_metrics_sources.json")
+    with open(out_sources, "w", encoding="utf-8") as f:
+        json.dump(test_sources + val_sources + pt_uni_sources, f, ensure_ascii=False, indent=2)
+    return out
+
+
 def _resolve_pr_output_png(
     workspace_cli: str | None,
     out_png_cli: str | None,
@@ -1434,6 +2519,27 @@ def _is_cuda_oom_error(exc: Exception) -> bool:
     return "cuda out of memory" in msg or ("out of memory" in msg and "cuda" in msg)
 
 
+def _resolve_selected_run_dirs(
+    runs_group_dir: str,
+    selected_run_dirs: list[str] | tuple[str, ...] | None,
+) -> list[str]:
+    all_run_dirs = sorted(
+        d for d in glob(os.path.join(runs_group_dir, "*"))
+        if os.path.isdir(d)
+    )
+    if not all_run_dirs:
+        return []
+    selected_norm = {
+        os.path.abspath(os.path.expanduser(str(p)))
+        for p in (selected_run_dirs or [])
+        if str(p).strip()
+    }
+    if not selected_norm:
+        return all_run_dirs
+    scoped = [d for d in all_run_dirs if os.path.abspath(d) in selected_norm]
+    return scoped
+
+
 def cmd_pr_curves(args: argparse.Namespace) -> None:
     if (not getattr(args, "runs_group_dir", None) or not getattr(args, "data_yaml", None)) and sys.stdin.isatty():
         args.runs_group_dir = prompt_text("Runs group dir", default=str(args.models_root)).strip() or str(args.models_root)
@@ -1459,13 +2565,14 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
         print(f"[ERROR] Failed to import ultralytics: {e}", file=sys.stderr)
         sys.exit(1)
 
-    run_dirs = sorted(
-        d for d in glob(os.path.join(runs_group_dir, "*"))
-        if os.path.isdir(d)
+    run_dirs = _resolve_selected_run_dirs(
+        runs_group_dir,
+        getattr(args, "selected_run_dirs", None),
     )
     if not run_dirs:
-        print(f"[ERROR] No run directories found in: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] No run directories found for scope in: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
+    print(f"[INFO] PR scope: {len(run_dirs)} run(s) selected")
 
     curves: list[tuple[str, np.ndarray, np.ndarray]] = []
     per_class_rows: list[dict[str, Any]] = []
@@ -1477,9 +2584,9 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
     cache_stats: list[dict[str, Any]] = []
     for run_dir in run_dirs:
         label = os.path.basename(run_dir.rstrip(os.sep))
-        best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+        best_pt = canonical_run_model_path(run_dir, ".pt")
         if not os.path.isfile(best_pt):
-            print(f"[WARN] {label}: missing best.pt, skipping ({best_pt})")
+            print(f"[WARN] {label}: missing run model, skipping ({best_pt})")
             continue
         cache_root = run_cache_root(run_dir)
         fp = compute_fingerprint(
@@ -1574,7 +2681,9 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
             _clear_gpu_memory()
 
         curves.append((label, recall, precision))
-        pr_dir = os.path.join(run_dir, "test")
+        pr_dir = os.path.join(run_dir, "tests", "test-ultralytics")
+        if not os.path.isdir(pr_dir):
+            pr_dir = os.path.join(run_dir, "test")
         os.makedirs(pr_dir, exist_ok=True)
         pr_csv = os.path.join(pr_dir, "pr.csv")
         pd.DataFrame({"recall": recall, "precision": precision}).to_csv(pr_csv, index=False, encoding="utf-8")
@@ -1723,18 +2832,22 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
         print("[ERROR] No images found for inference.", file=sys.stderr)
         sys.exit(1)
 
-    run_dirs = sorted(d for d in glob(os.path.join(runs_group_dir, "*")) if os.path.isdir(d))
+    run_dirs = _resolve_selected_run_dirs(
+        runs_group_dir,
+        getattr(args, "selected_run_dirs", None),
+    )
     if not run_dirs:
-        print(f"[ERROR] No run directories found in: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] No run directories found for scope in: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
+    print(f"[INFO] Benchmark scope: {len(run_dirs)} run(s) selected")
 
     rows: list[dict[str, Any]] = []
     cache_stats: list[dict[str, Any]] = []
     for run_dir in run_dirs:
         model_name = os.path.basename(run_dir.rstrip(os.sep))
-        best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+        best_pt = canonical_run_model_path(run_dir, ".pt")
         if not os.path.isfile(best_pt):
-            print(f"[WARN] {model_name}: missing best.pt, skipping")
+            print(f"[WARN] {model_name}: missing run model, skipping")
             continue
         cache_root = run_cache_root(run_dir)
         fp = compute_fingerprint(
@@ -1991,10 +3104,14 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
         print(f"[ERROR] Models directory not found: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
 
-    run_dirs = sorted(d for d in glob(os.path.join(runs_group_dir, "*")) if os.path.isdir(d))
+    run_dirs = _resolve_selected_run_dirs(
+        runs_group_dir,
+        getattr(args, "selected_run_dirs", None),
+    )
     if not run_dirs:
-        print(f"[ERROR] No run directories found in: {runs_group_dir}", file=sys.stderr)
+        print(f"[ERROR] No run directories found for scope in: {runs_group_dir}", file=sys.stderr)
         sys.exit(1)
+    print(f"[INFO] Test-metrics scope: {len(run_dirs)} run(s) selected")
 
     recompute_enabled = bool(getattr(args, "recompute_missing_metrics", False))
     rows: list[dict[str, Any]] = []
@@ -2235,7 +3352,24 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
     if sources_out:
         out_path = os.path.abspath(os.path.expanduser(sources_out))
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-        payload = {"requested_metrics": requested_metrics, "sources": metric_sources}
+        selected_scope = [os.path.abspath(d) for d in run_dirs]
+        recomputed_runs = sorted(
+            [
+                run_dir
+                for run_dir, by_metric in metric_sources.items()
+                if any(str(v) == "recomputed" for v in (by_metric or {}).values())
+            ]
+        )
+        payload = {
+            "requested_metrics": requested_metrics,
+            "scope": {
+                "mode": "selected_runs" if bool(getattr(args, "selected_run_dirs", None)) else "runs_group",
+                "runs_group_dir": runs_group_dir,
+                "selected_run_dirs": selected_scope,
+            },
+            "recomputed_runs": recomputed_runs,
+            "sources": metric_sources,
+        }
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         print(f"[OK] Metric sources: {out_path}")
@@ -2307,6 +3441,12 @@ def cmd_all(args: argparse.Namespace) -> None:
     session_root = _session_root(args.workspace, args.analytics_session)
     artifacts: list[dict[str, str]] = []
     cache_events: list[dict[str, Any]] = []
+    selected_run_dirs = [baseline] + others
+    selected_labels = [os.path.basename(x.rstrip(os.sep)) for x in selected_run_dirs]
+    print("[INFO] Selected compare runs:")
+    for idx, (run_dir, label) in enumerate(zip(selected_run_dirs, selected_labels), start=1):
+        role = "baseline" if idx == 1 else "other"
+        print(f"[INFO]  - {role}: {label} ({run_dir})")
 
     if others:
         compare_csv = os.path.join(session_root, "artifacts", "compare", "compare_delta.csv")
@@ -2339,7 +3479,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         output=exp_csv,
         workspace=args.workspace,
         models_root=args.models_root,
-        analytics_session=args.analytics_session,
+        analytics_session=None,
     )
     cmd_export_table(exp_ns)
     artifacts.append({"role": "summary_csv", "path": os.path.relpath(exp_csv, session_root)})
@@ -2349,10 +3489,17 @@ def cmd_all(args: argparse.Namespace) -> None:
         artifacts.append(
             {"role": "system_profile_compare_csv", "path": os.path.relpath(sys_profile_csv, session_root)}
         )
+    test_sys_profile_csv = os.path.join(session_root, "artifacts", "table", "test_system_profile_compare.csv")
+    written_test_sys_profile = _write_test_system_profile_compare_csv([baseline] + others, test_sys_profile_csv)
+    if written_test_sys_profile:
+        artifacts.append(
+            {"role": "test_system_profile_compare_csv", "path": os.path.relpath(test_sys_profile_csv, session_root)}
+        )
 
     lb_csv = os.path.join(session_root, "artifacts", "leaderboard", "leaderboard.csv")
     lb_ns = argparse.Namespace(
         out_csv=lb_csv,
+        selected_run_dirs=selected_run_dirs,
         quality_metric="mAP50-95",
         speed_metric="avg_inference_fps",
         weight_quality=0.6,
@@ -2420,6 +3567,7 @@ def cmd_all(args: argparse.Namespace) -> None:
                 )
         tm_ns = argparse.Namespace(
             runs_group_dir=runs_group_dir,
+            selected_run_dirs=selected_run_dirs,
             metrics=["mAP50-95", "Box-F1"],
             out_dir=os.path.join(session_root, "artifacts", "metrics"),
             workspace=args.workspace,
@@ -2448,6 +3596,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         inf_png = os.path.join(session_root, "artifacts", "inference", "benchmark_bars.png")
         ib_ns = argparse.Namespace(
             runs_group_dir=runs_group_dir,
+            selected_run_dirs=selected_run_dirs,
             data_yaml=data_yaml,
             split="test",
             frames=100,
@@ -2461,6 +3610,50 @@ def cmd_all(args: argparse.Namespace) -> None:
             cache_stats_out=os.path.join(session_root, "artifacts", "inference", "cache_stats.json"),
         )
         cmd_inference_benchmark(ib_ns)
+        if os.path.isfile(lb_csv) and os.path.isfile(inf_csv):
+            try:
+                lb_df = pd.read_csv(lb_csv)
+                inf_df = pd.read_csv(inf_csv)
+                if "run_dir" in lb_df.columns and "run_dir" in inf_df.columns:
+                    speed_series = (
+                        inf_df.assign(
+                            speed_metric=pd.to_numeric(inf_df.get("avg_inference_fps"), errors="coerce")
+                        )
+                        .dropna(subset=["run_dir", "speed_metric"])
+                        .groupby("run_dir", as_index=True)["speed_metric"]
+                        .max()
+                    )
+                    if not speed_series.empty:
+                        existing_speed = pd.to_numeric(lb_df.get("speed_metric"), errors="coerce")
+                        direct_speed = lb_df["run_dir"].map(speed_series)
+                        bench_by_name = {
+                            os.path.basename(str(k).rstrip(os.sep)): float(v)
+                            for k, v in speed_series.items()
+                        }
+                        by_name_speed = lb_df["run_dir"].astype(str).map(
+                            lambda p: bench_by_name.get(os.path.basename(str(p).rstrip(os.sep)))
+                        )
+                        lb_df["speed_metric"] = direct_speed.combine_first(by_name_speed).combine_first(existing_speed)
+                        if "quality_metric" in lb_df.columns:
+                            qv = pd.to_numeric(lb_df.get("quality_metric"), errors="coerce")
+                            sv = pd.to_numeric(lb_df.get("speed_metric"), errors="coerce")
+                            stable = (
+                                pd.Series([1.0] * len(lb_df))
+                                if "training_ok" not in lb_df.columns and "testing_ok" not in lb_df.columns
+                                else (
+                                    pd.to_numeric(lb_df.get("training_ok"), errors="coerce").fillna(0.0)
+                                    * pd.to_numeric(lb_df.get("testing_ok"), errors="coerce").fillna(0.0)
+                                )
+                            )
+                            speed_component = sv.where(sv.isna(), sv)
+                            denom = 0.6 + 0.25 + 0.15
+                            lb_df["composite_score"] = (
+                                (0.6 * qv.fillna(0.0)) + (0.25 * speed_component.fillna(0.0)) + (0.15 * stable.fillna(0.0))
+                            ) / denom
+                        lb_df = lb_df.sort_values("composite_score", ascending=False)
+                        lb_df.to_csv(lb_csv, index=False, encoding="utf-8")
+            except Exception:
+                pass
         ip_ns = argparse.Namespace(
             csv=inf_csv,
             metric="avg_inference_ms_per_frame",
@@ -2502,6 +3695,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         pr_png = os.path.join(session_root, "artifacts", "pr", "pr_all_classes.png")
         pr_ns = argparse.Namespace(
             runs_group_dir=runs_group_dir,
+            selected_run_dirs=selected_run_dirs,
             data_yaml=data_yaml,
             out_png=pr_png,
             workspace=args.workspace,
@@ -2538,6 +3732,22 @@ def cmd_all(args: argparse.Namespace) -> None:
         abbreviations,
     )
     artifacts.extend(ultralytics_test_artifacts)
+    format_compare = _write_format_compare_artifacts(session_root, [baseline] + others)
+    if format_compare and format_compare.get("csv"):
+        artifacts.append({"role": "format_compare_csv", "path": str(format_compare["csv"])})
+    conf_tables = _collect_confidence_recommendation_tables(
+        [baseline] + others,
+        os.path.join(session_root, "artifacts", "confidence"),
+    )
+    for objective in ("A", "B", "C"):
+        p = conf_tables.get(objective)
+        if p and os.path.isfile(p):
+            artifacts.append(
+                {
+                    "role": f"confidence_recommendations_{objective.lower()}_csv",
+                    "path": os.path.relpath(p, session_root),
+                }
+            )
 
     manifest = {
         "session_name": os.path.basename(session_root),
@@ -2556,6 +3766,7 @@ def cmd_all(args: argparse.Namespace) -> None:
             "comparison_context",
             "quality_analysis",
             "speed_analysis",
+            "format_compare",
             "per_class_analysis",
             "conclusion",
         ],
@@ -2563,6 +3774,10 @@ def cmd_all(args: argparse.Namespace) -> None:
     }
     if ultralytics_test_rows:
         manifest["ultralytics_test"] = ultralytics_test_rows
+    if conf_tables:
+        manifest["confidence_recommendations"] = {
+            key: os.path.relpath(path, session_root) for key, path in conf_tables.items()
+        }
     if metric_sources_payload is not None:
         manifest["metric_sources"] = metric_sources_payload
     if cache_events:
@@ -2583,6 +3798,12 @@ def cmd_all(args: argparse.Namespace) -> None:
             "scatter_x": str(getattr(args, "scatter_x", "avg_inference_ms_per_frame")),
             "scatter_y": str(getattr(args, "scatter_y", "mAP50-95")),
         }
+    if format_compare:
+        manifest["format_comparison"] = format_compare
+        for key in ("test_csv", "val_csv", "pt_uni_csv", "eval_csv", "csv"):
+            rel = str(format_compare.get(key) or "")
+            if rel and rel not in manifest["tables"]:
+                manifest["tables"].append(rel)
     manifest_path = os.path.join(session_root, "session.json")
     write_manifest(manifest_path, manifest)
     report_files = write_analysis_report(
@@ -2894,7 +4115,7 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         "--recompute-missing-metrics",
         action="store_true",
         default=False,
-        help="Recompute missing requested metrics from best.pt + detected data.yaml",
+        help="Recompute missing requested metrics from run model + detected data.yaml",
     )
     p_tm_plot.add_argument(
         "--recompute-split",

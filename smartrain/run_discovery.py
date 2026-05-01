@@ -6,12 +6,14 @@ from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
 
 def _looks_like_run_dir(path: str, filenames: set[str]) -> bool:
+    root = os.path.abspath(path)
+    canonical_best = os.path.join(root, "models", f"{os.path.basename(root)}.pt")
     train_dir = os.path.join(path, "train")
     has_train_artifacts = (
         os.path.isfile(os.path.join(train_dir, "args.yaml"))
         or os.path.isfile(os.path.join(train_dir, "results.csv"))
         or os.path.isfile(os.path.join(train_dir, "weights", "last.pt"))
-        or os.path.isfile(os.path.join(train_dir, "weights", "best.pt"))
+        or os.path.isfile(canonical_best)
     )
     return "training_metadata.json" in filenames or has_train_artifacts
 

@@ -10,6 +10,7 @@ import yaml
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.path_portable import relativize_if_under
+from smartrain.run_artifacts import canonical_run_model_path
 
 
 def build_migrate_models_arg_parser() -> argparse.ArgumentParser:
@@ -135,7 +136,7 @@ def build_metadata(
         },
         "paths": {
             "model_directory": ".",
-            "best_model": "train/weights/best.pt" if (run_dir / "train/weights/best.pt").exists() else None,
+            "best_model": f"{run_dir.name}.pt" if Path(canonical_run_model_path(str(run_dir), ".pt")).exists() else None,
         },
     }
 

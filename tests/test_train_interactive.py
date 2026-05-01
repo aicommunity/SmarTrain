@@ -10,6 +10,7 @@ import pytest
 
 from smartrain import cli_prompts
 from smartrain import model_training_module as mtm
+from smartrain.run_artifacts import canonical_run_model_path
 from smartrain.workspace_paths import DATASETS_INFO_FILE, deploy_workspace
 
 
@@ -44,8 +45,6 @@ def _base_args(workspace: Path) -> argparse.Namespace:
         val_conf=None,
         val_iou=None,
         weighted_sampling=False,
-        export_onnx=False,
-        export_onnx_fp32=False,
         clearml=False,
         clearml_project=None,
     )
@@ -74,8 +73,6 @@ def test_train_interactive_defaults_apply(tmp_path: Path, monkeypatch: pytest.Mo
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
@@ -159,8 +156,6 @@ def test_train_interactive_test_only_requires_model_dir(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
@@ -224,8 +219,6 @@ def test_train_interactive_skips_prompts_for_values_from_ultralytics_yaml(
             "imgsz": 512,
             "task": "segment",
             "weighted_sampling": True,
-            "export_onnx": True,
-            "export_onnx_half": False,
             "clearml": True,
             "clearml_project": "ProjA",
         },
@@ -238,8 +231,6 @@ def test_train_interactive_skips_prompts_for_values_from_ultralytics_yaml(
     assert args.batch == 4
     assert args.img_size == 512
     assert args.weighted_sampling is True
-    assert args.export_onnx is True
-    assert args.export_onnx_fp32 is True
     assert args.clearml is True
     assert args.clearml_project == "ProjA"
 
@@ -293,8 +284,6 @@ def test_train_interactive_uses_selected_base_run_defaults(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
@@ -360,8 +349,6 @@ def test_train_interactive_model_manual_entry(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
@@ -396,8 +383,6 @@ def test_train_interactive_model_options_filtered_by_task(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
@@ -450,8 +435,6 @@ def test_train_interactive_selects_external_provider_from_prefixed_alias(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
@@ -611,8 +594,8 @@ def test_train_main_external_layout_normalized_to_train_subdir(
     assert rc == 0
     run_dir = target_root / "ds_a" / "run-fixed"
     assert called["test"] is True
-    assert (run_dir / "train" / "args.yaml").is_file()
-    assert (run_dir / "train" / "weights" / "best.pt").is_file()
+    assert (run_dir / "train-ultralytics" / "args.yaml").is_file() or (run_dir / "train" / "args.yaml").is_file()
+    assert Path(canonical_run_model_path(str(run_dir), ".pt")).is_file()
     assert (run_dir / "training_metadata.json").is_file()
     payload = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))
     assert payload["status"]["testing"]["success"] is True
@@ -663,5 +646,5 @@ def test_train_main_external_best_pt_moved_to_contract_path(
     )
     assert rc == 0
     run_dir = target_root / "ds_a" / "run-fixed"
-    assert (run_dir / "train" / "weights" / "best.pt").is_file()
+    assert Path(canonical_run_model_path(str(run_dir), ".pt")).is_file()
 

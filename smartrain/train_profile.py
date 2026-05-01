@@ -13,11 +13,6 @@ import yaml
 # Keys processed by smart-train do not go to model.train()
 SMARTRAIN_TRAIN_KEYS = frozenset(
     {
-        "export_onnx",
-        "export_onnx_half",
-        "export_onnx_simplify",
-        "export_onnx_opset",
-        "export_onnx_dynamic",
         "weighted_sampling",
         "clearml",
         "clearml_project",
@@ -104,8 +99,6 @@ def merge_cli_into_ultralytics_cfg(
 
 def apply_cli_smartrain_overrides(opts: dict[str, Any], args: Any) -> None:
     """CLI flags override options from YAML (opts mutation)."""
-    if getattr(args, "export_onnx", False):
-        opts["export_onnx"] = True
     if getattr(args, "weighted_sampling", False):
         opts["weighted_sampling"] = True
     if getattr(args, "clearml", False):

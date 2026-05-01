@@ -41,7 +41,13 @@ from smartrain.train_profile import (
     resolve_profile_data_path,
     task_to_metadata_task_type,
 )
-from smartrain.device_selector import default_device_value, discover_device_options, is_cuda_device
+from smartrain.device_selector import (
+    default_device_value,
+    device_display_name,
+    prompt_device_selection,
+    resolve_device_request,
+    validate_device_available,
+)
 from smartrain.train_model_catalog import (
     TrainModelCatalog,
     is_supported_external_provider_model,
@@ -56,12 +62,38 @@ from smartrain.external_providers.runner import run_external_infer, run_external
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.external_providers.registry import list_provider_specs
 from smartrain.path_portable import relativize_if_under
+from smartrain.confidence_recommendation import (
+    compute_confidence_recommendations,
+    recommendation_file_path,
+    recommendations_complete,
+    read_recommendation_file,
+    write_not_available_recommendations,
+    write_recommendation_file,
+)
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,
     resolve_dataset_root,
     DATASETS_INFO_FILE,
+)
+from smartrain.run_discovery import find_run_directories
+from smartrain.model_test_service import (
+    complete_missing_test_artifacts,
+    format_metrics_path,
+    format_metrics_path_for_split,
+    persist_target_test_artifacts_state,
+    sync_test_artifacts_manifest,
+)
+from smartrain.run_artifacts import (
+    canonical_run_model_path,
+    materialize_canonical_run_model,
+    resolve_run_model_with_legacy_fallback,
+    run_tmp_dir,
+    run_tests_dir,
+    run_test_backend_dir,
+    run_train_backend_dir,
+    ensure_run_layout,
 )
 
 
@@ -440,22 +472,34 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Batch for val/test (by default: as a training batch; for --test-only it is taken from training_metadata.json if available)",
     )
+    parser.add_argument(
+        "--conf-rec-beta-recall",
+        type=float,
+        default=2.0,
+        help="Beta for objective B (recall-priority F-beta) in confidence recommendations.",
+    )
+    parser.add_argument(
+        "--conf-rec-beta-precision",
+        type=float,
+        default=0.5,
+        help="Beta for objective C (precision-priority F-beta) in confidence recommendations.",
+    )
+    parser.add_argument(
+        "--conf-rec-fallback",
+        type=float,
+        default=0.25,
+        help="Fallback confidence value when recommendations cannot be computed.",
+    )
+    parser.add_argument(
+        "--conf-rec-disable",
+        action="store_true",
+        help="Disable confidence threshold recommendation computation.",
+    )
 
     parser.add_argument(
         "--weighted-sampling",
         action="store_true",
         help="Weighted image sampling (classes with fewer objects more often); ultralytics patch",
-    )
-
-    parser.add_argument(
-        "--export-onnx",
-        action="store_true",
-        help="After successful training, export best.pt to ONNX",
-    )
-    parser.add_argument(
-        "--export-onnx-fp32",
-        action="store_true",
-        help="With --export-onnx, do not use half=True",
     )
 
     parser.add_argument(
@@ -504,6 +548,44 @@ def build_train_resume_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_train_calc_confidence_arg_parser() -> argparse.ArgumentParser:
+    parser = CliArgumentParser(
+        prog="smartrain train calc-confidence",
+        description="Calculate confidence recommendations for existing runs",
+    )
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default=None,
+        help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR})",
+    )
+    parser.add_argument(
+        "--run-dir",
+        action="append",
+        default=[],
+        help="Absolute or workspace-relative run directory. Can be used multiple times.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process all discovered run directories.",
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        dest="non_interactive",
+        help="Non-interactive mode. If no --run-dir is given, all runs are processed.",
+    )
+    parser.add_argument(
+        "--val-batch",
+        type=int,
+        default=None,
+        help="Batch size for val/test recompute in calc-confidence (default: 1).",
+    )
+    return parser
+
+
 def _resume_display_value(diag: RunDiagnosis) -> str:
     dataset_name = os.path.basename(os.path.dirname(diag.run_dir.rstrip(os.sep)))
     run_name = os.path.basename(diag.run_dir.rstrip(os.sep))
@@ -524,6 +606,139 @@ def _select_resume_candidate_interactive(candidates: list[RunDiagnosis]) -> RunD
             if 1 <= idx <= len(candidates):
                 return candidates[idx - 1]
         print(f"[ERROR] Incorrect selection: {raw!r}")
+
+
+def _select_runs_for_calc_confidence_interactive(run_dirs: list[str]) -> list[str]:
+    if not run_dirs:
+        return []
+    print("\n[INFO] Available runs:")
+    for idx, rd in enumerate(run_dirs, start=1):
+        print(f"  {idx}. {rd}")
+    raw = prompt_text(
+        "Select runs by numbers (comma-separated) or 'all'",
+        default="all",
+    ).strip()
+    if not raw or raw.lower() == "all":
+        return run_dirs
+    selected: list[str] = []
+    seen: set[str] = set()
+    for token in raw.split(","):
+        t = token.strip()
+        if not t:
+            continue
+        if not t.isdigit():
+            raise ValueError(f"Invalid token {t!r}. Expected numbers or 'all'.")
+        pos = int(t)
+        if pos < 1 or pos > len(run_dirs):
+            raise ValueError(f"Selection {pos} out of range 1..{len(run_dirs)}.")
+        item = run_dirs[pos - 1]
+        if item not in seen:
+            seen.add(item)
+            selected.append(item)
+    return selected
+
+
+def _resolve_run_dirs_for_calc_confidence(
+    workspace_root: str,
+    run_dir_args: list[str],
+    select_all: bool,
+    non_interactive: bool,
+) -> list[str]:
+    discovered = sorted(set(os.path.abspath(x) for x in find_run_directories(WorkspaceLayout(workspace_root).runs)))
+    if run_dir_args:
+        out: list[str] = []
+        for raw in run_dir_args:
+            rd = str(raw).strip()
+            if not rd:
+                continue
+            if not os.path.isabs(rd):
+                rd = os.path.join(WorkspaceLayout(workspace_root).runs, rd)
+            out.append(os.path.abspath(rd))
+        return sorted(set(out))
+    if select_all or non_interactive:
+        return discovered
+    if not sys.stdin.isatty():
+        raise RuntimeError("Interactive mode requires a terminal (TTY).")
+    return _select_runs_for_calc_confidence_interactive(discovered)
+
+
+def _run_calc_confidence_command(argv: list[str]) -> int:
+    args = build_train_calc_confidence_arg_parser().parse_args(argv)
+    try:
+        workspace_root = resolve_workspace_root(args.workspace)
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return 1
+    try:
+        run_dirs = _resolve_run_dirs_for_calc_confidence(
+            workspace_root=workspace_root,
+            run_dir_args=list(getattr(args, "run_dir", []) or []),
+            select_all=bool(getattr(args, "all", False)),
+            non_interactive=bool(getattr(args, "non_interactive", False)),
+        )
+    except Exception as e:
+        print(f"[ERROR] {e}")
+        return 2
+    if not run_dirs:
+        print("[INFO] No runs selected.")
+        return 0
+    val_batch = getattr(args, "val_batch", None)
+    if val_batch is None:
+        if bool(getattr(args, "non_interactive", False)) or not sys.stdin.isatty():
+            val_batch = 1
+        else:
+            raw_batch = prompt_text(
+                "Val/Test batch for confidence recompute",
+                default="1",
+            ).strip()
+            try:
+                val_batch = int(raw_batch) if raw_batch else 1
+            except ValueError:
+                print(f"[ERROR] Invalid --val-batch value: {raw_batch!r}")
+                return 2
+    if int(val_batch) <= 0:
+        print(f"[ERROR] --val-batch must be > 0, got: {val_batch}")
+        return 2
+
+    processed = 0
+    updated = 0
+    skipped = 0
+    failed = 0
+    for run_dir in run_dirs:
+        processed += 1
+        before_test = recommendations_complete(
+            read_recommendation_file(recommendation_file_path(run_dir, "test"))
+        )
+        before_val = recommendations_complete(
+            read_recommendation_file(recommendation_file_path(run_dir, "val"))
+        )
+        try:
+            _ensure_resume_confidence_recommendations(run_dir, workspace_root, val_batch=int(val_batch))
+        except Exception as e:
+            failed += 1
+            print(f"[ERROR] {run_dir}: {e}")
+            continue
+        after_test = recommendations_complete(
+            read_recommendation_file(recommendation_file_path(run_dir, "test"))
+        )
+        after_val = recommendations_complete(
+            read_recommendation_file(recommendation_file_path(run_dir, "val"))
+        )
+        if after_test and after_val and (not (before_test and before_val)):
+            updated += 1
+            print(f"[OK] {run_dir}: confidence recommendations computed.")
+        elif before_test and before_val:
+            skipped += 1
+            print(f"[INFO] {run_dir}: recommendations already present.")
+        else:
+            skipped += 1
+            print(f"[WARN] {run_dir}: recommendations still incomplete.")
+
+    print(
+        f"[INFO] calc-confidence summary: processed={processed}, "
+        f"updated={updated}, skipped={skipped}, failed={failed}"
+    )
+    return 1 if failed > 0 else 0
 
 
 def _run_resume_command(argv: list[str]) -> int:
@@ -568,21 +783,12 @@ def _run_resume_command(argv: list[str]) -> int:
 
     if chosen.status == RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING:
         try:
-            from smartrain.train_resume import diagnose_run
-
-            dataset_path = resolve_dataset_path_for_resume(chosen.run_dir, workspace_root)
-            if not dataset_path:
-                raise RuntimeError(
-                    "Cannot resolve dataset path for test stage. "
-                    "Expected valid dataset in runtime yaml/metadata/workspace datasets catalog."
-                )
             _maybe_free_cuda_memory()
-            test_yolo(chosen.run_dir, dataset_path)
-            update_resume_test_metadata(
+            complete_missing_test_artifacts(
                 chosen.run_dir,
-                success=True,
-                error=None,
-                diagnosis=diagnose_run(chosen.run_dir),
+                workspace_root=workspace_root,
+                pt_test_runner=test_yolo,
+                update_metadata_cb=update_resume_test_metadata,
             )
             print(f"[OK] Missing test stage completed: {chosen.run_dir}")
             return 0
@@ -603,6 +809,7 @@ def _run_resume_command(argv: list[str]) -> int:
         from smartrain.train_resume import diagnose_run
 
         resume_training_in_run(chosen.run_dir)
+        _ensure_resume_confidence_recommendations(chosen.run_dir, workspace_root)
         update_resume_metadata(
             chosen.run_dir,
             success=True,
@@ -623,6 +830,39 @@ def _run_resume_command(argv: list[str]) -> int:
         print(f"[ERROR] Failed to resume run: {chosen.run_dir}")
         print(f"[ERROR] {e}")
         return 1
+
+
+def _ensure_resume_confidence_recommendations(
+    run_dir: str,
+    workspace_root: str,
+    val_batch: int = 1,
+) -> None:
+    test_payload = read_recommendation_file(recommendation_file_path(run_dir, "test"))
+    val_payload = read_recommendation_file(recommendation_file_path(run_dir, "val"))
+    if recommendations_complete(test_payload) and recommendations_complete(val_payload):
+        return
+
+    best_pt = canonical_run_model_path(run_dir, ".pt")
+    if not os.path.isfile(best_pt):
+        print(
+            "[WARN] Resume post-check: recommendations missing but canonical run model is absent; "
+            "cannot recompute confidence recommendations."
+        )
+        return
+
+    dataset_path = resolve_dataset_path_for_resume(run_dir, workspace_root)
+    if not dataset_path:
+        print(
+            "[WARN] Resume post-check: recommendations missing but dataset path is unresolved; "
+            "cannot recompute confidence recommendations."
+        )
+        return
+
+    print("[INFO] Resume post-check: recomputing missing confidence recommendations (val/test).")
+    _maybe_free_cuda_memory()
+    # Recompute path is primarily for backfilling recommendations on existing runs.
+    # Keep val/test memory profile conservative to avoid OOM on small GPUs.
+    test_yolo(run_dir, dataset_path, val_batch=max(1, int(val_batch)))
 
 
 def _prompt_input(label: str, default: str = "", completer=None, show_default_hint: bool = True) -> str:
@@ -690,26 +930,7 @@ def _prompt_optional_float(label: str, default: float | None = None) -> float | 
 
 
 def _prompt_train_device(default: str | None = None) -> str:
-    options = discover_device_options()
-    labels = [o.label for o in options]
-    by_label = {o.label: o.value for o in options}
-    effective_default = str(default).strip() if default is not None else default_device_value()
-    default_label = next((o.label for o in options if o.value == effective_default), labels[0])
-    print_numbered_options("Train devices", labels)
-    picked = _prompt_input("Train device (--device, number/value): ", default=default_label).strip()
-    if not picked:
-        return by_label[default_label]
-    if picked in by_label:
-        return by_label[picked]
-    if picked.isdigit():
-        idx = int(picked)
-        if 1 <= idx <= len(options):
-            return options[idx - 1].value
-    for option in options:
-        if picked == option.value:
-            return option.value
-    print(f"[WARNING] Unknown device {picked!r}; fallback to default {by_label[default_label]!r}")
-    return by_label[default_label]
+    return prompt_device_selection(title="Train devices", default_device=default or default_device_value())
 
 
 def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
@@ -928,11 +1149,14 @@ def _collect_available_base_runs(layout: WorkspaceLayout, selected_dataset: str)
         for run_dir in sorted(ds_dir.iterdir()):
             if not run_dir.is_dir():
                 continue
-            args_train = run_dir / "train" / "args.yaml"
+            args_train = run_dir / "train-ultralytics" / "args.yaml"
+            legacy_args_train = run_dir / "train" / "args.yaml"
             args_root = run_dir / "args.yaml"
             args_path: Path | None = None
             if args_train.is_file():
                 args_path = args_train
+            elif legacy_args_train.is_file():
+                args_path = legacy_args_train
             elif args_root.is_file():
                 args_path = args_root
             if args_path is None:
@@ -1214,23 +1438,6 @@ def _run_interactive_train_setup(args) -> bool:
             "Enable weighted sampling (--weighted-sampling)?",
             default=bool(_get_interactive_default(args, "weighted_sampling", False, baseline_sm_opts, "weighted_sampling")),
         )
-    if "export_onnx" in ultra_sm_opts:
-        args.export_onnx = bool(ultra_sm_opts["export_onnx"])
-    else:
-        args.export_onnx = _prompt_yes_no(
-            "Export ONNX after training (--export-onnx)?",
-            default=bool(_get_interactive_default(args, "export_onnx", False, baseline_sm_opts, "export_onnx")),
-        )
-    if "export_onnx_half" in ultra_sm_opts:
-        args.export_onnx_fp32 = not bool(ultra_sm_opts["export_onnx_half"])
-    else:
-        default_fp32 = bool(getattr(args, "export_onnx_fp32", False))
-        if "export_onnx_half" in baseline_sm_opts:
-            default_fp32 = not bool(baseline_sm_opts["export_onnx_half"])
-        args.export_onnx_fp32 = _prompt_yes_no(
-            "Use FP32 for ONNX (--export-onnx-fp32)?",
-            default=default_fp32,
-        )
     if "clearml" in ultra_sm_opts:
         args.clearml = bool(ultra_sm_opts["clearml"])
     else:
@@ -1357,7 +1564,8 @@ def _build_runtime_data_yaml(dataset_path: str, run_dir: str, *, stage: str) -> 
     if test_rel is not None:
         runtime_cfg["test"] = test_rel
 
-    out_yaml = os.path.join(run_dir, f"_runtime_data_{stage}.yaml")
+    ensure_run_layout(run_dir)
+    out_yaml = os.path.join(str(run_tmp_dir(run_dir)), f"_runtime_data_{stage}.yaml")
     with open(out_yaml, "w", encoding="utf-8") as f:
         yaml.safe_dump(runtime_cfg, f, allow_unicode=True, sort_keys=False)
     print(
@@ -1426,7 +1634,7 @@ def _finalize_train_kwargs(ultralytics_cfg: dict[str, Any], data_yaml: str, mode
     k.pop("data", None)
     k["data"] = data_yaml
     k["project"] = model_dir
-    k["name"] = "train"
+    k["name"] = "train-ultralytics"
     k["exist_ok"] = False
     k.setdefault("mode", "train")
     if overwritten:
@@ -1508,10 +1716,10 @@ def _normalize_external_run_layout(run_dir: str) -> None:
     root = Path(run_dir).expanduser().resolve()
     if not root.is_dir():
         return
-    train_dir = root / "train"
+    train_dir = run_train_backend_dir(str(root), "ultralytics")
     train_dir.mkdir(parents=True, exist_ok=True)
     for entry in list(root.iterdir()):
-        if entry.name in {"train", "training_metadata.json"}:
+        if entry.name in {"training_metadata.json", "models", "tmp", "tests"} or entry.name.startswith("train-"):
             continue
         target = train_dir / entry.name
         if target.exists():
@@ -1519,44 +1727,24 @@ def _normalize_external_run_layout(run_dir: str) -> None:
         entry.rename(target)
 
 
+def _materialize_canonical_run_model(run_dir: str, source_path: str | None = None) -> str | None:
+    target = materialize_canonical_run_model(
+        run_dir,
+        ext=".pt",
+        source_path=source_path,
+        move=True,
+        normalize_metadata=True,
+    )
+    return str(target) if target is not None else None
+
+
 def _find_external_best_checkpoint(run_dir: str) -> str | None:
-    root = Path(run_dir).expanduser().resolve()
-    if not root.is_dir():
-        return None
-    preferred = root / "train" / "weights" / "best.pt"
-    if preferred.is_file():
-        return str(preferred)
-    candidates = [
-        root / "weights" / "best.pt",
-        root / "train" / "best.pt",
-        root / "best.pt",
-    ]
-    for cand in candidates:
-        if cand.is_file():
-            return str(cand)
-    for cand in root.rglob("best.pt"):
-        if cand.is_file():
-            return str(cand)
-    return None
+    found = resolve_run_model_with_legacy_fallback(run_dir, ".pt")
+    return str(found) if found is not None else None
 
 
 def _ensure_external_best_checkpoint_layout(run_dir: str) -> str | None:
-    root = Path(run_dir).expanduser().resolve()
-    if not root.is_dir():
-        return None
-    target = root / "train" / "weights" / "best.pt"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.is_file():
-        return str(target)
-    src = _find_external_best_checkpoint(run_dir)
-    if not src:
-        return None
-    src_path = Path(src).expanduser().resolve()
-    if src_path == target:
-        return str(target)
-    if not target.exists():
-        src_path.rename(target)
-    return str(target)
+    return _materialize_canonical_run_model(run_dir, _find_external_best_checkpoint(run_dir))
 
 
 def _resolve_external_eval_source(dataset_path: str) -> str:
@@ -1574,12 +1762,12 @@ def _resolve_external_eval_source(dataset_path: str) -> str:
 
 
 def _write_external_fallback_metrics(model_dir: str, *, provider_id: str, rc: int) -> str:
-    test_dir = os.path.join(model_dir, "test")
+    test_dir = str(run_test_backend_dir(model_dir, "ultralytics"))
     os.makedirs(test_dir, exist_ok=True)
     marker = os.path.join(test_dir, "fallback_infer.txt")
     with open(marker, "w", encoding="utf-8") as f:
         f.write("external infer fallback was used for test stage\n")
-    csv_path = os.path.join(model_dir, "test_metrics.csv")
+    csv_path = os.path.join(str(run_tests_dir(model_dir)), "test_metrics.csv")
     with open(csv_path, "w", encoding="utf-8") as f:
         f.write("provider,test_mode,return_code\n")
         f.write(f"{provider_id},external_infer_fallback,{int(rc)}\n")
@@ -1814,40 +2002,16 @@ def train_yolo(
         register_weighted_sampling_callback(model)
 
     training_end_time = None
-    onnx_rel = None
-    best_path = os.path.join(model_dir, "train", "weights", "best.pt")
+    raw_best_path = os.path.join(model_dir, "train-ultralytics", "weights", "best.pt")
+    canonical_best_path = canonical_run_model_path(model_dir, ".pt")
     try:
         model.train(**train_kw)
         training_end_time = datetime.now()
-        model_path = best_path
+        model_path = _materialize_canonical_run_model(model_dir, raw_best_path) or canonical_best_path
         print("\n" + "-" * 60)
         if os.path.exists(model_path):
             print("[OK] Training complete.")
             print(f"[INFO] Model saved at path:\n{model_path}")
-        if smartrain_opts.get("export_onnx") and os.path.exists(model_path):
-            half = bool(smartrain_opts.get("export_onnx_half", True))
-            simplify = bool(smartrain_opts.get("export_onnx_simplify", True))
-            opset = smartrain_opts.get("export_onnx_opset", 17)
-            dynamic = bool(smartrain_opts.get("export_onnx_dynamic", False))
-            try:
-                ex = model.export(
-                    format="onnx",
-                    dynamic=dynamic,
-                    simplify=simplify,
-                    opset=int(opset),
-                    half=half,
-                )
-                if ex:
-                    onnx_abs = str(ex) if isinstance(ex, (str, Path)) else str(getattr(ex, "path", ex))
-                    if os.path.isfile(onnx_abs):
-                        onnx_rel = os.path.relpath(onnx_abs, model_dir)
-                    else:
-                        cand = os.path.join(model_dir, "train", "weights", "best.onnx")
-                        if os.path.isfile(cand):
-                            onnx_rel = os.path.relpath(cand, model_dir)
-                print(f"[INFO] ONNX export completed: {onnx_rel or '(see weights directory)'}")
-            except Exception as ex_err:
-                print(f"[WARNING] ONNX export failed: {ex_err}")
     except Exception as e:
         training_end_time = datetime.now()
         print(
@@ -1864,8 +2028,7 @@ def train_yolo(
     meta_extras = {
         "train_kw": {k: v for k, v in train_kw.items() if k != "data"},
         "task_type": task_to_metadata_task_type(train_kw.get("task")),
-        "onnx_relative": onnx_rel,
-        "training_ok": os.path.isfile(best_path),
+        "training_ok": os.path.isfile(canonical_best_path),
     }
     return model_dir, training_start_time, training_end_time, dataset_hash, workspace_root, meta_extras
 
@@ -1884,6 +2047,10 @@ def test_yolo(
     val_conf=None,
     val_iou=None,
     val_batch=None,
+    conf_rec_disable: bool = False,
+    conf_rec_beta_recall: float = 2.0,
+    conf_rec_beta_precision: float = 0.5,
+    conf_rec_fallback: float = 0.25,
 ):
     test_start_time = datetime.now()
 
@@ -1897,14 +2064,16 @@ def test_yolo(
         "batch": val_batch,
     }
 
-    model_path = os.path.join(model_dir, "train", "weights", "best.pt")
+    model_path = canonical_run_model_path(model_dir, ".pt")
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(f"canonical run model is missing: {model_path}")
     trained_model = YOLO(model_path)
 
     val_kwargs = {
         "data": data_yaml,
         "split": "test",
-        "project": model_dir,
-        "name": "test",
+        "project": str(run_tests_dir(model_dir)),
+        "name": "test-ultralytics",
         "exist_ok": False,
     }
     if imgsz is not None:
@@ -1929,8 +2098,31 @@ def test_yolo(
     try:
         result = trained_model.val(**val_kwargs)
 
+        if not conf_rec_disable:
+            _ensure_confidence_recommendations(
+                trained_model=trained_model,
+                primary_test_result=result,
+                model_dir=model_dir,
+                data_yaml=data_yaml,
+                imgsz=imgsz,
+                val_conf=val_conf,
+                val_iou=val_iou,
+                val_batch=val_batch,
+                beta_recall=conf_rec_beta_recall,
+                beta_precision=conf_rec_beta_precision,
+                fallback_confidence=conf_rec_fallback,
+            )
+
         test_end_time = datetime.now()
         csv_file = save_metrics_csv(result, model_dir)
+        target_pt = model_path if os.path.isfile(model_path) else None
+        persist_target_test_artifacts_state(
+            model_dir,
+            format_name="pt",
+            target_path=target_pt,
+            backend="ultralytics",
+            status="ok" if os.path.exists(csv_file) else "incomplete",
+        )
 
         print("\n" + "-" * 60)
         if os.path.exists(csv_file):
@@ -1947,15 +2139,101 @@ def test_yolo(
     return test_start_time, test_end_time, inference_record
 
 
-def save_metrics_csv(test_result, model_dir):
-    base_name = "test_metrics"
-    ext = ".csv"
-    csv_file = os.path.join(model_dir, base_name + ext)
+def _recommendation_summary_for_metadata(model_dir: str) -> dict[str, Any] | None:
+    out: dict[str, Any] = {"files": {}, "status": {}}
+    found = False
+    for split in ("val", "test"):
+        p = recommendation_file_path(model_dir, split)
+        payload = read_recommendation_file(p)
+        if not isinstance(payload, dict):
+            continue
+        found = True
+        out["files"][split] = os.path.basename(p)
+        out["status"][split] = payload.get("status")
+    return out if found else None
 
-    counter = 1
-    while os.path.exists(csv_file):
-        csv_file = os.path.join(model_dir, f"{base_name}_{counter}{ext}")
-        counter += 1
+
+def _ensure_confidence_recommendations(
+    *,
+    trained_model: Any,
+    primary_test_result: Any,
+    model_dir: str,
+    data_yaml: str,
+    imgsz: int | None,
+    val_conf: float | None,
+    val_iou: float | None,
+    val_batch: int | None,
+    beta_recall: float,
+    beta_precision: float,
+    fallback_confidence: float,
+) -> None:
+    test_path = recommendation_file_path(model_dir, "test")
+    val_path = recommendation_file_path(model_dir, "val")
+    has_test = recommendations_complete(read_recommendation_file(test_path))
+    has_val = recommendations_complete(read_recommendation_file(val_path))
+    if has_test and has_val:
+        print("[INFO] Confidence recommendations already exist (val/test), skipping recompute.")
+        return
+
+    if not has_test:
+        test_payload = compute_confidence_recommendations(
+            primary_test_result,
+            split="test",
+            beta_recall=float(beta_recall),
+            beta_precision=float(beta_precision),
+            fallback_confidence=float(fallback_confidence),
+        )
+        write_recommendation_file(test_path, test_payload)
+        print(f"[OK] Confidence recommendations (test): {test_path}")
+
+    if has_val:
+        return
+
+    val_kwargs: dict[str, Any] = {
+        "data": data_yaml,
+        "split": "val",
+        "plots": False,
+        "save": False,
+        "verbose": False,
+    }
+    if imgsz is not None:
+        val_kwargs["imgsz"] = imgsz
+    if val_conf is not None:
+        val_kwargs["conf"] = val_conf
+    if val_iou is not None:
+        val_kwargs["iou"] = val_iou
+    if val_batch is not None:
+        val_kwargs["batch"] = int(val_batch)
+    try:
+        val_result = trained_model.val(**val_kwargs)
+        try:
+            with open(format_metrics_path_for_split(model_dir, "val", "pt"), "w", encoding="utf-8") as f:
+                f.write(val_result.to_csv())
+        except Exception:
+            pass
+        val_payload = compute_confidence_recommendations(
+            val_result,
+            split="val",
+            beta_recall=float(beta_recall),
+            beta_precision=float(beta_precision),
+            fallback_confidence=float(fallback_confidence),
+        )
+        write_recommendation_file(val_path, val_payload)
+        print(f"[OK] Confidence recommendations (val): {val_path}")
+    except Exception as exc:
+        write_not_available_recommendations(
+            model_dir=model_dir,
+            split="val",
+            reason=f"val_split_failed: {exc}",
+            beta_recall=float(beta_recall),
+            beta_precision=float(beta_precision),
+            fallback_confidence=float(fallback_confidence),
+        )
+        print(f"[WARN] Failed to compute val confidence recommendations: {exc}")
+
+
+def save_metrics_csv(test_result, model_dir):
+    csv_file = os.path.join(str(run_tests_dir(model_dir)), "test_metrics.csv")
 
     csv_data = test_result.to_csv()
     with open(csv_file, "w", encoding="utf-8") as f:
@@ -2118,10 +2396,10 @@ def save_training_metadata(
     workspace_root=None,
     task_type=None,
     ultralytics_train_summary=None,
-    onnx_relative=None,
     training_provider: str = "ultralytics",
     external_provider_id: str | None = None,
     system_profile: dict[str, Any] | None = None,
+    confidence_recommendation_config: dict[str, Any] | None = None,
 ):
     ds_abs = os.path.abspath(dataset_path)
     dataset_block: dict[str, Any] = {
@@ -2184,16 +2462,14 @@ def save_training_metadata(
         },
         "paths": {
             "model_directory": ".",
-            "best_model": "train/weights/best.pt"
-            if os.path.exists(os.path.join(model_dir, "train", "weights", "best.pt"))
+            "best_model": os.path.basename(canonical_run_model_path(model_dir, ".pt"))
+            if os.path.exists(canonical_run_model_path(model_dir, ".pt"))
             else None,
         },
     }
 
     if ultralytics_train_summary:
         metadata["training_info"]["ultralytics_train"] = ultralytics_train_summary
-    if onnx_relative:
-        metadata["paths"]["onnx"] = onnx_relative
 
     if workspace_root is not None:
         metadata["workspace"] = {
@@ -2206,6 +2482,19 @@ def save_training_metadata(
         metadata["inference"] = {k: v for k, v in inference.items() if v is not None}
     if system_profile:
         metadata["system_profile"] = system_profile
+    rec_summary = _recommendation_summary_for_metadata(model_dir)
+    if rec_summary:
+        if confidence_recommendation_config:
+            rec_summary["config"] = confidence_recommendation_config
+        metadata["recommendations"] = {"confidence": rec_summary}
+    test_manifest = sync_test_artifacts_manifest(
+        model_dir,
+        target_by_format={"pt": metadata["paths"].get("best_model")},
+        backend_by_format={"pt": "ultralytics"},
+    )
+    formats_payload = test_manifest.get("formats")
+    if isinstance(formats_payload, dict) and formats_payload:
+        metadata["test_artifacts_by_format"] = formats_payload
 
     metadata_file = os.path.join(model_dir, "training_metadata.json")
 
@@ -2293,17 +2582,7 @@ def _maybe_free_cuda_memory() -> None:
 
 
 def _ensure_device_available_or_raise(device: str | None) -> None:
-    if not is_cuda_device(device):
-        return
-    try:
-        import torch
-    except Exception as exc:
-        raise RuntimeError(f"CUDA device requested ({device}), but torch is unavailable: {exc}") from exc
-    if not torch.cuda.is_available():
-        raise RuntimeError(
-            f"CUDA device requested ({device}), but torch.cuda.is_available()=False. "
-            f"torch={getattr(torch, '__version__', 'unknown')} cuda_runtime={getattr(torch.version, 'cuda', 'unknown')}"
-        )
+    validate_device_available(device)
 
 
 def main(argv=None):
@@ -2311,6 +2590,8 @@ def main(argv=None):
         argv = sys.argv[1:]
     if argv and argv[0] == "resume":
         return _run_resume_command(argv[1:])
+    if argv and argv[0] == "calc-confidence":
+        return _run_calc_confidence_command(argv[1:])
     args = parse_args(argv)
     _apply_external_provider_defaults(args)
     known_provider_ids = {spec.id for spec in list_provider_specs()}
@@ -2371,9 +2652,7 @@ def main(argv=None):
         },
     )
     apply_cli_smartrain_overrides(sm_opts, args)
-
-    if getattr(args, "export_onnx_fp32", False):
-        sm_opts["export_onnx_half"] = False
+    u_cfg["device"] = resolve_device_request(u_cfg.get("device"))
 
     try:
         workspace_root, data, target_dir = _resolve_cli_paths_with_profile(args, u_cfg)
@@ -2386,6 +2665,7 @@ def main(argv=None):
     model_version = _normalize_model_spec(u_cfg.get("model", MODEL_VERSION), add_pt_when_missing=True)
     u_cfg["model"] = model_version
     _ensure_device_available_or_raise(str(u_cfg.get("device")) if u_cfg.get("device") is not None else None)
+    print(f"[INFO] Train device: {device_display_name(str(u_cfg.get('device')) if u_cfg.get('device') is not None else None)}")
     epochs = int(u_cfg.get("epochs", EPOCHS))
     batch = int(u_cfg.get("batch", BATCH))
     img_size = u_cfg.get("imgsz", IMG_SIZE)
@@ -2473,6 +2753,10 @@ def main(argv=None):
                     val_conf=args.val_conf,
                     val_iou=args.val_iou,
                     val_batch=val_batch,
+                    conf_rec_disable=bool(getattr(args, "conf_rec_disable", False)),
+                    conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
                 )
                 test_success = True
             except Exception as e:
@@ -2514,10 +2798,12 @@ def main(argv=None):
                     if fallback_rc == 0:
                         if external_provider == "mfel-yolo":
                             # keep test metrics contract in run root
-                            test_results_csv = os.path.join(external_run_dir, "test", "results.csv")
+                            test_results_csv = os.path.join(
+                                str(run_test_backend_dir(external_run_dir, "ultralytics")), "results.csv"
+                            )
                             if os.path.isfile(test_results_csv):
                                 shutil.copy2(
-                                    test_results_csv, os.path.join(external_run_dir, "test_metrics.csv")
+                                    test_results_csv, os.path.join(str(run_tests_dir(external_run_dir)), "test_metrics.csv")
                                 )
                             else:
                                 _write_external_fallback_metrics(
@@ -2534,6 +2820,23 @@ def main(argv=None):
                             "conf": fallback_conf,
                             "mode": "external_infer_fallback",
                         }
+                        reason = "external_fallback_without_ultralytics_val_metrics"
+                        write_not_available_recommendations(
+                            model_dir=external_run_dir,
+                            split="test",
+                            reason=reason,
+                            beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                            beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                            fallback_confidence=float(getattr(args, "conf_rec_fallback", 0.25)),
+                        )
+                        write_not_available_recommendations(
+                            model_dir=external_run_dir,
+                            split="val",
+                            reason=reason,
+                            beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                            beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                            fallback_confidence=float(getattr(args, "conf_rec_fallback", 0.25)),
+                        )
                         test_success = True
                         test_error = None
                     else:
@@ -2565,6 +2868,12 @@ def main(argv=None):
             training_provider=external_provider,
             external_provider_id=external_provider,
             system_profile=collect_system_profile(external_run_dir),
+            confidence_recommendation_config={
+                "enabled": not bool(getattr(args, "conf_rec_disable", False)),
+                "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                "beta_precision": float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                "fallback_confidence": float(getattr(args, "conf_rec_fallback", 0.25)),
+            },
         )
         try:
             marker = {
@@ -2659,6 +2968,10 @@ def main(argv=None):
                     val_conf=args.val_conf,
                     val_iou=args.val_iou,
                     val_batch=val_batch,
+                    conf_rec_disable=bool(getattr(args, "conf_rec_disable", False)),
+                    conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
                 )
             except Exception as e:
                 test_success = False
@@ -2688,10 +3001,15 @@ def main(argv=None):
                 workspace_root=workspace_root,
                 task_type=meta_extras.get("task_type") or task_to_metadata_task_type(u_cfg.get("task")),
                 ultralytics_train_summary=_json_safe_train_summary(meta_extras.get("train_kw")),
-                onnx_relative=meta_extras.get("onnx_relative"),
                 training_provider="ultralytics",
                 external_provider_id=None,
                 system_profile=collect_system_profile(model_dir),
+                confidence_recommendation_config={
+                    "enabled": not bool(getattr(args, "conf_rec_disable", False)),
+                    "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    "beta_precision": float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    "fallback_confidence": float(getattr(args, "conf_rec_fallback", 0.25)),
+                },
             )
     else:
         model_dir = args.model_dir
@@ -2710,6 +3028,10 @@ def main(argv=None):
                     val_conf=args.val_conf,
                     val_iou=args.val_iou,
                     val_batch=val_batch,
+                    conf_rec_disable=bool(getattr(args, "conf_rec_disable", False)),
+                    conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
                 )
             except Exception as e:
                 test_success = False
@@ -2731,6 +3053,12 @@ def main(argv=None):
                 training_provider="ultralytics",
                 external_provider_id=None,
                 system_profile=collect_system_profile(model_dir),
+                confidence_recommendation_config={
+                    "enabled": not bool(getattr(args, "conf_rec_disable", False)),
+                    "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
+                    "beta_precision": float(getattr(args, "conf_rec_beta_precision", 0.5)),
+                    "fallback_confidence": float(getattr(args, "conf_rec_fallback", 0.25)),
+                },
             )
         else:
             print("[ERROR] Model path not specified")

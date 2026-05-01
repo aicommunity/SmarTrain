@@ -381,13 +381,15 @@ def _analyze_single_run(
 ) -> dict[str, int] | None:
     from ultralytics import YOLO
 
+from smartrain.run_artifacts import canonical_run_model_path
+
     run_dir = os.path.abspath(run_dir)
     model_name = os.path.basename(run_dir.rstrip(os.sep))
     train_parent_name = os.path.basename(os.path.dirname(run_dir.rstrip(os.sep)))
 
-    best_pt = os.path.join(run_dir, "train", "weights", "best.pt")
+    best_pt = canonical_run_model_path(run_dir, ".pt")
     if not os.path.isfile(best_pt):
-        print(f"[WARN] {model_name}: missing best.pt, skip ({best_pt})")
+        print(f"[WARN] {model_name}: missing run model, skip ({best_pt})")
         return None
 
     # analytics/label-pred-match/<run_parent>/<run_folder>/<eval_dataset>/...

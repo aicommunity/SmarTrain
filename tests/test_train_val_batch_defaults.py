@@ -64,8 +64,6 @@ def test_test_only_default_val_batch_uses_metadata_then_fallback(monkeypatch: py
         val_iou=None,
         val_batch=None,
         weighted_sampling=False,
-        export_onnx=False,
-        export_onnx_fp32=False,
         clearml=False,
         clearml_project=None,
     )

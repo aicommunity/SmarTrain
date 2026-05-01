@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -9,6 +10,7 @@ import pytest
 from PIL import Image
 
 from smartrain.inference_cli import main as inference_main
+from smartrain.inference_cli import _resolve_model
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
@@ -102,6 +104,11 @@ def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
     assert report["model"]["name"] == "demo_model"
     assert report["source"]["mode"] == "folder"
     assert report["images"][0]["detections"][0]["bbox_roi_xyxy"] == [10.0, 12.0, 40.0, 48.0]
+    assert isinstance(report.get("performance"), dict)
+    assert "end_to_end" in report["performance"]
+    assert "infer_only" in report["performance"]
+    env_path = Path(report["artifacts"]["environment_profile"]["path_absolute"])
+    assert env_path.is_file()
 
 
 def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monkeypatch) -> None:
@@ -184,6 +191,34 @@ def test_inference_dataset_split(tmp_path: Path, monkeypatch) -> None:
     assert report["summary"]["images_processed"] == 1
 
 
+def test_inference_supports_engine_weights(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+    engine_path = tmp_path / "models" / "demo_model" / "demo_model.engine"
+    engine_path.parent.mkdir(parents=True, exist_ok=True)
+    engine_path.write_bytes(b"fake-engine")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--weights",
+            str(engine_path),
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["model"]["weights_absolute"].endswith(".engine")
+    assert report["summary"]["images_processed"] == 1
+
+
 def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
@@ -239,7 +274,7 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
         captured["model_path"] = kwargs.get("model_path")
         return 0
 
-    monkeypatch.setattr("smartrain.inference_cli.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.inference_backends.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -262,6 +297,7 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
     assert report["model"]["provider"]["type"] == "external"
     assert report["model"]["provider"]["id"] == "dr-yolo"
     assert report["external_execution"]["provider_id"] == "dr-yolo"
+    assert Path(report["artifacts"]["environment_profile"]["path_absolute"]).is_file()
 
 
 def test_inference_unknown_provider_in_weights_returns_error(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -312,5 +348,53 @@ def test_inference_rejects_unsupported_model_for_external_provider(monkeypatch, 
     assert int(ex.value.code or 0) == 2
     err = capsys.readouterr().err
     assert "is not supported by external provider" in err
+
+
+def test_resolve_model_run_ignores_internal_trtprep(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    internal = models_dir / "run_a_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0_trtprep.onnx"
+    public = models_dir / "run_a.onnx"
+    internal.write_bytes(b"internal")
+    public.write_bytes(b"public")
+
+    from smartrain.workspace_paths import WorkspaceLayout
+    import argparse
+
+    args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
+    model_path, _name, source = _resolve_model(args, WorkspaceLayout(str(tmp_path)))
+    assert source == "runs"
+    assert model_path == public.resolve()
+
+
+def test_resolve_model_run_prefers_newest_profile_onnx_variant(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+
+    run_dir = tmp_path / "runs" / "ds_a" / "run_b"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    old_variant = models_dir / "run_b_imgsz640x640_b1_static_op17_fp32_simplify1_nms0.onnx"
+    new_variant = models_dir / "run_b_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx"
+    old_variant.write_bytes(b"old")
+    new_variant.write_bytes(b"new")
+    os.utime(old_variant, (1_700_000_000, 1_700_000_000))
+    os.utime(new_variant, (1_800_000_000, 1_800_000_000))
+
+    import argparse
+    from smartrain.workspace_paths import WorkspaceLayout
+
+    args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
+    model_path, _name, source = _resolve_model(args, WorkspaceLayout(str(tmp_path)))
+    assert source == "runs"
+    assert model_path == new_variant.resolve()
 
 

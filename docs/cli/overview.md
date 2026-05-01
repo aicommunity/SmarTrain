@@ -46,13 +46,24 @@ Most important commands and groups also include `Examples` / `Quick examples` di
 
 Model convert highlights:
 
-- `smartrain model convert` exports `.pt` to `onnx`, `tensorrt`, or `both`, and also supports direct `.onnx -> tensorrt` conversion.
+- `smartrain model convert` exports `.pt` to `onnx`, `tensorrt-engine`, and `tensorrt-trt`, and supports `.onnx -> tensorrt-trt`.
 - Defaults: static batch mode, `--batch 1`, `--precision fp32`.
-- Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows selection by number or manual path input.
+- ONNX export options are configured in `model convert` (`--opset`, `--simplify/--no-simplify`, `--half/--no-half`).
+- Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows source selection by number or manual path input.
+- Target selection is model-based (`onnx`, `engine`, `trt`) with multi-select input (`1,2` or `onnx,trt`), and unavailable targets are shown with reason.
+- For run sources, interactive discovery uses canonical run artifacts (`<run_dir>/<run_dir_name>.<ext>`). Legacy run layouts are canonized automatically on first access.
+
+Inference highlights:
+
+- `smartrain inference` supports local model artifacts `pt`, `onnx`, `engine`, `trt` through unified backend routing, plus external provider references.
+- Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
+- Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
+- Full inference JSON/artifact contract: [`inference.md`](inference.md).
+- `pt_uni` is internal-only and used for PT vs PT-uni comparison table generation (test/val), not as a user-facing inference format.
 
 Model release highlights:
 
-- `smartrain model release` publishes only `train/weights/best.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
+- `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
 - A sidecar JSON with the same basename is created next to the model file and includes source/training/metrics/classes/io specification.
 - Re-running for the same run with the same source hash performs a no-op skip.
 

@@ -47,13 +47,16 @@ smartrain model convert --help
 
 Особенности `model convert`:
 
-- `smartrain model convert` экспортирует `.pt` в `onnx`, `tensorrt` или `both`, а также поддерживает прямую конвертацию `.onnx -> tensorrt`.
+- `smartrain model convert` экспортирует `.pt` в `onnx`, `tensorrt-engine` и `tensorrt-trt`, а также поддерживает прямую конвертацию `.onnx -> tensorrt-trt`.
 - По умолчанию: статический batch-режим, `--batch 1`, `--precision fp32`.
-- В интерактивном режиме команда автоматически находит `.pt/.onnx` в `models/` и `runs/` workspace и даёт выбор по номеру или ручной ввод пути.
+- ONNX-параметры настраиваются в `model convert` (`--opset`, `--simplify/--no-simplify`, `--half/--no-half`).
+- В интерактивном режиме команда автоматически находит `.pt/.onnx` в `models/` и `runs/` workspace и даёт выбор источника по номеру или ручной ввод пути.
+- Выходные модели выбираются отдельно (`onnx`, `engine`, `trt`) с мультивыбором (`1,2` или `onnx,trt`), недоступные варианты показываются с причиной.
+- Для run-источников интерактивный выбор использует канонические артефакты (`<run_dir>/<run_dir_name>.<ext>`). Legacy-раскладка run автоматически канонизируется при первом обращении.
 
 Особенности `model release`:
 
-- `smartrain model release` публикует только `train/weights/best.pt` из выбранного run в `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
+- `smartrain model release` публикует canonical run-модель `<run_dir_name>.pt` из выбранного run в `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
 - Рядом создаётся JSON с тем же basename (`.json`) c описанием источника, данных обучения, метрик, классов и `io_spec` модели.
 - Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`).
 

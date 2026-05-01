@@ -13,6 +13,7 @@ import sys
 from datetime import datetime, timezone
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
 
@@ -72,8 +73,12 @@ def _cmd_runs_info(ctx: RegistryCliContext, run_path: str) -> None:
     md = load_metadata(run_path)
     ti = md["training_info"]
     print(json.dumps({"run_dir": run_path, "training_info": ti, "timestamps": md["timestamps"]}, ensure_ascii=False, indent=2))
-    best = os.path.join(run_path, "train", "weights", "best.pt")
-    print(f"best.pt exists: {os.path.isfile(best)}  path: {best}")
+    best = canonical_run_model_path(run_path, ".pt")
+    if not os.path.isfile(best):
+        materialized = materialize_canonical_run_model(run_path, ext=".pt", move=True, normalize_metadata=True)
+        if materialized is not None:
+            best = str(materialized)
+    print(f"run model exists: {os.path.isfile(best)}  path: {best}")
     rc = os.path.join(run_path, "train", "results.csv")
     print(f"results.csv exists: {os.path.isfile(rc)}")
 
@@ -138,9 +143,13 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
     if not os.path.isfile(meta_path):
         print(f"[ERROR] No training_metadata.json: {run_path}", file=sys.stderr)
         sys.exit(1)
-    best = os.path.join(run_path, "train", "weights", "best.pt")
+    best = canonical_run_model_path(run_path, ".pt")
     if not os.path.isfile(best):
-        print(f"[ERROR] No best.pt: {best}", file=sys.stderr)
+        materialized = materialize_canonical_run_model(run_path, ext=".pt", move=True, normalize_metadata=True)
+        if materialized is not None:
+            best = str(materialized)
+    if not os.path.isfile(best):
+        print(f"[ERROR] No run model: {best}", file=sys.stderr)
         sys.exit(1)
     md = load_metadata(run_path)
     base = _friendly_name_base(md)
@@ -235,7 +244,7 @@ def build_registry_arg_parser() -> argparse.ArgumentParser:
     )
     p_rm.set_defaults(handler="runs_metrics")
 
-    p_ma = sub.add_parser("models-add", help="Copy best.pt to models/<friendly>/")
+    p_ma = sub.add_parser("models-add", help="Copy run model .pt to models/<friendly>/")
     p_ma.add_argument(
         "run_path",
         type=str,

@@ -13,13 +13,11 @@ def test_extract_smartrain_options():
     u, opts = extract_smartrain_options(
         {
             "epochs": 10,
-            "export_onnx": True,
             "weighted_sampling": True,
             "model": "yolov8n.pt",
         }
     )
     assert u == {"epochs": 10, "model": "yolov8n.pt"}
-    assert opts["export_onnx"] is True
     assert opts["weighted_sampling"] is True
 
 
@@ -127,7 +125,7 @@ def test_finalize_train_kwargs_forces_dataset_and_run_paths():
     )
     assert out["data"] == "/dataset/data.yaml"
     assert out["project"] == "/runs/out"
-    assert out["name"] == "train"
+    assert out["name"] == "train-ultralytics"
     assert out["exist_ok"] is False
     assert out["epochs"] == 2
 

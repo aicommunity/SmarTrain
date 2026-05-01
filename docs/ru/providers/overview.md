@@ -32,7 +32,7 @@
 
 Для любого внешнего провайдера Smart Train приводит структуру run к контракту:
 
-- `train/weights/best.pt`
+- `<run_dir_name>.pt` в корне run
 - каталог `test/`
 - `test_metrics.csv`
 - `training_metadata.json`

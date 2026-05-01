@@ -12,6 +12,8 @@ from typing import Any
 import yaml
 from ultralytics import YOLO
 
+from smartrain.model_test_service import has_complete_test_artifacts, missing_test_artifacts
+from smartrain.run_artifacts import canonical_run_model_path, run_tmp_dir
 from smartrain.run_discovery import find_run_directories
 from smartrain.workspace_paths import WorkspaceLayout
 
@@ -70,10 +72,12 @@ def _is_results_csv_readable(path: str) -> bool:
 
 def diagnose_run(run_dir: str) -> RunDiagnosis:
     rd = os.path.abspath(run_dir)
-    args_yaml = os.path.join(rd, "train", "args.yaml")
+    args_yaml = os.path.join(rd, "train-ultralytics", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        args_yaml = os.path.join(rd, "train", "args.yaml")
     results_csv = os.path.join(rd, "train", "results.csv")
     last_pt = os.path.join(rd, "train", "weights", "last.pt")
-    best_pt = os.path.join(rd, "train", "weights", "best.pt")
+    best_pt = canonical_run_model_path(rd, ".pt")
     metadata_path = os.path.join(rd, "training_metadata.json")
     test_dir = os.path.join(rd, "test")
 
@@ -83,6 +87,7 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
     has_best_pt = os.path.isfile(best_pt)
     has_metadata = os.path.isfile(metadata_path)
     has_test_dir = os.path.isdir(test_dir)
+    pt_test_complete = has_complete_test_artifacts(rd, "pt")
 
     reasons: list[str] = []
     if has_args_yaml:
@@ -99,12 +104,14 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
         reasons.append("training_metadata_present")
     if has_test_dir:
         reasons.append("test_dir_present")
+    if pt_test_complete:
+        reasons.append("pt_test_artifacts_complete")
 
     meta = _read_json(metadata_path) if has_metadata else None
     training_success = _training_success_from_metadata(meta)
     if has_metadata and training_success is True:
         reasons.append("metadata_training_success_true")
-        if has_test_dir:
+        if pt_test_complete:
             return RunDiagnosis(
                 run_dir=rd,
                 status=RUN_STATUS_COMPLETED,
@@ -116,7 +123,9 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
                 has_metadata=has_metadata,
                 has_test_dir=has_test_dir,
             )
-        reasons.append("missing_test_dir")
+        reasons.append("missing_test_artifacts")
+        for item in missing_test_artifacts(rd, "pt"):
+            reasons.append(f"missing_{item}")
         return RunDiagnosis(
             run_dir=rd,
             status=RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
@@ -194,7 +203,9 @@ def list_incomplete_runs(workspace_root: str) -> list[RunDiagnosis]:
 
 
 def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
-    data_yaml = os.path.join(run_dir, "_runtime_data_train.yaml")
+    preferred = os.path.join(str(run_tmp_dir(run_dir)), "_runtime_data_train.yaml")
+    legacy = os.path.join(run_dir, "_runtime_data_train.yaml")
+    data_yaml = preferred if os.path.isfile(preferred) else legacy
     if not os.path.isfile(data_yaml):
         return None
     try:
@@ -207,7 +218,9 @@ def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
 
 
 def _load_train_args_yaml(run_dir: str) -> dict[str, Any]:
-    args_yaml = os.path.join(run_dir, "train", "args.yaml")
+    args_yaml = os.path.join(run_dir, "train-ultralytics", "args.yaml")
+    if not os.path.isfile(args_yaml):
+        args_yaml = os.path.join(run_dir, "train", "args.yaml")
     if not os.path.isfile(args_yaml):
         return {}
     try:

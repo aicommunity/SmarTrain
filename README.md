@@ -39,6 +39,13 @@ smartrain train --data 2026-01-01_12-00-00-merged --device 0 -y
 - `train` creates a run directory with metrics and metadata;
 - `analyze` and `registry` work on artifacts in `runs/`.
 
+Run artifact layout:
+
+- `runs/<dataset>/<run>/models/` stores model artifacts (`.pt/.onnx/.engine/.trt`).
+- `runs/<dataset>/<run>/tmp/` stores runtime/temporary service files.
+- Each model artifact can have sidecar metadata: `<filename>.meta.json`.
+- Multiple artifacts of the same format are supported in one run (for example, several `trt` variants).
+
 ## Key commands
 
 | Command | Purpose |
@@ -47,7 +54,7 @@ smartrain train --data 2026-01-01_12-00-00-merged --device 0 -y
 | `smartrain scan` | Synchronize sources and update the dataset catalog |
 | `smartrain fusion` | Build the final training dataset |
 | `smartrain train` | Train and validate YOLO models |
-| `smartrain inference` | Run inference on folder or dataset split and save JSON report |
+| `smartrain inference` | Run inference on folder or dataset split, save JSON report, dual performance profile, and environment artifact |
 | `smartrain queue` / `smartrain queue-run` | Manage and run the command queue |
 | `smartrain analyze` | Summaries, run comparison, PR curves, and inference benchmarks |
 | `smartrain registry` | Catalog run artifacts and promoted models |
@@ -59,6 +66,7 @@ Current documentation is organized into sections in `docs/`:
 - [Documentation navigation](docs/index.md)
 - [Getting started and core workflows](docs/getting-started/quickstart.md)
 - [CLI guide](docs/cli/overview.md)
+- [Inference JSON/artifact contract](docs/cli/inference.md)
 - [API and format reference](docs/reference/api.md)
 - [Architecture and diagrams](docs/development/architecture.md)
 
@@ -83,9 +91,10 @@ pytest
 - `smartrain balance` eval splits: `--eval-coverage` is on by default (keeps `val`/`test` non-empty when possible and improves class coverage there); use `--no-eval-coverage` to disable. The interactive wizard asks for this option.
 - For `hash --validate`: `0` for a match, `1` for a mismatch, `2` for an error.
 - By default, the workspace queue uses `queue.txt` and `tmp/status.txt`.
-- Device selection in `train` and `inference`:
-  - `--device 0` to force GPU 0
+- Device selection in `train`, `test`, and `inference`:
+  - `--device 0` / `--device cuda:0` to use GPU 0
   - `--device cpu` to force CPU
+  - Interactive mode accepts number, token (`cpu`, `0`, `cuda:0`) or GPU name
   - If `--device` is omitted, default is `GPU 0` when CUDA is available, otherwise `cpu`
 - `train resume` recovery behavior:
   - failed resume attempts are persisted in `training_metadata.json` (`resume_attempts`)
@@ -132,7 +141,9 @@ Train and inference with explicit device:
 
 ```bash
 smartrain train --data my_dataset --model yolo11n.pt --device 0
+smartrain test --run ./runs/my_dataset/my_run --formats onnx,engine --device cpu
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
+smartrain inference --weights ./runs/my_run/models/my_run.engine --data-mode folder --source-dir ./images --perf-warmup-images 10
 ```
 
 ## Running long jobs over SSH (tmux)

@@ -97,10 +97,22 @@ Quick examples:
 HELP_MODEL_GROUP = """Model conversion tools.
 
 Quick examples:
+  smartrain model convert
   smartrain model convert --input models/best.pt --format onnx
-  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
-  smartrain model convert --input models/my_model.onnx --format tensorrt
+  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/2026-01-01_00-00-00.pt --format tensorrt-engine --precision fp16
+  smartrain model convert --input models/my_model.onnx --format tensorrt-trt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00
+
+Interactive convert:
+  - choose source model type: pt or onnx
+  - select a file (or enter a manual path)
+  - select one or multiple target models (onnx/engine/trt depending on source; CSV by numbers or values is supported, e.g. 1,3 or onnx,trt)
+  - set batch/imgsz and other export parameters
+  - run sources use canonical artifacts <run_dir>/<run_dir_name>.<ext>; legacy run layouts are canonized automatically
+
+Artifacts:
+  - tensorrt-engine: Ultralytics export to .engine
+  - tensorrt-trt: trtexec export to .trt
 """
 
 HELP_DEPS_GROUP = """Dependency management helpers.
@@ -634,6 +646,24 @@ def cmd_roi(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "test",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_test(ctx: typer.Context) -> None:
+    """Complete missing test artifacts for runs/models."""
+    from smartrain.model_test_cli import build_model_test_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.model_test_cli",
+        build_parser=build_model_test_arg_parser,
+        prog="smartrain test",
+        empty_args_mode="invoke",
+    )
+
+
+@app.command(
     "inference",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
@@ -1088,8 +1118,8 @@ def cmd_model_convert(ctx: typer.Context) -> None:
 
     Examples:
       smartrain model convert --input models/best.pt --format onnx
-      smartrain model convert --input runs/my_dataset/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
-      smartrain model convert --input models/my_model.onnx --format tensorrt
+      smartrain model convert --input runs/my_dataset/2026-01-01_00-00-00/2026-01-01_00-00-00.pt --format tensorrt-engine --precision fp16
+      smartrain model convert --input models/my_model.onnx --format tensorrt-trt
       smartrain model convert
     """
     from smartrain.model_convert_cli import build_model_convert_arg_parser
@@ -1109,7 +1139,7 @@ def cmd_model_convert(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_model_release(ctx: typer.Context) -> None:
-    """Release run `best.pt` into workspace models catalog.
+    """Release canonical run `.pt` into workspace models catalog.
 
     Examples:
       smartrain model release --run runs/my_dataset/2026-01-01_00-00-00
