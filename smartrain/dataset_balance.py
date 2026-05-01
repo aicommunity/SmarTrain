@@ -86,6 +86,15 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-count", type=int, default=1, help="Minimum class count for accounting")
     p.add_argument("--weight-mode", choices=("effective", "inverse", "sqrt-inverse"), default="effective")
     p.add_argument("--beta", type=float, default=0.9999, help="Beta for effective-number weighting")
+    p.add_argument(
+        "--class-weight-multiplier",
+        type=str,
+        default="",
+        help=(
+            "Per-class weight multipliers CSV, e.g. "
+            '"other:0.6,tear_up:1.1". Multipliers are applied after base class weights.'
+        ),
+    )
     p.add_argument("--image-weight-agg", choices=("max", "mean", "sum"), default="max")
     p.add_argument("--weight-clip-min", type=float, default=0.2)
     p.add_argument("--weight-clip-max", type=float, default=5.0)
@@ -93,6 +102,27 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-repeat-per-image", type=int, default=5)
     p.add_argument("--rfs-thresh", type=float, default=0.001)
     p.add_argument("--rfs-power", type=float, default=0.5)
+    p.add_argument(
+        "--auto-head-cap",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Auto-calculate dampening multipliers for overrepresented head classes "
+            "to reduce dominance in weighted sampling (enabled by default; disable with --no-auto-head-cap)."
+        ),
+    )
+    p.add_argument(
+        "--auto-head-cap-quantile",
+        type=float,
+        default=0.85,
+        help="Quantile used to define head classes for auto cap (0..1).",
+    )
+    p.add_argument(
+        "--auto-head-cap-min-mult",
+        type=float,
+        default=0.35,
+        help="Minimum multiplier for auto head-cap dampening.",
+    )
     p.add_argument("--class", dest="single_class", type=str, default=None, help="Balance only one class")
     p.add_argument("--classes", type=str, default=None, help="Balance CSV class list")
     p.add_argument("--output-name", type=str, default=None, help="Name of output dataset (default <dataset>_balanced)")
@@ -106,6 +136,16 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
             "Auto-adjust balanced train split to keep eval splits non-empty and improve class coverage "
             "without source-image leakage between train/val/test; if unique images are insufficient, "
             "eval splits may stay partially unfilled (enabled by default; disable with --no-eval-coverage)."
+        ),
+    )
+    p.add_argument(
+        "--eval-min-class-count",
+        type=int,
+        default=0,
+        help=(
+            "Optional target minimum bbox count per class in eval splits (val/test). "
+            "When > 0 and eval coverage is enabled, balance may move split-safe train source keys "
+            "to val/test to increase tail coverage."
         ),
     )
     p.add_argument("--seed", type=int, default=12345)
@@ -324,6 +364,90 @@ def _class_weights(
     return out
 
 
+def _parse_class_weight_multiplier(raw: str) -> dict[str, float]:
+    out: dict[str, float] = {}
+    text = (raw or "").strip()
+    if not text:
+        return out
+    for token in text.split(","):
+        part = token.strip()
+        if not part:
+            continue
+        if ":" not in part:
+            raise ValueError(f"Invalid class multiplier token: '{part}'. Expected <class>:<multiplier>.")
+        name, value = part.split(":", 1)
+        cls_name = name.strip()
+        if not cls_name:
+            raise ValueError(f"Invalid class multiplier token: '{part}'. Class name is empty.")
+        try:
+            mult = float(value.strip())
+        except ValueError as exc:
+            raise ValueError(f"Invalid multiplier for class '{cls_name}': '{value.strip()}'.") from exc
+        if not math.isfinite(mult) or mult <= 0:
+            raise ValueError(f"Multiplier for class '{cls_name}' must be a positive finite number.")
+        out[cls_name] = mult
+    return out
+
+
+def _quantile(values: list[int], q: float) -> float:
+    if not values:
+        return 0.0
+    data = sorted(values)
+    q_clamped = min(max(float(q), 0.0), 1.0)
+    if len(data) == 1:
+        return float(data[0])
+    pos = (len(data) - 1) * q_clamped
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+    if lo == hi:
+        return float(data[lo])
+    frac = pos - lo
+    return float(data[lo] * (1.0 - frac) + data[hi] * frac)
+
+
+def _auto_head_cap_multipliers(
+    bbox_count: dict[str, int],
+    *,
+    quantile: float,
+    min_mult: float,
+) -> dict[str, float]:
+    if len(bbox_count) < 3:
+        return {}
+    counts = [int(v) for v in bbox_count.values() if int(v) > 0]
+    if not counts:
+        return {}
+    threshold = _quantile(counts, quantile)
+    if threshold <= 0:
+        return {}
+    median_count = _quantile(counts, 0.5)
+    if median_count <= 0:
+        return {}
+    out: dict[str, float] = {}
+    floor_mult = max(0.01, min(1.0, float(min_mult)))
+    for cls_name, n_raw in bbox_count.items():
+        n = max(1, int(n_raw))
+        if float(n) <= threshold:
+            continue
+        # Smoothly reduce weights for head classes above quantile threshold.
+        mult = math.sqrt(float(median_count) / float(n))
+        out[cls_name] = max(floor_mult, min(1.0, mult))
+    return out
+
+
+def _apply_class_weight_multipliers(
+    class_weights: dict[str, float],
+    multipliers: dict[str, float],
+) -> dict[str, float]:
+    if not class_weights:
+        return class_weights
+    if not multipliers:
+        return class_weights
+    out: dict[str, float] = {}
+    for cls_name, w in class_weights.items():
+        out[cls_name] = float(w) * float(multipliers.get(cls_name, 1.0))
+    return out
+
+
 def _image_weights(
     selected_pool: list[tuple[str, str, str, list[str]]],
     class_weights: dict[str, float],
@@ -433,6 +557,7 @@ def _ensure_non_empty_eval_splits(
     passthrough_items: list[tuple[str, str, str, list[str]]],
     *,
     seed: int,
+    eval_min_class_count: int = 0,
 ) -> list[tuple[str, str, str, list[str]]]:
     """
     Ensure val/test are not empty in output when possible.
@@ -588,6 +713,55 @@ def _ensure_non_empty_eval_splits(
                 covered.update(cls_names)
             move_key_to_split(chosen_key, target_split)
             missing -= covered
+
+    # Optional eval-tail strengthening:
+    # raise per-class bbox minimum in val/test by moving split-safe train groups.
+    target_min = max(0, int(eval_min_class_count))
+    if target_min <= 0:
+        return out_train
+
+    def split_bbox_counts(split_name: str) -> dict[str, int]:
+        counts: dict[str, int] = defaultdict(int)
+        for s, _img, _lbl, cls_names in out_train:
+            if s != split_name:
+                continue
+            for c in cls_names:
+                counts[c] += 1
+        for s, _img, _lbl, cls_names in passthrough_items:
+            if s != split_name:
+                continue
+            for c in cls_names:
+                counts[c] += 1
+        return counts
+
+    for target_split in ("val", "test"):
+        while train_count() > 1:
+            current = split_bbox_counts(target_split)
+            shortage = {c: target_min - int(current.get(c, 0)) for c in global_classes if int(current.get(c, 0)) < target_min}
+            if not shortage:
+                break
+            groups = train_groups()
+            movable = [k for k in groups.keys() if k not in passthrough_keys]
+            best_key = None
+            best_gain = 0
+            for key in movable:
+                idxs = groups.get(key, [])
+                key_box_counts: dict[str, int] = defaultdict(int)
+                for i in idxs:
+                    s, _img, _lbl, cls_names = out_train[i]
+                    if s != "train":
+                        continue
+                    for c in cls_names:
+                        key_box_counts[c] += 1
+                gain = 0
+                for c, miss in shortage.items():
+                    gain += min(int(miss), int(key_box_counts.get(c, 0)))
+                if gain > best_gain:
+                    best_gain = gain
+                    best_key = key
+            if best_key is None or best_gain <= 0:
+                break
+            move_key_to_split(best_key, target_split)
     return out_train
 
 
@@ -674,6 +848,18 @@ def main(argv=None):
         if unknown:
             print(f"[ERROR] Unknown classes in the filter: {', '.join(unknown)}")
             return
+    try:
+        manual_class_multipliers = _parse_class_weight_multiplier(args.class_weight_multiplier)
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return
+    unknown_multiplier_classes = [c for c in manual_class_multipliers if c not in class_map]
+    if unknown_multiplier_classes:
+        print(
+            "[ERROR] Unknown classes in --class-weight-multiplier: "
+            + ", ".join(sorted(unknown_multiplier_classes))
+        )
+        return
 
     src_root = resolve_dataset_root_for_entry(
         args.dataset, entry, workspace_root=layout.root, source_catalog_dir=layout.datasets, legacy_source_parent=layout.datasets
@@ -722,6 +908,9 @@ def main(argv=None):
     if not selected_pool:
         selected_pool = train_items
 
+    auto_class_multipliers: dict[str, float] = {}
+    effective_class_multipliers: dict[str, float] = {}
+
     if args.strategy == "copy":
         balanced_train = list(selected_pool)
     elif args.strategy == "undersample":
@@ -755,6 +944,19 @@ def main(argv=None):
                 beta=args.beta,
                 min_count=args.min_count,
             )
+            auto_class_multipliers: dict[str, float] = {}
+            if bool(getattr(args, "auto_head_cap", True)):
+                auto_class_multipliers = _auto_head_cap_multipliers(
+                    bbox_count,
+                    quantile=float(args.auto_head_cap_quantile),
+                    min_mult=float(args.auto_head_cap_min_mult),
+                )
+            effective_class_multipliers: dict[str, float] = dict(auto_class_multipliers)
+            for cls_name, mult in manual_class_multipliers.items():
+                effective_class_multipliers[cls_name] = (
+                    float(effective_class_multipliers.get(cls_name, 1.0)) * float(mult)
+                )
+            class_w = _apply_class_weight_multipliers(class_w, effective_class_multipliers)
             pool_for_weights = selected_pool
             if args.strategy == "hybrid":
                 pool_for_weights = _rfs_expand_pool(
@@ -792,6 +994,7 @@ def main(argv=None):
             balanced_train,
             passthrough_items,
             seed=int(args.seed),
+            eval_min_class_count=int(getattr(args, "eval_min_class_count", 0)),
         )
     balanced_train, passthrough_items, forced_reassignments = _enforce_no_cross_split_duplicates(
         balanced_train,
@@ -868,13 +1071,21 @@ def main(argv=None):
                     "replacement": args.replacement,
                     "weight_mode": args.weight_mode,
                     "beta": args.beta,
+                    "class_weight_multiplier": args.class_weight_multiplier,
                     "image_weight_agg": args.image_weight_agg,
                     "weight_clip_min": args.weight_clip_min,
                     "weight_clip_max": args.weight_clip_max,
+                    "auto_head_cap": bool(args.auto_head_cap),
+                    "auto_head_cap_quantile": args.auto_head_cap_quantile,
+                    "auto_head_cap_min_mult": args.auto_head_cap_min_mult,
+                    "applied_auto_head_cap_multipliers": dict(sorted(auto_class_multipliers.items())),
+                    "applied_manual_class_multipliers": dict(sorted(manual_class_multipliers.items())),
+                    "applied_effective_class_multipliers": dict(sorted(effective_class_multipliers.items())),
                     "rfs_thresh": args.rfs_thresh,
                     "rfs_power": args.rfs_power,
                     "max_repeat_per_image": args.max_repeat_per_image,
                     "eval_coverage": bool(args.eval_coverage),
+                    "eval_min_class_count": int(args.eval_min_class_count),
                     "emit_train_config": bool(args.emit_train_config),
                     "emit_balance_report": bool(args.emit_balance_report),
                     "class_counts_before_bbox": dict(class_counts),

@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.dataset_balance import main as balance_main
+from smartrain.dataset_balance import (
+    _auto_head_cap_multipliers,
+    _parse_class_weight_multiplier,
+    main as balance_main,
+)
 from smartrain.datasets_json_former import main as scan_main
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
@@ -367,4 +371,125 @@ def test_balance_eval_coverage_degrades_safely_when_unique_images_insufficient(t
     # In tiny dataset there may be not enough unique source images
     # to fill both eval splits without leakage.
     assert (val_count == 0) or (test_count == 0)
+
+
+def test_parse_class_weight_multiplier_csv() -> None:
+    parsed = _parse_class_weight_multiplier("other:0.6, tear_up:1.1")
+    assert parsed == {"other": 0.6, "tear_up": 1.1}
+
+
+def test_auto_head_cap_multipliers_reduce_head_classes() -> None:
+    multipliers = _auto_head_cap_multipliers(
+        {"other": 10000, "tear_up": 8000, "tear": 900, "strings": 120, "cloudy_plastic": 80},
+        quantile=0.7,
+        min_mult=0.3,
+    )
+    assert "other" in multipliers
+    assert "tear_up" in multipliers
+    assert multipliers["other"] < 1.0
+    assert multipliers["tear_up"] < 1.0
+    assert min(multipliers.values()) >= 0.3
+
+
+def test_balance_manual_multiplier_shifts_distribution(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "weights",
+            "--target",
+            "3.0",
+            "--max-repeat-per-image",
+            "6",
+            "--replacement",
+            "on",
+            "--emit-balance-report",
+            "--output-name",
+            "ds_b_bal_base",
+        ]
+    )
+    base_manifest = json.loads(
+        (tmp_path / "datasets" / "ds_b_bal_base" / "balance_manifest.json").read_text(encoding="utf-8")
+    )
+    base_counts = base_manifest["class_counts_after_bbox"]
+
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "weights",
+            "--target",
+            "3.0",
+            "--max-repeat-per-image",
+            "6",
+            "--replacement",
+            "on",
+            "--class-weight-multiplier",
+            "cat:0.1,dog:2.0",
+            "--emit-balance-report",
+            "--output-name",
+            "ds_b_bal_mul",
+        ]
+    )
+    mul_manifest = json.loads(
+        (tmp_path / "datasets" / "ds_b_bal_mul" / "balance_manifest.json").read_text(encoding="utf-8")
+    )
+    mul_counts = mul_manifest["class_counts_after_bbox"]
+    base_ratio = float(base_counts["dog"]) / max(1.0, float(base_counts["cat"]))
+    mul_ratio = float(mul_counts["dog"]) / max(1.0, float(mul_counts["cat"]))
+    assert mul_ratio > base_ratio
+    assert mul_manifest["applied_manual_class_multipliers"] == {"cat": 0.1, "dog": 2.0}
+
+
+def test_balance_auto_head_cap_enabled_by_default(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "weights",
+            "--emit-balance-report",
+            "--output-name",
+            "ds_b_bal_auto_default",
+        ]
+    )
+    manifest = json.loads(
+        (tmp_path / "datasets" / "ds_b_bal_auto_default" / "balance_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["auto_head_cap"] is True
+    assert "applied_effective_class_multipliers" in manifest
+
+
+def test_balance_supports_eval_min_class_count_option(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "weights",
+            "--eval-min-class-count",
+            "2",
+            "--emit-balance-report",
+            "--output-name",
+            "ds_b_bal_eval_min",
+        ]
+    )
+    manifest = json.loads(
+        (tmp_path / "datasets" / "ds_b_bal_eval_min" / "balance_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["eval_coverage"] is True
+    assert manifest["eval_min_class_count"] == 2
 

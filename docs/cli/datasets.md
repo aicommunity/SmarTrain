@@ -28,6 +28,8 @@ Collects a new dataset from several sources:
 
 - `augment` — autonomous augmentations with recording of a new dataset;
 - `balance` — class balancing; after balancing, `--eval-coverage` (default) can rebalance items across `train`/`val`/`test` so eval splits are non-empty when possible and rare classes appear in `val`/`test`; `--no-eval-coverage` turns this off;
+  - class priority tuning: `--class-weight-multiplier "other:0.6,tear_up:1.1"` multiplies class weights after base weighting;
+  - auto head-class dampening is enabled by default (`--auto-head-cap`): the tool computes recommended dampening multipliers for overrepresented classes from train statistics; disable via `--no-auto-head-cap`;
 - `orient` — frame rotation correction;
 - `roi` — crop according to the ROI-model.
 
