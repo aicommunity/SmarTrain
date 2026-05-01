@@ -1978,6 +1978,16 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         inference = _stage("infer", "inference", "infer_ms")
         postprocess = _stage("postprocess", "decode_nms", "decode_nms_ms")
         total = _stage("total", "total_ms", "infer_total_only_ms")
+        io_load = _stage("io_load_ms")
+        diag_alloc = _stage("diagnostics_alloc_ms")
+        diag_h2d = _stage("diagnostics_h2d_ms")
+        diag_exec = _stage("diagnostics_execute_ms")
+        diag_d2h = _stage("diagnostics_d2h_ms")
+        diagnostics = (
+            perf.get("diagnostics_overhead")
+            if isinstance(perf.get("diagnostics_overhead"), dict)
+            else {}
+        )
 
         runtime = profile.get("runtime") if isinstance(profile.get("runtime"), dict) else {}
         device = (
@@ -2017,6 +2027,18 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
             "perf_sample_count": perf.get("images_total"),
             "perf_batch": batch_val,
             "perf_device": device,
+            # Non-comparable diagnostics: overhead excluded from primary KPI.
+            "perf_io_load_ms_per_frame": io_load.get("mean"),
+            "perf_diag_alloc_ms_per_frame": diag_alloc.get("mean"),
+            "perf_diag_h2d_ms_per_frame": diag_h2d.get("mean"),
+            "perf_diag_execute_ms_per_frame": diag_exec.get("mean"),
+            "perf_diag_d2h_ms_per_frame": diag_d2h.get("mean"),
+            "perf_diag_session_init_ms": diagnostics.get("session_init_ms"),
+            "perf_diag_engine_init_ms": diagnostics.get("engine_init_ms"),
+            "perf_diag_worker_wall_ms": diagnostics.get("worker_wall_ms"),
+            "perf_diag_retries_count": diagnostics.get("retries_count"),
+            "perf_diag_retry_sleep_ms": diagnostics.get("retry_sleep_ms"),
+            "perf_diag_provider_switched_to_cpu": diagnostics.get("provider_switched_to_cpu"),
         }
 
     def _resolve_perf_and_reason(

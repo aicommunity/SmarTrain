@@ -368,9 +368,12 @@ def _letterbox(im: np.ndarray, new_shape: tuple[int, int]) -> tuple[np.ndarray, 
     return canvas, r, (float(left), float(top))
 
 
-def _preprocess_image(image_path: str, input_hw: tuple[int, int]) -> tuple[np.ndarray, tuple[int, int], float, tuple[float, float]]:
+def _load_image_rgb(image_path: str) -> np.ndarray:
     im = Image.open(image_path).convert("RGB")
-    arr = np.asarray(im)
+    return np.asarray(im)
+
+
+def _preprocess_array(arr: np.ndarray, input_hw: tuple[int, int]) -> tuple[np.ndarray, tuple[int, int], float, tuple[float, float]]:
     orig_h, orig_w = arr.shape[:2]
     boxed, gain, pad = _letterbox(arr, input_hw)
     chw = boxed.transpose(2, 0, 1).astype(np.float32) / 255.0
@@ -1317,16 +1320,18 @@ def _infer_with_onnx_session(
     iou_thr: float,
     names: list[str],
 ) -> tuple[list[_Pred], dict[str, int]]:
-    t0 = time.perf_counter_ns()
     input_name = str(session.get_inputs()[0].name)
+    t_io0 = time.perf_counter_ns()
+    arr = _load_image_rgb(image_path)
+    t_io1 = time.perf_counter_ns()
     t_pre0 = time.perf_counter_ns()
-    tensor, orig_hw, gain, pad = _preprocess_image(image_path, input_hw)
+    tensor, orig_hw, gain, pad = _preprocess_array(arr, input_hw)
     t_pre1 = time.perf_counter_ns()
     t_inf0 = time.perf_counter_ns()
     outputs = session.run(None, {input_name: tensor})
     t_inf1 = time.perf_counter_ns()
-    raw = _select_output_tensor([np.asarray(x) for x in outputs])
     t_dec0 = time.perf_counter_ns()
+    raw = _select_output_tensor([np.asarray(x) for x in outputs])
     preds = _decode_onnx_predictions(
         raw,
         image_path=image_path,
@@ -1338,8 +1343,10 @@ def _infer_with_onnx_session(
         pad=pad,
     )
     t1 = time.perf_counter_ns()
+    runtime_total = int((t_pre1 - t_pre0) + (t_inf1 - t_inf0) + (t1 - t_dec0))
     return preds, {
-        "total": int(t1 - t0),
+        "total": runtime_total,
+        "io_load": int(t_io1 - t_io0),
         "preprocess": int(t_pre1 - t_pre0),
         "infer": int(t_inf1 - t_inf0),
         "decode_nms": int(t1 - t_dec0),
@@ -1447,6 +1454,7 @@ def _run_onnx_split_with_retry(
                     perf_collector.record_stage("preprocess_ms", int(perf_ns.get("preprocess", 0)))
                     perf_collector.record_stage("infer_ms", int(perf_ns.get("infer", 0)))
                     perf_collector.record_stage("decode_nms_ms", int(perf_ns.get("decode_nms", 0)))
+                    perf_collector.record_stage("io_load_ms", int(perf_ns.get("io_load", 0)))
             print(f"[INFO] {format_name}: native {split_name} completed ({len(image_paths)}/{len(image_paths)} images).")
             return preds
         except Exception as exc:
@@ -1609,16 +1617,9 @@ def _cuda_check(status: Any, op: str) -> Any:
     return status
 
 
-def _infer_with_trt_engine(
-    engine_path: str,
-    image_path: str,
-    input_hw: tuple[int, int],
-    conf_thr: float,
-    iou_thr: float,
-    names: list[str],
-) -> tuple[list[_Pred], dict[str, int]]:
-    t0 = time.perf_counter_ns()
+def _prepare_trt_runtime(engine_path: str) -> dict[str, Any]:
     import tensorrt as trt  # type: ignore
+
     try:
         cudart, _import_path = trt_checks.resolve_cuda_runtime_module()
     except Exception as e:
@@ -1627,6 +1628,7 @@ def _infer_with_trt_engine(
             f"Install CUDA Python bindings and verify runtime libraries: {e}"
         ) from e
 
+    t0 = time.perf_counter_ns()
     logger = trt.Logger(trt.Logger.ERROR)
     runtime = trt.Runtime(logger)
     with open(engine_path, "rb") as f:
@@ -1655,13 +1657,43 @@ def _infer_with_trt_engine(
     context = engine.create_execution_context()
     if context is None:
         raise RuntimeError("Failed to create TensorRT execution context")
+    t1 = time.perf_counter_ns()
+    return {
+        "trt": trt,
+        "cudart": cudart,
+        "engine": engine,
+        "context": context,
+        "init_ns": int(t1 - t0),
+    }
 
+
+def _infer_with_trt_engine(
+    runtime_state: dict[str, Any],
+    image_path: str,
+    input_hw: tuple[int, int],
+    conf_thr: float,
+    iou_thr: float,
+    names: list[str],
+) -> tuple[list[_Pred], dict[str, int]]:
+    trt = runtime_state.get("trt")
+    cudart = runtime_state.get("cudart")
+    engine = runtime_state.get("engine")
+    context = runtime_state.get("context")
+    if trt is None or cudart is None or engine is None or context is None:
+        raise RuntimeError("invalid TensorRT runtime state")
+    t_io0 = time.perf_counter_ns()
+    arr = _load_image_rgb(image_path)
+    t_io1 = time.perf_counter_ns()
     t_pre0 = time.perf_counter_ns()
-    tensor, orig_hw, gain, pad = _preprocess_image(image_path, input_hw)
+    tensor, orig_hw, gain, pad = _preprocess_array(arr, input_hw)
     t_pre1 = time.perf_counter_ns()
     input_array = np.ascontiguousarray(tensor.astype(np.float32))
     device_allocations: list[int] = []
     host_outputs: list[np.ndarray] = []
+    alloc_ns = 0
+    h2d_ns = 0
+    d2h_ns = 0
+    exec_ns = 0
     try:
         output_ptrs: list[int] = []
         if hasattr(engine, "num_io_tensors"):
@@ -1677,9 +1709,12 @@ def _infer_with_trt_engine(
                     if any(v < 0 for v in declared):
                         context.set_input_shape(tensor_name, shape)
                     nbytes = int(input_array.nbytes)
+                    t_alloc0 = time.perf_counter_ns()
                     err, ptr = cudart.cudaMalloc(nbytes)
                     _cuda_check((err,), "cudaMalloc(input)")
+                    alloc_ns += int(time.perf_counter_ns() - t_alloc0)
                     device_allocations.append(int(ptr))
+                    t_h2d0 = time.perf_counter_ns()
                     _cuda_check(
                         cudart.cudaMemcpy(
                             int(ptr),
@@ -1689,21 +1724,26 @@ def _infer_with_trt_engine(
                         ),
                         "cudaMemcpy(H2D)",
                     )
+                    h2d_ns += int(time.perf_counter_ns() - t_h2d0)
                     context.set_tensor_address(tensor_name, int(ptr))
                 else:
                     shape = tuple(int(x) for x in context.get_tensor_shape(tensor_name))
                     nbytes = int(_trt_volume(shape) * dtype.itemsize)
                     host = np.empty(shape, dtype=dtype)
+                    t_alloc0 = time.perf_counter_ns()
                     err, ptr = cudart.cudaMalloc(nbytes)
                     _cuda_check((err,), "cudaMalloc(output)")
+                    alloc_ns += int(time.perf_counter_ns() - t_alloc0)
                     device_allocations.append(int(ptr))
                     context.set_tensor_address(tensor_name, int(ptr))
                     host_outputs.append(host)
                     output_ptrs.append(int(ptr))
-            t_inf0 = time.perf_counter_ns()
+            t_exec0 = time.perf_counter_ns()
             if not context.execute_async_v3(0):
                 raise RuntimeError("TensorRT execute_async_v3 returned False")
+            exec_ns += int(time.perf_counter_ns() - t_exec0)
             for host, ptr in zip(host_outputs, output_ptrs):
+                t_d2h0 = time.perf_counter_ns()
                 _cuda_check(
                     cudart.cudaMemcpy(
                         host.ctypes.data,
@@ -1713,7 +1753,7 @@ def _infer_with_trt_engine(
                     ),
                     "cudaMemcpy(D2H)",
                 )
-            t_inf1 = time.perf_counter_ns()
+                d2h_ns += int(time.perf_counter_ns() - t_d2h0)
         else:
             # TensorRT 8/9 legacy bindings API.
             bindings: list[int] = [0] * int(getattr(engine, "num_bindings"))
@@ -1725,9 +1765,12 @@ def _infer_with_trt_engine(
                     if any(int(v) < 0 for v in engine.get_binding_shape(binding_idx)):
                         context.set_binding_shape(binding_idx, shape)
                     nbytes = int(input_array.nbytes)
+                    t_alloc0 = time.perf_counter_ns()
                     err, ptr = cudart.cudaMalloc(nbytes)
                     _cuda_check((err,), "cudaMalloc(input)")
+                    alloc_ns += int(time.perf_counter_ns() - t_alloc0)
                     device_allocations.append(int(ptr))
+                    t_h2d0 = time.perf_counter_ns()
                     _cuda_check(
                         cudart.cudaMemcpy(
                             int(ptr),
@@ -1737,21 +1780,26 @@ def _infer_with_trt_engine(
                         ),
                         "cudaMemcpy(H2D)",
                     )
+                    h2d_ns += int(time.perf_counter_ns() - t_h2d0)
                     bindings[binding_idx] = int(ptr)
                 else:
                     shape = tuple(int(x) for x in context.get_binding_shape(binding_idx))
                     nbytes = int(_trt_volume(shape) * dtype.itemsize)
                     host = np.empty(shape, dtype=dtype)
+                    t_alloc0 = time.perf_counter_ns()
                     err, ptr = cudart.cudaMalloc(nbytes)
                     _cuda_check((err,), "cudaMalloc(output)")
+                    alloc_ns += int(time.perf_counter_ns() - t_alloc0)
                     device_allocations.append(int(ptr))
                     bindings[binding_idx] = int(ptr)
                     host_outputs.append(host)
                     output_ptrs.append(int(ptr))
-            t_inf0 = time.perf_counter_ns()
+            t_exec0 = time.perf_counter_ns()
             if not context.execute_v2(bindings):
                 raise RuntimeError("TensorRT execute_v2 returned False")
+            exec_ns += int(time.perf_counter_ns() - t_exec0)
             for host, ptr in zip(host_outputs, output_ptrs):
+                t_d2h0 = time.perf_counter_ns()
                 _cuda_check(
                     cudart.cudaMemcpy(
                         host.ctypes.data,
@@ -1761,8 +1809,7 @@ def _infer_with_trt_engine(
                     ),
                     "cudaMemcpy(D2H)",
                 )
-            t_inf1 = time.perf_counter_ns()
-        raw = _select_output_tensor([np.asarray(x) for x in host_outputs])
+                d2h_ns += int(time.perf_counter_ns() - t_d2h0)
     finally:
         for ptr in device_allocations:
             try:
@@ -1770,6 +1817,7 @@ def _infer_with_trt_engine(
             except Exception:
                 pass
     t_dec0 = time.perf_counter_ns()
+    raw = _select_output_tensor([np.asarray(x) for x in host_outputs])
     preds = _decode_onnx_predictions(
         raw,
         image_path=image_path,
@@ -1781,11 +1829,18 @@ def _infer_with_trt_engine(
         pad=pad,
     )
     t1 = time.perf_counter_ns()
+    infer_runtime_ns = int(h2d_ns + exec_ns + d2h_ns)
+    runtime_total = int((t_pre1 - t_pre0) + infer_runtime_ns + (t1 - t_dec0))
     return preds, {
-        "total": int(t1 - t0),
+        "total": runtime_total,
+        "io_load": int(t_io1 - t_io0),
         "preprocess": int(t_pre1 - t_pre0),
-        "infer": int(t_inf1 - t_inf0),
+        "infer": infer_runtime_ns,
         "decode_nms": int(t1 - t_dec0),
+        "diagnostics_alloc": int(alloc_ns),
+        "diagnostics_h2d": int(h2d_ns),
+        "diagnostics_execute": int(exec_ns),
+        "diagnostics_d2h": int(d2h_ns),
     }
 
 
@@ -2324,6 +2379,8 @@ def run_native_format_backend(
             perf_collector = PerfCollector(warmup_images=perf_warmup_images) if collect_performance else None
             perf_payload: dict[str, Any] | None = None
             provider_actual: str | None = None
+            session_init_ns = 0
+            provider_switched_to_cpu = False
             if use_worker:
                 preds, input_hw, perf_payload, provider_actual = _run_onnx_split_in_subprocess(
                     split_name="test",
@@ -2346,7 +2403,9 @@ def run_native_format_backend(
                 if policy == "gpu_strict" and "CUDAExecutionProvider" not in providers_local:
                     raise RuntimeError(_format_onnx_error("provider_unavailable", f"CUDAExecutionProvider is unavailable. available={available}"))
                 try:
+                    t_sess0 = time.perf_counter_ns()
                     session = _build_onnx_session_with_retry(ort, weights_path, providers_local)
+                    session_init_ns = int(time.perf_counter_ns() - t_sess0)
                 except Exception as primary_exc:
                     if policy == "gpu_strict":
                         raise RuntimeError(_format_onnx_error(_classify_onnx_error_text(str(primary_exc)), str(primary_exc))) from primary_exc
@@ -2354,7 +2413,10 @@ def run_native_format_backend(
                     if not cpu_only:
                         raise primary_exc
                     print("[WARN] onnx: switching to CPUExecutionProvider after repeated initialization failures.")
+                    provider_switched_to_cpu = True
+                    t_sess0 = time.perf_counter_ns()
                     session = ort.InferenceSession(weights_path, providers=cpu_only)
+                    session_init_ns = int(time.perf_counter_ns() - t_sess0)
                 try:
                     provider_actual = str((session.get_providers() or [None])[0] or "")
                 except Exception:
@@ -2374,6 +2436,14 @@ def run_native_format_backend(
                 )
                 if perf_collector is not None:
                     perf_payload = perf_collector.to_payload()
+            if isinstance(perf_payload, dict):
+                perf_payload.setdefault("diagnostics_overhead", {})
+                perf_payload["diagnostics_overhead"].update(
+                    {
+                        "session_init_ms": float(session_init_ns / 1_000_000.0),
+                        "provider_switched_to_cpu": bool(provider_switched_to_cpu),
+                    }
+                )
             if not isinstance(input_hw, tuple):
                 input_hw = (requested_imgsz, requested_imgsz)
             if strict_imgsz and requested_imgsz != int(input_hw[0]):
@@ -2541,11 +2611,12 @@ def run_native_format_backend(
             iou_thr = float(eval_params["iou"])
             input_hw = _resolve_input_hw_from_native_artifact(weights_path, int(eval_params["imgsz"]))
             perf_collector = PerfCollector(warmup_images=perf_warmup_images) if collect_performance else None
+            trt_runtime = _prepare_trt_runtime(weights_path)
             preds: list[_Pred] = []
             total_images = len(image_paths)
             print(f"[INFO] {format_name}: running native test on {total_images} images with {weights_path}")
             for image_path in tqdm(image_paths, desc=f"{format_name}:test", unit="img", file=sys.stdout):
-                infer_out = _infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names)
+                infer_out = _infer_with_trt_engine(trt_runtime, image_path, input_hw, conf_thr, iou_thr, names)
                 if isinstance(infer_out, tuple) and len(infer_out) == 2:
                     image_preds, perf_ns = infer_out
                 else:
@@ -2556,8 +2627,18 @@ def run_native_format_backend(
                     perf_collector.record_stage("preprocess_ms", int(perf_ns.get("preprocess", 0)))
                     perf_collector.record_stage("infer_ms", int(perf_ns.get("infer", 0)))
                     perf_collector.record_stage("decode_nms_ms", int(perf_ns.get("decode_nms", 0)))
+                    perf_collector.record_stage("io_load_ms", int(perf_ns.get("io_load", 0)))
+                    perf_collector.record_stage("diagnostics_alloc_ms", int(perf_ns.get("diagnostics_alloc", 0)))
+                    perf_collector.record_stage("diagnostics_h2d_ms", int(perf_ns.get("diagnostics_h2d", 0)))
+                    perf_collector.record_stage("diagnostics_execute_ms", int(perf_ns.get("diagnostics_execute", 0)))
+                    perf_collector.record_stage("diagnostics_d2h_ms", int(perf_ns.get("diagnostics_d2h", 0)))
             print(f"[INFO] {format_name}: native test completed ({total_images}/{total_images} images).")
             perf_payload = perf_collector.to_payload() if perf_collector is not None else None
+            if isinstance(perf_payload, dict):
+                perf_payload.setdefault("diagnostics_overhead", {})
+                perf_payload["diagnostics_overhead"]["engine_init_ms"] = float(
+                    int(trt_runtime.get("init_ns", 0)) / 1_000_000.0
+                )
             if perf_payload:
                 _write_perf_artifact(root_dir, format_name, weights_path, perf_payload)
             inference = _write_native_eval_artifacts(
@@ -2595,7 +2676,7 @@ def run_native_format_backend(
                 preds_val: list[_Pred] = []
                 print(f"[INFO] {format_name}: running native val on {len(image_paths_val)} images with {weights_path}")
                 for image_path in tqdm(image_paths_val, desc=f"{format_name}:val", unit="img", file=sys.stdout):
-                    infer_out = _infer_with_trt_engine(weights_path, image_path, input_hw, conf_thr, iou_thr, names)
+                    infer_out = _infer_with_trt_engine(trt_runtime, image_path, input_hw, conf_thr, iou_thr, names)
                     if isinstance(infer_out, tuple) and len(infer_out) == 2:
                         preds_val.extend(infer_out[0])
                     else:

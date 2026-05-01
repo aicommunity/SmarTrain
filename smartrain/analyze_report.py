@@ -102,6 +102,17 @@ def _column_display_name(name: str, is_ru: bool) -> str:
         "pure_inference_fps": "FPS (чистый инференс)" if is_ru else "FPS (pure inference)",
         "pipeline_end_to_end_ms_per_frame": "мс/кадр (pipeline e2e)" if is_ru else "ms/frame (pipeline e2e)",
         "pipeline_end_to_end_fps": "FPS (pipeline e2e)" if is_ru else "FPS (pipeline e2e)",
+        "perf_io_load_ms_per_frame": "мс/кадр (I/O загрузка, diag)" if is_ru else "ms/frame (I/O load, diag)",
+        "perf_diag_alloc_ms_per_frame": "мс/кадр (alloc, diag)" if is_ru else "ms/frame (alloc, diag)",
+        "perf_diag_h2d_ms_per_frame": "мс/кадр (H2D, diag)" if is_ru else "ms/frame (H2D, diag)",
+        "perf_diag_execute_ms_per_frame": "мс/кадр (execute, diag)" if is_ru else "ms/frame (execute, diag)",
+        "perf_diag_d2h_ms_per_frame": "мс/кадр (D2H, diag)" if is_ru else "ms/frame (D2H, diag)",
+        "perf_diag_session_init_ms": "Инициализация сессии, мс (diag)" if is_ru else "Session init, ms (diag)",
+        "perf_diag_engine_init_ms": "Инициализация engine, мс (diag)" if is_ru else "Engine init, ms (diag)",
+        "perf_diag_worker_wall_ms": "Время worker, мс (diag)" if is_ru else "Worker wall time, ms (diag)",
+        "perf_diag_retries_count": "Повторы, шт (diag)" if is_ru else "Retries, count (diag)",
+        "perf_diag_retry_sleep_ms": "Сон при повторе, мс (diag)" if is_ru else "Retry sleep, ms (diag)",
+        "perf_diag_provider_switched_to_cpu": "Переключение на CPU (diag)" if is_ru else "Switched to CPU (diag)",
     }
     return common.get(name, name)
 
@@ -602,6 +613,17 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "perf_sample_count",
             "perf_batch",
             "perf_device",
+            "perf_io_load_ms_per_frame",
+            "perf_diag_alloc_ms_per_frame",
+            "perf_diag_h2d_ms_per_frame",
+            "perf_diag_execute_ms_per_frame",
+            "perf_diag_d2h_ms_per_frame",
+            "perf_diag_session_init_ms",
+            "perf_diag_engine_init_ms",
+            "perf_diag_worker_wall_ms",
+            "perf_diag_retries_count",
+            "perf_diag_retry_sleep_ms",
+            "perf_diag_provider_switched_to_cpu",
         ]
     elif "format_eval_settings" in lower:
         preferred = [
@@ -1685,9 +1707,11 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
                 lines.append(
                     (
-                        "- В этой таблице показано только «чистое» ядро инференса (без e2e-накладных)."
+                        "- Основной KPI: сопоставимые runtime-этапы по методике Ultralytics-like. "
+                        "I/O загрузки источника и одноразовая инициализация бэкенда сюда не входят."
                         if is_ru
-                        else "- This table shows pure inference core timing only (without e2e pipeline overhead)."
+                        else "- Primary KPI: comparable runtime stages in Ultralytics-like methodology. "
+                        "Source I/O and one-time backend initialization are excluded."
                     )
                 )
                 lines.append("")
@@ -1714,8 +1738,9 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     else ("Device", "Execution device (e.g. cpu/0)"),
                 ]
                 lines.append("**" + ("Легенда колонок:" if is_ru else "Column legend:") + "**")
-                for title, descr in legend:
-                    lines.append(f"- {title} — {descr}")
+                lines.append("")
+                for idx, (title, descr) in enumerate(legend, start=1):
+                    lines.append(f"{idx}. **{title}** — {descr}")
                 lines.append("")
                 table_no += 1
                 lines.append(
@@ -1733,9 +1758,11 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
                 lines.append(
                     (
-                        "- В этой таблице показаны накладные этапы и полное время конвейера."
+                        "- Здесь показан полный runtime-конвейер (preprocess + inference + postprocess), "
+                        "но без одноразовой инициализации."
                         if is_ru
-                        else "- This table shows overhead stages and full end-to-end pipeline timing."
+                        else "- This table shows full runtime pipeline "
+                        "(preprocess + inference + postprocess), without one-time initialization."
                     )
                 )
                 lines.append("")
@@ -1767,8 +1794,54 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     else ("Measured frames", "Number of frames used in perf sampling"),
                 ]
                 lines.append("**" + ("Легенда колонок (e2e):" if is_ru else "Column legend (e2e):") + "**")
-                for title, descr in legend2:
-                    lines.append(f"- {title} — {descr}")
+                lines.append("")
+                for idx, (title, descr) in enumerate(legend2, start=1):
+                    lines.append(f"{idx}. **{title}** — {descr}")
+                diag_cols = [
+                    c
+                    for c in (
+                        "alias",
+                        "run_name",
+                        "split",
+                        "format",
+                        "perf_io_load_ms_per_frame",
+                        "perf_diag_alloc_ms_per_frame",
+                        "perf_diag_h2d_ms_per_frame",
+                        "perf_diag_execute_ms_per_frame",
+                        "perf_diag_d2h_ms_per_frame",
+                        "perf_diag_session_init_ms",
+                        "perf_diag_engine_init_ms",
+                        "perf_diag_worker_wall_ms",
+                        "perf_diag_retries_count",
+                        "perf_diag_retry_sleep_ms",
+                        "perf_diag_provider_switched_to_cpu",
+                    )
+                    if c in perf_df.columns
+                ]
+                if diag_cols:
+                    diag_df = perf_df[diag_cols].copy()
+                    lines.append("")
+                    table_no += 1
+                    lines.append(
+                        f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                        + (
+                            "Диагностика несопоставимых накладных расходов"
+                            if is_ru
+                            else "Diagnostics of non-comparable overheads"
+                        )
+                        + "**"
+                    )
+                    lines.append("")
+                    lines.extend(_md_table_from_df(diag_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                    lines.append("")
+                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
+                    lines.append(
+                        (
+                            "- Эти метрики диагностические и не используются в основном сравнении форматов."
+                            if is_ru
+                            else "- These metrics are diagnostic and are not used for primary format comparison."
+                        )
+                    )
                 lines.extend(_center_close())
                 table_no += 1
                 rendered_perf_table = True
