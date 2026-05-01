@@ -101,6 +101,11 @@ def test_balance_weights_and_report_manifest(tmp_path: Path) -> None:
     manifest = json.loads((out / "balance_manifest.json").read_text(encoding="utf-8"))
     assert manifest["strategy"] == "weights"
     assert manifest["weight_mode"] == "effective"
+    assert manifest["max_ratio"] == 3.0
+    assert manifest["min_count"] == 1
+    assert manifest["eval_coverage"] is True
+    assert manifest["emit_balance_report"] is True
+    assert manifest["emit_train_config"] is False
     assert "class_counts_before_bbox" in manifest
     assert "class_counts_after_bbox" in manifest
 
@@ -122,6 +127,7 @@ def test_balance_preset_applies_defaults_and_allows_override(tmp_path: Path) -> 
     )
     out = tmp_path / "datasets" / "ds_b_balanced"
     manifest = json.loads((out / "balance_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["preset"] == "hybrid-default"
     assert manifest["strategy"] == "hybrid"
     # Overridden explicitly by CLI flag; preset should not overwrite it.
     assert abs(float(manifest["target"]) - 1.1) < 1e-9
@@ -154,6 +160,38 @@ def test_balance_interactive_can_enable_emit_report(
     balance_main([])
     out = tmp_path / "datasets" / "ds_b_balanced"
     assert (out / "balance_manifest.json").is_file()
+
+
+def test_balance_interactive_defaults_enable_manifest_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_workspace(tmp_path)
+    answers = iter(
+        [
+            "ds_b",        # Dataset
+            "oversample",  # Strategy
+            "",            # Output
+            "1.0",         # target
+            "3.0",         # max-ratio
+            "all",         # classes mode
+            "",            # emit-balance-report (default yes)
+            "",            # emit-train-config (default yes)
+            "",            # eval-coverage (default yes)
+            "n",           # dry-run
+        ]
+    )
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    monkeypatch.setattr("smartrain.dataset_balance.prompt", lambda *a, **k: next(answers))
+    monkeypatch.setattr("smartrain.cli_prompts.prompt", lambda *a, **k: next(answers))
+    balance_main([])
+    out = tmp_path / "datasets" / "ds_b_balanced"
+    manifest_path = out / "balance_manifest.json"
+    assert manifest_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["emit_balance_report"] is True
+    assert manifest["emit_train_config"] is True
 
 
 def test_balance_ensures_non_empty_val_and_test_when_possible(tmp_path: Path) -> None:

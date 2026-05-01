@@ -185,11 +185,11 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
         args.classes = None
     args.emit_balance_report = prompt_yes_no(
         "Write balance report manifest (--emit-balance-report)?",
-        default=bool(args.emit_balance_report),
+        default=True,
     )
     args.emit_train_config = prompt_yes_no(
         "Write train config manifest (--emit-train-config)?",
-        default=bool(args.emit_train_config),
+        default=True,
     )
     args.eval_coverage = prompt_yes_no(
         "Auto-fix eval split coverage (--eval-coverage)?",
@@ -854,12 +854,17 @@ def main(argv=None):
         Path(out_dir, "balance_manifest.json").write_text(
             json.dumps(
                 {
+                    "preset": args.preset,
                     "strategy": args.strategy,
                     "selected_classes": sorted(selected_classes),
+                    "single_class": args.single_class,
+                    "classes": args.classes,
                     "train_input": len(train_items),
                     "train_output": len(balanced_train),
                     "seed": args.seed,
                     "target": args.target,
+                    "max_ratio": args.max_ratio,
+                    "min_count": args.min_count,
                     "replacement": args.replacement,
                     "weight_mode": args.weight_mode,
                     "beta": args.beta,
@@ -869,6 +874,9 @@ def main(argv=None):
                     "rfs_thresh": args.rfs_thresh,
                     "rfs_power": args.rfs_power,
                     "max_repeat_per_image": args.max_repeat_per_image,
+                    "eval_coverage": bool(args.eval_coverage),
+                    "emit_train_config": bool(args.emit_train_config),
+                    "emit_balance_report": bool(args.emit_balance_report),
                     "class_counts_before_bbox": dict(class_counts),
                     "class_counts_after_bbox": dict(counts_after),
                 },

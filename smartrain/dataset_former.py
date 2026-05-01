@@ -860,6 +860,22 @@ def main(argv=None):
 
     json_file = os.path.join(info_dir, DATASETS_INFO_FILE)
     class_names_file = os.path.join(info_dir, CLASS_NAMES_FILE)
+    missing_metadata = [p for p in (json_file, class_names_file) if not os.path.isfile(p)]
+    if missing_metadata:
+        run_mode = "legacy flags mode" if legacy else "workspace mode"
+        print("[ERROR] Fusion metadata files were not found.")
+        print(f"[ERROR] Mode: {run_mode}")
+        if workspace_root:
+            print(f"[ERROR] Workspace root: {workspace_root}")
+        print(f"[ERROR] Metadata directory: {info_dir}")
+        print("[ERROR] Missing files:")
+        for path in missing_metadata:
+            print(f"[ERROR] - {path}")
+        print(
+            "[ERROR] Use --workspace /data/MarsSmarTrain or prepare metadata with "
+            "'smartrain scan'/'smartrain deploy'."
+        )
+        return
 
     with open(json_file, "r", encoding="utf-8") as f:
         datasets_info = json.load(f)

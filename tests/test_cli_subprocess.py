@@ -212,6 +212,23 @@ def test_train_without_args_dispatches_to_interactive_flow(
     assert "interactive train mode requires a terminal" in out.lower()
 
 
+def test_fusion_missing_workspace_metadata_shows_friendly_error(
+    subprocess_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["fusion", "--", "--workspace", str(tmp_path), "--dataset", "ds_a"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    low = out.lower()
+    assert r.returncode == 0, out
+    assert "fusion metadata files were not found" in low
+    assert "metadata directory" in low
+    assert "datasets_info.json" in low
+    assert "class_names.json" in low
+    assert "traceback" not in low
+
+
 def test_info_prints_supported_train_models(subprocess_env: dict[str, str], tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     env = dict(subprocess_env)

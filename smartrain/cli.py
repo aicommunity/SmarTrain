@@ -441,6 +441,7 @@ def cmd_fusion(ctx: typer.Context) -> None:
 
     Notes:
       - Produces a new dataset directory under workspace datasets/.
+      - Requires datasets/datasets_info.json and datasets/class_names.json in the selected workspace.
       - Check output data.yaml before training.
     """
     from smartrain.dataset_former import build_dataset_former_arg_parser
