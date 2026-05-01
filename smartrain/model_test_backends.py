@@ -1875,9 +1875,10 @@ def run_ultralytics_backend(
     deep_diagnostics: bool = False,
     collect_performance: bool = False,
     perf_warmup_images: int = 5,
+    runtime_device: str | None = None,
 ) -> BackendRunResult:
     def _ultralytics_perf_payload_from_result(
-        val_result: Any, *, duration_s: float, warmup_images: int
+        val_result: Any, *, duration_s: float, warmup_images: int, images_count: int | None = None
     ) -> dict[str, Any]:
         speed = getattr(val_result, "speed", None)
         speed_map = speed if isinstance(speed, dict) else {}
@@ -1904,8 +1905,10 @@ def run_ultralytics_backend(
         elif total_ms is not None and total_ms > 0:
             throughput = 1000.0 / total_ms
 
-        count_guess = None
-        for attr in ("nt_per_class", "nt_per_image"):
+        count_guess = int(images_count) if isinstance(images_count, int) and images_count > 0 else None
+        for attr in ("seen", "nt_per_image", "nt_per_class"):
+            if isinstance(images_count, int) and images_count > 0:
+                break
             raw = getattr(val_result, attr, None)
             try:
                 if raw is None:
@@ -1955,6 +1958,8 @@ def run_ultralytics_backend(
             "breakdown_ms": breakdown,
             "infer_total_only": True,
             "source": "ultralytics_speed_dict",
+            "eval_batch": int(val_batch) if val_batch is not None else None,
+            "eval_device": str(runtime_device) if runtime_device else None,
         }
 
     test_start_time = datetime.now()
@@ -1974,7 +1979,10 @@ def run_ultralytics_backend(
         val_kwargs["iou"] = val_iou
     if val_batch is not None:
         val_kwargs["batch"] = int(val_batch)
+    if runtime_device is not None and str(runtime_device).strip():
+        val_kwargs["device"] = str(runtime_device).strip()
     try:
+        test_image_count = len(_split_images_from_yaml(dataset_yaml_path, "test", 0))
         result = model.val(**val_kwargs)
         _save_metrics_csv_for_format(result, root_dir, format_name)
         if not conf_rec_disable:
@@ -2121,13 +2129,16 @@ def run_ultralytics_backend(
             format_name=format_name,
             backend_name="ultralytics",
             runtime_provider="ultralytics",
-            runtime_device=str(val_kwargs.get("device", "")) or None,
+            runtime_device=str(val_kwargs.get("device", "")) or (str(runtime_device) if runtime_device else None),
         )
         perf_payload: dict[str, Any] | None = None
         if collect_performance:
             duration_s = max(0.0, (test_end_time - test_start_time).total_seconds())
             perf_payload = _ultralytics_perf_payload_from_result(
-                result, duration_s=duration_s, warmup_images=perf_warmup_images
+                result,
+                duration_s=duration_s,
+                warmup_images=perf_warmup_images,
+                images_count=test_image_count,
             )
             _write_perf_artifact(root_dir, format_name, weights_path, perf_payload)
         persist_target_test_artifacts_state(

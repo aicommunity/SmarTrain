@@ -98,6 +98,10 @@ def _column_display_name(name: str, is_ru: bool) -> str:
         "perf_sample_count": "Измерено кадров" if is_ru else "Measured frames",
         "perf_batch": "Batch (eval)" if is_ru else "Batch (eval)",
         "perf_device": "Устройство" if is_ru else "Device",
+        "pure_inference_ms_per_frame": "мс/кадр (чистый инференс)" if is_ru else "ms/frame (pure inference)",
+        "pure_inference_fps": "FPS (чистый инференс)" if is_ru else "FPS (pure inference)",
+        "pipeline_end_to_end_ms_per_frame": "мс/кадр (pipeline e2e)" if is_ru else "ms/frame (pipeline e2e)",
+        "pipeline_end_to_end_fps": "FPS (pipeline e2e)" if is_ru else "FPS (pipeline e2e)",
     }
     return common.get(name, name)
 
@@ -1583,22 +1587,107 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     ].copy()
                 perf_df = _select_table_columns(perf_csv_rel, perf_df)
                 perf_df = _abbrev_df(perf_df, abbreviations)
+                def _num_or_none(v: Any) -> float | None:
+                    try:
+                        if v is None or (isinstance(v, float) and pd.isna(v)):
+                            return None
+                        out = float(v)
+                        if pd.isna(out):
+                            return None
+                        return out
+                    except Exception:
+                        return None
+
+                # Explicitly separate pure inference timing from full pipeline timing.
+                pure_ms_series = (
+                    perf_df.get("perf_inference_ms_per_frame")
+                    if "perf_inference_ms_per_frame" in perf_df.columns
+                    else None
+                )
+                if pure_ms_series is None and "avg_inference_ms_per_frame" in perf_df.columns:
+                    pure_ms_series = perf_df.get("avg_inference_ms_per_frame")
+                if pure_ms_series is None and "latency_p50_ms" in perf_df.columns:
+                    pure_ms_series = perf_df.get("latency_p50_ms")
+                if pure_ms_series is None:
+                    pure_ms_series = pd.Series([None] * len(perf_df), index=perf_df.index)
+                perf_df["pure_inference_ms_per_frame"] = pure_ms_series
+
+                if "throughput_img_s" in perf_df.columns:
+                    pure_fps_series = perf_df["throughput_img_s"]
+                else:
+                    pure_fps_series = perf_df["pure_inference_ms_per_frame"].apply(
+                        lambda x: (1000.0 / x) if (_num_or_none(x) is not None and _num_or_none(x) > 0.0) else None
+                    )
+                perf_df["pure_inference_fps"] = pure_fps_series
+
+                pipeline_ms_series = (
+                    perf_df.get("perf_total_ms_per_frame")
+                    if "perf_total_ms_per_frame" in perf_df.columns
+                    else None
+                )
+                if pipeline_ms_series is None and "avg_total_ms_per_frame" in perf_df.columns:
+                    pipeline_ms_series = perf_df.get("avg_total_ms_per_frame")
+                if pipeline_ms_series is None:
+                    pipeline_ms_series = pd.Series([None] * len(perf_df), index=perf_df.index)
+                perf_df["pipeline_end_to_end_ms_per_frame"] = pipeline_ms_series
+                perf_df["pipeline_end_to_end_fps"] = perf_df["pipeline_end_to_end_ms_per_frame"].apply(
+                    lambda x: (1000.0 / x) if (_num_or_none(x) is not None and _num_or_none(x) > 0.0) else None
+                )
+
+                pure_cols = [
+                    c
+                    for c in (
+                        "alias",
+                        "run_name",
+                        "split",
+                        "format",
+                        "pure_inference_ms_per_frame",
+                        "pure_inference_fps",
+                        "latency_p95_ms",
+                        "perf_batch",
+                        "perf_device",
+                    )
+                    if c in perf_df.columns
+                ]
+                pipeline_cols = [
+                    c
+                    for c in (
+                        "alias",
+                        "run_name",
+                        "split",
+                        "format",
+                        "perf_preprocess_ms_per_frame",
+                        "perf_inference_ms_per_frame",
+                        "perf_postprocess_ms_per_frame",
+                        "pipeline_end_to_end_ms_per_frame",
+                        "pipeline_end_to_end_fps",
+                        "perf_warmup_images",
+                        "perf_sample_count",
+                    )
+                    if c in perf_df.columns
+                ]
+                pure_df = perf_df[pure_cols].copy() if pure_cols else perf_df.copy()
+                pipeline_df = perf_df[pipeline_cols].copy() if pipeline_cols else perf_df.copy()
                 lines.extend(_center_open())
                 lines.append("")
-                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(perf_csv_rel, is_ru)}**")
+                lines.append(
+                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                    + (
+                        "Производительность форматов: чистый инференс"
+                        if is_ru
+                        else "Format performance: pure inference"
+                    )
+                    + "**"
+                )
                 lines.append("")
-                lines.extend(_md_table_from_df(perf_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                lines.extend(_md_table_from_df(pure_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
                 lines.append("")
                 lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
                 lines.append(
                     (
-                        "- `мс/кадр (инференс)` и `FPS (инференс)` вычисляются по разной методике: "
-                        "latency берётся из steady p50, а FPS — как throughput по времени прогона. "
-                        "Поэтому они могут не быть строго обратными."
+                        "- В этой таблице показано только «чистое» ядро инференса (без e2e-накладных)."
                         if is_ru
-                        else "- `ms/frame (inference)` and `FPS (inference)` follow different methodologies: "
-                        "latency uses steady p50, while FPS uses throughput over run duration. "
-                        "Therefore they are not guaranteed to be strict reciprocals."
+                        else "- This table shows pure inference core timing only (without e2e pipeline overhead)."
                     )
                 )
                 lines.append("")
@@ -1608,17 +1697,53 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     ("Подвыборка", "Подмножество датасета (обычно test)") if is_ru else ("Split", "Dataset subset (usually test)"),
                     ("Формат", "Тип экспортированного артефакта") if is_ru else ("Format", "Exported artifact format"),
                     (
-                        "мс/кадр (инференс)",
-                        "Latency steady p50 на кадр; не обязана быть обратной к FPS",
+                        "мс/кадр (чистый инференс)",
+                        "Среднее время ядра инференса на кадр (без preprocess/postprocess)",
                     )
                     if is_ru
-                    else ("ms/frame (inference)", "Latency steady p50 per frame; not guaranteed reciprocal to FPS"),
-                    ("FPS (инференс)", "Throughput по времени прогона, кадр/с")
+                    else ("ms/frame (pure inference)", "Average core inference time per frame (without preprocess/postprocess)"),
+                    ("FPS (чистый инференс)", "Расчёт как 1000 / мс на кадр чистого инференса")
                     if is_ru
-                    else ("FPS (inference)", "Throughput over run duration, frames/s"),
+                    else ("FPS (pure inference)", "Computed as 1000 / pure inference ms per frame"),
                     ("Задержка p95, мс", "95-й перцентиль latency (steady/all fallback)")
                     if is_ru
                     else ("Latency p95, ms", "95th percentile latency (steady/all fallback)"),
+                    ("Batch (eval)", "Batch из eval args") if is_ru else ("Batch (eval)", "Batch from eval args"),
+                    ("Устройство", "Устройство исполнения (например cpu/0)")
+                    if is_ru
+                    else ("Device", "Execution device (e.g. cpu/0)"),
+                ]
+                lines.append("**" + ("Легенда колонок:" if is_ru else "Column legend:") + "**")
+                for title, descr in legend:
+                    lines.append(f"- {title} — {descr}")
+                lines.append("")
+                table_no += 1
+                lines.append(
+                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                    + (
+                        "Производительность форматов: полный e2e pipeline"
+                        if is_ru
+                        else "Format performance: full e2e pipeline"
+                    )
+                    + "**"
+                )
+                lines.append("")
+                lines.extend(_md_table_from_df(pipeline_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                lines.append("")
+                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
+                lines.append(
+                    (
+                        "- В этой таблице показаны накладные этапы и полное время конвейера."
+                        if is_ru
+                        else "- This table shows overhead stages and full end-to-end pipeline timing."
+                    )
+                )
+                lines.append("")
+                legend2 = [
+                    ("Алиас", "Короткий идентификатор артефакта формата") if is_ru else ("Alias", "Short format artifact identifier"),
+                    ("Запуск", "Сравниваемый run") if is_ru else ("Run", "Compared run"),
+                    ("Подвыборка", "Подмножество датасета (обычно test)") if is_ru else ("Split", "Dataset subset (usually test)"),
+                    ("Формат", "Тип экспортированного артефакта") if is_ru else ("Format", "Exported artifact format"),
                     ("мс/кадр (preprocess)", "Среднее время preprocess на кадр")
                     if is_ru
                     else ("ms/frame (preprocess)", "Average preprocess time per frame"),
@@ -1628,22 +1753,21 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     ("мс/кадр (postprocess)", "Среднее время decode/NMS на кадр")
                     if is_ru
                     else ("ms/frame (postprocess)", "Average decode/NMS time per frame"),
-                    ("мс/кадр (pipeline total)", "Среднее суммарное время конвейера")
+                    ("мс/кадр (pipeline e2e)", "Среднее суммарное время полного конвейера на кадр")
                     if is_ru
-                    else ("ms/frame (pipeline total)", "Average end-to-end pipeline time"),
+                    else ("ms/frame (pipeline e2e)", "Average total end-to-end pipeline time per frame"),
+                    ("FPS (pipeline e2e)", "Расчёт как 1000 / мс полного конвейера")
+                    if is_ru
+                    else ("FPS (pipeline e2e)", "Computed as 1000 / total e2e ms per frame"),
                     ("Warmup (кадров)", "Число warmup-кадров, исключённых из steady latency")
                     if is_ru
                     else ("Warmup images", "Warmup frames excluded from steady latency"),
                     ("Измерено кадров", "Количество кадров в perf-замере")
                     if is_ru
                     else ("Measured frames", "Number of frames used in perf sampling"),
-                    ("Batch (eval)", "Batch из eval args") if is_ru else ("Batch (eval)", "Batch from eval args"),
-                    ("Устройство", "Устройство исполнения (например cpu/0)")
-                    if is_ru
-                    else ("Device", "Execution device (e.g. cpu/0)"),
                 ]
-                lines.append("**" + ("Легенда колонок:" if is_ru else "Column legend:") + "**")
-                for title, descr in legend:
+                lines.append("**" + ("Легенда колонок (e2e):" if is_ru else "Column legend (e2e):") + "**")
+                for title, descr in legend2:
                     lines.append(f"- {title} — {descr}")
                 lines.extend(_center_close())
                 table_no += 1

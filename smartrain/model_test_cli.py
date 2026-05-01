@@ -810,6 +810,7 @@ def main(argv: list[str] | None = None) -> None:
                         deep_diagnostics=bool(args.deep_diagnostics),
                         collect_performance=bool(args.perf),
                         perf_warmup_images=int(max(0, args.perf_warmup_images)),
+                        runtime_device=args.device,
                     )
                     results.append(("pt", pt_result.success, pt_result.error))
                 else:
@@ -864,6 +865,7 @@ def main(argv: list[str] | None = None) -> None:
                     deep_diagnostics=bool(args.deep_diagnostics),
                     collect_performance=bool(args.perf),
                     perf_warmup_images=int(max(0, args.perf_warmup_images)),
+                    runtime_device=args.device,
                 )
                 results.append(("pt", pt_result.success, pt_result.error))
 

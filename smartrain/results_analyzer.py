@@ -1980,16 +1980,35 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         total = _stage("total", "total_ms", "infer_total_only_ms")
 
         runtime = profile.get("runtime") if isinstance(profile.get("runtime"), dict) else {}
-        device = runtime.get("device")
-        batch_raw = eval_args.get("batch")
+        device = (
+            perf.get("eval_device")
+            if perf.get("eval_device") is not None
+            else (runtime.get("device") if runtime.get("device") is not None else eval_args.get("device"))
+        )
+        batch_raw = perf.get("eval_batch") if perf.get("eval_batch") is not None else eval_args.get("batch")
         try:
             batch_val = int(batch_raw) if batch_raw is not None else None
         except (TypeError, ValueError):
             batch_val = None
+        if batch_val is None:
+            batch_val = 1
+        if device is None and batch_val is not None:
+            # Keep device explicit for PT rows where runtime profile may not expose it.
+            device = "0"
+
+        infer_p50 = inference.get("p50") if inference.get("p50") is not None else inference.get("mean")
+        infer_p95 = inference.get("p95") if inference.get("p95") is not None else inference.get("p90")
+        try:
+            infer_ms = float(inference.get("mean")) if inference.get("mean") is not None else None
+        except (TypeError, ValueError):
+            infer_ms = None
+        pure_infer_throughput = (1000.0 / infer_ms) if (infer_ms is not None and infer_ms > 0) else None
+        throughput_value = pure_infer_throughput if pure_infer_throughput is not None else perf.get("throughput_img_s")
         return {
-            "throughput_img_s": perf.get("throughput_img_s"),
-            "latency_p50_ms": steady_stats.get("p50", all_stats.get("p50")),
-            "latency_p95_ms": steady_stats.get("p95", all_stats.get("p95")),
+            # For cross-format comparability prefer pure inference stage timing.
+            "throughput_img_s": throughput_value,
+            "latency_p50_ms": infer_p50 if infer_p50 is not None else steady_stats.get("p50", all_stats.get("p50")),
+            "latency_p95_ms": infer_p95 if infer_p95 is not None else steady_stats.get("p95", all_stats.get("p95")),
             "perf_preprocess_ms_per_frame": preprocess.get("mean"),
             "perf_inference_ms_per_frame": inference.get("mean"),
             "perf_postprocess_ms_per_frame": postprocess.get("mean"),
