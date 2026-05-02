@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import random
 import shutil
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from prompt_toolkit import prompt
@@ -78,7 +79,7 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--strategy",
-        choices=("copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid"),
+        choices=("copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid", "hybrid-aug"),
         default="oversample",
     )
     p.add_argument("--target", type=float, default=1.0, help="Train size multiplier after balancing")
@@ -150,6 +151,60 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument(
+        "--aug-preset",
+        choices=("geo-photo", "conveyor-lite"),
+        default="geo-photo",
+        help="For strategy hybrid-aug: augment preset after hybrid (train split only).",
+    )
+    p.add_argument(
+        "--aug-enable-bbox-copy",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="For hybrid-aug: add bbox-copy to augment (default off).",
+    )
+    p.add_argument(
+        "--keep-hybrid-intermediate",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="For hybrid-aug: keep the intermediate hybrid-only dataset after augment (default: delete).",
+    )
+    p.add_argument(
+        "--aug-class-aware-geo",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "For hybrid-aug: scale flip / photometric / conveyor attempt rates by inverse class frequency "
+            "(passes through to augment). Disable with --no-aug-class-aware-geo."
+        ),
+    )
+    p.add_argument(
+        "--aug-total-bbox-cap-mult",
+        type=float,
+        default=0.0,
+        help="For hybrid-aug: if >0, cap train bbox total after augment (see augment --aug-total-bbox-cap-mult).",
+    )
+    p.add_argument(
+        "--aug-per-class-bbox-cap-mult",
+        type=float,
+        default=0.0,
+        help=(
+            "For hybrid-aug: if >0, per-class cap on extra bbox from augment "
+            "(see augment --aug-per-class-bbox-cap-mult)."
+        ),
+    )
+    p.add_argument(
+        "--train-head-bbox-undersample",
+        choices=("off", "median-factor"),
+        default="off",
+        help="Optional: trim head-class bbox counts toward median*cap after hybrid sampling.",
+    )
+    p.add_argument(
+        "--train-head-bbox-cap-mult",
+        type=float,
+        default=5.0,
+        help="With --train-head-bbox-undersample median-factor: cap = floor(mult * median bbox count per class).",
+    )
     return p
 
 
@@ -202,7 +257,7 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
     args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
     args.strategy = prompt_choice(
         "Strategy",
-        ["copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid"],
+        ["copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid", "hybrid-aug"],
         default=args.strategy,
     )
     args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
@@ -802,6 +857,211 @@ def _enforce_no_cross_split_duplicates(
     return new_balanced, new_passthrough, changed
 
 
+def _remove_dataset_from_workspace_catalog(layout: WorkspaceLayout, dataset_key: str) -> None:
+    info_path = layout.work_datasets_info_path()
+    if not os.path.isfile(info_path):
+        return
+    with open(info_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict) or dataset_key not in data:
+        return
+    del data[dataset_key]
+    with open(info_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+def _build_hybrid_aug_augment_argv(
+    *,
+    workspace: str,
+    intermediate_dataset: str,
+    final_base: str,
+    seed: int,
+    preset: str,
+    aug_enable_bbox_copy: bool,
+    aug_class_aware_geo: bool,
+    aug_total_bbox_cap_mult: float,
+    aug_per_class_bbox_cap_mult: float,
+) -> list[str]:
+    argv = [
+        "--workspace",
+        workspace,
+        "--dataset",
+        intermediate_dataset,
+        "--output-name",
+        final_base,
+        "--seed",
+        str(seed),
+        "--splits",
+        "train",
+        "--enable-flip",
+        "--enable-photometric",
+        "--enable-center-rotate",
+        "--center-rotate-anchor",
+        "center",
+        "--center-rotate-deg",
+        "5",
+        "--rotate-copies",
+        "1",
+    ]
+    if preset == "conveyor-lite":
+        argv.append("--enable-conveyor")
+    if aug_enable_bbox_copy:
+        argv.append("--enable-bbox-copy")
+    if aug_class_aware_geo:
+        argv.append("--aug-class-aware-geo")
+    else:
+        argv.append("--no-aug-class-aware-geo")
+    if float(aug_total_bbox_cap_mult) > 0:
+        argv.extend(["--aug-total-bbox-cap-mult", str(float(aug_total_bbox_cap_mult))])
+    if float(aug_per_class_bbox_cap_mult) > 0:
+        argv.extend(["--aug-per-class-bbox-cap-mult", str(float(aug_per_class_bbox_cap_mult))])
+    return argv
+
+
+def _read_label_text_lines(lbl_path: str) -> list[str]:
+    if not os.path.isfile(lbl_path):
+        return []
+    with open(lbl_path, "r", encoding="utf-8") as f:
+        return f.readlines()
+
+
+def _line_class_id(line: str) -> int | None:
+    parts = line.strip().split()
+    if not parts:
+        return None
+    try:
+        return int(float(parts[0]))
+    except ValueError:
+        return None
+
+
+def _head_bbox_undersample_balanced_train(
+    balanced_train: list[tuple[str, str, str, list[str]]],
+    *,
+    id_to_name: dict[int, str],
+    cap_mult: float,
+    seed: int,
+    selected_classes: set[str],
+) -> tuple[list[tuple[str, str, str, list[str]]], dict[str, object], list[set[int]]]:
+    """Stratified removal of excess bbox lines for head classes (plan §7)."""
+    empty_skips = [set() for _ in balanced_train]
+    counts: Counter[str] = Counter()
+    for _s, _img, _lbl, cls_names in balanced_train:
+        for c in cls_names:
+            if selected_classes and c not in selected_classes:
+                continue
+            counts[c] += 1
+    if not counts:
+        return balanced_train, {}, empty_skips
+
+    vals_sorted = sorted(int(v) for v in counts.values())
+    median_bbox = int(_quantile(vals_sorted, 0.5))
+    if median_bbox <= 0:
+        return balanced_train, {}, empty_skips
+
+    cap_target = max(0, int(math.floor(float(cap_mult) * float(median_bbox))))
+    omit: dict[int, set[int]] = {}
+
+    for cls_name, n_raw in counts.items():
+        if int(n_raw) <= cap_target:
+            continue
+        excess = int(n_raw) - cap_target
+        pool: list[tuple[int, int]] = []
+        for ti, (_sp, img, lbl, _cn) in enumerate(balanced_train):
+            lines = _read_label_text_lines(lbl)
+            for li, raw in enumerate(lines):
+                cid = _line_class_id(raw)
+                if cid is None:
+                    continue
+                name = id_to_name.get(cid, f"id_{cid}")
+                if selected_classes and name not in selected_classes:
+                    continue
+                if name != cls_name:
+                    continue
+                pool.append((ti, li))
+        pool.sort(key=lambda p: (Path(balanced_train[p[0]][1]).stem, p[0], p[1]))
+        if not pool or excess <= 0:
+            continue
+        g_sz = min(32, max(1, len(pool)))
+        groups: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for ti, li in pool:
+            stem = Path(balanced_train[ti][1]).stem
+            h = int(hashlib.md5(f"{seed}:{stem}".encode()).hexdigest(), 16)
+            groups[h % g_sz].append((ti, li))
+        removed_pairs: set[tuple[int, int]] = set()
+        while len(removed_pairs) < excess and groups:
+            best_g: int | None = None
+            best_sz = -1
+            for g in sorted(groups.keys()):
+                sz = sum(1 for pair in groups[g] if pair not in removed_pairs)
+                if sz > best_sz:
+                    best_sz = sz
+                    best_g = g
+            if best_g is None or best_sz <= 0:
+                break
+            for pair in groups[best_g]:
+                if pair not in removed_pairs:
+                    removed_pairs.add(pair)
+                    ti, li = pair
+                    omit.setdefault(ti, set()).add(li)
+                    break
+
+    dropped_indices = set()
+    for ti, it in enumerate(balanced_train):
+        lines = _read_label_text_lines(it[2])
+        kept_is = [j for j in range(len(lines)) if j not in omit.get(ti, set())]
+        if not kept_is:
+            dropped_indices.add(ti)
+
+    after_counts: Counter[str] = Counter()
+    for ti, (_s, _img, lbl, _cn) in enumerate(balanced_train):
+        if ti in dropped_indices:
+            continue
+        lines = _read_label_text_lines(lbl)
+        kept_lines = [lines[j] for j in range(len(lines)) if j not in omit.get(ti, set())]
+        for raw in kept_lines:
+            cid = _line_class_id(raw)
+            if cid is None:
+                continue
+            name = id_to_name.get(cid, f"id_{cid}")
+            if selected_classes and name not in selected_classes:
+                continue
+            after_counts[name] += 1
+
+    per_class: dict[str, dict[str, int]] = {}
+    for cls_name, before in counts.items():
+        after = int(after_counts.get(cls_name, 0))
+        per_class[str(cls_name)] = {"before": int(before), "after": after, "removed": max(0, int(before) - after)}
+
+    new_train: list[tuple[str, str, str, list[str]]] = []
+    for ti, it in enumerate(balanced_train):
+        if ti in dropped_indices:
+            continue
+        lines = _read_label_text_lines(it[2])
+        kept_lines = [lines[j] for j in range(len(lines)) if j not in omit.get(ti, set())]
+        new_cls: list[str] = []
+        for raw in kept_lines:
+            cid = _line_class_id(raw)
+            if cid is None:
+                continue
+            new_cls.append(id_to_name.get(cid, f"id_{cid}"))
+        new_train.append((it[0], it[1], it[2], new_cls))
+
+    stats: dict[str, object] = {
+        "mode": "median-factor",
+        "cap_mult": float(cap_mult),
+        "median_bbox_per_class": median_bbox,
+        "cap_target": cap_target,
+        "per_class": per_class,
+    }
+    label_skips: list[set[int]] = []
+    for ti, _it in enumerate(balanced_train):
+        if ti in dropped_indices:
+            continue
+        label_skips.append(set(omit.get(ti, set())))
+    return new_train, stats, label_skips
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = build_balance_arg_parser()
@@ -958,7 +1218,7 @@ def main(argv=None):
                 )
             class_w = _apply_class_weight_multipliers(class_w, effective_class_multipliers)
             pool_for_weights = selected_pool
-            if args.strategy == "hybrid":
+            if args.strategy in ("hybrid", "hybrid-aug"):
                 pool_for_weights = _rfs_expand_pool(
                     selected_pool,
                     img_to_classes,
@@ -986,8 +1246,14 @@ def main(argv=None):
                 rng=rng,
             )
 
-    out_base = args.output_name or f"{args.dataset}_balanced"
-    out_name = next_dataset_name(layout.datasets, out_base)
+    is_hybrid_aug = args.strategy == "hybrid-aug"
+    if is_hybrid_aug:
+        final_base = args.output_name or f"{args.dataset}_balanced_aug"
+        intermediate_base = f"{final_base}__hybrid"
+        out_name = next_dataset_name(layout.datasets, intermediate_base)
+    else:
+        out_base = args.output_name or f"{args.dataset}_balanced"
+        out_name = next_dataset_name(layout.datasets, out_base)
     out_dir = os.path.join(layout.datasets, out_name)
     if bool(getattr(args, "eval_coverage", True)):
         balanced_train = _ensure_non_empty_eval_splits(
@@ -1006,8 +1272,22 @@ def main(argv=None):
             "cross-split duplicates (priority train > val > test)."
         )
 
+    head_bbox_stats: dict[str, object] | None = None
+    train_label_skips: list[set[int]] | None = None
+    if getattr(args, "train_head_bbox_undersample", "off") == "median-factor":
+        balanced_train, head_bbox_stats, skips_list = _head_bbox_undersample_balanced_train(
+            balanced_train,
+            id_to_name=id_to_name,
+            cap_mult=float(getattr(args, "train_head_bbox_cap_mult", 5.0)),
+            seed=int(args.seed),
+            selected_classes=selected_classes,
+        )
+        train_label_skips = skips_list
+
     if args.dry_run:
         print(f"[OK] dry-run: strategy={args.strategy}, train_in={len(train_items)}, train_out={len(balanced_train)}, output={out_name}")
+        if is_hybrid_aug:
+            print("[INFO] hybrid-aug: skipping augment (dry-run)")
         if replay_cmd:
             print_replay_command("after execution", replay_cmd)
         return
@@ -1016,21 +1296,37 @@ def main(argv=None):
         os.makedirs(os.path.join(out_dir, split, "images"), exist_ok=True)
         os.makedirs(os.path.join(out_dir, split, "labels"), exist_ok=True)
 
-    def _copy_items(items, *, suffix: str = ""):
+    def _copy_items(
+        items: list[tuple[str, str, str, list[str]]],
+        *,
+        suffix: str = "",
+        dest_root: str | None = None,
+        label_skips: list[set[int]] | None = None,
+    ) -> None:
+        root_dir = dest_root or out_dir
         idx = 1
-        for split, img, lbl, _ in items:
+        for item_idx, (split, img, lbl, _) in enumerate(items):
             ext = os.path.splitext(img)[1]
             stem = f"{Path(img).stem}{suffix}_{idx}" if suffix else f"{Path(img).stem}_{idx}"
-            dst_img = os.path.join(out_dir, split, "images", f"{stem}{ext}")
-            dst_lbl = os.path.join(out_dir, split, "labels", f"{stem}.txt")
+            dst_img = os.path.join(root_dir, split, "images", f"{stem}{ext}")
+            dst_lbl = os.path.join(root_dir, split, "labels", f"{stem}.txt")
             shutil.copy2(img, dst_img)
-            if os.path.isfile(lbl):
+            use_skip = (
+                label_skips is not None
+                and item_idx < len(label_skips)
+                and len(label_skips[item_idx]) > 0
+            )
+            if use_skip:
+                lines = _read_label_text_lines(lbl)
+                kept = "".join(lines[j] for j in range(len(lines)) if j not in label_skips[item_idx])
+                Path(dst_lbl).write_text(kept, encoding="utf-8")
+            elif os.path.isfile(lbl):
                 shutil.copy2(lbl, dst_lbl)
             else:
                 Path(dst_lbl).write_text("", encoding="utf-8")
             idx += 1
 
-    _copy_items(balanced_train, suffix="bal")
+    _copy_items(balanced_train, suffix="bal", label_skips=train_label_skips)
     _copy_items(passthrough_items)
 
     names = [k for k, _ in sorted(class_map.items(), key=lambda kv: kv[1])]
@@ -1048,6 +1344,50 @@ def main(argv=None):
         out_dir,
         out_hash,
     )
+
+    hybrid_intermediate_name_for_manifest: str | None = None
+    aug_argv_list: list[str] | None = None
+    bbox_before_augment: int | None = None
+    bbox_after_augment: int | None = None
+    if is_hybrid_aug:
+        from smartrain.dataset_augment import main as augment_main, sum_train_bbox_disk
+
+        saved_intermediate_name = out_name
+        final_base = args.output_name or f"{args.dataset}_balanced_aug"
+        aug_argv_list = _build_hybrid_aug_augment_argv(
+            workspace=root,
+            intermediate_dataset=saved_intermediate_name,
+            final_base=final_base,
+            seed=int(args.seed),
+            preset=str(args.aug_preset),
+            aug_enable_bbox_copy=bool(getattr(args, "aug_enable_bbox_copy", False)),
+            aug_class_aware_geo=bool(getattr(args, "aug_class_aware_geo", True)),
+            aug_total_bbox_cap_mult=float(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
+            aug_per_class_bbox_cap_mult=float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0)),
+        )
+        pred_final = next_dataset_name(layout.datasets, final_base)
+        bbox_before_augment = int(sum_train_bbox_disk(out_dir))
+        augment_main(aug_argv_list)
+        final_out_dir = os.path.join(layout.datasets, pred_final)
+        if not os.path.isdir(final_out_dir):
+            print(
+                "[ERROR] balance: augment did not create the expected output dataset; "
+                "intermediate dataset left in place for recovery."
+            )
+            return
+        if not bool(getattr(args, "keep_hybrid_intermediate", False)):
+            try:
+                shutil.rmtree(out_dir)
+            except OSError as exc:
+                print(f"[WARN] balance: could not remove intermediate dataset directory: {exc}")
+            _remove_dataset_from_workspace_catalog(layout, saved_intermediate_name)
+            hybrid_intermediate_name_for_manifest = None
+        else:
+            hybrid_intermediate_name_for_manifest = saved_intermediate_name
+        out_dir = final_out_dir
+        out_name = pred_final
+        out_hash = calculate_dataset_hash(out_dir)
+        bbox_after_augment = int(sum_train_bbox_disk(out_dir))
     if args.emit_train_config or args.emit_balance_report:
         counts_after: dict[str, int] = defaultdict(int)
         for _split, _img, _lbl, cls_names in balanced_train:
@@ -1090,6 +1430,28 @@ def main(argv=None):
                     "emit_balance_report": bool(args.emit_balance_report),
                     "class_counts_before_bbox": dict(class_counts),
                     "class_counts_after_bbox": dict(counts_after),
+                    "aug_preset": getattr(args, "aug_preset", "geo-photo"),
+                    "aug_enable_bbox_copy": bool(getattr(args, "aug_enable_bbox_copy", False)),
+                    "keep_hybrid_intermediate": bool(getattr(args, "keep_hybrid_intermediate", False)),
+                    "train_head_bbox_undersample": getattr(args, "train_head_bbox_undersample", "off"),
+                    "train_head_bbox_cap_mult": float(getattr(args, "train_head_bbox_cap_mult", 5.0)),
+                    "hybrid_intermediate_name": hybrid_intermediate_name_for_manifest,
+                    "output_dataset_name": out_name,
+                    "post_augment": (
+                        {
+                            "preset": str(args.aug_preset),
+                            "aug_enable_bbox_copy": bool(getattr(args, "aug_enable_bbox_copy", False)),
+                            "class_aware_geo": bool(getattr(args, "aug_class_aware_geo", True)),
+                            "total_bbox_cap_mult": float(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
+                            "per_class_bbox_cap_mult": float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0)),
+                            "train_bbox_sum_before_augment": bbox_before_augment,
+                            "train_bbox_sum_after_augment": bbox_after_augment,
+                            "argv_summary": aug_argv_list or [],
+                        }
+                        if is_hybrid_aug
+                        else None
+                    ),
+                    "head_bbox_undersample": head_bbox_stats,
                 },
                 ensure_ascii=False,
                 indent=2,

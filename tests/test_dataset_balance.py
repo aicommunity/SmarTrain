@@ -493,3 +493,86 @@ def test_balance_supports_eval_min_class_count_option(tmp_path: Path) -> None:
     assert manifest["eval_coverage"] is True
     assert manifest["eval_min_class_count"] == 2
 
+
+def test_hybrid_aug_dry_run_skips_augment_message(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "hybrid-aug",
+            "--dry-run",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert "hybrid-aug: skipping augment" in captured.out
+
+
+def test_hybrid_aug_creates_final_with_post_augment_manifest(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "hybrid-aug",
+            "--target",
+            "1.0",
+            "--emit-balance-report",
+            "--output-name",
+            "ds_b_ha",
+        ]
+    )
+    info = json.loads((tmp_path / "datasets" / "datasets_info.json").read_text(encoding="utf-8"))
+    final_keys = [k for k in info if k.startswith("ds_b_ha") and "__hybrid" not in k]
+    assert final_keys, "expected final balanced_aug dataset in catalog"
+    out = tmp_path / "datasets" / final_keys[0]
+    manifest = json.loads((out / "balance_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["strategy"] == "hybrid-aug"
+    assert manifest["post_augment"] is not None
+    assert manifest["post_augment"]["preset"] == "geo-photo"
+    assert manifest["post_augment"]["class_aware_geo"] is True
+    assert isinstance(manifest["post_augment"].get("train_bbox_sum_before_augment"), int)
+    assert isinstance(manifest["post_augment"].get("train_bbox_sum_after_augment"), int)
+    argv_sum = manifest["post_augment"].get("argv_summary") or []
+    assert any("enable-flip" in str(x) for x in argv_sum)
+    assert "--aug-class-aware-geo" in argv_sum
+    assert manifest.get("hybrid_intermediate_name") is None
+    assert (out / "train" / "images").is_dir()
+    hybrid_keys = [k for k in info if "__hybrid" in k]
+    assert not hybrid_keys, "intermediate hybrid dataset should be removed by default"
+
+
+def test_head_bbox_undersample_median_factor(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    balance_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_b",
+            "--strategy",
+            "hybrid",
+            "--target",
+            "1.0",
+            "--emit-balance-report",
+            "--output-name",
+            "ds_b_head",
+            "--train-head-bbox-undersample",
+            "median-factor",
+            "--train-head-bbox-cap-mult",
+            "0.1",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_b_head"
+    manifest = json.loads((out / "balance_manifest.json").read_text(encoding="utf-8"))
+    h = manifest.get("head_bbox_undersample")
+    assert h is not None
+    assert h["mode"] == "median-factor"
+    assert "per_class" in h
+

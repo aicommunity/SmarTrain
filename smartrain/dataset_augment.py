@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+from collections import defaultdict
 import random
 import shutil
 import sys
@@ -107,6 +109,34 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--side-tolerance-px", type=float, default=3.0, help="Tolerance in px for ROI side classification")
     p.add_argument("--imbalance-mode", choices=("off", "soft"), default="soft", help="Balancing according to scarce classes")
     p.add_argument("--imbalance-strength", type=float, default=1.0, help="Balancing strength >=0")
+    p.add_argument(
+        "--aug-class-aware-geo",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Scale flip / photometric / conveyor attempt rate by inverse class frequency on the frame "
+            "(uses --imbalance-mode soft and _image_soft_weight). Off keeps prior per-image behavior."
+        ),
+    )
+    p.add_argument(
+        "--aug-total-bbox-cap-mult",
+        type=float,
+        default=0.0,
+        help=(
+            "If >0: after augment, sum bbox on train ≤ ceil(mult × baseline B₀); baseline copies stay; "
+            "only extra augmented frames consume slack (slack = ceil(mult×B₀) − B₀). mult=1.0 forbids extra bbox."
+        ),
+    )
+    p.add_argument(
+        "--aug-per-class-bbox-cap-mult",
+        type=float,
+        default=0.0,
+        help=(
+            "If >0: per-class slack on train — class c may gain at most ceil(mult × n_c) − n_c bbox lines "
+            "from augmented files (n_c = baseline train count for that class before augment). "
+            "Combines with --aug-total-bbox-cap-mult when both are set (both must pass)."
+        ),
+    )
     p.add_argument("--min-diversity-iou", type=float, default=0.97, help="bbox similarity threshold (higher -> almost duplicate)")
     p.add_argument("--min-angle-delta", type=float, default=1.0, help="Minimum angle difference between rotate options")
     p.add_argument("--splits", type=str, default="train", help="CSV: train,val,test")
@@ -311,6 +341,115 @@ def _scaled_copies(base: int, image_weight: float, args) -> int:
     strength = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
     scaled = int(round(base * (1.0 + image_weight * strength)))
     return max(0, scaled)
+
+
+def count_yolo_bbox_lines(lbl_path: str) -> int:
+    """Number of bbox lines (non-empty) in a YOLO label file."""
+    if not os.path.isfile(lbl_path):
+        return 0
+    n = 0
+    with open(lbl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip().split():
+                n += 1
+    return n
+
+
+def _train_split_class_bbox_counts(items: list[dict[str, str]]) -> dict[int, int]:
+    """Per-class bbox line counts on train split before augment."""
+    ctr: dict[int, int] = defaultdict(int)
+    for it in items:
+        sp = str(it.get("split", "")).strip().lower()
+        if sp == "valid":
+            sp = "val"
+        if sp != "train":
+            continue
+        for lb in _parse_yolo_labels(it["lbl"]):
+            ctr[int(lb[0])] += 1
+    return dict(ctr)
+
+
+def _per_class_extra_bbox_allowances(baseline_counts: dict[int, int], mult: float) -> dict[int, int]:
+    """Extra bbox budget per class: max(0, ceil(mult × n_c) − n_c)."""
+    out: dict[int, int] = {}
+    for c, n in baseline_counts.items():
+        nn = max(0, int(n))
+        cap_lines = int(math.ceil(float(mult) * float(nn)))
+        out[int(c)] = max(0, cap_lines - nn)
+    return out
+
+
+def _yolo_label_class_counts(lbl_path: str) -> dict[int, int]:
+    ctr: dict[int, int] = defaultdict(int)
+    for lb in _parse_yolo_labels(lbl_path):
+        ctr[int(lb[0])] += 1
+    return dict(ctr)
+
+
+def _labels_tuple_class_counts(labels: list[tuple[int, float, float, float, float]]) -> dict[int, int]:
+    ctr: dict[int, int] = defaultdict(int)
+    for lb in labels:
+        ctr[int(lb[0])] += 1
+    return dict(ctr)
+
+
+def _train_split_bbox_sum(items: list[dict[str, str]]) -> int:
+    """Sum YOLO bbox lines on train split (budget baseline B₀ before augment)."""
+    total = 0
+    for it in items:
+        sp = str(it.get("split", "")).strip().lower()
+        if sp == "valid":
+            sp = "val"
+        if sp != "train":
+            continue
+        total += count_yolo_bbox_lines(it["lbl"])
+    return total
+
+
+def _effective_flip_prob_geo(args, image_weight: float) -> float:
+    """Higher probability for tail-heavy frames when aug-class-aware-geo + imbalance soft."""
+    base = float(getattr(args, "flip_prob", 0.5))
+    if not bool(getattr(args, "aug_class_aware_geo", False)):
+        return base
+    if str(getattr(args, "imbalance_mode", "soft")) != "soft":
+        return base
+    strength = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
+    w = max(1e-9, float(image_weight))
+    scale = math.sqrt(w) * max(0.35, min(2.5, strength))
+    p = base * scale
+    return float(min(1.0, max(0.02, p)))
+
+
+def _geo_photo_trigger(args, image_weight: float, rng: random.Random) -> bool:
+    """Whether to emit photometric/conveyor variant for this frame (class-aware)."""
+    if not bool(getattr(args, "aug_class_aware_geo", False)):
+        return True
+    if str(getattr(args, "imbalance_mode", "soft")) != "soft":
+        return True
+    strength = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
+    w = float(image_weight)
+    p = min(1.0, max(0.0, (w * strength) / (1.0 + strength)))
+    return bool(rng.random() < p)
+
+
+def _aug_extra_budget_allow(extra_used: int, delta: int, extra_budget: int | None) -> bool:
+    """Extra augment bbox must stay within extra_budget (cap_total − baseline B₀)."""
+    if extra_budget is None:
+        return True
+    return extra_used + delta <= extra_budget
+
+
+def sum_train_bbox_disk(dataset_root: str) -> int:
+    """Sum bbox lines across train/labels/*.txt under dataset_root."""
+    lbl_dir = os.path.join(dataset_root, "train", "labels")
+    if not os.path.isdir(lbl_dir):
+        return 0
+    s = 0
+    for name in os.listdir(lbl_dir):
+        if not name.endswith(".txt"):
+            continue
+        s += count_yolo_bbox_lines(os.path.join(lbl_dir, name))
+    return s
 
 
 def _to_xyxy(box: tuple[int, float, float, float, float], w: int, h: int) -> tuple[int, int, int, int]:
@@ -1138,6 +1277,20 @@ def main(argv=None):
     class_usage: dict[int, int] = {}
     class_freq = _collect_class_freq(items)
     alpha = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
+    train_baseline_bbox = _train_split_bbox_sum(items)
+    cap_mult = float(getattr(args, "aug_total_bbox_cap_mult", 0.0))
+    bbox_cap_total: int | None = None
+    if cap_mult > 0 and train_baseline_bbox > 0:
+        bbox_cap_total = int(math.ceil(cap_mult * train_baseline_bbox))
+    extra_budget: int | None = None
+    if bbox_cap_total is not None:
+        extra_budget = max(0, bbox_cap_total - train_baseline_bbox)
+    train_extra_bbox_used = 0
+    pc_mult = float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0))
+    per_class_extra_allowed: dict[int, int] | None = None
+    train_extra_per_class_used: dict[int, int] = defaultdict(int)
+    if pc_mult > 0:
+        per_class_extra_allowed = _per_class_extra_bbox_allowances(_train_split_class_bbox_counts(items), pc_mult)
     progress = tqdm(
         items,
         total=len(items),
@@ -1146,55 +1299,91 @@ def main(argv=None):
         disable=bool(args.no_legend),
     )
     for it in progress:
-            split = it["split"]
-            stem = it["stem"]
-            ext = it["ext"]
-            img_src = it["img"]
-            lbl_src = it["lbl"]
-            classes_in_image = _read_yolo_classes(lbl_src)
-            class_names = {names_by_id.get(i, f"id_{i}") for i in classes_in_image}
-            if allowed_classes and class_names.isdisjoint(allowed_classes):
-                continue
+        split = it["split"]
+        stem = it["stem"]
+        ext = it["ext"]
+        img_src = it["img"]
+        lbl_src = it["lbl"]
+        split_norm = SPLIT_ALIASES.get(str(split).strip().lower(), str(split).strip().lower())
+        classes_in_image = _read_yolo_classes(lbl_src)
+        class_names = {names_by_id.get(i, f"id_{i}") for i in classes_in_image}
+        if allowed_classes and class_names.isdisjoint(allowed_classes):
+            continue
+        bi = count_yolo_bbox_lines(lbl_src)
+        if not args.dry_run:
+            dst_img = os.path.join(out_dir, split, "images", f"{stem}{ext}")
+            dst_lbl = os.path.join(out_dir, split, "labels", f"{stem}.txt")
+            shutil.copy2(img_src, dst_img)
+            if os.path.isfile(lbl_src):
+                shutil.copy2(lbl_src, dst_lbl)
+            else:
+                Path(dst_lbl).write_text("", encoding="utf-8")
+        copied += 1
+        if split not in split_filter:
+            continue
+
+        image_weight = _image_soft_weight(classes_in_image, class_freq, alpha)
+        seen_labels: list[list[tuple[int, float, float, float, float]]] = []
+
+        def _budget_ok(delta_total: int, delta_per_cls: dict[int, int]) -> bool:
+            if split_norm != "train":
+                return True
+            if args.dry_run:
+                return True
+            if not _aug_extra_budget_allow(train_extra_bbox_used, delta_total, extra_budget):
+                return False
+            if per_class_extra_allowed is not None:
+                for c, k in delta_per_cls.items():
+                    if k <= 0:
+                        continue
+                    lim = int(per_class_extra_allowed.get(int(c), 0))
+                    if train_extra_per_class_used[int(c)] + k > lim:
+                        return False
+            return True
+
+        def _consume_extra(delta_total: int, delta_per_cls: dict[int, int]) -> None:
+            nonlocal train_extra_bbox_used
+            if split_norm != "train" or args.dry_run:
+                return
+            train_extra_bbox_used += delta_total
+            for c, k in delta_per_cls.items():
+                if k > 0:
+                    train_extra_per_class_used[int(c)] += k
+
+        crc_img = zlib.crc32(img_src.encode("utf-8"))
+        flip_rng = random.Random(int(args.seed) + crc_img)
+        flip_p = _effective_flip_prob_geo(args, image_weight)
+
+        flip_cls0 = _yolo_label_class_counts(lbl_src)
+        if args.enable_flip and flip_rng.random() <= flip_p and _budget_ok(bi, flip_cls0):
+            aug_stem = _aug_stem(stem, args, 1, "f")
             if not args.dry_run:
-                dst_img = os.path.join(out_dir, split, "images", f"{stem}{ext}")
-                dst_lbl = os.path.join(out_dir, split, "labels", f"{stem}.txt")
-                shutil.copy2(img_src, dst_img)
-                if os.path.isfile(lbl_src):
-                    shutil.copy2(lbl_src, dst_lbl)
-                else:
-                    Path(dst_lbl).write_text("", encoding="utf-8")
-            copied += 1
-            if split not in split_filter:
-                continue
-            image_weight = _image_soft_weight(classes_in_image, class_freq, alpha)
-            seen_labels: list[list[tuple[int, float, float, float, float]]] = []
+                out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
+                out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                new_labels = _apply_geom_aug(
+                    img_src,
+                    lbl_src,
+                    out_img,
+                    out_lbl,
+                    args,
+                    enable_flip=True,
+                    enable_photometric=False,
+                    enable_conveyor=False,
+                    enable_center_rotate=False,
+                )
+                seen_labels.append(new_labels)
+                if split_norm == "train":
+                    _consume_extra(count_yolo_bbox_lines(out_lbl), _labels_tuple_class_counts(new_labels))
+                augmented += 1
+            else:
+                augmented += 1
 
-            if args.enable_flip and random.Random(int(args.seed) + zlib.crc32(img_src.encode("utf-8"))).random() <= float(
-                getattr(args, "flip_prob", 0.5)
-            ):
-                aug_stem = _aug_stem(stem, args, 1, "f")
-                if not args.dry_run:
-                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
-                    new_labels = _apply_geom_aug(
-                        img_src,
-                        lbl_src,
-                        out_img,
-                        out_lbl,
-                        args,
-                        enable_flip=True,
-                        enable_photometric=False,
-                        enable_conveyor=False,
-                        enable_center_rotate=False,
-                    )
-                    seen_labels.append(new_labels)
-                    augmented += 1
-                else:
-                    augmented += 1
-
-            if args.enable_photometric or args.enable_conveyor:
-                geom_mode = "c" if args.enable_conveyor else "b"
-                aug_stem = _aug_stem(stem, args, 1, geom_mode)
+        photo_rng = random.Random(int(args.seed) + 901 + crc_img)
+        if (args.enable_photometric or args.enable_conveyor) and _geo_photo_trigger(args, image_weight, photo_rng):
+            geom_mode = "c" if args.enable_conveyor else "b"
+            aug_stem = _aug_stem(stem, args, 1, geom_mode)
+            photo_cls0 = _yolo_label_class_counts(lbl_src)
+            if _budget_ok(bi, photo_cls0):
                 if not args.dry_run:
                     out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
                     out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
@@ -1221,45 +1410,98 @@ def main(argv=None):
                             pass
                     else:
                         seen_labels.append(new_labels)
+                        if split_norm == "train":
+                            _consume_extra(count_yolo_bbox_lines(out_lbl), _labels_tuple_class_counts(new_labels))
                         augmented += 1
                 else:
                     augmented += 1
 
-            if args.enable_center_rotate:
-                rot_copies = _scaled_copies(int(getattr(args, "rotate_copies", 1)), image_weight, args)
-                path_seed = zlib.crc32(img_src.encode("utf-8")) & 0xFFFFFFFF
-                rng_rot = random.Random(int(args.seed) + 5003 + path_seed)
-                used_angles: list[float] = []
-                rot_saved = 0
-                tries_left = max(1, rot_copies * 8)
-                while rot_saved < rot_copies and tries_left > 0:
-                    tries_left -= 1
-                    angle = rng_rot.uniform(
-                        -float(getattr(args, "center_rotate_deg", 5.0)),
-                        float(getattr(args, "center_rotate_deg", 5.0)),
+        if args.enable_center_rotate:
+            rot_copies = _scaled_copies(int(getattr(args, "rotate_copies", 1)), image_weight, args)
+            path_seed = zlib.crc32(img_src.encode("utf-8")) & 0xFFFFFFFF
+            rng_rot = random.Random(int(args.seed) + 5003 + path_seed)
+            used_angles: list[float] = []
+            rot_saved = 0
+            tries_left = max(1, rot_copies * 8)
+            while rot_saved < rot_copies and tries_left > 0:
+                tries_left -= 1
+                angle = rng_rot.uniform(
+                    -float(getattr(args, "center_rotate_deg", 5.0)),
+                    float(getattr(args, "center_rotate_deg", 5.0)),
+                )
+                if any(abs(angle - prev) < float(getattr(args, "min_angle_delta", 1.0)) for prev in used_angles):
+                    continue
+                used_angles.append(angle)
+                aug_stem = _aug_stem(stem, args, rot_saved + 1, "r")
+                if not args.dry_run:
+                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
+                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                    new_labels = _apply_exact_center_rotate(
+                        img_src,
+                        lbl_src,
+                        out_img,
+                        out_lbl,
+                        args,
+                        angle,
+                        detector_roi=detector_roi_cache.get(img_src),
                     )
-                    if any(abs(angle - prev) < float(getattr(args, "min_angle_delta", 1.0)) for prev in used_angles):
+                    if new_labels is None:
+                        if args.placement_mode in ("bbox", "detector"):
+                            skipped_roi_missing += 1
                         continue
-                    used_angles.append(angle)
-                    aug_stem = _aug_stem(stem, args, rot_saved + 1, "r")
-                    if not args.dry_run:
-                        out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                        out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
-                        new_labels = _apply_exact_center_rotate(
-                            img_src,
-                            lbl_src,
-                            out_img,
-                            out_lbl,
-                            args,
-                            angle,
-                            detector_roi=detector_roi_cache.get(img_src),
-                        )
-                        if new_labels is None:
-                            if args.placement_mode in ("bbox", "detector"):
-                                skipped_roi_missing += 1
-                            continue
+                    rot_tot = len(new_labels)
+                    rot_cls = _labels_tuple_class_counts(new_labels)
+                    if not _budget_ok(rot_tot, rot_cls):
+                        try:
+                            os.remove(out_img)
+                            os.remove(out_lbl)
+                        except OSError:
+                            pass
+                        continue
+                    if any(
+                        _labels_signature_iou(prev, new_labels, 1000, 1000)
+                        >= float(getattr(args, "min_diversity_iou", 0.97))
+                        for prev in seen_labels
+                    ):
+                        try:
+                            os.remove(out_img)
+                            os.remove(out_lbl)
+                        except OSError:
+                            pass
+                        continue
+                    seen_labels.append(new_labels)
+                    if split_norm == "train":
+                        _consume_extra(rot_tot, rot_cls)
+                    rot_saved += 1
+                    augmented += 1
+                else:
+                    rot_saved += 1
+                    augmented += 1
+
+        if args.enable_bbox_copy:
+            cp_copies = _scaled_copies(int(getattr(args, "bbox_copy_copies", 1)), image_weight, args)
+            for i in range(cp_copies):
+                aug_stem = _aug_stem(stem, args, i + 1, "p")
+                if not args.dry_run:
+                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
+                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                    ok, new_labels = _apply_copy_paste(
+                        img_src,
+                        lbl_src,
+                        out_img,
+                        out_lbl,
+                        args,
+                        donors,
+                        class_usage,
+                        variant_seed=i + 1,
+                        class_freq=class_freq,
+                        detector_roi=detector_roi_cache.get(img_src),
+                    )
+                    if ok:
+                        delta_bb = len(new_labels)
                         if any(
-                            _labels_signature_iou(prev, new_labels, 1000, 1000) >= float(getattr(args, "min_diversity_iou", 0.97))
+                            _labels_signature_iou(prev, new_labels, 1000, 1000)
+                            >= float(getattr(args, "min_diversity_iou", 0.97))
                             for prev in seen_labels
                         ):
                             try:
@@ -1268,53 +1510,28 @@ def main(argv=None):
                             except OSError:
                                 pass
                             continue
+                        cp_cls = _labels_tuple_class_counts(new_labels)
+                        if not _budget_ok(delta_bb, cp_cls):
+                            try:
+                                os.remove(out_img)
+                                os.remove(out_lbl)
+                            except OSError:
+                                pass
+                            continue
                         seen_labels.append(new_labels)
-                    rot_saved += 1
-                    augmented += 1
-
-            if args.enable_bbox_copy:
-                cp_copies = _scaled_copies(int(getattr(args, "bbox_copy_copies", 1)), image_weight, args)
-                for i in range(cp_copies):
-                    aug_stem = _aug_stem(stem, args, i + 1, "p")
-                    if not args.dry_run:
-                        out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                        out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
-                        ok, new_labels = _apply_copy_paste(
-                            img_src,
-                            lbl_src,
-                            out_img,
-                            out_lbl,
-                            args,
-                            donors,
-                            class_usage,
-                            variant_seed=i + 1,
-                            class_freq=class_freq,
-                            detector_roi=detector_roi_cache.get(img_src),
-                        )
-                        if ok:
-                            if any(
-                                _labels_signature_iou(prev, new_labels, 1000, 1000)
-                                >= float(getattr(args, "min_diversity_iou", 0.97))
-                                for prev in seen_labels
-                            ):
-                                try:
-                                    os.remove(out_img)
-                                    os.remove(out_lbl)
-                                except OSError:
-                                    pass
-                                continue
-                            seen_labels.append(new_labels)
-                            augmented += 1
-                        elif args.placement_mode in ("bbox", "detector"):
-                            skipped_roi_missing += 1
-                    else:
+                        if split_norm == "train":
+                            _consume_extra(delta_bb, cp_cls)
                         augmented += 1
-            progress.set_postfix(
-                copied=copied,
-                augmented=augmented,
-                skipped_roi=skipped_roi_missing,
-                refresh=False,
-            )
+                    elif args.placement_mode in ("bbox", "detector"):
+                        skipped_roi_missing += 1
+                else:
+                    augmented += 1
+        progress.set_postfix(
+            copied=copied,
+            augmented=augmented,
+            skipped_roi=skipped_roi_missing,
+            refresh=False,
+        )
     progress.close()
 
     if args.dry_run:
@@ -1357,6 +1574,13 @@ def main(argv=None):
                 "placement_mode": args.placement_mode,
                 "imbalance_mode": str(getattr(args, "imbalance_mode", "soft")),
                 "imbalance_strength": float(getattr(args, "imbalance_strength", 1.0)),
+                "aug_class_aware_geo": bool(getattr(args, "aug_class_aware_geo", False)),
+                "aug_total_bbox_cap_mult": float(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
+                "aug_per_class_bbox_cap_mult": float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0)),
+                "train_bbox_baseline_before_augment": train_baseline_bbox,
+                "train_bbox_budget_cap": bbox_cap_total,
+                "train_bbox_extra_budget": extra_budget,
+                "train_bbox_extra_per_class_allowance": dict(per_class_extra_allowed or {}),
                 "splits": sorted(split_filter),
             }
         ],
@@ -1366,6 +1590,9 @@ def main(argv=None):
             "copied_images": copied,
             "augmented_images": augmented,
             "skipped_roi_missing": skipped_roi_missing,
+            "train_bbox_extra_used_after_augment": train_extra_bbox_used,
+            "train_bbox_extra_per_class_used_after_augment": dict(train_extra_per_class_used),
+            "train_bbox_total_on_disk": sum_train_bbox_disk(out_dir),
             "output_hash": out_hash,
         },
     )
