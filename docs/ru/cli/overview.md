@@ -72,7 +72,7 @@ smartrain model convert --help
 
 - `smartrain balance` поддерживает стратегии `weights`, `rfs`, `hybrid` и параметры их настройки.
 - `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default,hybrid-aug-tail-budget}` применяет готовые настройки под типовые сценарии.
-- Для `--strategy hybrid-aug` по умолчанию включён режим контролируемого роста с приоритетом хвоста: `--aug-total-bbox-cap-mult 1.10`, `--aug-budget-tail-first`, `--aug-budget-tail-gamma 1.0`, `--train-head-bbox-undersample median-factor`, `--train-head-bbox-cap-mult 5.0` (явные CLI-флаги имеют приоритет).
+- Для `--strategy hybrid-aug` по умолчанию включён режим контролируемого роста с приоритетом хвоста: `--aug-total-bbox-cap-mult 1.10`, `--aug-budget-tail-first`, `--aug-budget-tail-gamma 1.0`, `--train-head-bbox-undersample median-factor`, `--train-head-bbox-cap-mult 5.0`, а также консервативное прореживание head в eval-сплитах `--eval-head-bbox-undersample median-factor --eval-head-bbox-cap-mult 8.0 --eval-head-bbox-min-count 30 --eval-head-bbox-max-remove-frac 0.35` (явные CLI-флаги имеют приоритет).
 - `smartrain balance --eval-coverage` (по умолчанию включено) подстраивает пул train после балансировки: по возможности не оставлять пустыми `val`/`test` и донаполнять в eval отсутствующие классы из train, при этом один и тот же source-кадр не распределяется между разными сплитами; если уникальных кадров не хватает, `val/test` могут быть заполнены не полностью; отключение — `--no-eval-coverage`. В интерактивном `balance` тот же выбор задаётся вопросом.
 - `smartrain stats --balance-ready` выводит метрики дисбаланса и рекомендации для балансировщика.
 - `smartrain prune empty` удаляет пустые пары image/label в новый датасет `<dataset>_pruned`.

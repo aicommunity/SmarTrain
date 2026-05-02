@@ -68,6 +68,10 @@ BALANCE_PRESETS: dict[str, dict[str, object]] = {
         "aug_budget_tail_gamma": 1.0,
         "train_head_bbox_undersample": "median-factor",
         "train_head_bbox_cap_mult": 5.0,
+        "eval_head_bbox_undersample": "median-factor",
+        "eval_head_bbox_cap_mult": 8.0,
+        "eval_head_bbox_min_count": 30,
+        "eval_head_bbox_max_remove_frac": 0.35,
     },
 }
 
@@ -219,6 +223,30 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
         default=5.0,
         help="With --train-head-bbox-undersample median-factor: cap = floor(mult * median bbox count per class).",
     )
+    p.add_argument(
+        "--eval-head-bbox-undersample",
+        choices=("off", "median-factor"),
+        default="off",
+        help="Optional: conservative head-class bbox trimming on val/test splits after split coverage adjustments.",
+    )
+    p.add_argument(
+        "--eval-head-bbox-cap-mult",
+        type=float,
+        default=8.0,
+        help="With --eval-head-bbox-undersample median-factor: cap = floor(mult * median bbox count per class) per eval split.",
+    )
+    p.add_argument(
+        "--eval-head-bbox-min-count",
+        type=int,
+        default=30,
+        help="Do not trim eval classes with fewer than this bbox count in the split.",
+    )
+    p.add_argument(
+        "--eval-head-bbox-max-remove-frac",
+        type=float,
+        default=0.35,
+        help="Maximum removable fraction [0..1] per class in eval split when head trimming is enabled.",
+    )
     return p
 
 
@@ -356,6 +384,33 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
                 ).strip()
                 or str(getattr(args, "train_head_bbox_cap_mult", 5.0))
             )
+        args.eval_head_bbox_undersample = prompt_choice(
+            "Eval head bbox undersample (--eval-head-bbox-undersample)",
+            ["off", "median-factor"],
+            default=str(getattr(args, "eval_head_bbox_undersample", "median-factor")),
+        )
+        if str(args.eval_head_bbox_undersample) == "median-factor":
+            args.eval_head_bbox_cap_mult = float(
+                prompt_text(
+                    "Eval head bbox cap multiplier (--eval-head-bbox-cap-mult)",
+                    default=str(getattr(args, "eval_head_bbox_cap_mult", 8.0)),
+                ).strip()
+                or str(getattr(args, "eval_head_bbox_cap_mult", 8.0))
+            )
+            args.eval_head_bbox_min_count = int(
+                prompt_text(
+                    "Eval minimum class bbox before trimming (--eval-head-bbox-min-count)",
+                    default=str(getattr(args, "eval_head_bbox_min_count", 30)),
+                ).strip()
+                or str(getattr(args, "eval_head_bbox_min_count", 30))
+            )
+            args.eval_head_bbox_max_remove_frac = float(
+                prompt_text(
+                    "Eval maximum removable fraction (--eval-head-bbox-max-remove-frac)",
+                    default=str(getattr(args, "eval_head_bbox_max_remove_frac", 0.35)),
+                ).strip()
+                or str(getattr(args, "eval_head_bbox_max_remove_frac", 0.35))
+            )
         args.aug_enable_bbox_copy = prompt_yes_no(
             "Enable bbox copy-paste (--aug-enable-bbox-copy)?",
             default=bool(getattr(args, "aug_enable_bbox_copy", False)),
@@ -442,6 +497,10 @@ def _apply_preset_defaults(args: argparse.Namespace, provided_flags: set[str]) -
         "aug_budget_tail_gamma": "--aug-budget-tail-gamma",
         "train_head_bbox_undersample": "--train-head-bbox-undersample",
         "train_head_bbox_cap_mult": "--train-head-bbox-cap-mult",
+        "eval_head_bbox_undersample": "--eval-head-bbox-undersample",
+        "eval_head_bbox_cap_mult": "--eval-head-bbox-cap-mult",
+        "eval_head_bbox_min_count": "--eval-head-bbox-min-count",
+        "eval_head_bbox_max_remove_frac": "--eval-head-bbox-max-remove-frac",
     }
     for attr, value in preset_cfg.items():
         flag = flag_for_attr.get(attr)
@@ -462,6 +521,10 @@ def _apply_hybrid_aug_default_mode(args: argparse.Namespace, provided_flags: set
         "aug_budget_tail_gamma": {"--aug-budget-tail-gamma"},
         "train_head_bbox_undersample": {"--train-head-bbox-undersample"},
         "train_head_bbox_cap_mult": {"--train-head-bbox-cap-mult"},
+        "eval_head_bbox_undersample": {"--eval-head-bbox-undersample"},
+        "eval_head_bbox_cap_mult": {"--eval-head-bbox-cap-mult"},
+        "eval_head_bbox_min_count": {"--eval-head-bbox-min-count"},
+        "eval_head_bbox_max_remove_frac": {"--eval-head-bbox-max-remove-frac"},
     }
     for attr, value in mode_defaults.items():
         if attr == "strategy":
@@ -1168,6 +1231,147 @@ def _head_bbox_undersample_balanced_train(
     return new_train, stats, label_skips
 
 
+def _head_bbox_undersample_items(
+    items: list[tuple[str, str, str, list[str]]],
+    *,
+    id_to_name: dict[int, str],
+    cap_mult: float,
+    seed: int,
+    selected_classes: set[str],
+    min_class_count: int = 0,
+    max_remove_frac: float = 1.0,
+) -> tuple[list[tuple[str, str, str, list[str]]], dict[str, object], list[set[int]]]:
+    """Generalized bbox head-trimming with conservative guards for eval/train subsets."""
+    empty_skips = [set() for _ in items]
+    counts: Counter[str] = Counter()
+    for _s, _img, _lbl, cls_names in items:
+        for c in cls_names:
+            if selected_classes and c not in selected_classes:
+                continue
+            counts[c] += 1
+    if not counts:
+        return items, {}, empty_skips
+
+    vals_sorted = sorted(int(v) for v in counts.values())
+    median_bbox = int(_quantile(vals_sorted, 0.5))
+    if median_bbox <= 0:
+        return items, {}, empty_skips
+
+    cap_target = max(0, int(math.floor(float(cap_mult) * float(median_bbox))))
+    omit: dict[int, set[int]] = {}
+    min_cls = max(0, int(min_class_count))
+    max_frac = max(0.0, min(1.0, float(max_remove_frac)))
+
+    for cls_name, n_raw in counts.items():
+        before = int(n_raw)
+        if before <= cap_target or before <= min_cls:
+            continue
+        excess = before - cap_target
+        # Conservative guard: do not remove more than configured fraction.
+        excess = min(excess, int(math.floor(float(before) * max_frac)))
+        # Conservative guard: keep at least min_cls instances in split.
+        excess = min(excess, max(0, before - min_cls))
+        if excess <= 0:
+            continue
+
+        pool: list[tuple[int, int]] = []
+        for ti, (_sp, img, lbl, _cn) in enumerate(items):
+            lines = _read_label_text_lines(lbl)
+            for li, raw in enumerate(lines):
+                cid = _line_class_id(raw)
+                if cid is None:
+                    continue
+                name = id_to_name.get(cid, f"id_{cid}")
+                if selected_classes and name not in selected_classes:
+                    continue
+                if name != cls_name:
+                    continue
+                pool.append((ti, li))
+        pool.sort(key=lambda p: (Path(items[p[0]][1]).stem, p[0], p[1]))
+        if not pool:
+            continue
+        g_sz = min(32, max(1, len(pool)))
+        groups: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for ti, li in pool:
+            stem = Path(items[ti][1]).stem
+            h = int(hashlib.md5(f"{seed}:{stem}".encode()).hexdigest(), 16)
+            groups[h % g_sz].append((ti, li))
+        removed_pairs: set[tuple[int, int]] = set()
+        while len(removed_pairs) < excess and groups:
+            best_g: int | None = None
+            best_sz = -1
+            for g in sorted(groups.keys()):
+                sz = sum(1 for pair in groups[g] if pair not in removed_pairs)
+                if sz > best_sz:
+                    best_sz = sz
+                    best_g = g
+            if best_g is None or best_sz <= 0:
+                break
+            for pair in groups[best_g]:
+                if pair not in removed_pairs:
+                    removed_pairs.add(pair)
+                    ti, li = pair
+                    omit.setdefault(ti, set()).add(li)
+                    break
+
+    dropped_indices = set()
+    for ti, it in enumerate(items):
+        lines = _read_label_text_lines(it[2])
+        kept_is = [j for j in range(len(lines)) if j not in omit.get(ti, set())]
+        if not kept_is:
+            dropped_indices.add(ti)
+
+    after_counts: Counter[str] = Counter()
+    for ti, (_s, _img, lbl, _cn) in enumerate(items):
+        if ti in dropped_indices:
+            continue
+        lines = _read_label_text_lines(lbl)
+        kept_lines = [lines[j] for j in range(len(lines)) if j not in omit.get(ti, set())]
+        for raw in kept_lines:
+            cid = _line_class_id(raw)
+            if cid is None:
+                continue
+            name = id_to_name.get(cid, f"id_{cid}")
+            if selected_classes and name not in selected_classes:
+                continue
+            after_counts[name] += 1
+
+    per_class: dict[str, dict[str, int]] = {}
+    for cls_name, before in counts.items():
+        after = int(after_counts.get(cls_name, 0))
+        per_class[str(cls_name)] = {"before": int(before), "after": after, "removed": max(0, int(before) - after)}
+
+    new_items: list[tuple[str, str, str, list[str]]] = []
+    for ti, it in enumerate(items):
+        if ti in dropped_indices:
+            continue
+        lines = _read_label_text_lines(it[2])
+        kept_lines = [lines[j] for j in range(len(lines)) if j not in omit.get(ti, set())]
+        new_cls: list[str] = []
+        for raw in kept_lines:
+            cid = _line_class_id(raw)
+            if cid is None:
+                continue
+            new_cls.append(id_to_name.get(cid, f"id_{cid}"))
+        new_items.append((it[0], it[1], it[2], new_cls))
+
+    stats: dict[str, object] = {
+        "mode": "median-factor",
+        "cap_mult": float(cap_mult),
+        "median_bbox_per_class": median_bbox,
+        "cap_target": cap_target,
+        "min_class_count": min_cls,
+        "max_remove_frac": max_frac,
+        "per_class": per_class,
+    }
+    label_skips: list[set[int]] = []
+    for ti, _it in enumerate(items):
+        if ti in dropped_indices:
+            continue
+        label_skips.append(set(omit.get(ti, set())))
+    return new_items, stats, label_skips
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = build_balance_arg_parser()
@@ -1391,6 +1595,47 @@ def main(argv=None):
             selected_classes=selected_classes,
         )
         train_label_skips = skips_list
+    eval_head_bbox_stats: dict[str, object] | None = None
+    passthrough_label_skips: list[set[int]] | None = None
+    if getattr(args, "eval_head_bbox_undersample", "off") == "median-factor":
+        grouped_eval: dict[str, list[tuple[str, str, str, list[str]]]] = defaultdict(list)
+        for it in passthrough_items:
+            grouped_eval[it[0]].append(it)
+        new_passthrough: list[tuple[str, str, str, list[str]]] = []
+        new_passthrough_skips: list[set[int]] = []
+        split_stats: dict[str, dict[str, object]] = {}
+        for split in ("val", "test"):
+            split_items = grouped_eval.get(split, [])
+            if not split_items:
+                continue
+            split_new, split_stat, split_skips = _head_bbox_undersample_items(
+                split_items,
+                id_to_name=id_to_name,
+                cap_mult=float(getattr(args, "eval_head_bbox_cap_mult", 8.0)),
+                seed=int(args.seed) + (17 if split == "val" else 29),
+                selected_classes=selected_classes,
+                min_class_count=int(getattr(args, "eval_head_bbox_min_count", 30)),
+                max_remove_frac=float(getattr(args, "eval_head_bbox_max_remove_frac", 0.35)),
+            )
+            if split_stat:
+                split_stats[split] = split_stat
+            new_passthrough.extend(split_new)
+            new_passthrough_skips.extend(split_skips)
+        for split in sorted(grouped_eval.keys()):
+            if split in ("val", "test"):
+                continue
+            split_items = grouped_eval.get(split, [])
+            new_passthrough.extend(split_items)
+            new_passthrough_skips.extend([set() for _ in split_items])
+        passthrough_items = new_passthrough
+        passthrough_label_skips = new_passthrough_skips
+        eval_head_bbox_stats = {
+            "mode": "median-factor",
+            "cap_mult": float(getattr(args, "eval_head_bbox_cap_mult", 8.0)),
+            "min_class_count": int(getattr(args, "eval_head_bbox_min_count", 30)),
+            "max_remove_frac": float(getattr(args, "eval_head_bbox_max_remove_frac", 0.35)),
+            "splits": split_stats,
+        }
 
     if args.dry_run:
         print(f"[OK] dry-run: strategy={args.strategy}, train_in={len(train_items)}, train_out={len(balanced_train)}, output={out_name}")
@@ -1435,7 +1680,7 @@ def main(argv=None):
             idx += 1
 
     _copy_items(balanced_train, suffix="bal", label_skips=train_label_skips)
-    _copy_items(passthrough_items)
+    _copy_items(passthrough_items, label_skips=passthrough_label_skips)
 
     names = [k for k, _ in sorted(class_map.items(), key=lambda kv: kv[1])]
     Path(out_dir, "data.yaml").write_text(
@@ -1544,6 +1789,10 @@ def main(argv=None):
                     "keep_hybrid_intermediate": bool(getattr(args, "keep_hybrid_intermediate", False)),
                     "train_head_bbox_undersample": getattr(args, "train_head_bbox_undersample", "off"),
                     "train_head_bbox_cap_mult": float(getattr(args, "train_head_bbox_cap_mult", 5.0)),
+                    "eval_head_bbox_undersample": getattr(args, "eval_head_bbox_undersample", "off"),
+                    "eval_head_bbox_cap_mult": float(getattr(args, "eval_head_bbox_cap_mult", 8.0)),
+                    "eval_head_bbox_min_count": int(getattr(args, "eval_head_bbox_min_count", 30)),
+                    "eval_head_bbox_max_remove_frac": float(getattr(args, "eval_head_bbox_max_remove_frac", 0.35)),
                     "hybrid_intermediate_name": hybrid_intermediate_name_for_manifest,
                     "output_dataset_name": out_name,
                     "post_augment": (
@@ -1562,6 +1811,7 @@ def main(argv=None):
                         else None
                     ),
                     "head_bbox_undersample": head_bbox_stats,
+                    "eval_head_bbox_undersample_stats": eval_head_bbox_stats,
                 },
                 ensure_ascii=False,
                 indent=2,

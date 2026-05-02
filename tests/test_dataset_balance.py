@@ -223,6 +223,10 @@ def test_balance_interactive_hybrid_aug_uses_mode_defaults_in_replay(
             "",             # aug-budget-tail-gamma (default 1.0)
             "",             # train-head-bbox-undersample (default median-factor)
             "",             # train-head-bbox-cap-mult (default 5.0)
+            "",             # eval-head-bbox-undersample (default median-factor)
+            "",             # eval-head-bbox-cap-mult (default 8.0)
+            "",             # eval-head-bbox-min-count (default 30)
+            "",             # eval-head-bbox-max-remove-frac (default 0.35)
             "",             # aug-enable-bbox-copy (default no)
             "",             # keep-hybrid-intermediate (default no)
             "y",            # dry-run
@@ -238,6 +242,10 @@ def test_balance_interactive_hybrid_aug_uses_mode_defaults_in_replay(
     assert "--aug-total-bbox-cap-mult 1.1" in captured
     assert "--train-head-bbox-undersample median-factor" in captured
     assert "--train-head-bbox-cap-mult 5.0" in captured
+    assert "--eval-head-bbox-undersample median-factor" in captured
+    assert "--eval-head-bbox-cap-mult 8.0" in captured
+    assert "--eval-head-bbox-min-count 30" in captured
+    assert "--eval-head-bbox-max-remove-frac 0.35" in captured
     assert "--aug-budget-tail-first" in captured
     assert "--aug-budget-tail-gamma 1.0" in captured
 
@@ -585,7 +593,9 @@ def test_hybrid_aug_creates_final_with_post_augment_manifest(tmp_path: Path) -> 
     assert manifest["post_augment"]["budget_tail_first"] is True
     assert manifest["post_augment"]["budget_tail_gamma"] == 1.0
     assert manifest["train_head_bbox_undersample"] == "median-factor"
+    assert manifest["eval_head_bbox_undersample"] == "median-factor"
     assert manifest["head_bbox_undersample"] is not None
+    assert manifest["eval_head_bbox_undersample_stats"] is not None
     assert isinstance(manifest["post_augment"].get("train_bbox_sum_before_augment"), int)
     assert isinstance(manifest["post_augment"].get("train_bbox_sum_after_augment"), int)
     argv_sum = manifest["post_augment"].get("argv_summary") or []
