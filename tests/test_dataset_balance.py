@@ -198,6 +198,50 @@ def test_balance_interactive_defaults_enable_manifest_creation(
     assert manifest["emit_train_config"] is True
 
 
+def test_balance_interactive_hybrid_aug_uses_mode_defaults_in_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_workspace(tmp_path)
+    answers = iter(
+        [
+            "ds_b",         # Dataset
+            "hybrid-aug",   # Strategy
+            "",             # Output
+            "1.0",          # target
+            "3.0",          # max-ratio
+            "all",          # classes mode
+            "",             # emit-balance-report (default yes)
+            "",             # emit-train-config (default yes)
+            "",             # eval-coverage (default yes)
+            "",             # eval-min-class-count (default 0)
+            "",             # aug-preset (default geo-photo)
+            "",             # aug-class-aware-geo (default yes)
+            "",             # aug-total-bbox-cap-mult (default 1.1)
+            "",             # aug-budget-tail-first (default yes)
+            "",             # aug-budget-tail-gamma (default 1.0)
+            "",             # train-head-bbox-undersample (default median-factor)
+            "",             # train-head-bbox-cap-mult (default 5.0)
+            "",             # aug-enable-bbox-copy (default no)
+            "",             # keep-hybrid-intermediate (default no)
+            "y",            # dry-run
+        ]
+    )
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    monkeypatch.setattr("smartrain.dataset_balance.prompt", lambda *a, **k: next(answers))
+    monkeypatch.setattr("smartrain.cli_prompts.prompt", lambda *a, **k: next(answers))
+    balance_main([])
+    captured = capsys.readouterr().out
+    assert "--strategy hybrid-aug" in captured
+    assert "--aug-total-bbox-cap-mult 1.1" in captured
+    assert "--train-head-bbox-undersample median-factor" in captured
+    assert "--train-head-bbox-cap-mult 5.0" in captured
+    assert "--aug-budget-tail-first" in captured
+    assert "--aug-budget-tail-gamma 1.0" in captured
+
+
 def test_balance_ensures_non_empty_val_and_test_when_possible(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
     balance_main(
@@ -537,6 +581,11 @@ def test_hybrid_aug_creates_final_with_post_augment_manifest(tmp_path: Path) -> 
     assert manifest["post_augment"] is not None
     assert manifest["post_augment"]["preset"] == "geo-photo"
     assert manifest["post_augment"]["class_aware_geo"] is True
+    assert manifest["post_augment"]["total_bbox_cap_mult"] == 1.1
+    assert manifest["post_augment"]["budget_tail_first"] is True
+    assert manifest["post_augment"]["budget_tail_gamma"] == 1.0
+    assert manifest["train_head_bbox_undersample"] == "median-factor"
+    assert manifest["head_bbox_undersample"] is not None
     assert isinstance(manifest["post_augment"].get("train_bbox_sum_before_augment"), int)
     assert isinstance(manifest["post_augment"].get("train_bbox_sum_after_augment"), int)
     argv_sum = manifest["post_augment"].get("argv_summary") or []

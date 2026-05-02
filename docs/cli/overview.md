@@ -70,7 +70,8 @@ Model release highlights:
 Balance and stats additions:
 
 - `smartrain balance` supports `weights`, `rfs`, and `hybrid` strategies, plus weight/rfs tuning flags.
-- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` applies tuned defaults for common scenarios.
+- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default,hybrid-aug-tail-budget}` applies tuned defaults for common scenarios.
+- For `--strategy hybrid-aug`, a constrained-growth tail-first mode is enabled by default: `--aug-total-bbox-cap-mult 1.10`, `--aug-budget-tail-first`, `--aug-budget-tail-gamma 1.0`, `--train-head-bbox-undersample median-factor`, `--train-head-bbox-cap-mult 5.0` (override with explicit flags).
 - `smartrain balance --eval-coverage` (default on) adjusts the balanced train pool so `val`/`test` stay non-empty when possible and missing classes in eval splits are filled from train; `--no-eval-coverage` disables this. Interactive `balance` prompts for the same choice.
 - `smartrain stats --balance-ready` prints imbalance metrics and balancing recommendations.
 - `smartrain prune empty` removes empty image/label pairs into a new `<dataset>_pruned` dataset.

@@ -88,6 +88,7 @@ pytest
   - `--preset weights-safe` for conservative balancing
   - `--preset rfs-aggressive` for stronger tail upsampling
   - `--preset hybrid-default` as a general default
+  - `--preset hybrid-aug-tail-budget` for constrained-growth hybrid-aug with tail-first budgeting and head trim
 - `smartrain balance` eval splits: `--eval-coverage` is on by default (keeps `val`/`test` non-empty when possible and improves class coverage there); use `--no-eval-coverage` to disable. The interactive wizard asks for this option.
 - For `hash --validate`: `0` for a match, `1` for a mismatch, `2` for an error.
 - By default, the workspace queue uses `queue.txt` and `tmp/status.txt`.

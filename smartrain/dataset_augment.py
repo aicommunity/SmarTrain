@@ -128,14 +128,20 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        "--aug-per-class-bbox-cap-mult",
-        type=float,
-        default=0.0,
+        "--aug-budget-tail-first",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
-            "If >0: per-class slack on train — class c may gain at most ceil(mult × n_c) − n_c bbox lines "
-            "from augmented files (n_c = baseline train count for that class before augment). "
-            "Combines with --aug-total-bbox-cap-mult when both are set (both must pass)."
+            "With --aug-total-bbox-cap-mult >0: process train images in split by descending tail priority "
+            "(max_c (n_max/n_c)^γ over classes on the frame) so scarce classes consume slack first. "
+            "Disable with --no-aug-budget-tail-first (dataset iteration order)."
         ),
+    )
+    p.add_argument(
+        "--aug-budget-tail-gamma",
+        type=float,
+        default=1.0,
+        help="Exponent γ for tail priority when --aug-budget-tail-first (default 1.0).",
     )
     p.add_argument("--min-diversity-iou", type=float, default=0.97, help="bbox similarity threshold (higher -> almost duplicate)")
     p.add_argument("--min-angle-delta", type=float, default=1.0, help="Minimum angle difference between rotate options")
@@ -369,30 +375,6 @@ def _train_split_class_bbox_counts(items: list[dict[str, str]]) -> dict[int, int
     return dict(ctr)
 
 
-def _per_class_extra_bbox_allowances(baseline_counts: dict[int, int], mult: float) -> dict[int, int]:
-    """Extra bbox budget per class: max(0, ceil(mult × n_c) − n_c)."""
-    out: dict[int, int] = {}
-    for c, n in baseline_counts.items():
-        nn = max(0, int(n))
-        cap_lines = int(math.ceil(float(mult) * float(nn)))
-        out[int(c)] = max(0, cap_lines - nn)
-    return out
-
-
-def _yolo_label_class_counts(lbl_path: str) -> dict[int, int]:
-    ctr: dict[int, int] = defaultdict(int)
-    for lb in _parse_yolo_labels(lbl_path):
-        ctr[int(lb[0])] += 1
-    return dict(ctr)
-
-
-def _labels_tuple_class_counts(labels: list[tuple[int, float, float, float, float]]) -> dict[int, int]:
-    ctr: dict[int, int] = defaultdict(int)
-    for lb in labels:
-        ctr[int(lb[0])] += 1
-    return dict(ctr)
-
-
 def _train_split_bbox_sum(items: list[dict[str, str]]) -> int:
     """Sum YOLO bbox lines on train split (budget baseline B₀ before augment)."""
     total = 0
@@ -404,6 +386,48 @@ def _train_split_bbox_sum(items: list[dict[str, str]]) -> int:
             continue
         total += count_yolo_bbox_lines(it["lbl"])
     return total
+
+
+def _image_tail_priority_score(lbl_path: str, cls_counts: dict[int, int], gamma: float) -> float:
+    """Plan MVP: max over classes in image of (n_max / n_c)^γ (higher => more tail / process first)."""
+    if not cls_counts:
+        return 0.0
+    n_max = max(int(v) for v in cls_counts.values())
+    if n_max <= 0:
+        return 0.0
+    g = float(gamma)
+    best = 0.0
+    for c in _read_yolo_classes(lbl_path):
+        nc = max(1, int(cls_counts.get(int(c), 0)))
+        s = (float(n_max) / float(nc)) ** g
+        if s > best:
+            best = s
+    return float(best)
+
+
+def _reorder_items_for_bbox_budget(
+    items: list[dict[str, str]],
+    *,
+    split_filter: set[str],
+    cls_counts: dict[int, int],
+    extra_budget: int | None,
+    tail_first: bool,
+    gamma: float,
+) -> list[dict[str, str]]:
+    if extra_budget is None or not tail_first:
+        return items
+
+    def sort_key(i: int) -> tuple[int, float, int]:
+        it = items[i]
+        split = it["split"]
+        split_norm = SPLIT_ALIASES.get(str(split).strip().lower(), str(split).strip().lower())
+        if split_norm != "train" or split not in split_filter:
+            return (1, 0.0, i)
+        pr = _image_tail_priority_score(it["lbl"], cls_counts, gamma)
+        return (0, -pr, i)
+
+    order = sorted(range(len(items)), key=sort_key)
+    return [items[j] for j in order]
 
 
 def _effective_flip_prob_geo(args, image_weight: float) -> float:
@@ -1286,11 +1310,15 @@ def main(argv=None):
     if bbox_cap_total is not None:
         extra_budget = max(0, bbox_cap_total - train_baseline_bbox)
     train_extra_bbox_used = 0
-    pc_mult = float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0))
-    per_class_extra_allowed: dict[int, int] | None = None
-    train_extra_per_class_used: dict[int, int] = defaultdict(int)
-    if pc_mult > 0:
-        per_class_extra_allowed = _per_class_extra_bbox_allowances(_train_split_class_bbox_counts(items), pc_mult)
+    train_cls_counts = _train_split_class_bbox_counts(items)
+    items = _reorder_items_for_bbox_budget(
+        items,
+        split_filter=split_filter,
+        cls_counts=train_cls_counts,
+        extra_budget=extra_budget,
+        tail_first=bool(getattr(args, "aug_budget_tail_first", True)),
+        gamma=float(getattr(args, "aug_budget_tail_gamma", 1.0)),
+    )
     progress = tqdm(
         items,
         total=len(items),
@@ -1325,37 +1353,24 @@ def main(argv=None):
         image_weight = _image_soft_weight(classes_in_image, class_freq, alpha)
         seen_labels: list[list[tuple[int, float, float, float, float]]] = []
 
-        def _budget_ok(delta_total: int, delta_per_cls: dict[int, int]) -> bool:
+        def _budget_ok(delta_total: int) -> bool:
             if split_norm != "train":
                 return True
             if args.dry_run:
                 return True
-            if not _aug_extra_budget_allow(train_extra_bbox_used, delta_total, extra_budget):
-                return False
-            if per_class_extra_allowed is not None:
-                for c, k in delta_per_cls.items():
-                    if k <= 0:
-                        continue
-                    lim = int(per_class_extra_allowed.get(int(c), 0))
-                    if train_extra_per_class_used[int(c)] + k > lim:
-                        return False
-            return True
+            return _aug_extra_budget_allow(train_extra_bbox_used, delta_total, extra_budget)
 
-        def _consume_extra(delta_total: int, delta_per_cls: dict[int, int]) -> None:
+        def _consume_extra(delta_total: int) -> None:
             nonlocal train_extra_bbox_used
             if split_norm != "train" or args.dry_run:
                 return
             train_extra_bbox_used += delta_total
-            for c, k in delta_per_cls.items():
-                if k > 0:
-                    train_extra_per_class_used[int(c)] += k
 
         crc_img = zlib.crc32(img_src.encode("utf-8"))
         flip_rng = random.Random(int(args.seed) + crc_img)
         flip_p = _effective_flip_prob_geo(args, image_weight)
 
-        flip_cls0 = _yolo_label_class_counts(lbl_src)
-        if args.enable_flip and flip_rng.random() <= flip_p and _budget_ok(bi, flip_cls0):
+        if args.enable_flip and flip_rng.random() <= flip_p and _budget_ok(bi):
             aug_stem = _aug_stem(stem, args, 1, "f")
             if not args.dry_run:
                 out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
@@ -1373,7 +1388,7 @@ def main(argv=None):
                 )
                 seen_labels.append(new_labels)
                 if split_norm == "train":
-                    _consume_extra(count_yolo_bbox_lines(out_lbl), _labels_tuple_class_counts(new_labels))
+                    _consume_extra(count_yolo_bbox_lines(out_lbl))
                 augmented += 1
             else:
                 augmented += 1
@@ -1382,8 +1397,7 @@ def main(argv=None):
         if (args.enable_photometric or args.enable_conveyor) and _geo_photo_trigger(args, image_weight, photo_rng):
             geom_mode = "c" if args.enable_conveyor else "b"
             aug_stem = _aug_stem(stem, args, 1, geom_mode)
-            photo_cls0 = _yolo_label_class_counts(lbl_src)
-            if _budget_ok(bi, photo_cls0):
+            if _budget_ok(bi):
                 if not args.dry_run:
                     out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
                     out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
@@ -1411,7 +1425,7 @@ def main(argv=None):
                     else:
                         seen_labels.append(new_labels)
                         if split_norm == "train":
-                            _consume_extra(count_yolo_bbox_lines(out_lbl), _labels_tuple_class_counts(new_labels))
+                            _consume_extra(count_yolo_bbox_lines(out_lbl))
                         augmented += 1
                 else:
                     augmented += 1
@@ -1450,8 +1464,7 @@ def main(argv=None):
                             skipped_roi_missing += 1
                         continue
                     rot_tot = len(new_labels)
-                    rot_cls = _labels_tuple_class_counts(new_labels)
-                    if not _budget_ok(rot_tot, rot_cls):
+                    if not _budget_ok(rot_tot):
                         try:
                             os.remove(out_img)
                             os.remove(out_lbl)
@@ -1471,7 +1484,7 @@ def main(argv=None):
                         continue
                     seen_labels.append(new_labels)
                     if split_norm == "train":
-                        _consume_extra(rot_tot, rot_cls)
+                        _consume_extra(rot_tot)
                     rot_saved += 1
                     augmented += 1
                 else:
@@ -1510,8 +1523,7 @@ def main(argv=None):
                             except OSError:
                                 pass
                             continue
-                        cp_cls = _labels_tuple_class_counts(new_labels)
-                        if not _budget_ok(delta_bb, cp_cls):
+                        if not _budget_ok(delta_bb):
                             try:
                                 os.remove(out_img)
                                 os.remove(out_lbl)
@@ -1520,7 +1532,7 @@ def main(argv=None):
                             continue
                         seen_labels.append(new_labels)
                         if split_norm == "train":
-                            _consume_extra(delta_bb, cp_cls)
+                            _consume_extra(delta_bb)
                         augmented += 1
                     elif args.placement_mode in ("bbox", "detector"):
                         skipped_roi_missing += 1
@@ -1576,11 +1588,11 @@ def main(argv=None):
                 "imbalance_strength": float(getattr(args, "imbalance_strength", 1.0)),
                 "aug_class_aware_geo": bool(getattr(args, "aug_class_aware_geo", False)),
                 "aug_total_bbox_cap_mult": float(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
-                "aug_per_class_bbox_cap_mult": float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0)),
+                "aug_budget_tail_first": bool(getattr(args, "aug_budget_tail_first", True)),
+                "aug_budget_tail_gamma": float(getattr(args, "aug_budget_tail_gamma", 1.0)),
                 "train_bbox_baseline_before_augment": train_baseline_bbox,
                 "train_bbox_budget_cap": bbox_cap_total,
                 "train_bbox_extra_budget": extra_budget,
-                "train_bbox_extra_per_class_allowance": dict(per_class_extra_allowed or {}),
                 "splits": sorted(split_filter),
             }
         ],
@@ -1591,7 +1603,6 @@ def main(argv=None):
             "augmented_images": augmented,
             "skipped_roi_missing": skipped_roi_missing,
             "train_bbox_extra_used_after_augment": train_extra_bbox_used,
-            "train_bbox_extra_per_class_used_after_augment": dict(train_extra_per_class_used),
             "train_bbox_total_on_disk": sum_train_bbox_disk(out_dir),
             "output_hash": out_hash,
         },

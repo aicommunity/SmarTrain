@@ -59,6 +59,16 @@ BALANCE_PRESETS: dict[str, dict[str, object]] = {
         "target": 1.3,
         "max_repeat_per_image": 5,
     },
+    # Default for hybrid-aug: constrained growth + tail-first budget + head trim.
+    "hybrid-aug-tail-budget": {
+        "strategy": "hybrid-aug",
+        "aug_class_aware_geo": True,
+        "aug_total_bbox_cap_mult": 1.10,
+        "aug_budget_tail_first": True,
+        "aug_budget_tail_gamma": 1.0,
+        "train_head_bbox_undersample": "median-factor",
+        "train_head_bbox_cap_mult": 5.0,
+    },
 }
 
 
@@ -74,7 +84,8 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
             "Preset with tuned balancing parameters. "
             "weights-safe: conservative; "
             "rfs-aggressive: stronger tail upsampling; "
-            "hybrid-default: recommended general-purpose balance."
+            "hybrid-default: recommended general-purpose balance; "
+            "hybrid-aug-tail-budget: constrained-growth hybrid-aug with tail-first budget."
         ),
     )
     p.add_argument(
@@ -185,13 +196,16 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
         help="For hybrid-aug: if >0, cap train bbox total after augment (see augment --aug-total-bbox-cap-mult).",
     )
     p.add_argument(
-        "--aug-per-class-bbox-cap-mult",
+        "--aug-budget-tail-first",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="For hybrid-aug with bbox cap: pass --aug-budget-tail-first / --no-aug-budget-tail-first to augment.",
+    )
+    p.add_argument(
+        "--aug-budget-tail-gamma",
         type=float,
-        default=0.0,
-        help=(
-            "For hybrid-aug: if >0, per-class cap on extra bbox from augment "
-            "(see augment --aug-per-class-bbox-cap-mult)."
-        ),
+        default=1.0,
+        help="For hybrid-aug with bbox cap: tail-priority exponent passed to augment (default 1.0).",
     )
     p.add_argument(
         "--train-head-bbox-undersample",
@@ -260,6 +274,9 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
         ["copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid", "hybrid-aug"],
         default=args.strategy,
     )
+    if args.strategy == "hybrid-aug":
+        # Apply product defaults in interactive mode as a starting point.
+        _apply_hybrid_aug_default_mode(args, set())
     args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
     args.target = float(
         prompt_text("train size multiplier (--target)", default=str(args.target)).strip() or str(args.target)
@@ -290,6 +307,63 @@ def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) ->
         "Auto-fix eval split coverage (--eval-coverage)?",
         default=bool(args.eval_coverage),
     )
+    if args.strategy == "hybrid-aug":
+        args.eval_min_class_count = int(
+            prompt_text(
+                "Eval minimum bbox per class (--eval-min-class-count, 0=off)",
+                default=str(getattr(args, "eval_min_class_count", 0)),
+            ).strip()
+            or str(getattr(args, "eval_min_class_count", 0))
+        )
+        args.aug_preset = prompt_choice(
+            "Augment preset (--aug-preset)",
+            ["geo-photo", "conveyor-lite"],
+            default=str(getattr(args, "aug_preset", "geo-photo")),
+        )
+        args.aug_class_aware_geo = prompt_yes_no(
+            "Class-aware geo/photo augment (--aug-class-aware-geo)?",
+            default=bool(getattr(args, "aug_class_aware_geo", True)),
+        )
+        args.aug_total_bbox_cap_mult = float(
+            prompt_text(
+                "Total train bbox cap multiplier (--aug-total-bbox-cap-mult, 0=off)",
+                default=str(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
+            ).strip()
+            or str(getattr(args, "aug_total_bbox_cap_mult", 0.0))
+        )
+        if float(args.aug_total_bbox_cap_mult) > 0:
+            args.aug_budget_tail_first = prompt_yes_no(
+                "Tail-first budget ordering (--aug-budget-tail-first)?",
+                default=bool(getattr(args, "aug_budget_tail_first", True)),
+            )
+            args.aug_budget_tail_gamma = float(
+                prompt_text(
+                    "Tail priority gamma (--aug-budget-tail-gamma)",
+                    default=str(getattr(args, "aug_budget_tail_gamma", 1.0)),
+                ).strip()
+                or str(getattr(args, "aug_budget_tail_gamma", 1.0))
+            )
+        args.train_head_bbox_undersample = prompt_choice(
+            "Head bbox undersample (--train-head-bbox-undersample)",
+            ["off", "median-factor"],
+            default=str(getattr(args, "train_head_bbox_undersample", "off")),
+        )
+        if str(args.train_head_bbox_undersample) == "median-factor":
+            args.train_head_bbox_cap_mult = float(
+                prompt_text(
+                    "Head bbox cap multiplier (--train-head-bbox-cap-mult)",
+                    default=str(getattr(args, "train_head_bbox_cap_mult", 5.0)),
+                ).strip()
+                or str(getattr(args, "train_head_bbox_cap_mult", 5.0))
+            )
+        args.aug_enable_bbox_copy = prompt_yes_no(
+            "Enable bbox copy-paste (--aug-enable-bbox-copy)?",
+            default=bool(getattr(args, "aug_enable_bbox_copy", False)),
+        )
+        args.keep_hybrid_intermediate = prompt_yes_no(
+            "Keep intermediate hybrid dataset (--keep-hybrid-intermediate)?",
+            default=bool(getattr(args, "keep_hybrid_intermediate", False)),
+        )
     args.dry_run = prompt_yes_no("Do dry-run (--dry-run)?", default=bool(args.dry_run))
 
 
@@ -362,10 +436,38 @@ def _apply_preset_defaults(args: argparse.Namespace, provided_flags: set[str]) -
         "rfs_power": "--rfs-power",
         "target": "--target",
         "max_repeat_per_image": "--max-repeat-per-image",
+        "aug_class_aware_geo": "--aug-class-aware-geo",
+        "aug_total_bbox_cap_mult": "--aug-total-bbox-cap-mult",
+        "aug_budget_tail_first": "--aug-budget-tail-first",
+        "aug_budget_tail_gamma": "--aug-budget-tail-gamma",
+        "train_head_bbox_undersample": "--train-head-bbox-undersample",
+        "train_head_bbox_cap_mult": "--train-head-bbox-cap-mult",
     }
     for attr, value in preset_cfg.items():
         flag = flag_for_attr.get(attr)
         if flag and flag in provided_flags:
+            continue
+        setattr(args, attr, value)
+
+
+def _apply_hybrid_aug_default_mode(args: argparse.Namespace, provided_flags: set[str]) -> None:
+    """Default mode for hybrid-aug unless explicitly overridden by CLI flags."""
+    if str(getattr(args, "strategy", "")) != "hybrid-aug":
+        return
+    mode_defaults: dict[str, object] = BALANCE_PRESETS["hybrid-aug-tail-budget"]
+    flags_by_attr: dict[str, set[str]] = {
+        "aug_class_aware_geo": {"--aug-class-aware-geo", "--no-aug-class-aware-geo"},
+        "aug_total_bbox_cap_mult": {"--aug-total-bbox-cap-mult"},
+        "aug_budget_tail_first": {"--aug-budget-tail-first", "--no-aug-budget-tail-first"},
+        "aug_budget_tail_gamma": {"--aug-budget-tail-gamma"},
+        "train_head_bbox_undersample": {"--train-head-bbox-undersample"},
+        "train_head_bbox_cap_mult": {"--train-head-bbox-cap-mult"},
+    }
+    for attr, value in mode_defaults.items():
+        if attr == "strategy":
+            continue
+        flags = flags_by_attr.get(attr, set())
+        if flags and any(f in provided_flags for f in flags):
             continue
         setattr(args, attr, value)
 
@@ -880,7 +982,8 @@ def _build_hybrid_aug_augment_argv(
     aug_enable_bbox_copy: bool,
     aug_class_aware_geo: bool,
     aug_total_bbox_cap_mult: float,
-    aug_per_class_bbox_cap_mult: float,
+    aug_budget_tail_first: bool,
+    aug_budget_tail_gamma: float,
 ) -> list[str]:
     argv = [
         "--workspace",
@@ -913,8 +1016,11 @@ def _build_hybrid_aug_augment_argv(
         argv.append("--no-aug-class-aware-geo")
     if float(aug_total_bbox_cap_mult) > 0:
         argv.extend(["--aug-total-bbox-cap-mult", str(float(aug_total_bbox_cap_mult))])
-    if float(aug_per_class_bbox_cap_mult) > 0:
-        argv.extend(["--aug-per-class-bbox-cap-mult", str(float(aug_per_class_bbox_cap_mult))])
+        if aug_budget_tail_first:
+            argv.append("--aug-budget-tail-first")
+        else:
+            argv.append("--no-aug-budget-tail-first")
+        argv.extend(["--aug-budget-tail-gamma", str(float(aug_budget_tail_gamma))])
     return argv
 
 
@@ -1070,7 +1176,9 @@ def main(argv=None):
     if args.dataset is None and not interactive_allowed:
         print("[ERROR] Incomplete arguments: specify --dataset.")
         return
-    _apply_preset_defaults(args, _provided_flags(argv))
+    provided_flags = _provided_flags(argv)
+    _apply_preset_defaults(args, provided_flags)
+    _apply_hybrid_aug_default_mode(args, provided_flags)
     interactive_used = False
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
@@ -1363,7 +1471,8 @@ def main(argv=None):
             aug_enable_bbox_copy=bool(getattr(args, "aug_enable_bbox_copy", False)),
             aug_class_aware_geo=bool(getattr(args, "aug_class_aware_geo", True)),
             aug_total_bbox_cap_mult=float(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
-            aug_per_class_bbox_cap_mult=float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0)),
+            aug_budget_tail_first=bool(getattr(args, "aug_budget_tail_first", True)),
+            aug_budget_tail_gamma=float(getattr(args, "aug_budget_tail_gamma", 1.0)),
         )
         pred_final = next_dataset_name(layout.datasets, final_base)
         bbox_before_augment = int(sum_train_bbox_disk(out_dir))
@@ -1443,7 +1552,8 @@ def main(argv=None):
                             "aug_enable_bbox_copy": bool(getattr(args, "aug_enable_bbox_copy", False)),
                             "class_aware_geo": bool(getattr(args, "aug_class_aware_geo", True)),
                             "total_bbox_cap_mult": float(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
-                            "per_class_bbox_cap_mult": float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0)),
+                            "budget_tail_first": bool(getattr(args, "aug_budget_tail_first", True)),
+                            "budget_tail_gamma": float(getattr(args, "aug_budget_tail_gamma", 1.0)),
                             "train_bbox_sum_before_augment": bbox_before_augment,
                             "train_bbox_sum_after_augment": bbox_after_augment,
                             "argv_summary": aug_argv_list or [],
