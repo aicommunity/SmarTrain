@@ -1627,6 +1627,13 @@ def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str,
 
 
 def _finalize_train_kwargs(ultralytics_cfg: dict[str, Any], data_yaml: str, model_dir: str) -> dict[str, Any]:
+    """Force Ultralytics train directory under ``model_dir``.
+
+    ``name="train-ultralytics"`` and ``exist_ok=False`` mean a second training run in the same
+    ``model_dir`` gets a new sibling folder (e.g. ``train-ultralytics-2``) instead of overwriting
+    the first — Ultralytics avoids clobbering artifacts. Unusual absolute paths under the run
+    (e.g. segments like ``*.tar.gz``) usually come from workspace/dataset layout, not from this call.
+    """
     k = copy.deepcopy(ultralytics_cfg)
     overwritten: list[str] = []
     if "data" in k:
@@ -1883,7 +1890,6 @@ def train_yolo(
     training_start_time = datetime.now()
     _validate_dataset_dir(dataset_path)
 
-    data_yaml = _build_runtime_data_yaml(dataset_path, target_dir, stage="train")
     dataset_name = os.path.basename(os.path.normpath(dataset_path))
 
     model_version = _normalize_model_spec(
@@ -1930,6 +1936,7 @@ def train_yolo(
     else:
         os.makedirs(model_dir, exist_ok=True)
 
+    data_yaml = _build_runtime_data_yaml(dataset_path, model_dir, stage="train")
     train_kw = _finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
     if non_interactive or mpl_rt.force_ultralytics_plots_false:
         train_kw.setdefault("plots", False)

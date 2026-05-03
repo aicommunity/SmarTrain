@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import os
 import re
@@ -16,7 +17,7 @@ from smartrain.mpl_runtime import configure_matplotlib_before_ultralytics, ensur
 configure_matplotlib_before_ultralytics()
 from ultralytics import YOLO
 
-from smartrain.metrics_reader import results_csv_path
+from smartrain.metrics_reader import results_csv_path, training_args_yaml_path
 from smartrain.model_test_service import has_complete_test_artifacts, missing_test_artifacts
 from smartrain.run_artifacts import (
     canonical_run_model_path,
@@ -80,30 +81,143 @@ def _is_results_csv_readable(path: str) -> bool:
         return False
 
 
-def resolve_last_checkpoint_path(run_dir: str) -> str | None:
-    """Ultralytics weights under ``train-ultralytics`` / ``train-ultralytics-*`` or legacy ``train``."""
+def _warn_if_archive_like_run_path(run_dir: str) -> None:
+    for part in Path(run_dir).parts:
+        pl = part.lower()
+        if pl.endswith(".tar.gz") or pl.endswith(".zip") or pl.endswith(".tar"):
+            print(
+                f"[WARN] Run directory path contains archive-like segment {part!r}. "
+                "Confirm SMART_TRAIN_WORKSPACE is a normal directory (not a cloud virtual path)."
+            )
+            return
+
+
+def _load_ckpt_dict(path: str) -> dict[str, Any] | None:
+    try:
+        import torch
+    except ImportError:
+        return None
+    try:
+        try:
+            obj = torch.load(path, map_location="cpu", weights_only=False)
+        except TypeError:
+            obj = torch.load(path, map_location="cpu")
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def is_ultralytics_train_resume_checkpoint(path: str) -> bool:
+    """Match Ultralytics ``model.train(resume=True)`` gate: epoch >= 0 and optimizer state present."""
+    ckpt = _load_ckpt_dict(path)
+    if not ckpt:
+        return False
+    try:
+        epoch_ok = int(ckpt.get("epoch", -1)) >= 0
+    except (TypeError, ValueError):
+        epoch_ok = False
+    return epoch_ok and ckpt.get("optimizer") is not None
+
+
+def collect_last_pt_paths(run_dir: str) -> list[Path]:
+    """All ``last.pt`` paths under the run (any Ultralytics train subfolder)."""
     rd = Path(run_dir).resolve()
-    ordered = [
+    out: list[Path] = []
+    seen: set[str] = set()
+    for p in (
         rd / "train-ultralytics" / "weights" / "last.pt",
         rd / "train" / "weights" / "last.pt",
-    ]
-    for p in ordered:
+    ):
         if p.is_file():
+            key = str(p.resolve())
+            if key not in seen:
+                seen.add(key)
+                out.append(p)
+    globs = sorted(
+        (p for p in rd.glob("train-ultralytics*/weights/last.pt") if p.is_file()),
+        key=lambda x: x.stat().st_mtime,
+        reverse=True,
+    )
+    for p in globs:
+        key = str(p.resolve())
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+    return out
+
+
+def resolve_last_checkpoint_path(run_dir: str) -> str | None:
+    """Return a ``last.pt`` that can resume training (optimizer + epoch), or ``None``.
+
+    Post-training checkpoints often have the optimizer stripped; those must not be used with
+    ``resume=True`` (Ultralytics would start a new run with wrong defaults). See
+    ``collect_last_pt_paths`` for every on-disk ``last.pt``.
+    """
+    for p in collect_last_pt_paths(run_dir):
+        if is_ultralytics_train_resume_checkpoint(str(p)):
             return str(p)
-    globs = [p for p in rd.glob("train-ultralytics*/weights/last.pt") if p.is_file()]
-    if not globs:
+    return None
+
+
+def _read_epochs_from_args_yaml(path: str) -> int | None:
+    if not os.path.isfile(path):
         return None
-    return str(max(globs, key=lambda p: p.stat().st_mtime))
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            return None
+        e = data.get("epochs")
+        if e is None:
+            return None
+        return int(e)
+    except Exception:
+        return None
+
+
+def _last_epoch_from_results_csv(path: str) -> int | None:
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        if not rows:
+            return None
+        last_row = rows[-1]
+        for key in ("epoch", "\ufeffepoch"):
+            if key in last_row and str(last_row.get(key) or "").strip() != "":
+                return int(float(last_row[key]))
+        if reader.fieldnames:
+            first = reader.fieldnames[0]
+            if first in last_row and str(last_row.get(first) or "").strip() != "":
+                return int(float(last_row[first]))
+    except Exception:
+        return None
+    return None
+
+
+def _results_reached_configured_epochs(results_csv: str, args_yaml: str) -> bool:
+    target = _read_epochs_from_args_yaml(args_yaml)
+    if target is None or target < 1:
+        return False
+    last_ep = _last_epoch_from_results_csv(results_csv)
+    if last_ep is None:
+        return False
+    return last_ep >= target
 
 
 def diagnose_run(run_dir: str) -> RunDiagnosis:
     rd = os.path.abspath(run_dir)
+    _warn_if_archive_like_run_path(rd)
     ensure_run_layout(rd)
-    args_yaml = os.path.join(rd, "train-ultralytics", "args.yaml")
-    if not os.path.isfile(args_yaml):
-        args_yaml = os.path.join(rd, "train", "args.yaml")
-    results_csv = results_csv_path(rd) or os.path.join(rd, "train", "results.csv")
-    last_pt_path = resolve_last_checkpoint_path(rd)
+    results_real = results_csv_path(rd)
+    results_csv = results_real if results_real is not None else os.path.join(rd, "train", "results.csv")
+    args_yaml = training_args_yaml_path(rd, results_real)
+    last_pt_candidates = collect_last_pt_paths(rd)
+    any_last_pt = len(last_pt_candidates) > 0
+    resumable_last = resolve_last_checkpoint_path(rd)
+    has_last_pt = resumable_last is not None
     best_pt = canonical_run_model_path(rd, ".pt")
     legacy_best = resolve_run_model_with_legacy_fallback(rd)
     metadata_path = os.path.join(rd, "training_metadata.json")
@@ -111,7 +225,6 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
 
     has_args_yaml = os.path.isfile(args_yaml)
     has_results_csv = os.path.isfile(results_csv)
-    has_last_pt = last_pt_path is not None
     has_best_pt = os.path.isfile(best_pt) or (legacy_best is not None and legacy_best.is_file())
     has_metadata = os.path.isfile(metadata_path)
     has_test_dir = os.path.isdir(test_dir)
@@ -126,6 +239,8 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
             reasons.append("results_csv_unreadable")
     if has_last_pt:
         reasons.append("last_checkpoint_present")
+    if any_last_pt and not has_last_pt:
+        reasons.append("last_pt_present_but_stripped")
     if has_best_pt:
         reasons.append("best_checkpoint_present")
     if has_metadata:
@@ -137,6 +252,34 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
 
     meta = _read_json(metadata_path) if has_metadata else None
     training_success = _training_success_from_metadata(meta)
+
+    if (
+        not has_metadata
+        and not has_last_pt
+        and has_best_pt
+        and has_results_csv
+        and _is_results_csv_readable(results_csv)
+        and not pt_test_complete
+        and any_last_pt
+        and has_args_yaml
+        and _results_reached_configured_epochs(results_csv, args_yaml)
+    ):
+        reasons.append("finalize_stripped_no_metadata_epochs_ok")
+        reasons.append("missing_test_artifacts")
+        for item in missing_test_artifacts(rd, "pt"):
+            reasons.append(f"missing_{item}")
+        return RunDiagnosis(
+            run_dir=rd,
+            status=RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
+            reasons=reasons,
+            has_args_yaml=has_args_yaml,
+            has_results_csv=has_results_csv,
+            has_last_pt=has_last_pt,
+            has_best_pt=has_best_pt,
+            has_metadata=has_metadata,
+            has_test_dir=has_test_dir,
+        )
+
     if (
         has_metadata
         and training_success is not True
@@ -270,9 +413,8 @@ def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
 
 
 def _load_train_args_yaml(run_dir: str) -> dict[str, Any]:
-    args_yaml = os.path.join(run_dir, "train-ultralytics", "args.yaml")
-    if not os.path.isfile(args_yaml):
-        args_yaml = os.path.join(run_dir, "train", "args.yaml")
+    rc = results_csv_path(run_dir)
+    args_yaml = training_args_yaml_path(run_dir, rc)
     if not os.path.isfile(args_yaml):
         return {}
     try:
@@ -369,6 +511,75 @@ def _is_dataset_dir(path: str | None) -> bool:
     return os.path.isdir(p) and os.path.isfile(os.path.join(p, "data.yaml"))
 
 
+def _try_resolve_dataset_path_string(candidate: str, workspace_root: str | None = None) -> str | None:
+    """Resolve dataset root from directory path, dataset yaml, or legacy runtime yaml pointer."""
+    if not candidate:
+        return None
+    p = os.path.abspath(os.path.expanduser(candidate))
+    ws = os.path.abspath(os.path.expanduser(workspace_root)) if workspace_root else None
+
+    if os.path.isfile(p) and os.path.basename(p) in {"_runtime_data_train.yaml", "_runtime_data_test.yaml"}:
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                runtime_payload = yaml.safe_load(f) or {}
+        except Exception:
+            runtime_payload = {}
+        if isinstance(runtime_payload, dict):
+            runtime_path = runtime_payload.get("path")
+            if isinstance(runtime_path, str) and runtime_path.strip():
+                direct = _try_resolve_dataset_path_string(runtime_path.strip(), workspace_root=ws)
+                if direct:
+                    return direct
+                if ws:
+                    ds_name = os.path.basename(os.path.normpath(runtime_path.strip()))
+                    fallback = os.path.join(WorkspaceLayout(ws).work_datasets, ds_name)
+                    if _is_dataset_dir(fallback):
+                        return os.path.abspath(fallback)
+
+    if os.path.isfile(p) and str(p).lower().endswith((".yaml", ".yml")):
+        root = str(Path(p).resolve().parent)
+        if _is_dataset_dir(root):
+            return os.path.abspath(root)
+        return None
+    if _is_dataset_dir(p):
+        return p
+    return None
+
+
+def _resolve_dataset_from_train_args_yaml(run_dir: str, workspace_root: str) -> str | None:
+    """Use Ultralytics ``args.yaml`` ``data:`` field (written at train time) when metadata/runtime lack paths."""
+    payload = _load_train_args_yaml(run_dir)
+    raw = payload.get("data")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    data_str = raw.strip()
+    ws = os.path.abspath(workspace_root)
+    rd = os.path.abspath(run_dir)
+    rc = results_csv_path(run_dir)
+    args_yaml = training_args_yaml_path(run_dir, rc)
+    args_dir = os.path.dirname(args_yaml) if os.path.isfile(args_yaml) else None
+
+    candidates: list[str] = []
+    if os.path.isabs(data_str):
+        candidates.append(data_str)
+    else:
+        if args_dir:
+            candidates.append(os.path.normpath(os.path.join(args_dir, data_str)))
+        candidates.append(os.path.normpath(os.path.join(ws, data_str)))
+        candidates.append(os.path.normpath(os.path.join(rd, data_str)))
+
+    seen: set[str] = set()
+    for c in candidates:
+        key = os.path.abspath(os.path.expanduser(c))
+        if key in seen:
+            continue
+        seen.add(key)
+        out = _try_resolve_dataset_path_string(key, workspace_root=ws)
+        if out:
+            return out
+    return None
+
+
 def resolve_dataset_path_for_resume(run_dir: str, workspace_root: str) -> str | None:
     rd = os.path.abspath(run_dir)
     ws = os.path.abspath(workspace_root)
@@ -405,6 +616,10 @@ def resolve_dataset_path_for_resume(run_dir: str, workspace_root: str) -> str | 
                 candidate = os.path.join(ws, ds_rel)
                 if _is_dataset_dir(candidate):
                     return os.path.abspath(candidate)
+
+    resolved_from_args = _resolve_dataset_from_train_args_yaml(rd, ws)
+    if resolved_from_args:
+        return resolved_from_args
 
     dataset_name = os.path.basename(os.path.dirname(rd.rstrip(os.sep)))
     if dataset_name:

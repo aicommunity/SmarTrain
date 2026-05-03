@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -314,11 +315,58 @@ def read_metrics_by_format_for_split_artifacts(
 
 
 def results_csv_path(run_dir: str) -> str | None:
-    p = os.path.join(run_dir, "train-ultralytics", "results.csv")
-    if os.path.exists(p):
-        return p
-    legacy = os.path.join(run_dir, "train", "results.csv")
-    return legacy if os.path.exists(legacy) else None
+    """Resolve ``results.csv`` for a run, including sibling ``train-ultralytics*`` save dirs.
+
+    Ultralytics increments the train folder name (e.g. ``train-ultralytics-2``) when
+    ``exist_ok=False`` and the default name already exists; metrics then live under that
+    folder, not only ``train-ultralytics/results.csv``.
+    """
+    root = Path(run_dir).expanduser().resolve()
+    candidates: list[Path] = []
+    for rel in ("train-ultralytics/results.csv", "train/results.csv"):
+        p = root.joinpath(*rel.split("/"))
+        if p.is_file():
+            candidates.append(p)
+    try:
+        for p in root.glob("train-ultralytics*/results.csv"):
+            if p.is_file():
+                candidates.append(p)
+    except OSError:
+        pass
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for p in candidates:
+        key = str(p.resolve())
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+    if not unique:
+        return None
+    return str(max(unique, key=lambda x: x.stat().st_mtime))
+
+
+def training_args_yaml_path(run_dir: str, results_csv: str | None = None) -> str:
+    """Prefer ``args.yaml`` next to ``results.csv`` (same Ultralytics ``save_dir``), then canonical paths."""
+    root = Path(run_dir).expanduser().resolve()
+    if results_csv:
+        paired = Path(results_csv).expanduser().resolve().parent / "args.yaml"
+        if paired.is_file():
+            return str(paired)
+    for rel in ("train-ultralytics/args.yaml", "train/args.yaml"):
+        p = root.joinpath(*rel.split("/"))
+        if p.is_file():
+            return str(p)
+    try:
+        globs = sorted(
+            (p for p in root.glob("train-ultralytics*/args.yaml") if p.is_file()),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
+        if globs:
+            return str(globs[0])
+    except OSError:
+        pass
+    return str(root / "train-ultralytics" / "args.yaml")
 
 
 def pick_map_column(df: pd.DataFrame) -> str | None:

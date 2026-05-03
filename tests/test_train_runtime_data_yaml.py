@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from smartrain import model_training_module as mtm
@@ -71,4 +72,39 @@ def test_runtime_data_yaml_cvat_style_shared_images_bucket(tmp_path: Path) -> No
     assert cfg["train"] == "images"
     assert cfg["val"] == "images"
     assert cfg["test"] == "images"
+
+
+def test_train_yolo_builds_runtime_yaml_under_run_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ds = tmp_path / "datasets" / "ds"
+    ds.mkdir(parents=True)
+    (ds / "data.yaml").write_text("path: .\ntrain: train/images\nval: val/images\n", encoding="utf-8")
+
+    target_dir = tmp_path / "runs"
+    target_dir.mkdir(parents=True)
+    called: dict[str, str] = {}
+
+    monkeypatch.setattr(mtm, "_normalize_model_spec", lambda *args, **kwargs: "yolo11n.pt")
+    monkeypatch.setattr(mtm, "calculate_dataset_hash", lambda *_args, **_kwargs: "hash")
+    monkeypatch.setattr(mtm, "_build_run_name", lambda *args, **kwargs: "run-id")
+
+    def _fake_build_runtime_yaml(dataset_path: str, run_dir: str, *, stage: str) -> str:
+        called["dataset_path"] = dataset_path
+        called["run_dir"] = run_dir
+        called["stage"] = stage
+        return "/tmp/runtime_data_train.yaml"
+
+    monkeypatch.setattr(mtm, "_build_runtime_data_yaml", _fake_build_runtime_yaml)
+
+    def _stop_after_finalize(*_args, **_kwargs):
+        raise RuntimeError("stop-after-runtime-yaml")
+
+    monkeypatch.setattr(mtm, "_finalize_train_kwargs", _stop_after_finalize)
+
+    with pytest.raises(RuntimeError, match="stop-after-runtime-yaml"):
+        mtm.train_yolo(str(ds), str(target_dir), non_interactive=True)
+
+    expected_run_dir = target_dir / ds.name / "run-id"
+    assert called["dataset_path"] == str(ds)
+    assert called["run_dir"] == str(expected_run_dir)
+    assert called["stage"] == "train"
 
