@@ -1173,6 +1173,89 @@ def _insights_from_manifest(manifest: dict[str, Any], lang: str) -> list[str]:
     return lines
 
 
+def _missing_reasons_from_manifest(manifest: dict[str, Any], lang: str) -> list[str]:
+    lines: list[str] = []
+    report_root = str(manifest.get("_report_root") or "")
+    if not report_root:
+        return lines
+    fmt = manifest.get("format_comparison") if isinstance(manifest.get("format_comparison"), dict) else {}
+    perf_rel = str((fmt or {}).get("perf_test_csv") or "")
+    if perf_rel:
+        perf_csv = os.path.join(report_root, perf_rel)
+        if os.path.isfile(perf_csv):
+            try:
+                pdf = pd.read_csv(perf_csv)
+                if "performance_reason" in pdf.columns:
+                    perf_reasons = pdf["performance_reason"].astype(str).str.strip()
+                    perf_reasons = perf_reasons.where((perf_reasons != "") & (perf_reasons != "nan"), np.nan)
+                    reasons = (
+                        perf_reasons
+                        .dropna()
+                        .value_counts()
+                    )
+                    if len(reasons) > 0:
+                        top = ", ".join(f"{k}={int(v)}" for k, v in reasons.head(5).items())
+                        lines.append(
+                            ("- Performance причины: " if lang == "ru" else "- Performance reasons: ") + top
+                        )
+            except Exception:
+                pass
+    conf = manifest.get("confidence_recommendations") if isinstance(manifest.get("confidence_recommendations"), dict) else {}
+    reason_counts: dict[str, int] = {}
+    for rel in conf.values():
+        cpath = os.path.join(report_root, str(rel))
+        if not os.path.isfile(cpath):
+            continue
+        try:
+            cdf = pd.read_csv(cpath)
+            if "reason" not in cdf.columns:
+                continue
+            conf_reasons = cdf["reason"].astype(str).str.strip()
+            conf_reasons = conf_reasons.where((conf_reasons != "") & (conf_reasons != "nan"), np.nan)
+            for reason, cnt in (
+                conf_reasons.dropna().value_counts().items()
+            ):
+                reason_counts[str(reason)] = reason_counts.get(str(reason), 0) + int(cnt)
+        except Exception:
+            continue
+    if reason_counts:
+        top = ", ".join(f"{k}={v}" for k, v in sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:5])
+        lines.append(
+            ("- Confidence причины: " if lang == "ru" else "- Confidence reasons: ") + top
+        )
+    failures = manifest.get("artifact_failures") if isinstance(manifest.get("artifact_failures"), list) else []
+    if failures:
+        by_reason: dict[str, int] = {}
+        for item in failures:
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("reason_code") or "unknown").strip() or "unknown"
+            by_reason[code] = by_reason.get(code, 0) + 1
+        if by_reason:
+            top = ", ".join(f"{k}={v}" for k, v in sorted(by_reason.items(), key=lambda x: x[1], reverse=True)[:8])
+            lines.append(("- Диагностические причины: " if lang == "ru" else "- Diagnostic reasons: ") + top)
+    return lines
+
+
+def _discover_missing_pr_images(report_root: str, manifest_images: list[str]) -> list[str]:
+    discovered: list[str] = []
+    known = {str(x) for x in manifest_images}
+    pr_root = os.path.join(report_root, "artifacts", "pr")
+    if not os.path.isdir(pr_root):
+        return discovered
+    for root, _dirs, files in os.walk(pr_root):
+        for name in files:
+            if not name.lower().endswith(".png"):
+                continue
+            abs_path = os.path.join(root, name)
+            rel = os.path.relpath(abs_path, report_root)
+            if rel in known:
+                continue
+            if "per_class" in rel or "pr_all_classes" in name:
+                discovered.append(rel)
+    return sorted(discovered)
+
+
 def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     is_ru = lang == "ru"
     tpl = _read_template(lang)
@@ -1202,6 +1285,26 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append(f"- {('Рабочая папка' if is_ru else 'Workspace root')}: `{workspace_root}`")
     lines.append("")
     report_root = manifest.get("_report_root") or ""
+    images = list(manifest.get("images") or [])
+    if report_root:
+        fallback_pr_images = _discover_missing_pr_images(report_root, images)
+        if fallback_pr_images:
+            images.extend(fallback_pr_images)
+            images = sorted(set(images))
+            failures = manifest.setdefault("artifact_failures", [])
+            if isinstance(failures, list):
+                for rel in fallback_pr_images:
+                    failures.append(
+                        {
+                            "stage": "report",
+                            "status": "recovered",
+                            "reason_code": "manifest_missed_artifact",
+                            "reason_detail": rel,
+                            "run_dir": "",
+                            "format": "",
+                            "split": "",
+                        }
+                    )
     lines.append(_sec("context"))
     lines.append("")
     if tpl.get("INTRO"):
@@ -1510,7 +1613,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     table_no += 1
             except Exception:
                 pass
-    images = manifest.get("images") or []
+    # images list may be extended by fallback PR image discovery.
     lines.append(_sec("format_compare"))
     lines.append("")
     format_idx = section_index["format_compare"]
@@ -1664,6 +1767,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append("")
     if tpl.get("SPEED"):
         lines.extend(_justify_block(tpl["SPEED"]))
+    has_combined_per_class = any(
+        isinstance(rel, str) and "artifacts/pr/per_class_combined/" in rel and rel.endswith(".png")
+        for rel in images
+    )
     for rel in images:
         if isinstance(rel, str):
             if not any(k in rel for k in ("compare", "inference", "speed_quality")):
@@ -2005,7 +2112,6 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     lines.append("")
                     pr_sum = _abbrev_df(pr_sum, abbreviations)
                     lines.extend(_md_table_from_df(pr_sum, abbreviations, limit=None, is_ru=is_ru))
-                    lines.append("| class_name | best_run | best_ap | worst_run | worst_ap | ap_gap |")
                     lines.append("")
                     lines.append(
                         ("_Источник данных:_ " if is_ru else "_Data source:_ ")
@@ -2013,8 +2119,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     )
                     lines.extend(_center_close())
                     table_no += 1
-            except Exception:
-                pass
+            except Exception as e:
+                lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
     conf_map = (
         manifest.get("confidence_recommendations")
         if isinstance(manifest.get("confidence_recommendations"), dict)
@@ -2073,8 +2179,6 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {full_title}**")
                 lines.append("")
                 lines.extend(_md_table_from_df(local_df, abbreviations, limit=None, is_ru=is_ru))
-                lines.append("| split | recommended_conf | target_metric | precision | recall | f1 | status |")
-                lines.append("| class_name | split | class_id | recommended_conf | target_metric | precision | recall | f1 | status |")
                 lines.append("")
                 lines.append(
                     ("_Источник данных:_ " if is_ru else "_Data source:_ ")
@@ -2082,17 +2186,25 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 )
                 lines.extend(_center_close())
                 table_no += 1
-        except Exception:
-            pass
+        except Exception as e:
+            lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
     for rel in images:
-        if isinstance(rel, str) and rel.endswith("artifacts/pr/pr_all_classes.png"):
+        if isinstance(rel, str) and ("artifacts/pr/" in rel and rel.endswith("pr_all_classes.png")):
             lines.extend(_center_open())
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
             lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
             figure_no += 1
             lines.append("")
             lines.extend(_center_close())
-        if isinstance(rel, str) and "artifacts/pr/per_class/" in rel and rel.endswith(".png"):
+        # Prefer unified per-class set when present; otherwise keep legacy
+        # per-class rendering for backward compatibility.
+        if isinstance(rel, str) and (
+            ("artifacts/pr/per_class_combined/" in rel and rel.endswith(".png"))
+            or (
+                (not has_combined_per_class)
+                and ("artifacts/pr/" in rel and "per_class/" in rel and rel.endswith(".png"))
+            )
+        ):
             lines.extend(_center_open())
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
             lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
@@ -2226,6 +2338,12 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         lines.extend(_justify_block(tpl["CONCLUSION"]))
     else:
         lines.append("- " + ("Рекомендуется использовать выводы выше для выбора trade-off качества/скорости." if is_ru else "Use the findings above to select the quality/speed trade-off."))
+    missing_lines = _missing_reasons_from_manifest(manifest, lang)
+    if missing_lines:
+        lines.append("")
+        lines.append("### " + ("Пропуски и причины" if is_ru else "Missing values and reasons"))
+        lines.append("")
+        lines.extend(missing_lines)
     lines.append("")
     lines.append(_sec("exec"))
     lines.append("")

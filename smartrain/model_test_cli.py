@@ -53,7 +53,13 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--model-name", type=str, default=None, help="Promoted model directory name from workspace/models.")
     p.add_argument("--weights", type=str, default=None, help="Explicit weights path (.pt/.onnx/.engine/.trt).")
     p.add_argument("--data", type=str, default=None, help="Dataset directory or path to data.yaml.")
-    p.add_argument("--formats", type=str, default="pt", help="Comma-separated formats: pt,onnx,engine,trt")
+    p.add_argument(
+        "--formats",
+        type=str,
+        default=None,
+        help="Comma-separated formats: pt,onnx,engine,trt. "
+        "Default: pt in batch (-y); interactive + --run: all export formats found under the run unless you pass this flag.",
+    )
     p.add_argument("--missing-only", action="store_true", help="Only build artifacts that are currently missing.")
     p.add_argument("--force", action="store_true", help="Force re-test even if matching artifacts already exist.")
     p.add_argument("--imgsz", type=int, default=None, help="Validation image size.")
@@ -133,6 +139,46 @@ def _discover_run_artifact_candidates(root_dir: str, formats: list[str] | None =
     return ordered
 
 
+def _prompt_export_backends_interactive(root_dir: str, candidates: dict[str, list[str]]) -> list[str]:
+    """Interactive step: choose pt/onnx/engine/trt. Always lists all four; marks missing weights."""
+    entries: list[tuple[str, str, bool]] = []
+    for fmt in SUPPORTED_TEST_FORMATS:
+        paths = [p for p in (candidates.get(fmt) or []) if p and os.path.isfile(str(p))]
+        if paths:
+            try:
+                rel = os.path.relpath(paths[0], root_dir)
+            except ValueError:
+                rel = str(paths[0])
+            extra = f" (+{len(paths) - 1} more)" if len(paths) > 1 else ""
+            entries.append((fmt, f"{fmt} — {rel}{extra}", True))
+        else:
+            entries.append((fmt, f"{fmt} — no artifact under this run", False))
+
+    options = [e[1] for e in entries]
+    print_numbered_options("test backends", options)
+    default_nums = [str(i + 1) for i, e in enumerate(entries) if e[2]]
+    default = ",".join(default_nums) if default_nums else "1"
+    raw = prompt_text("Select backends to test (comma-separated numbers)", default=default).strip() or default
+    out: list[str] = []
+    seen: set[str] = set()
+    for token in [t.strip() for t in raw.split(",") if t.strip()]:
+        if not token.isdigit():
+            continue
+        i = int(token)
+        if i < 1 or i > len(entries):
+            continue
+        fmt, _line, ok = entries[i - 1]
+        if not ok:
+            print(f"[WARN] {fmt}: skipped — no weights file for this format in the run.")
+            continue
+        if fmt not in seen:
+            seen.add(fmt)
+            out.append(fmt)
+    if not out:
+        out = [e[0] for e in entries if e[2]]
+    return out
+
+
 def _prompt_artifact_selection_interactive(candidates: dict[str, list[str]]) -> list[tuple[str, str]]:
     options: list[str] = []
     mapping: dict[int, tuple[str, str]] = {}
@@ -149,8 +195,6 @@ def _prompt_artifact_selection_interactive(candidates: dict[str, list[str]]) -> 
             idx += 1
     if not options:
         return []
-    if len(options) == 1:
-        return [mapping[1]]
     print_numbered_options("models", options)
     default = ",".join(str(i) for i in mapping.keys())
     raw = prompt_text("Select models for test (comma-separated numbers)", default=default).strip() or default
@@ -659,9 +703,6 @@ def main(argv: list[str] | None = None) -> None:
     interactive = is_interactive_allowed(bool(getattr(args, "non_interactive", False)))
     workspace_root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(workspace_root)
-    requested_imgsz = args.imgsz
-    requested_conf = args.conf
-    requested_iou = args.iou
     user_onnx_policy = getattr(args, "onnx_provider_policy", None)
     args.device = resolve_device_request(getattr(args, "device", None) or default_device_value())
     onnx_provider_policy = str(
@@ -719,6 +760,11 @@ def main(argv: list[str] | None = None) -> None:
             root_dir, primary_path, target_kind, target_label = _resolve_target(args, layout)
         except (FileNotFoundError, ValueError) as exc:
             parser.error(str(exc))
+        if args.formats is None:
+            if interactive and target_kind == "runs":
+                args.formats = "pt,onnx,engine,trt"
+            else:
+                args.formats = "pt"
         formats = _parse_formats(args.formats)
         try:
             data_yaml = _resolve_data_yaml_for_target(target_kind=target_kind, root_dir=root_dir, layout=layout, data_cli=args.data)
@@ -733,6 +779,10 @@ def main(argv: list[str] | None = None) -> None:
             args.iou = float(defaults["iou"]) if defaults["iou"] is not None else None
         if args.batch is None:
             args.batch = 1
+    # Effective params after defaults — must match args.* so pt_uni / skip logic compares real imgsz.
+    requested_imgsz = args.imgsz
+    requested_conf = args.conf
+    requested_iou = args.iou
     args.device = resolve_device_request(args.device or default_device_value())
     if user_onnx_policy is None and str(args.device).strip().lower() == "cpu":
         onnx_provider_policy = "cpu_only"
@@ -744,6 +794,18 @@ def main(argv: list[str] | None = None) -> None:
 
     replay: str | None = None
     results: list[tuple[str, bool, str | None]] = []
+    selected_artifacts: list[tuple[str, str]] = []
+    if interactive and target_kind == "runs":
+        candidates = _discover_run_artifact_candidates(root_dir)
+        enabled_formats = _prompt_export_backends_interactive(root_dir, candidates)
+        formats = [fmt for fmt in SUPPORTED_TEST_FORMATS if fmt in enabled_formats]
+        args.formats = ",".join(formats)
+        narrowed = {fmt: candidates[fmt] for fmt in formats if candidates.get(fmt)}
+        selected_artifacts = _prompt_artifact_selection_interactive(narrowed)
+        selected_formats = {fmt for fmt, _ in selected_artifacts}
+        if selected_formats:
+            formats = [fmt for fmt in SUPPORTED_TEST_FORMATS if fmt in selected_formats]
+            args.formats = ",".join(formats)
     _print_test_plan(
         target_kind=target_kind,
         target_label=target_label,
@@ -752,14 +814,6 @@ def main(argv: list[str] | None = None) -> None:
         formats=formats,
         split_name="test",
     )
-    selected_artifacts: list[tuple[str, str]] = []
-    if interactive and target_kind == "runs":
-        candidates = _discover_run_artifact_candidates(root_dir)
-        selected_artifacts = _prompt_artifact_selection_interactive(candidates)
-        selected_formats = {fmt for fmt, _ in selected_artifacts}
-        if selected_formats:
-            formats = [fmt for fmt in SUPPORTED_TEST_FORMATS if fmt in selected_formats]
-            args.formats = ",".join(formats)
     replay = build_non_interactive_command("test", parser, args)
     predecisions = _collect_interactive_rerun_decisions(
         interactive=interactive,
@@ -908,7 +962,8 @@ def main(argv: list[str] | None = None) -> None:
     queued: list[tuple[str, str]] = []
     if selected_artifacts:
         for fmt, path in selected_artifacts:
-            if fmt in {"pt", "onnx", "engine", "trt"}:
+            # .pt is evaluated earlier via Ultralytics; native runner supports only onnx/engine/trt.
+            if fmt in {"onnx", "engine", "trt"}:
                 queued.append((fmt, path))
     else:
         for fmt in ("onnx", "engine", "trt"):

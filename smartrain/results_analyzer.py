@@ -1318,6 +1318,7 @@ def _write_speed_quality_artifacts(
     *,
     scatter_x: str,
     scatter_y: str,
+    run_data_yaml_map: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     if not os.path.isfile(inference_csv):
         return None
@@ -1330,12 +1331,38 @@ def _write_speed_quality_artifacts(
     if isinstance(metric_sources_payload, dict):
         source_map = metric_sources_payload.get("sources") or {}
     rows: list[dict[str, Any]] = []
+    run_data_yaml_map = run_data_yaml_map or {}
+    df_with_name = df.copy()
+    if "run_name" not in df_with_name.columns:
+        if "run_dir" in df_with_name.columns:
+            df_with_name["run_name"] = df_with_name["run_dir"].astype(str).map(
+                lambda p: os.path.basename(str(p).rstrip(os.sep))
+            )
+        else:
+            df_with_name["run_name"] = ""
     for run_dir in requested_runs:
-        sub = df[df["run_dir"] == run_dir]
+        run_name = os.path.basename(run_dir.rstrip(os.sep))
+        sub = df_with_name[(df_with_name["run_dir"] == run_dir) | (df_with_name["run_name"] == run_name)].copy()
         if len(sub) == 0:
             continue
+        status_score = sub.get("benchmark_status", pd.Series(["ok"] * len(sub))).astype(str).map(
+            lambda s: 0 if s == "ok" else 1
+        )
+        val_score = pd.to_numeric(sub.get(scatter_x), errors="coerce").isna().astype(int)
+        sub = sub.assign(_status_score=status_score, _val_score=val_score).sort_values(
+            ["_status_score", "_val_score"], ascending=[True, True]
+        )
         rec = sub.iloc[0].to_dict()
-        quality = read_test_metrics_row(run_dir).get(scatter_y)
+        base_metrics = read_test_metrics_row(run_dir)
+        recomputed_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
+        if os.path.isfile(recomputed_csv):
+            try:
+                rdf = pd.read_csv(recomputed_csv)
+                if len(rdf) > 0:
+                    base_metrics.update(rdf.iloc[0].to_dict())
+            except Exception:
+                pass
+        quality = base_metrics.get(scatter_y)
         q_num = pd.to_numeric(quality, errors="coerce")
         s_num = pd.to_numeric(rec.get(scatter_x), errors="coerce")
         if pd.isna(q_num) or pd.isna(s_num):
@@ -1350,6 +1377,7 @@ def _write_speed_quality_artifacts(
                 "scatter_x_value": float(s_num),
                 "scatter_y_value": float(q_num),
                 "quality_source": q_src,
+                "dataset_yaml_used": run_data_yaml_map.get(run_dir, ""),
             }
         )
     if len(rows) < 2:
@@ -1872,6 +1900,8 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
         if fmt == "pt":
             args_yaml = os.path.join(run_dir, "tests", "test-ultralytics", "args.yaml")
             if not os.path.isfile(args_yaml):
+                args_yaml = os.path.join(run_dir, "test-ultralytics", "args.yaml")
+            if not os.path.isfile(args_yaml):
                 args_yaml = os.path.join(run_dir, "test", "args.yaml")
         else:
             args_yaml = os.path.join(run_dir, "tests", f"test_{fmt}", "args.yaml")
@@ -1887,7 +1917,7 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
             except Exception:
                 payload = {}
             inf = payload.get("inference") if isinstance(payload, dict) else {}
-            if isinstance(inf, dict):
+            if isinstance(inf, dict) and inf:
                 return {
                     "imgsz": inf.get("imgsz"),
                     "conf": inf.get("conf", 0.001 if inf.get("conf") is None else inf.get("conf")),
@@ -1896,6 +1926,23 @@ def _write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> d
                     "gt_source": "ultralytics_validator",
                     "nms_profile": "ultralytics_validator_multilabel",
                 }
+            # Newer runs may omit top-level "inference" but still have training_info.imgsz.
+            ti = payload.get("training_info") if isinstance(payload, dict) else {}
+            if isinstance(ti, dict):
+                ut = ti.get("ultralytics_train") if isinstance(ti.get("ultralytics_train"), dict) else {}
+                hp = ti.get("hyperparameters") if isinstance(ti.get("hyperparameters"), dict) else {}
+                imgsz = ut.get("imgsz")
+                if imgsz is None:
+                    imgsz = hp.get("image_size")
+                if imgsz is not None:
+                    return {
+                        "imgsz": imgsz,
+                        "conf": 0.001,
+                        "iou": 0.7,
+                        "inference_source": "ultralytics_model_val",
+                        "gt_source": "ultralytics_validator",
+                        "nms_profile": "ultralytics_validator_multilabel",
+                    }
             return {}
         try:
             with open(args_yaml, "r", encoding="utf-8") as f:
@@ -2664,6 +2711,8 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
             per_class_df = pd.read_csv(cache_pc)
             if len(per_class_df) > 0:
                 cache_stats.append({"run_dir": run_dir, "artifact": "pr.per_class", "status": "hit"})
+            else:
+                per_class_df = None
         if recall is None or precision is None or (per_class_enabled and per_class_df is None):
             print(f"[INFO] {label}: val(split=test) ...")
             _clear_gpu_memory()
@@ -3490,6 +3539,29 @@ def cmd_all(args: argparse.Namespace) -> None:
     session_root = _session_root(args.workspace, args.analytics_session)
     artifacts: list[dict[str, str]] = []
     cache_events: list[dict[str, Any]] = []
+    artifact_failures: list[dict[str, Any]] = []
+
+    def _record_failure(
+        *,
+        stage: str,
+        status: str,
+        reason_code: str,
+        reason_detail: str = "",
+        run_dir: str | None = None,
+        format_name: str | None = None,
+        split: str | None = None,
+    ) -> None:
+        artifact_failures.append(
+            {
+                "stage": stage,
+                "status": status,
+                "reason_code": reason_code,
+                "reason_detail": reason_detail,
+                "run_dir": run_dir or "",
+                "format": format_name or "",
+                "split": split or "",
+            }
+        )
     selected_run_dirs = [baseline] + others
     run_data_yaml_map, run_data_yaml_source, unresolved_data_yaml_runs = _build_run_data_yaml_map(
         selected_run_dirs,
@@ -3692,6 +3764,14 @@ def cmd_all(args: argparse.Namespace) -> None:
             print("[WARN] Speed stage: skipped runs without resolved data.yaml:")
             for rd in unresolved_for_speed:
                 print(f"[WARN]  - {os.path.basename(rd.rstrip(os.sep))}")
+                _record_failure(
+                    stage="speed",
+                    status="skipped",
+                    reason_code="no_data_yaml",
+                    reason_detail="run excluded from speed stage due to unresolved data.yaml",
+                    run_dir=rd,
+                    split="test",
+                )
         if not run_groups:
             print("[WARN] Speed stage skipped: no runs with resolved data.yaml.")
         inf_csv = os.path.join(session_root, "artifacts", "inference", "benchmark.csv")
@@ -3718,14 +3798,93 @@ def cmd_all(args: argparse.Namespace) -> None:
             cmd_inference_benchmark(ib_ns)
             if os.path.isfile(inf_part_csv):
                 try:
-                    inf_parts.append(pd.read_csv(inf_part_csv))
-                except Exception:
-                    pass
+                    part_df = pd.read_csv(inf_part_csv)
+                    part_df["dataset_yaml_used"] = group_yaml
+                    if "run_name" not in part_df.columns:
+                        part_df["run_name"] = part_df.get("run_dir", pd.Series(dtype=str)).astype(str).map(
+                            lambda p: os.path.basename(str(p).rstrip(os.sep))
+                        )
+                    if "benchmark_status" not in part_df.columns:
+                        part_df["benchmark_status"] = "ok"
+                    inf_parts.append(part_df)
+                except Exception as e:
+                    _record_failure(
+                        stage="speed",
+                        status="failed",
+                        reason_code="benchmark_group_read_failed",
+                        reason_detail=str(e),
+                        split="test",
+                    )
         if inf_parts:
             inf_df = pd.concat(inf_parts, ignore_index=True)
+            present = {
+                os.path.abspath(str(p))
+                for p in inf_df.get("run_dir", pd.Series(dtype=str)).astype(str).tolist()
+                if str(p).strip()
+            }
+            present_by_name: dict[str, str] = {}
+            for _, row in inf_df.iterrows():
+                rname = str(row.get("run_name") or "").strip()
+                if not rname:
+                    continue
+                status = str(row.get("benchmark_status") or "ok").strip()
+                current = present_by_name.get(rname)
+                if current is None or (current != "ok" and status == "ok"):
+                    present_by_name[rname] = status
+            for run_dir in selected_run_dirs:
+                rd = os.path.abspath(run_dir)
+                run_name = os.path.basename(run_dir.rstrip(os.sep))
+                if rd in present:
+                    continue
+                if present_by_name.get(run_name) == "ok":
+                    _record_failure(
+                        stage="speed",
+                        status="missing",
+                        reason_code="run_dir_mismatch",
+                        reason_detail="benchmark row matched by run_name but run_dir differs",
+                        run_dir=run_dir,
+                        split="test",
+                    )
+                    continue
+                inf_df = pd.concat(
+                    [
+                        inf_df,
+                        pd.DataFrame(
+                            [
+                                {
+                                    "model": os.path.basename(run_dir.rstrip(os.sep)),
+                                    "run_name": os.path.basename(run_dir.rstrip(os.sep)),
+                                    "run_dir": run_dir,
+                                    "dataset_yaml_used": run_data_yaml_map.get(run_dir, ""),
+                                    "benchmark_status": "missing_or_failed",
+                                }
+                            ]
+                        ),
+                    ],
+                    ignore_index=True,
+                )
+                _record_failure(
+                    stage="speed",
+                    status="missing",
+                    reason_code="benchmark_missing_or_failed",
+                    reason_detail="benchmark row was not produced for selected run",
+                    run_dir=run_dir,
+                    split="test",
+                )
             inf_df.to_csv(inf_csv, index=False, encoding="utf-8")
         else:
-            inf_df = pd.DataFrame()
+            inf_df = pd.DataFrame(
+                [
+                    {
+                        "model": os.path.basename(run_dir.rstrip(os.sep)),
+                        "run_name": os.path.basename(run_dir.rstrip(os.sep)),
+                        "run_dir": run_dir,
+                        "dataset_yaml_used": run_data_yaml_map.get(run_dir, ""),
+                        "benchmark_status": "missing_or_failed",
+                    }
+                    for run_dir in selected_run_dirs
+                ]
+            )
             inf_df.to_csv(inf_csv, index=False, encoding="utf-8")
         if os.path.isfile(lb_csv) and os.path.isfile(inf_csv):
             try:
@@ -3770,7 +3929,13 @@ def cmd_all(args: argparse.Namespace) -> None:
                         lb_df = lb_df.sort_values("composite_score", ascending=False)
                         lb_df.to_csv(lb_csv, index=False, encoding="utf-8")
             except Exception:
-                pass
+                _record_failure(
+                    stage="speed",
+                    status="failed",
+                    reason_code="leaderboard_speed_merge_failed",
+                    reason_detail="failed to merge speed benchmark into leaderboard",
+                    split="test",
+                )
         ip_ns = argparse.Namespace(
             csv=inf_csv,
             metric="avg_inference_ms_per_frame",
@@ -3791,8 +3956,14 @@ def cmd_all(args: argparse.Namespace) -> None:
             if os.path.isfile(cache_stats_path):
                 try:
                     cache_events.extend(json.load(open(cache_stats_path, "r", encoding="utf-8")).get("cache", []))
-                except Exception:
-                    pass
+                except Exception as e:
+                    _record_failure(
+                        stage="speed",
+                        status="failed",
+                        reason_code="cache_stats_read_failed",
+                        reason_detail=str(e),
+                        split="test",
+                    )
         if os.path.isfile(inf_csv):
             try:
                 if os.path.getsize(inf_csv) > 0:
@@ -3803,6 +3974,7 @@ def cmd_all(args: argparse.Namespace) -> None:
                         metric_sources_payload,
                         scatter_x=str(getattr(args, "scatter_x", "avg_inference_ms_per_frame")),
                         scatter_y=str(getattr(args, "scatter_y", "mAP50-95")),
+                        run_data_yaml_map=run_data_yaml_map,
                     )
                     if sq:
                         artifacts.extend(
@@ -3811,8 +3983,38 @@ def cmd_all(args: argparse.Namespace) -> None:
                                 {"role": "speed_quality_png", "path": sq["png"]},
                             ]
                         )
+                        try:
+                            sq_abs = os.path.join(session_root, sq["csv"])
+                            sq_df = pd.read_csv(sq_abs)
+                            expected = {
+                                os.path.basename(str(r).rstrip(os.sep))
+                                for r in selected_run_dirs
+                            }
+                            actual = set(sq_df.get("model", pd.Series(dtype=str)).astype(str).tolist())
+                            if len(actual) < len(expected):
+                                _record_failure(
+                                    stage="speed_quality",
+                                    status="failed",
+                                    reason_code="png_incomplete_series",
+                                    reason_detail=f"speed_quality models={sorted(actual)} expected={sorted(expected)}",
+                                    split="test",
+                                )
+                        except Exception as e:
+                            _record_failure(
+                                stage="speed_quality",
+                                status="failed",
+                                reason_code="speed_quality_validation_failed",
+                                reason_detail=str(e),
+                                split="test",
+                            )
             except Exception:
-                pass
+                _record_failure(
+                    stage="speed_quality",
+                    status="failed",
+                    reason_code="speed_quality_write_failed",
+                    reason_detail="failed to build speed-quality artifacts",
+                    split="test",
+                )
 
     if profile == "full":
         pr_groups, unresolved_for_pr = _group_runs_by_data_yaml(selected_run_dirs, run_data_yaml_map)
@@ -3820,11 +4022,21 @@ def cmd_all(args: argparse.Namespace) -> None:
             print("[WARN] PR stage: skipped runs without resolved data.yaml:")
             for rd in unresolved_for_pr:
                 print(f"[WARN]  - {os.path.basename(rd.rstrip(os.sep))}")
+                _record_failure(
+                    stage="pr",
+                    status="skipped",
+                    reason_code="no_data_yaml",
+                    reason_detail="run excluded from PR stage due to unresolved data.yaml",
+                    run_dir=rd,
+                    split="test",
+                )
         pr_per_class_frames: list[pd.DataFrame] = []
         pr_png_written = False
         os.makedirs(os.path.join(session_root, "artifacts", "pr"), exist_ok=True)
         for g_idx, (group_yaml, group_runs) in enumerate(sorted(pr_groups.items()), start=1):
-            pr_png = os.path.join(session_root, "artifacts", "pr", f"pr_all_classes_{g_idx}.png")
+            group_pr_dir = os.path.join(session_root, "artifacts", "pr", f"group_{g_idx}")
+            os.makedirs(group_pr_dir, exist_ok=True)
+            pr_png = os.path.join(group_pr_dir, "pr_all_classes.png")
             pr_ns = argparse.Namespace(
                 runs_group_dir=runs_group_dir,
                 selected_run_dirs=group_runs,
@@ -3845,30 +4057,161 @@ def cmd_all(args: argparse.Namespace) -> None:
             if os.path.isfile(pr_png):
                 artifacts.append({"role": "pr_png", "path": os.path.relpath(pr_png, session_root)})
                 pr_png_written = True
-            part_csv = os.path.join(session_root, "artifacts", "pr", "per_class", "pr_per_class.csv")
+            part_csv = os.path.join(group_pr_dir, "per_class", "pr_per_class.csv")
             if os.path.isfile(part_csv):
                 try:
                     pr_per_class_frames.append(pd.read_csv(part_csv))
-                except Exception:
-                    pass
+                except Exception as e:
+                    _record_failure(
+                        stage="pr",
+                        status="failed",
+                        reason_code="per_class_csv_read_failed",
+                        reason_detail=str(e),
+                        split="test",
+                    )
+            else:
+                for rd in group_runs:
+                    _record_failure(
+                        stage="pr",
+                        status="missing",
+                        reason_code="pr_per_class_missing",
+                        reason_detail="group PR per-class CSV was not produced",
+                        run_dir=rd,
+                        split="test",
+                    )
             pr_cache_stats = os.path.join(session_root, "artifacts", "pr", f"cache_stats_group_{g_idx}.json")
             if os.path.isfile(pr_cache_stats):
                 try:
                     cache_events.extend(json.load(open(pr_cache_stats, "r", encoding="utf-8")).get("cache", []))
-                except Exception:
-                    pass
+                except Exception as e:
+                    _record_failure(
+                        stage="pr",
+                        status="failed",
+                        reason_code="cache_stats_read_failed",
+                        reason_detail=str(e),
+                        split="test",
+                    )
         if pr_per_class_frames:
             pr_per_class_csv = os.path.join(session_root, "artifacts", "pr", "per_class", "pr_per_class.csv")
+            os.makedirs(os.path.dirname(pr_per_class_csv), exist_ok=True)
             merged = pd.concat(pr_per_class_frames, ignore_index=True)
             merged = merged.drop_duplicates()
+            present_models = set(merged.get("model", pd.Series(dtype=str)).astype(str).tolist())
+            for rd in selected_run_dirs:
+                run_name = os.path.basename(rd.rstrip(os.sep))
+                if run_name in present_models:
+                    continue
+                merged = pd.concat(
+                    [
+                        merged,
+                        pd.DataFrame(
+                            [
+                                {
+                                    "model": run_name,
+                                    "class_name": "N/A",
+                                    "ap": np.nan,
+                                    "status": "missing",
+                                    "reason_code": "pr_per_class_missing",
+                                    "run_dir": rd,
+                                }
+                            ]
+                        ),
+                    ],
+                    ignore_index=True,
+                )
             merged.to_csv(pr_per_class_csv, index=False, encoding="utf-8")
             artifacts.append({"role": "pr_per_class_csv", "path": os.path.relpath(pr_per_class_csv, session_root)})
+            # Build unified per-class PNGs across all selected runs/groups.
+            # This removes ambiguity when runs are split by data.yaml groups.
+            combined_dir = os.path.join(session_root, "artifacts", "pr", "per_class_combined")
+            os.makedirs(combined_dir, exist_ok=True)
+            if {"class_id", "class_name", "model", "recall", "precision"}.issubset(merged.columns):
+                expected_models = {
+                    os.path.basename(str(r).rstrip(os.sep))
+                    for r in selected_run_dirs
+                }
+                class_groups = merged.groupby(["class_id", "class_name"], dropna=False)
+                for (class_id, class_name), cls_df in class_groups:
+                    cdf = cls_df.copy()
+                    cdf["recall_num"] = pd.to_numeric(cdf.get("recall"), errors="coerce")
+                    cdf["precision_num"] = pd.to_numeric(cdf.get("precision"), errors="coerce")
+                    cdf = cdf.dropna(subset=["recall_num", "precision_num"])
+                    if len(cdf) == 0:
+                        continue
+                    plt.figure(figsize=(9, 6))
+                    present_models: set[str] = set()
+                    for model_name, mdf in cdf.groupby("model"):
+                        mdf = mdf.sort_values("recall_num")
+                        if len(mdf) == 0:
+                            continue
+                        present_models.add(str(model_name))
+                        plt.plot(
+                            mdf["recall_num"],
+                            mdf["precision_num"],
+                            linewidth=1.8,
+                            label=str(model_name),
+                        )
+                    if not present_models:
+                        plt.close()
+                        continue
+                    plt.title(f"PR per class (all runs): {class_name} (id={class_id})")
+                    plt.xlabel("Recall")
+                    plt.ylabel("Precision")
+                    plt.grid(True, linestyle="--", alpha=0.6)
+                    plt.legend(fontsize=8)
+                    plt.tight_layout()
+                    class_id_int = int(class_id) if str(class_id).isdigit() else -1
+                    out_png = os.path.join(
+                        combined_dir,
+                        f"pr_class_{class_id_int}_{_safe_name(str(class_name))}_all_runs.png",
+                    )
+                    plt.savefig(out_png, dpi=220)
+                    plt.close()
+                    artifacts.append({"role": "pr_per_class_png", "path": os.path.relpath(out_png, session_root)})
+                    if len(present_models) < len(expected_models):
+                        _record_failure(
+                            stage="pr",
+                            status="failed",
+                            reason_code="png_incomplete_series",
+                            reason_detail=(
+                                f"pr_per_class_combined class={class_name} "
+                                f"models={sorted(present_models)} expected={sorted(expected_models)}"
+                            ),
+                            split="test",
+                        )
+            try:
+                expected = {
+                    os.path.basename(str(r).rstrip(os.sep))
+                    for r in selected_run_dirs
+                }
+                actual = set(merged.get("model", pd.Series(dtype=str)).astype(str).tolist())
+                if len(actual) < len(expected):
+                    _record_failure(
+                        stage="pr",
+                        status="failed",
+                        reason_code="png_incomplete_series",
+                        reason_detail=f"pr_per_class models={sorted(actual)} expected={sorted(expected)}",
+                        split="test",
+                    )
+            except Exception as e:
+                _record_failure(
+                    stage="pr",
+                    status="failed",
+                    reason_code="pr_series_validation_failed",
+                    reason_detail=str(e),
+                    split="test",
+                )
         if not pr_png_written:
             print("[WARN] PR stage completed without PR plot artifacts.")
-        pr_per_class_dir = os.path.join(session_root, "artifacts", "pr", "per_class")
-        if os.path.isdir(pr_per_class_dir):
-            for p in sorted(glob(os.path.join(pr_per_class_dir, "*.png"))):
-                artifacts.append({"role": "pr_per_class_png", "path": os.path.relpath(p, session_root)})
+            _record_failure(
+                stage="pr",
+                status="missing",
+                reason_code="pr_plot_missing",
+                reason_detail="no PR plot artifacts were produced",
+                split="test",
+            )
+        for p in sorted(glob(os.path.join(session_root, "artifacts", "pr", "**", "per_class", "*.png"), recursive=True)):
+            artifacts.append({"role": "pr_per_class_png", "path": os.path.relpath(p, session_root)})
 
     abbreviations = _build_abbreviations_for_report([baseline] + others)
     ultralytics_test_rows, ultralytics_test_artifacts = _collect_ultralytics_test_artifacts(
@@ -3880,6 +4223,32 @@ def cmd_all(args: argparse.Namespace) -> None:
     format_compare = _write_format_compare_artifacts(session_root, [baseline] + others)
     if format_compare and format_compare.get("csv"):
         artifacts.append({"role": "format_compare_csv", "path": str(format_compare["csv"])})
+        perf_rel = str(format_compare.get("perf_test_csv") or "")
+        if perf_rel:
+            perf_abs = os.path.join(session_root, perf_rel)
+            if os.path.isfile(perf_abs):
+                try:
+                    perf_df = pd.read_csv(perf_abs)
+                    if "performance_status" in perf_df.columns:
+                        bad = perf_df[perf_df["performance_status"].astype(str).str.lower() != "ok"].copy()
+                        for _, row in bad.iterrows():
+                            _record_failure(
+                                stage="format_performance",
+                                status="missing",
+                                reason_code=str(row.get("performance_reason") or "performance_not_collected"),
+                                reason_detail="format performance row is incomplete",
+                                run_dir=str(row.get("run_dir") or ""),
+                                format_name=str(row.get("format") or ""),
+                                split=str(row.get("split") or "test"),
+                            )
+                except Exception as e:
+                    _record_failure(
+                        stage="format_performance",
+                        status="failed",
+                        reason_code="format_perf_read_failed",
+                        reason_detail=str(e),
+                        split="test",
+                    )
     conf_tables = _collect_confidence_recommendation_tables(
         [baseline] + others,
         os.path.join(session_root, "artifacts", "confidence"),
@@ -3927,6 +4296,24 @@ def cmd_all(args: argparse.Namespace) -> None:
         }
     if metric_sources_payload is not None:
         manifest["metric_sources"] = metric_sources_payload
+    else:
+        _record_failure(
+            stage="metrics",
+            status="missing",
+            reason_code="metric_sources_missing",
+            reason_detail="metric_sources.json missing or unreadable",
+            split="test",
+        )
+    if artifact_failures:
+        manifest["artifact_failures"] = artifact_failures
+        by_reason: dict[str, int] = {}
+        for item in artifact_failures:
+            reason = str(item.get("reason_code") or "unknown")
+            by_reason[reason] = by_reason.get(reason, 0) + 1
+        manifest["artifact_failures_summary"] = {
+            "total": len(artifact_failures),
+            "by_reason_code": by_reason,
+        }
     if cache_events:
         manifest["cache"] = {
             "events": cache_events,
@@ -3953,6 +4340,25 @@ def cmd_all(args: argparse.Namespace) -> None:
                 manifest["tables"].append(rel)
     manifest_path = os.path.join(session_root, "session.json")
     write_manifest(manifest_path, manifest)
+    strict_diag = bool(getattr(args, "strict_diagnostics", False))
+    if strict_diag:
+        critical_missing = []
+        if profile in ("quality", "full") and "metric_sources" not in manifest:
+            critical_missing.append("metric_sources")
+        if profile == "full":
+            pr_meta = manifest.get("pr_per_class") if isinstance(manifest.get("pr_per_class"), dict) else {}
+            pr_csv_rel = str((pr_meta or {}).get("csv") or "")
+            if not pr_csv_rel:
+                critical_missing.append("pr_per_class_csv")
+            elif not os.path.isfile(os.path.join(session_root, pr_csv_rel)):
+                critical_missing.append("pr_per_class_csv")
+        if critical_missing:
+            print(
+                "[ERROR] Strict diagnostics failed: missing critical artifacts: "
+                + ", ".join(critical_missing),
+                file=sys.stderr,
+            )
+            sys.exit(1)
     report_files = write_analysis_report(
         session_root,
         manifest,
@@ -4043,6 +4449,11 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default="ru,en",
         help="Comma-separated report languages, e.g. ru,en or en",
+    )
+    p_all.add_argument(
+        "--strict-diagnostics",
+        action="store_true",
+        help="Fail analyze all if critical artifacts are missing",
     )
     p_all.add_argument(
         "--scatter-x",

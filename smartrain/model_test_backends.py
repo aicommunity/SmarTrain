@@ -1892,8 +1892,8 @@ def _ensure_confidence_recommendations_for_explicit_artifact(
             val_csv = format_metrics_path_for_split(root_dir, "val", format_name)
             with open(val_csv, "w", encoding="utf-8") as f:
                 f.write(val_result.to_csv())
-        except Exception:
-            pass
+        except Exception as csv_exc:
+            print(f"[WARN] {format_name}: failed to persist val metrics csv: {csv_exc}")
         val_payload = compute_confidence_recommendations(
             val_result,
             split="val",

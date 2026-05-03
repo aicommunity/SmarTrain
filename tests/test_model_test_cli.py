@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+from typing import Any
+
 import pytest
 from pathlib import Path
 from types import ModuleType
@@ -13,6 +15,8 @@ from PIL import Image
 from smartrain.model_test_cli import (
     _check_onnx_format_preflight,
     _discover_run_artifact_candidates,
+    _prompt_export_backends_interactive,
+    _prompt_artifact_selection_interactive,
     _resolve_existing_artifact,
     main as smartrain_test_main,
 )
@@ -91,7 +95,9 @@ def test_model_test_cli_run_uses_existing_resume_logic(monkeypatch, tmp_path: Pa
         error = None
     monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", lambda **_kwargs: _FakeResult())
 
-    smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "pt", "-y"])
+    smartrain_test_main(
+        ["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "pt", "--no-perf", "-y"]
+    )
     assert called["run_dir"] == str(run_dir)
     assert called["workspace_root"] == str(tmp_path)
 
@@ -165,6 +171,10 @@ def test_model_test_cli_interactive_replay_command_is_complete(monkeypatch, tmp_
     monkeypatch.setattr("smartrain.model_test_cli.is_interactive_allowed", lambda _flag: True)
     monkeypatch.setattr("smartrain.model_test_cli._pick_interactive_target", lambda _layout: (str(run_dir), str(run_dir / "train" / "weights" / "best.pt"), "runs", run_dir.name))
     monkeypatch.setattr(
+        "smartrain.model_test_cli._prompt_export_backends_interactive",
+        lambda _root, _c: ["onnx"],
+    )
+    monkeypatch.setattr(
         "smartrain.model_test_cli._prompt_artifact_selection_interactive",
         lambda _candidates: [("onnx", str(run_dir / "train" / "weights" / "best.onnx"))],
     )
@@ -178,6 +188,181 @@ def test_model_test_cli_interactive_replay_command_is_complete(monkeypatch, tmp_
     assert f"--run {run_dir}" in out
     assert f"--data {dataset_yaml}" in out
     assert "--formats onnx" in out
+
+
+def test_model_test_cli_interactive_pt_not_queued_for_native_backend(monkeypatch, tmp_path: Path, capsys) -> None:
+    """Selecting .pt in interactive mode must not call run_native_format_backend(format_name='pt')."""
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    pt_path = run_dir / "train" / "weights" / "best.pt"
+    pt_path.write_bytes(b"fake")
+    onnx_path = run_dir / "train" / "weights" / "best.onnx"
+    onnx_path.write_bytes(b"fake-onnx")
+    dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
+    dataset_yaml.write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"path_under_workspace": "datasets/ds_a"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    native_formats: list[str] = []
+
+    class _FakeResult:
+        success = True
+        error = None
+
+    def _fake_native(**kwargs):
+        native_formats.append(str(kwargs.get("format_name", "")))
+        return _FakeResult()
+
+    monkeypatch.setattr("smartrain.model_test_cli.is_interactive_allowed", lambda _flag: True)
+    monkeypatch.setattr(
+        "smartrain.model_test_cli._pick_interactive_target",
+        lambda _layout: (str(run_dir), str(pt_path), "runs", run_dir.name),
+    )
+    monkeypatch.setattr(
+        "smartrain.model_test_cli._prompt_export_backends_interactive",
+        lambda _root, _c: ["pt", "onnx"],
+    )
+    monkeypatch.setattr(
+        "smartrain.model_test_cli._prompt_artifact_selection_interactive",
+        lambda _candidates: [("pt", str(pt_path)), ("onnx", str(onnx_path))],
+    )
+    _answers(monkeypatch, [str(dataset_yaml)])
+    monkeypatch.setattr("smartrain.model_test_cli.run_ultralytics_backend", lambda **_kwargs: _FakeResult())
+    monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", _fake_native)
+    monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli._check_onnx_format_preflight", lambda _policy: (True, None))
+    _install_fake_onnxruntime(monkeypatch)
+
+    smartrain_test_main(["--workspace", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "pt" not in native_formats
+    assert "onnx" in native_formats
+    assert "[WARN] pt: Unsupported native backend format: pt" not in out
+
+
+def test_prompt_export_backends_lists_all_formats_and_skips_missing(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "run1"
+    root.mkdir(parents=True, exist_ok=True)
+    pt = root / "models" / "m.pt"
+    pt.parent.mkdir(parents=True, exist_ok=True)
+    pt.write_bytes(b"x")
+    monkeypatch.setattr("smartrain.model_test_cli.canonical_run_model_path", lambda _r, _ext=".pt": str(pt))
+    monkeypatch.setattr("smartrain.model_test_cli.print_numbered_options", lambda *a, **k: None)
+    monkeypatch.setattr("smartrain.model_test_cli.prompt_text", lambda _p, default="": "1,2,3,4")
+    out = _prompt_export_backends_interactive(
+        str(root),
+        {"pt": [str(pt)], "onnx": [], "engine": [], "trt": []},
+    )
+    assert out == ["pt"]
+
+
+def test_prompt_artifact_selection_interactive_always_prompts_even_for_single_model(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("smartrain.model_test_cli.print_numbered_options", lambda *a, **k: None)
+    prompts: list[str] = []
+
+    def _pt(prompt: str, default: str = "") -> str:
+        prompts.append(prompt)
+        return default
+
+    monkeypatch.setattr("smartrain.model_test_cli.prompt_text", _pt)
+    one_pt = str(tmp_path / "w.pt")
+    out = _prompt_artifact_selection_interactive({"pt": [one_pt]})
+    assert out == [("pt", one_pt)]
+    assert prompts and "Select models for test" in prompts[0]
+
+
+def test_interactive_run_without_formats_defaults_to_all_export_formats(monkeypatch, tmp_path: Path, capsys) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
+    dataset_yaml.write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"path_under_workspace": "datasets/ds_a"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("smartrain.model_test_cli.is_interactive_allowed", lambda _f: True)
+    monkeypatch.setattr("smartrain.model_test_cli.prompt_yes_no", lambda *a, **k: False)
+    monkeypatch.setattr("smartrain.model_test_cli.has_matching_test_artifacts", lambda *_a, **_k: True)
+    monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        "smartrain.model_test_cli._prompt_export_backends_interactive",
+        lambda _root, _c: ["pt"],
+    )
+    monkeypatch.setattr(
+        "smartrain.model_test_cli._prompt_artifact_selection_interactive",
+        lambda _c: [],
+    )
+
+    class _FakeResult:
+        success = True
+        error = None
+
+    monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", lambda **_k: _FakeResult())
+
+    smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir)])
+    out = capsys.readouterr().out
+    assert "formats: pt" in out
+
+
+def test_model_test_cli_pt_uni_matching_uses_imgsz_after_metadata_defaults(monkeypatch, tmp_path: Path) -> None:
+    """pt_uni skip/match must compare effective imgsz (args after defaults), not pre-default None."""
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    ds = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    ds.parent.mkdir(parents=True)
+    ds.write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps(
+            {
+                "training_info": {"dataset": {"path_under_workspace": "datasets/ds_a"}},
+                "inference": {"imgsz": 1280, "conf": 0.001, "iou": 0.7},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    pt_uni_kw: list[dict[str, Any]] = []
+
+    def _fake_matching(_root_dir: str, **kwargs: Any) -> bool:
+        if kwargs.get("format_name") == "pt_uni":
+            pt_uni_kw.append(
+                {"imgsz": kwargs.get("imgsz"), "conf": kwargs.get("conf"), "iou": kwargs.get("iou")}
+            )
+            return False
+        return True
+
+    class _FakeResult:
+        success = True
+        error = None
+
+    monkeypatch.setattr("smartrain.model_test_cli.has_matching_test_artifacts", _fake_matching)
+    monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", lambda **_k: _FakeResult())
+
+    smartrain_test_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--run",
+            str(run_dir),
+            "--data",
+            str(ds),
+            "--formats",
+            "pt",
+            "-y",
+        ]
+    )
+    assert pt_uni_kw
+    assert pt_uni_kw[0]["imgsz"] == 1280
+    assert pt_uni_kw[0]["conf"] == 0.001
 
 
 def test_model_test_cli_replay_contains_perf_flags(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -519,6 +704,7 @@ def test_model_test_cli_prompts_before_rerun_matching_existing_test_interactive(
     deploy_workspace(str(tmp_path))
     run_dir = tmp_path / "runs" / "ds_a" / "run_prompt"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake-pt")
     onnx_path = run_dir / "train" / "weights" / "best.onnx"
     onnx_path.write_bytes(b"fake-onnx")
     dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
@@ -536,6 +722,10 @@ def test_model_test_cli_prompts_before_rerun_matching_existing_test_interactive(
 
     monkeypatch.setattr("smartrain.model_test_cli.is_interactive_allowed", lambda _flag: True)
     monkeypatch.setattr("smartrain.model_test_cli._pick_interactive_target", lambda _layout: (str(run_dir), str(run_dir / "train" / "weights" / "best.pt"), "runs", run_dir.name))
+    monkeypatch.setattr(
+        "smartrain.model_test_cli._prompt_export_backends_interactive",
+        lambda _root, _c: ["onnx"],
+    )
     monkeypatch.setattr(
         "smartrain.model_test_cli._prompt_artifact_selection_interactive",
         lambda _candidates: [("onnx", str(run_dir / "train" / "weights" / "best.onnx"))],

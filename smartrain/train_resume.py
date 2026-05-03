@@ -728,6 +728,7 @@ def update_resume_test_metadata(
     success: bool,
     error: str | None = None,
     diagnosis: RunDiagnosis | None = None,
+    inference: dict[str, Any] | None = None,
 ) -> None:
     metadata_path = os.path.join(run_dir, "training_metadata.json")
     payload: dict[str, Any] = {}
@@ -771,6 +772,9 @@ def update_resume_test_metadata(
                 "has_test_dir": diagnosis.has_test_dir,
             },
         }
+
+    if isinstance(inference, dict) and inference:
+        payload["inference"] = {k: v for k, v in inference.items() if v is not None}
 
     _hydrate_training_info(payload, run_dir)
 

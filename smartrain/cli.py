@@ -318,9 +318,14 @@ def _forward_argparse_command(
     empty_args_mode: str = "help",
 ) -> None:
     args = list(prepend_args or []) + list(ctx.args)
-    interactive_allowed = (
-        len(args) == 0 and empty_args_mode in ("invoke", "invoke_if_tty_else_help")
-    )
+    non_interactive = any(tok in args for tok in ("-y", "--non-interactive"))
+    if non_interactive:
+        interactive_allowed = False
+    elif len(args) == 0 and empty_args_mode in ("invoke", "invoke_if_tty_else_help"):
+        interactive_allowed = True
+    else:
+        # Allow prompts when the user passed flags (e.g. smartrain test --run ...) from a TTY.
+        interactive_allowed = bool(sys.stdin.isatty())
     def _enhance_parser_help(parser_obj: object) -> None:
         if prog is None:
             return

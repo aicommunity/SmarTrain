@@ -205,8 +205,15 @@ def load_test_artifacts_manifest(root_dir: str) -> dict[str, Any]:
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
         return payload if isinstance(payload, dict) else {"formats": {}}
-    except Exception:
-        return {"formats": {}}
+    except Exception as e:
+        return {
+            "formats": {},
+            "_diagnostics": {
+                "status": "manifest_load_failed",
+                "reason_code": "manifest_read_error",
+                "reason_detail": str(e),
+            },
+        }
 
 
 def _write_json_atomic(path: str, payload: dict[str, Any]) -> None:
@@ -267,7 +274,7 @@ def get_test_artifacts_status(root_dir: str, format_name: str | None = "pt") -> 
                 if not val_metrics_exists:
                     missing.append("val_metrics_csv")
         except Exception:
-            pass
+            missing.append("dataset_yaml_read_failed")
     if not confidence_test_complete:
         missing.append("confidence_test")
     if not confidence_val_complete:
@@ -635,7 +642,11 @@ def has_matching_test_artifacts(
     for key, value in expected.items():
         if value is None:
             continue
-        if recorded.get(key) != value:
+        rec = recorded.get(key)
+        if rec is None:
+            # Legacy/minimal args.yaml: no recorded value — cannot prove mismatch with expected defaults.
+            continue
+        if rec != value:
             return False
     if fmt in {"engine", "trt"} and _has_all_zero_native_metrics(root_dir, fmt):
         return False
@@ -646,7 +657,7 @@ def complete_missing_test_artifacts(
     run_dir: str,
     *,
     workspace_root: str,
-    pt_test_runner: Callable[..., tuple[Any, Any, dict[str, Any]]],
+    pt_test_runner: Callable[..., Any],
     pt_test_runner_kwargs: dict[str, Any] | None = None,
     update_metadata_cb: Callable[..., None] | None = None,
 ) -> bool:
@@ -672,7 +683,14 @@ def complete_missing_test_artifacts(
         )
 
     kwargs = dict(pt_test_runner_kwargs or {})
-    pt_test_runner(root_dir, dataset_path, **kwargs)
+    inference_payload: dict[str, Any] | None = None
+    runner_result = pt_test_runner(root_dir, dataset_path, **kwargs)
+    if isinstance(runner_result, (tuple, list)) and len(runner_result) >= 3:
+        maybe_inf = runner_result[2]
+        if isinstance(maybe_inf, dict):
+            inference_payload = maybe_inf
+    elif isinstance(runner_result, dict):
+        inference_payload = runner_result
     persist_target_test_artifacts_state(
         root_dir,
         format_name="pt",
@@ -681,7 +699,22 @@ def complete_missing_test_artifacts(
         status="ok",
     )
     if update_metadata_cb is not None:
-        update_metadata_cb(root_dir, success=True, error=None, diagnosis=diagnose_run(root_dir))
+        try:
+            update_metadata_cb(
+                root_dir,
+                success=True,
+                error=None,
+                diagnosis=diagnose_run(root_dir),
+                inference=inference_payload,
+            )
+        except TypeError:
+            # Backward compatibility for callbacks that do not accept `inference`.
+            update_metadata_cb(
+                root_dir,
+                success=True,
+                error=None,
+                diagnosis=diagnose_run(root_dir),
+            )
     return True
 
 
