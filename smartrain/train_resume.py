@@ -10,10 +10,20 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from smartrain.mpl_runtime import configure_matplotlib_before_ultralytics, ensure_matplotlib_training_runtime
+
+configure_matplotlib_before_ultralytics()
 from ultralytics import YOLO
 
+from smartrain.metrics_reader import results_csv_path
 from smartrain.model_test_service import has_complete_test_artifacts, missing_test_artifacts
-from smartrain.run_artifacts import canonical_run_model_path, run_tmp_dir
+from smartrain.run_artifacts import (
+    canonical_run_model_path,
+    ensure_run_layout,
+    resolve_run_model_with_legacy_fallback,
+    run_tmp_dir,
+)
 from smartrain.run_discovery import find_run_directories
 from smartrain.workspace_paths import WorkspaceLayout
 
@@ -70,21 +80,39 @@ def _is_results_csv_readable(path: str) -> bool:
         return False
 
 
+def resolve_last_checkpoint_path(run_dir: str) -> str | None:
+    """Ultralytics weights under ``train-ultralytics`` / ``train-ultralytics-*`` or legacy ``train``."""
+    rd = Path(run_dir).resolve()
+    ordered = [
+        rd / "train-ultralytics" / "weights" / "last.pt",
+        rd / "train" / "weights" / "last.pt",
+    ]
+    for p in ordered:
+        if p.is_file():
+            return str(p)
+    globs = [p for p in rd.glob("train-ultralytics*/weights/last.pt") if p.is_file()]
+    if not globs:
+        return None
+    return str(max(globs, key=lambda p: p.stat().st_mtime))
+
+
 def diagnose_run(run_dir: str) -> RunDiagnosis:
     rd = os.path.abspath(run_dir)
+    ensure_run_layout(rd)
     args_yaml = os.path.join(rd, "train-ultralytics", "args.yaml")
     if not os.path.isfile(args_yaml):
         args_yaml = os.path.join(rd, "train", "args.yaml")
-    results_csv = os.path.join(rd, "train", "results.csv")
-    last_pt = os.path.join(rd, "train", "weights", "last.pt")
+    results_csv = results_csv_path(rd) or os.path.join(rd, "train", "results.csv")
+    last_pt_path = resolve_last_checkpoint_path(rd)
     best_pt = canonical_run_model_path(rd, ".pt")
+    legacy_best = resolve_run_model_with_legacy_fallback(rd)
     metadata_path = os.path.join(rd, "training_metadata.json")
     test_dir = os.path.join(rd, "test")
 
     has_args_yaml = os.path.isfile(args_yaml)
     has_results_csv = os.path.isfile(results_csv)
-    has_last_pt = os.path.isfile(last_pt)
-    has_best_pt = os.path.isfile(best_pt)
+    has_last_pt = last_pt_path is not None
+    has_best_pt = os.path.isfile(best_pt) or (legacy_best is not None and legacy_best.is_file())
     has_metadata = os.path.isfile(metadata_path)
     has_test_dir = os.path.isdir(test_dir)
     pt_test_complete = has_complete_test_artifacts(rd, "pt")
@@ -109,6 +137,30 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
 
     meta = _read_json(metadata_path) if has_metadata else None
     training_success = _training_success_from_metadata(meta)
+    if (
+        has_metadata
+        and training_success is not True
+        and has_best_pt
+        and has_results_csv
+        and _is_results_csv_readable(results_csv)
+        and not pt_test_complete
+    ):
+        reasons.append("finalize_after_training_error_heuristic")
+        reasons.append("missing_test_artifacts")
+        for item in missing_test_artifacts(rd, "pt"):
+            reasons.append(f"missing_{item}")
+        return RunDiagnosis(
+            run_dir=rd,
+            status=RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
+            reasons=reasons,
+            has_args_yaml=has_args_yaml,
+            has_results_csv=has_results_csv,
+            has_last_pt=has_last_pt,
+            has_best_pt=has_best_pt,
+            has_metadata=has_metadata,
+            has_test_dir=has_test_dir,
+        )
+
     if has_metadata and training_success is True:
         reasons.append("metadata_training_success_true")
         if pt_test_complete:
@@ -511,9 +563,10 @@ def update_resume_test_metadata(
 
 
 def resume_training_in_run(run_dir: str) -> None:
-    last_pt = os.path.join(run_dir, "train", "weights", "last.pt")
-    if not os.path.isfile(last_pt):
-        raise FileNotFoundError(f"Resume checkpoint not found: {last_pt}")
+    ensure_matplotlib_training_runtime(non_interactive=True)
+    last_pt = resolve_last_checkpoint_path(run_dir)
+    if not last_pt:
+        raise FileNotFoundError(f"Resume checkpoint last.pt not found under {run_dir}")
     model = YOLO(last_pt)
     model.train(resume=True)
 

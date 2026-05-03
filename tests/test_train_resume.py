@@ -67,6 +67,35 @@ def test_diagnose_run_marks_pending_when_test_dir_exists_but_artifacts_incomplet
     assert "missing_metrics_csv" in diag.reasons
 
 
+def test_diagnose_run_resumable_when_train_ultralytics_last_exists(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_ultra_last"
+    (run_dir / "train-ultralytics" / "weights").mkdir(parents=True)
+    (run_dir / "train-ultralytics" / "weights" / "last.pt").write_text("bin", encoding="utf-8")
+    (run_dir / "train-ultralytics" / "args.yaml").write_text("epochs: 30\n", encoding="utf-8")
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_RESUMABLE_INCOMPLETE
+    assert "resume_checkpoint_available" in diag.reasons
+
+
+def test_diagnose_run_finalize_pending_when_training_failed_but_weights_and_results_exist(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_finalize_pending"
+    run_dir.mkdir(parents=True)
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"status": {"training": {"success": False}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (run_dir / "train-ultralytics" / "weights").mkdir(parents=True)
+    (run_dir / "train-ultralytics" / "weights" / "best.pt").write_text("bin", encoding="utf-8")
+    (run_dir / "train-ultralytics" / "results.csv").write_text("epoch,mAP\n1,0.5\n", encoding="utf-8")
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING
+    assert "finalize_after_training_error_heuristic" in diag.reasons
+
+
 def test_diagnose_run_marks_incomplete_non_resumable_without_last(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds" / "run3"
     (run_dir / "train").mkdir(parents=True, exist_ok=True)

@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from smartrain.mpl_runtime import configure_matplotlib_before_ultralytics, ensure_matplotlib_training_runtime
+
+configure_matplotlib_before_ultralytics()
 from ultralytics import YOLO
 
 from smartrain.cli_argparse import CliArgumentParser
@@ -783,11 +787,13 @@ def _run_resume_command(argv: list[str]) -> int:
 
     if chosen.status == RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING:
         try:
+            ensure_matplotlib_training_runtime(non_interactive=True)
             _maybe_free_cuda_memory()
             complete_missing_test_artifacts(
                 chosen.run_dir,
                 workspace_root=workspace_root,
                 pt_test_runner=test_yolo,
+                pt_test_runner_kwargs={"non_interactive": True},
                 update_metadata_cb=update_resume_test_metadata,
             )
             print(f"[OK] Missing test stage completed: {chosen.run_dir}")
@@ -862,7 +868,7 @@ def _ensure_resume_confidence_recommendations(
     _maybe_free_cuda_memory()
     # Recompute path is primarily for backfilling recommendations on existing runs.
     # Keep val/test memory profile conservative to avoid OOM on small GPUs.
-    test_yolo(run_dir, dataset_path, val_batch=max(1, int(val_batch)))
+    test_yolo(run_dir, dataset_path, val_batch=max(1, int(val_batch)), non_interactive=True)
 
 
 def _prompt_input(label: str, default: str = "", completer=None, show_default_hint: bool = True) -> str:
@@ -1870,6 +1876,7 @@ def train_yolo(
     ultralytics_cfg: dict[str, Any] | None = None,
     smartrain_opts: dict[str, Any] | None = None,
 ):
+    mpl_rt = ensure_matplotlib_training_runtime(non_interactive=non_interactive)
     ultralytics_cfg = ultralytics_cfg or {}
     smartrain_opts = smartrain_opts or {}
 
@@ -1924,6 +1931,8 @@ def train_yolo(
         os.makedirs(model_dir, exist_ok=True)
 
     train_kw = _finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
+    if non_interactive or mpl_rt.force_ultralytics_plots_false:
+        train_kw.setdefault("plots", False)
     _ensure_initial_training_metadata(
         model_dir=model_dir,
         dataset_path=dataset_path,
@@ -2002,12 +2011,16 @@ def train_yolo(
         register_weighted_sampling_callback(model)
 
     training_end_time = None
-    raw_best_path = os.path.join(model_dir, "train-ultralytics", "weights", "best.pt")
+    raw_best_candidate = os.path.join(model_dir, "train-ultralytics", "weights", "best.pt")
+    raw_best_path = raw_best_candidate if os.path.isfile(raw_best_candidate) else None
     canonical_best_path = canonical_run_model_path(model_dir, ".pt")
     try:
         model.train(**train_kw)
         training_end_time = datetime.now()
-        model_path = _materialize_canonical_run_model(model_dir, raw_best_path) or canonical_best_path
+        model_path = (
+            _materialize_canonical_run_model(model_dir, source_path=raw_best_path, move=True)
+            or canonical_best_path
+        )
         print("\n" + "-" * 60)
         if os.path.exists(model_path):
             print("[OK] Training complete.")
@@ -2015,8 +2028,7 @@ def train_yolo(
     except Exception as e:
         training_end_time = datetime.now()
         print(
-            f"[ERROR] Failed to start training {model_version} on dataset {dataset_name}"
-            f"on {epochs} eras: {e}"
+            f"[ERROR] Training failed ({model_version}, dataset {dataset_name}, {epochs} epochs): {e}"
         )
     finally:
         if clearml_task is not None:
@@ -2025,10 +2037,24 @@ def train_yolo(
             except Exception:
                 pass
 
+    try:
+        if not os.path.isfile(canonical_best_path):
+            legacy = resolve_run_model_with_legacy_fallback(model_dir)
+            if legacy is not None and legacy.is_file():
+                materialize_canonical_run_model(
+                    model_dir, source_path=str(legacy), move=True, normalize_metadata=True
+                )
+    except Exception:
+        pass
+
+    weights_dest = resolve_run_model_with_legacy_fallback(model_dir)
+    training_weights_ok = weights_dest is not None and weights_dest.is_file()
+
     meta_extras = {
         "train_kw": {k: v for k, v in train_kw.items() if k != "data"},
         "task_type": task_to_metadata_task_type(train_kw.get("task")),
-        "training_ok": os.path.isfile(canonical_best_path),
+        "training_ok": training_weights_ok,
+        "mpl_runtime": mpl_rt.as_dict(),
     }
     return model_dir, training_start_time, training_end_time, dataset_hash, workspace_root, meta_extras
 
@@ -2051,7 +2077,10 @@ def test_yolo(
     conf_rec_beta_recall: float = 2.0,
     conf_rec_beta_precision: float = 0.5,
     conf_rec_fallback: float = 0.25,
+    *,
+    non_interactive: bool = False,
 ):
+    mpl_rt = ensure_matplotlib_training_runtime(non_interactive=non_interactive)
     test_start_time = datetime.now()
 
     data_yaml = _build_runtime_data_yaml(dataset_path, model_dir, stage="test")
@@ -2062,6 +2091,7 @@ def test_yolo(
         "conf": val_conf,
         "iou": val_iou,
         "batch": val_batch,
+        "matplotlib_runtime": mpl_rt.as_dict(),
     }
 
     model_path = canonical_run_model_path(model_dir, ".pt")
@@ -2075,6 +2105,8 @@ def test_yolo(
         "project": str(run_tests_dir(model_dir)),
         "name": "test-ultralytics",
         "exist_ok": False,
+        "plots": False,
+        "save": False,
     }
     if imgsz is not None:
         val_kwargs["imgsz"] = imgsz
@@ -2399,6 +2431,7 @@ def save_training_metadata(
     training_provider: str = "ultralytics",
     external_provider_id: str | None = None,
     system_profile: dict[str, Any] | None = None,
+    matplotlib_runtime: dict[str, Any] | None = None,
     confidence_recommendation_config: dict[str, Any] | None = None,
 ):
     ds_abs = os.path.abspath(dataset_path)
@@ -2480,8 +2513,11 @@ def save_training_metadata(
 
     if inference:
         metadata["inference"] = {k: v for k, v in inference.items() if v is not None}
-    if system_profile:
-        metadata["system_profile"] = system_profile
+    sp_out: dict[str, Any] = dict(system_profile) if system_profile else {}
+    if matplotlib_runtime:
+        sp_out["matplotlib_runtime"] = matplotlib_runtime
+    if sp_out:
+        metadata["system_profile"] = sp_out
     rec_summary = _recommendation_summary_for_metadata(model_dir)
     if rec_summary:
         if confidence_recommendation_config:
@@ -2757,6 +2793,7 @@ def main(argv=None):
                     conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
                     conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
                     conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
+                    non_interactive=args.non_interactive,
                 )
                 test_success = True
             except Exception as e:
@@ -2846,6 +2883,12 @@ def main(argv=None):
                         )
                 else:
                     test_success = False
+        _ext_mpl = None
+        if isinstance(inference_info, dict):
+            _c = inference_info.get("matplotlib_runtime")
+            _ext_mpl = _c if isinstance(_c, dict) else None
+        if _ext_mpl is None:
+            _ext_mpl = ensure_matplotlib_training_runtime(non_interactive=args.non_interactive).as_dict()
         save_training_metadata(
             model_dir=external_run_dir,
             dataset_path=data,
@@ -2868,6 +2911,7 @@ def main(argv=None):
             training_provider=external_provider,
             external_provider_id=external_provider,
             system_profile=collect_system_profile(external_run_dir),
+            matplotlib_runtime=_ext_mpl,
             confidence_recommendation_config={
                 "enabled": not bool(getattr(args, "conf_rec_disable", False)),
                 "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
@@ -2952,6 +2996,9 @@ def main(argv=None):
                 "task_type": task_to_metadata_task_type(u_cfg.get("task")),
                 "train_kw": {k: v for k, v in u_cfg.items() if k != "data"},
                 "training_ok": False,
+                "mpl_runtime": ensure_matplotlib_training_runtime(
+                    non_interactive=args.non_interactive
+                ).as_dict(),
             }
 
         if training_success and model_dir:
@@ -2972,6 +3019,7 @@ def main(argv=None):
                     conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
                     conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
                     conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
+                    non_interactive=args.non_interactive,
                 )
             except Exception as e:
                 test_success = False
@@ -2981,6 +3029,12 @@ def main(argv=None):
                 test_error = f"{str(e)}\n{traceback.format_exc()}"
 
         if model_dir:
+            _mpl_meta = (
+                meta_extras.get("mpl_runtime") if isinstance(meta_extras.get("mpl_runtime"), dict) else None
+            )
+            if _mpl_meta is None and isinstance(inference_info, dict):
+                _cand = inference_info.get("matplotlib_runtime")
+                _mpl_meta = _cand if isinstance(_cand, dict) else None
             save_training_metadata(
                 model_dir=model_dir,
                 dataset_path=data,
@@ -3004,6 +3058,7 @@ def main(argv=None):
                 training_provider="ultralytics",
                 external_provider_id=None,
                 system_profile=collect_system_profile(model_dir),
+                matplotlib_runtime=_mpl_meta,
                 confidence_recommendation_config={
                     "enabled": not bool(getattr(args, "conf_rec_disable", False)),
                     "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
@@ -3032,6 +3087,7 @@ def main(argv=None):
                     conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
                     conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
                     conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
+                    non_interactive=args.non_interactive,
                 )
             except Exception as e:
                 test_success = False
@@ -3040,6 +3096,10 @@ def main(argv=None):
                 print(f"[ERROR] Error during testing: {e}")
                 test_error = f"{str(e)}\n{traceback.format_exc()}"
 
+            _test_only_mpl = None
+            if isinstance(inference_info, dict):
+                _tc = inference_info.get("matplotlib_runtime")
+                _test_only_mpl = _tc if isinstance(_tc, dict) else None
             save_training_metadata(
                 model_dir=model_dir,
                 dataset_path=data,
@@ -3053,6 +3113,7 @@ def main(argv=None):
                 training_provider="ultralytics",
                 external_provider_id=None,
                 system_profile=collect_system_profile(model_dir),
+                matplotlib_runtime=_test_only_mpl,
                 confidence_recommendation_config={
                     "enabled": not bool(getattr(args, "conf_rec_disable", False)),
                     "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
