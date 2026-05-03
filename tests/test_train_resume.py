@@ -321,6 +321,83 @@ def test_resume_runs_test_stage_when_training_complete_but_test_missing(
     assert called["meta"] is True
 
 
+def test_resume_test_backoff_retries_on_cuda_oom(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_backoff_ok"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    batches: list[int] = []
+    freed = {"count": 0}
+
+    def _fake_complete(*_args, **kwargs: object) -> bool:
+        runner_kwargs = kwargs.get("pt_test_runner_kwargs")
+        assert isinstance(runner_kwargs, dict)
+        b = int(runner_kwargs.get("val_batch", -1))
+        batches.append(b)
+        if len(batches) == 1:
+            raise RuntimeError("CUDA out of memory while testing")
+        return True
+
+    monkeypatch.setattr(mtm, "complete_missing_test_artifacts", _fake_complete)
+    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: freed.__setitem__("count", freed["count"] + 1))
+
+    mtm._complete_missing_test_with_backoff(
+        str(run_dir),
+        workspace_root=str(tmp_path),
+        initial_batch=4,
+        min_batch=1,
+        backoff=2,
+    )
+    assert batches == [4, 2]
+    assert freed["count"] == 1
+
+
+def test_resume_test_backoff_fails_when_min_batch_oom(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_backoff_fail"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    batches: list[int] = []
+
+    def _fake_complete(*_args, **kwargs: object) -> bool:
+        runner_kwargs = kwargs.get("pt_test_runner_kwargs")
+        assert isinstance(runner_kwargs, dict)
+        batches.append(int(runner_kwargs.get("val_batch", -1)))
+        raise RuntimeError("CUDA out of memory during validation")
+
+    monkeypatch.setattr(mtm, "complete_missing_test_artifacts", _fake_complete)
+    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: None)
+
+    with pytest.raises(RuntimeError, match="backoff exhausted"):
+        mtm._complete_missing_test_with_backoff(
+            str(run_dir),
+            workspace_root=str(tmp_path),
+            initial_batch=2,
+            min_batch=1,
+            backoff=2,
+        )
+    assert batches == [2, 1]
+
+
+def test_resume_test_backoff_does_not_retry_non_oom(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_backoff_non_oom"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    calls = {"count": 0}
+
+    def _fake_complete(*_args, **_kwargs) -> bool:
+        calls["count"] += 1
+        raise RuntimeError("dataset yaml malformed")
+
+    monkeypatch.setattr(mtm, "complete_missing_test_artifacts", _fake_complete)
+    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: None)
+
+    with pytest.raises(RuntimeError, match="dataset yaml malformed"):
+        mtm._complete_missing_test_with_backoff(
+            str(run_dir),
+            workspace_root=str(tmp_path),
+            initial_batch=4,
+            min_batch=1,
+            backoff=2,
+        )
+    assert calls["count"] == 1
+
+
 def test_resolve_dataset_path_for_resume_falls_back_to_workspace_dataset_dir(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     dataset_name = "my_dataset"

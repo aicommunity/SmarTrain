@@ -549,6 +549,24 @@ def build_train_resume_arg_parser() -> argparse.ArgumentParser:
         dest="non_interactive",
         help="Non-interactive mode. Requires --run-dir.",
     )
+    parser.add_argument(
+        "--test-batch",
+        type=int,
+        default=None,
+        help="Start batch for resume test stage (training_complete_test_pending).",
+    )
+    parser.add_argument(
+        "--test-batch-min",
+        type=int,
+        default=1,
+        help="Minimum batch for OOM backoff in resume test stage.",
+    )
+    parser.add_argument(
+        "--test-batch-backoff",
+        type=int,
+        default=2,
+        help="OOM backoff divider for test batch (e.g. 2 means batch/2).",
+    )
     return parser
 
 
@@ -756,6 +774,15 @@ def _run_resume_command(argv: list[str]) -> int:
     if args.non_interactive and not args.run_dir:
         print("[ERROR] In non-interactive mode, --run-dir is required.")
         return 2
+    if args.test_batch is not None and int(args.test_batch) <= 0:
+        print(f"[ERROR] --test-batch must be > 0, got: {args.test_batch}")
+        return 2
+    if int(args.test_batch_min) <= 0:
+        print(f"[ERROR] --test-batch-min must be > 0, got: {args.test_batch_min}")
+        return 2
+    if int(args.test_batch_backoff) <= 1:
+        print(f"[ERROR] --test-batch-backoff must be > 1, got: {args.test_batch_backoff}")
+        return 2
 
     candidates = list_incomplete_runs(workspace_root)
     chosen: RunDiagnosis | None = None
@@ -789,12 +816,12 @@ def _run_resume_command(argv: list[str]) -> int:
         try:
             ensure_matplotlib_training_runtime(non_interactive=True)
             _maybe_free_cuda_memory()
-            complete_missing_test_artifacts(
+            _complete_missing_test_with_backoff(
                 chosen.run_dir,
                 workspace_root=workspace_root,
-                pt_test_runner=test_yolo,
-                pt_test_runner_kwargs={"non_interactive": True},
-                update_metadata_cb=update_resume_test_metadata,
+                initial_batch=args.test_batch,
+                min_batch=int(args.test_batch_min),
+                backoff=int(args.test_batch_backoff),
             )
             print(f"[OK] Missing test stage completed: {chosen.run_dir}")
             return 0
@@ -836,6 +863,93 @@ def _run_resume_command(argv: list[str]) -> int:
         print(f"[ERROR] Failed to resume run: {chosen.run_dir}")
         print(f"[ERROR] {e}")
         return 1
+
+
+def _is_cuda_oom_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return "out of memory" in msg and "cuda" in msg
+
+
+def _default_resume_test_batch(run_dir: str) -> int:
+    metadata_path = os.path.join(run_dir, "training_metadata.json")
+    meta: dict[str, Any] | None = None
+    if os.path.isfile(metadata_path):
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                meta = payload
+        except Exception:
+            meta = None
+    if isinstance(meta, dict):
+        inf = meta.get("inference")
+        if isinstance(inf, dict) and inf.get("batch") is not None:
+            try:
+                val = int(inf.get("batch"))
+                if val > 0:
+                    return val
+            except Exception:
+                pass
+
+    for p in (os.path.join(run_dir, "train-ultralytics", "args.yaml"), os.path.join(run_dir, "train", "args.yaml")):
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                payload = yaml.safe_load(f) or {}
+            if isinstance(payload, dict) and payload.get("batch") is not None:
+                val = int(payload.get("batch"))
+                if val > 0:
+                    return val
+        except Exception:
+            continue
+    return 4
+
+
+def _next_backoff_batch(current: int, min_batch: int, backoff: int) -> int:
+    if current <= min_batch:
+        return current
+    nxt = (current + backoff - 1) // backoff
+    return max(min_batch, nxt)
+
+
+def _complete_missing_test_with_backoff(
+    run_dir: str,
+    *,
+    workspace_root: str,
+    initial_batch: int | None,
+    min_batch: int,
+    backoff: int,
+) -> None:
+    batch = int(initial_batch) if initial_batch is not None else _default_resume_test_batch(run_dir)
+    batch = max(min_batch, batch)
+    attempt = 0
+    while True:
+        attempt += 1
+        print(f"[INFO] Resume test attempt {attempt}: batch={batch}")
+        try:
+            complete_missing_test_artifacts(
+                run_dir,
+                workspace_root=workspace_root,
+                pt_test_runner=test_yolo,
+                pt_test_runner_kwargs={"non_interactive": True, "val_batch": batch},
+                update_metadata_cb=update_resume_test_metadata,
+            )
+            return
+        except Exception as e:
+            if not _is_cuda_oom_error(e):
+                raise
+            next_batch = _next_backoff_batch(batch, min_batch, backoff)
+            if next_batch == batch:
+                raise RuntimeError(
+                    f"CUDA OOM at minimal test batch={batch}; backoff exhausted."
+                ) from e
+            print(
+                f"[WARN] CUDA OOM during resume test at batch={batch}. "
+                f"Retrying with batch={next_batch}."
+            )
+            _maybe_free_cuda_memory()
+            batch = next_batch
 
 
 def _ensure_resume_confidence_recommendations(
