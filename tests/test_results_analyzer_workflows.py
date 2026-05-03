@@ -1849,6 +1849,16 @@ def test_runs_with_missing_metrics_skips_prompt_without_best_pt(
     assert missing == []
 
 
+def test_resolve_selected_run_dirs_allows_explicit_runs_outside_group(tmp_path: Path) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_b", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    scoped = results_analyzer._resolve_selected_run_dirs(
+        str(tmp_path / "runs" / "ds_a"),
+        [str(run_a), str(run_b)],
+    )
+    assert scoped == [str(run_a), str(run_b)]
+
+
 def test_auto_select_data_yaml_prefers_candidate_with_existing_split_dir(
     tmp_path: Path,
 ) -> None:

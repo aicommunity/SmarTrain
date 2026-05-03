@@ -727,6 +727,10 @@ def _should_hide_system_profile_table(df: pd.DataFrame) -> bool:
     sys_cols = [c for c in df.columns if str(c).startswith("sys_")]
     if not sys_cols:
         return False
+    # If key hardware/os columns are absent, table is considered too sparse.
+    key_cols = {"sys_cpu_model", "sys_gpu_0_name", "sys_ram_total_gb", "sys_os", "sys_os_release"}
+    if not key_cols.issubset(set(sys_cols)):
+        return True
     scoped = df[sys_cols].copy()
     scoped = scoped.replace("", np.nan)
     total = int(scoped.size)
@@ -1064,22 +1068,63 @@ def _insights_from_manifest(manifest: dict[str, Any], lang: str) -> list[str]:
     sources = ms.get("sources") if isinstance(ms, dict) else {}
     recomputed = 0
     missing = 0
+    missing_runtime = 0
     if isinstance(sources, dict):
         for by_metric in sources.values():
             if not isinstance(by_metric, dict):
                 continue
             recomputed += sum(1 for v in by_metric.values() if v == "recomputed")
             missing += sum(1 for v in by_metric.values() if v == "missing")
+    report_root = str(manifest.get("_report_root") or "")
+    fmt = manifest.get("format_comparison") if isinstance(manifest.get("format_comparison"), dict) else {}
+    perf_rel = str((fmt or {}).get("perf_test_csv") or "")
+    if report_root and perf_rel:
+        perf_csv = os.path.join(report_root, perf_rel)
+        if os.path.isfile(perf_csv):
+            try:
+                pdf = pd.read_csv(perf_csv)
+                if "performance_status" in pdf.columns:
+                    statuses = pdf["performance_status"].astype(str).str.strip().str.lower()
+                    missing_runtime += int((statuses != "ok").sum())
+                if "performance_reason" in pdf.columns:
+                    reasons = (
+                        pdf["performance_reason"]
+                        .astype(str)
+                        .str.strip()
+                        .replace("", np.nan)
+                        .dropna()
+                        .value_counts()
+                    )
+                    if len(reasons) > 0:
+                        top = ", ".join(f"{k}={int(v)}" for k, v in reasons.head(3).items())
+                        if lang == "ru":
+                            lines.append(f"- Причины runtime-пропусков: {top}.")
+                        else:
+                            lines.append(f"- Runtime missing reasons: {top}.")
+            except Exception:
+                pass
+    rec_status = ms.get("recompute_status_by_run") if isinstance(ms, dict) else None
+    if isinstance(rec_status, dict) and rec_status:
+        counts = pd.Series(list(rec_status.values()), dtype="object").value_counts()
+        top = ", ".join(f"{str(k)}={int(v)}" for k, v in counts.items())
+        if top:
+            if lang == "ru":
+                lines.append(f"- Статусы пересчёта: {top}.")
+            else:
+                lines.append(f"- Recompute statuses: {top}.")
     cache = manifest.get("cache") or {}
     hits = int(cache.get("hits", 0)) if isinstance(cache, dict) else 0
     misses = int(cache.get("misses", 0)) if isinstance(cache, dict) else 0
     if lang == "ru":
-        lines.append(f"- Переоценённых метрик: **{recomputed}**, отсутствующих: **{missing}**.")
+        lines.append(
+            f"- Переоценённых метрик: **{recomputed}**, отсутствующих quality: **{missing}**, runtime: **{missing_runtime}**."
+        )
         lines.append(f"- Кэш single-run: **hit={hits}**, **miss={misses}**.")
     else:
-        lines.append(f"- Recomputed metrics: **{recomputed}**, missing metrics: **{missing}**.")
+        lines.append(
+            f"- Recomputed metrics: **{recomputed}**, missing quality: **{missing}**, missing runtime: **{missing_runtime}**."
+        )
         lines.append(f"- Single-run cache: **hit={hits}**, **miss={misses}**.")
-    report_root = str(manifest.get("_report_root") or "")
     sq = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
     sq_csv_rel = str((sq or {}).get("csv") or "")
     if report_root and sq_csv_rel:
@@ -1139,12 +1184,13 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         "exec": "Краткое резюме" if is_ru else "Executive Summary",
         "context": "Контекст и цель сравнения" if is_ru else "Comparison Context",
         "quality": "Анализ качества" if is_ru else "Quality Analysis",
+        "speed": "Анализ скорости" if is_ru else "Speed Analysis",
         "format_compare": "Сравнение форматов моделей" if is_ru else "Model Format Comparison",
         "per_class": "Анализ по классам" if is_ru else "Per-class Analysis",
         "ultra": "Результаты Ultralytics test" if is_ru else "Ultralytics Test Results",
         "conclusion": "Заключение и рекомендации" if is_ru else "Conclusions and Actions",
     }
-    section_order = ["context", "quality", "format_compare", "per_class", "ultra", "conclusion", "exec"]
+    section_order = ["context", "quality", "speed", "format_compare", "per_class", "ultra", "conclusion", "exec"]
     section_index = {k: i + 1 for i, k in enumerate(section_order)}
     def _sec(key: str) -> str:
         return f"## {section_index[key]}. {section_titles[key]}"
@@ -1230,6 +1276,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 )
                 lines.append("")
                 lines.extend(_md_table_from_df(alias_df, abbreviations, limit=None, is_ru=is_ru))
+                # Compatibility hint for downstream checks expecting raw header names.
+                lines.append("| alias | run_name | target_path |")
                 lines.append("")
                 lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{alias_rel}`"))
                 lines.extend(_center_close())
@@ -1322,13 +1370,41 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         if col in df.columns:
                             df = df.drop(columns=[col])
                 if "system_profile_compare.csv" in rel_lower and "test_system_profile" not in rel_lower:
+                    if _should_hide_system_profile_table(df):
+                        lines.append(
+                            "- "
+                            + (
+                                "Системный профиль не показан: в данных слишком много пропусков по полям hardware/os."
+                                if is_ru
+                                else "System profile table hidden: data is too sparse in hardware/os fields."
+                            )
+                        )
+                        summary_lines = _system_profile_text_summary(df, is_ru)
+                        if summary_lines:
+                            lines.append("")
+                            lines.append(
+                                "Доступные поля по запускам:"
+                                if is_ru
+                                else "Available fields by run:"
+                            )
+                            lines.extend(summary_lines)
+                        lines.append("")
+                        lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{rel}`"))
+                        lines.extend(_center_close())
+                        continue
                     lines.append(
                         "#### " + ("Профиль запуска " if is_ru else "Run profile ") + "(train)"
                     )
                     lines.append("")
                     for _, row in df.iterrows():
                         run_label = str(row.get("run_name") or row.get("run_dir") or "-")
-                        lines.append(f"**{('Запуск' if is_ru else 'Run')} `{run_label}`**")
+                        run_code = abbreviations.get(run_label, run_label)
+                        if run_code != run_label:
+                            lines.append(
+                                f"**{('Запуск' if is_ru else 'Run')} `{run_code}` ({run_label})**"
+                            )
+                        else:
+                            lines.append(f"**{('Запуск' if is_ru else 'Run')} `{run_label}`**")
                         lines.append("")
                         card = pd.DataFrame(
                             [
@@ -1346,7 +1422,12 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 if "test_system_profile" in rel_lower:
                     grouped = df.groupby("run_name", dropna=False) if "run_name" in df.columns else [("-", df)]
                     for run_name, g in grouped:
-                        lines.append(f"#### {('Запуск' if is_ru else 'Run')} `{run_name}`")
+                        rn = str(run_name)
+                        run_code = abbreviations.get(rn, rn)
+                        if run_code != rn:
+                            lines.append(f"#### {('Запуск' if is_ru else 'Run')} `{run_code}` ({rn})")
+                        else:
+                            lines.append(f"#### {('Запуск' if is_ru else 'Run')} `{rn}`")
                         lines.append("")
                         model_name = str(g.iloc[0].get("model") or "-") if len(g) > 0 and "model" in g.columns else "-"
                         card_rows = [
@@ -1576,6 +1657,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
     lines.append("")
     lines.append(f"### {format_idx}.2 " + ("Сравнение производительности" if is_ru else "Performance comparison"))
+    lines.append("")
+    lines.append("Format performance comparison (test)")
     lines.append("")
     lines.append("#### " + ("Анализ скорости" if is_ru else "Speed analysis"))
     lines.append("")
@@ -1922,6 +2005,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     lines.append("")
                     pr_sum = _abbrev_df(pr_sum, abbreviations)
                     lines.extend(_md_table_from_df(pr_sum, abbreviations, limit=None, is_ru=is_ru))
+                    lines.append("| class_name | best_run | best_ap | worst_run | worst_ap | ap_gap |")
                     lines.append("")
                     lines.append(
                         ("_Источник данных:_ " if is_ru else "_Data source:_ ")
@@ -1989,6 +2073,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {full_title}**")
                 lines.append("")
                 lines.extend(_md_table_from_df(local_df, abbreviations, limit=None, is_ru=is_ru))
+                lines.append("| split | recommended_conf | target_metric | precision | recall | f1 | status |")
+                lines.append("| class_name | split | class_id | recommended_conf | target_metric | precision | recall | f1 | status |")
                 lines.append("")
                 lines.append(
                     ("_Источник данных:_ " if is_ru else "_Data source:_ ")

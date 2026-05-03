@@ -355,6 +355,44 @@ def _auto_select_data_yaml(
     return picked
 
 
+def _build_run_data_yaml_map(
+    run_dirs: list[str],
+    workspace_cli: str | None,
+    *,
+    preferred_split: str | None = None,
+) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    run_to_yaml: dict[str, str] = {}
+    run_to_source: dict[str, str] = {}
+    unresolved: list[str] = []
+    for rd in run_dirs:
+        candidates = _collect_data_yaml_candidates_for_run(rd, workspace_cli)
+        if preferred_split:
+            viable = [(p, src) for p, src in candidates if _has_split_dir(p, preferred_split)]
+            if viable:
+                candidates = viable
+        if not candidates:
+            unresolved.append(rd)
+            continue
+        run_to_yaml[rd] = candidates[0][0]
+        run_to_source[rd] = candidates[0][1]
+    return run_to_yaml, run_to_source, unresolved
+
+
+def _group_runs_by_data_yaml(
+    run_dirs: list[str],
+    run_data_yaml_map: dict[str, str],
+) -> tuple[dict[str, list[str]], list[str]]:
+    groups: dict[str, list[str]] = {}
+    unresolved: list[str] = []
+    for rd in run_dirs:
+        dy = str(run_data_yaml_map.get(rd) or "").strip()
+        if not dy:
+            unresolved.append(rd)
+            continue
+        groups.setdefault(dy, []).append(rd)
+    return groups, unresolved
+
+
 def _recompute_run_test_metrics(
     run_dir: str,
     data_yaml: str,
@@ -1352,6 +1390,7 @@ def _runs_with_missing_metrics(
         run_dirs,
         requested_metrics,
         data_yaml=data_yaml,
+        run_data_yaml_map=None,
         workspace=workspace,
         split=split,
     )
@@ -1363,6 +1402,7 @@ def _collect_missing_metrics_recompute_plan(
     requested_metrics: list[str],
     *,
     data_yaml: str | None = None,
+    run_data_yaml_map: dict[str, str] | None = None,
     workspace: str | None = None,
     split: str = "test",
 ) -> dict[str, list[dict[str, Any]]]:
@@ -1385,7 +1425,7 @@ def _collect_missing_metrics_recompute_plan(
         if missing_metrics:
             # Keep pre-check aligned with actual recompute path in cmd_test_metrics_plot:
             # per-run resolved data.yaml has priority over shared session choice.
-            resolved_yaml = _resolve_data_yaml_for_run(run_dir, workspace)[0]
+            resolved_yaml = str((run_data_yaml_map or {}).get(run_dir) or "").strip() or _resolve_data_yaml_for_run(run_dir, workspace)[0]
             if not resolved_yaml:
                 resolved_yaml = data_yaml
             best_pt = canonical_run_model_path(run_dir, ".pt")
@@ -2529,15 +2569,23 @@ def _resolve_selected_run_dirs(
     )
     if not all_run_dirs:
         return []
-    selected_norm = {
-        os.path.abspath(os.path.expanduser(str(p)))
-        for p in (selected_run_dirs or [])
-        if str(p).strip()
-    }
-    if not selected_norm:
+    selected_ordered: list[str] = []
+    for p in (selected_run_dirs or []):
+        ps = str(p).strip()
+        if not ps:
+            continue
+        ap = os.path.abspath(os.path.expanduser(ps))
+        if ap not in selected_ordered:
+            selected_ordered.append(ap)
+    if not selected_ordered:
         return all_run_dirs
-    scoped = [d for d in all_run_dirs if os.path.abspath(d) in selected_norm]
-    return scoped
+    # When explicit run dirs are provided (e.g. mixed datasets), honor them
+    # directly even if they live outside runs_group_dir.
+    explicit_existing = [d for d in selected_ordered if os.path.isdir(d)]
+    if explicit_existing:
+        return explicit_existing
+    selected_norm = set(selected_ordered)
+    return [d for d in all_run_dirs if os.path.abspath(d) in selected_norm]
 
 
 def cmd_pr_curves(args: argparse.Namespace) -> None:
@@ -3114,9 +3162,13 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
     print(f"[INFO] Test-metrics scope: {len(run_dirs)} run(s) selected")
 
     recompute_enabled = bool(getattr(args, "recompute_missing_metrics", False))
+    run_data_yaml_map = getattr(args, "run_data_yaml_map", None)
+    if not isinstance(run_data_yaml_map, dict):
+        run_data_yaml_map = {}
     rows: list[dict[str, Any]] = []
     run_rows: dict[str, dict[str, Any]] = {}
     metric_sources: dict[str, dict[str, str]] = {}
+    recompute_status_by_run: dict[str, str] = {}
     for run_dir in run_dirs:
         model_name = os.path.basename(run_dir.rstrip(os.sep))
         tm = latest_test_metrics_path(run_dir)
@@ -3160,11 +3212,12 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
                 for m in requested_metrics:
                     metric_sources.setdefault(run_dir, {})[m] = "original"
                 continue
-            data_yaml = _resolve_data_yaml_for_run(run_dir, args.workspace)[0]
+            data_yaml = str(run_data_yaml_map.get(run_dir) or "").strip() or _resolve_data_yaml_for_run(run_dir, args.workspace)[0]
             if not data_yaml:
                 print(f"[WARN] {os.path.basename(run_dir)}: no data.yaml detected, cannot recompute {missing_for_run}")
                 for m in missing_for_run:
                     metric_sources.setdefault(run_dir, {})[m] = "missing"
+                recompute_status_by_run[run_dir] = "skipped_no_data_yaml"
                 _save_recompute_status(
                     run_dir,
                     data_yaml=os.path.join(run_dir, "_missing_data_yaml_"),
@@ -3181,6 +3234,7 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
                 if unresolved_prev and set(missing_for_run).issubset(unresolved_prev):
                     for m in missing_for_run:
                         metric_sources.setdefault(run_dir, {})[m] = "missing"
+                    recompute_status_by_run[run_dir] = "skipped_known_unresolved"
                     continue
             try:
                 recomputed_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
@@ -3245,6 +3299,7 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
                 print(f"[WARN] {os.path.basename(run_dir)}: recompute failed: {e}")
                 for m in missing_for_run:
                     metric_sources.setdefault(run_dir, {})[m] = "missing"
+                recompute_status_by_run[run_dir] = "error"
                 _save_recompute_status(
                     run_dir,
                     data_yaml=data_yaml,
@@ -3259,6 +3314,7 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
                 print(f"[WARN] {os.path.basename(run_dir)}: recompute produced no metrics")
                 for m in missing_for_run:
                     metric_sources.setdefault(run_dir, {})[m] = "missing"
+                recompute_status_by_run[run_dir] = "no_metrics"
                 _save_recompute_status(
                     run_dir,
                     data_yaml=data_yaml,
@@ -3282,6 +3338,7 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
             for m in requested_metrics:
                 metric_sources.setdefault(run_dir, {}).setdefault(m, "original")
             row["metrics_source"] = "recomputed"
+            recompute_status_by_run[run_dir] = "recomputed"
             print(f"[INFO] {os.path.basename(run_dir)}: recomputed missing metrics from {data_yaml}")
             _save_recompute_status(
                 run_dir,
@@ -3369,6 +3426,8 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
             },
             "recomputed_runs": recomputed_runs,
             "sources": metric_sources,
+            "recompute_status_by_run": recompute_status_by_run,
+            "run_data_yaml_map": {k: v for k, v in run_data_yaml_map.items() if isinstance(v, str) and v.strip()},
         }
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -3428,20 +3487,54 @@ def cmd_all(args: argparse.Namespace) -> None:
     if not report_languages:
         report_languages = ["ru", "en"]
     data_yaml = str(getattr(args, "data_yaml", "") or "").strip()
-    if profile in ("speed", "full"):
-        if not data_yaml:
-            auto_yaml = _auto_select_data_yaml(baseline, others, args.workspace, preferred_split="test")
-            if auto_yaml:
-                data_yaml = auto_yaml
-            elif interactive_mode:
-                data_yaml = prompt_text("Path to data.yaml (required for speed/full)", default="").strip()
-        if not data_yaml and not interactive_mode:
-            print("[ERROR] --data-yaml is required for --profile speed/full in non-interactive mode.", file=sys.stderr)
-            sys.exit(2)
     session_root = _session_root(args.workspace, args.analytics_session)
     artifacts: list[dict[str, str]] = []
     cache_events: list[dict[str, Any]] = []
     selected_run_dirs = [baseline] + others
+    run_data_yaml_map, run_data_yaml_source, unresolved_data_yaml_runs = _build_run_data_yaml_map(
+        selected_run_dirs,
+        args.workspace,
+        preferred_split="test" if profile in ("speed", "full") else None,
+    )
+    unique_data_yaml = sorted(set(run_data_yaml_map.values()))
+    if profile in ("speed", "full"):
+        if data_yaml:
+            for rd in selected_run_dirs:
+                run_data_yaml_map.setdefault(rd, data_yaml)
+            unique_data_yaml = sorted(set(run_data_yaml_map.values()))
+        elif interactive_mode and len(unique_data_yaml) > 1:
+            print("[INFO] Multiple datasets detected across selected runs.")
+            for rd in selected_run_dirs:
+                dy = run_data_yaml_map.get(rd)
+                src = run_data_yaml_source.get(rd, "unknown")
+                print(f"[INFO]  - {os.path.basename(rd.rstrip(os.sep))}: {dy or 'UNRESOLVED'} (source: {src})")
+            mode = prompt_choice(
+                "Data.yaml mode",
+                ["auto_per_run", "single_shared"],
+                default="auto_per_run",
+                show_options=False,
+            )
+            if mode == "single_shared":
+                auto_yaml = _auto_select_data_yaml(baseline, others, args.workspace, preferred_split="test")
+                if auto_yaml:
+                    data_yaml = auto_yaml
+                    for rd in selected_run_dirs:
+                        run_data_yaml_map[rd] = data_yaml
+                    unique_data_yaml = [data_yaml]
+        elif not data_yaml and len(unique_data_yaml) == 1:
+            data_yaml = unique_data_yaml[0]
+        elif not data_yaml and interactive_mode and not run_data_yaml_map:
+            data_yaml = prompt_text("Path to data.yaml (required for speed/full)", default="").strip()
+            if data_yaml:
+                for rd in selected_run_dirs:
+                    run_data_yaml_map[rd] = data_yaml
+                unique_data_yaml = [data_yaml]
+        if not data_yaml and not run_data_yaml_map and not interactive_mode:
+            print(
+                "[ERROR] No data.yaml resolved for selected runs; use --data-yaml or ensure metadata/runtime yaml is present.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
     selected_labels = [os.path.basename(x.rstrip(os.sep)) for x in selected_run_dirs]
     print("[INFO] Selected compare runs:")
     for idx, (run_dir, label) in enumerate(zip(selected_run_dirs, selected_labels), start=1):
@@ -3521,6 +3614,7 @@ def cmd_all(args: argparse.Namespace) -> None:
             [baseline] + others,
             ["mAP50-95", "Box-F1"],
             data_yaml=(data_yaml or None),
+            run_data_yaml_map=run_data_yaml_map,
             workspace=args.workspace,
             split="test",
         )
@@ -3580,6 +3674,7 @@ def cmd_all(args: argparse.Namespace) -> None:
             val_imgsz=int(getattr(args, "val_imgsz", 640)),
             val_half=bool(getattr(args, "val_half", True)),
             gpu_only_val=bool(getattr(args, "gpu_only_val", True)),
+            run_data_yaml_map=run_data_yaml_map,
         )
         cmd_test_metrics_plot(tm_ns)
         artifacts.append({"role": "metrics_dir", "path": os.path.relpath(tm_ns.out_dir, session_root)})
@@ -3591,25 +3686,47 @@ def cmd_all(args: argparse.Namespace) -> None:
             except Exception:
                 metric_sources_payload = None
 
-    if profile in ("speed", "full") and data_yaml:
+    if profile in ("speed", "full"):
+        run_groups, unresolved_for_speed = _group_runs_by_data_yaml(selected_run_dirs, run_data_yaml_map)
+        if unresolved_for_speed:
+            print("[WARN] Speed stage: skipped runs without resolved data.yaml:")
+            for rd in unresolved_for_speed:
+                print(f"[WARN]  - {os.path.basename(rd.rstrip(os.sep))}")
+        if not run_groups:
+            print("[WARN] Speed stage skipped: no runs with resolved data.yaml.")
         inf_csv = os.path.join(session_root, "artifacts", "inference", "benchmark.csv")
         inf_png = os.path.join(session_root, "artifacts", "inference", "benchmark_bars.png")
-        ib_ns = argparse.Namespace(
-            runs_group_dir=runs_group_dir,
-            selected_run_dirs=selected_run_dirs,
-            data_yaml=data_yaml,
-            split="test",
-            frames=100,
-            device="cpu",
-            half=False,
-            out_csv=inf_csv,
-            workspace=args.workspace,
-            models_root=args.models_root,
-            analytics_session=args.analytics_session,
-            reuse_run_cache=True,
-            cache_stats_out=os.path.join(session_root, "artifacts", "inference", "cache_stats.json"),
-        )
-        cmd_inference_benchmark(ib_ns)
+        os.makedirs(os.path.dirname(inf_csv), exist_ok=True)
+        inf_parts: list[pd.DataFrame] = []
+        for g_idx, (group_yaml, group_runs) in enumerate(sorted(run_groups.items()), start=1):
+            inf_part_csv = os.path.join(session_root, "artifacts", "inference", f"benchmark_group_{g_idx}.csv")
+            ib_ns = argparse.Namespace(
+                runs_group_dir=runs_group_dir,
+                selected_run_dirs=group_runs,
+                data_yaml=group_yaml,
+                split="test",
+                frames=100,
+                device="cpu",
+                half=False,
+                out_csv=inf_part_csv,
+                workspace=args.workspace,
+                models_root=args.models_root,
+                analytics_session=args.analytics_session,
+                reuse_run_cache=True,
+                cache_stats_out=os.path.join(session_root, "artifacts", "inference", f"cache_stats_group_{g_idx}.json"),
+            )
+            cmd_inference_benchmark(ib_ns)
+            if os.path.isfile(inf_part_csv):
+                try:
+                    inf_parts.append(pd.read_csv(inf_part_csv))
+                except Exception:
+                    pass
+        if inf_parts:
+            inf_df = pd.concat(inf_parts, ignore_index=True)
+            inf_df.to_csv(inf_csv, index=False, encoding="utf-8")
+        else:
+            inf_df = pd.DataFrame()
+            inf_df.to_csv(inf_csv, index=False, encoding="utf-8")
         if os.path.isfile(lb_csv) and os.path.isfile(inf_csv):
             try:
                 lb_df = pd.read_csv(lb_csv)
@@ -3669,61 +3786,89 @@ def cmd_all(args: argparse.Namespace) -> None:
                 {"role": "inference_png", "path": os.path.relpath(inf_png, session_root)},
             ]
         )
-        cache_stats_path = os.path.join(session_root, "artifacts", "inference", "cache_stats.json")
-        if os.path.isfile(cache_stats_path):
+        for g_idx in range(1, len(run_groups) + 1):
+            cache_stats_path = os.path.join(session_root, "artifacts", "inference", f"cache_stats_group_{g_idx}.json")
+            if os.path.isfile(cache_stats_path):
+                try:
+                    cache_events.extend(json.load(open(cache_stats_path, "r", encoding="utf-8")).get("cache", []))
+                except Exception:
+                    pass
+        if os.path.isfile(inf_csv):
             try:
-                cache_events.extend(json.load(open(cache_stats_path, "r", encoding="utf-8")).get("cache", []))
+                if os.path.getsize(inf_csv) > 0:
+                    sq = _write_speed_quality_artifacts(
+                        session_root,
+                        inf_csv,
+                        [baseline] + others,
+                        metric_sources_payload,
+                        scatter_x=str(getattr(args, "scatter_x", "avg_inference_ms_per_frame")),
+                        scatter_y=str(getattr(args, "scatter_y", "mAP50-95")),
+                    )
+                    if sq:
+                        artifacts.extend(
+                            [
+                                {"role": "speed_quality_csv", "path": sq["csv"]},
+                                {"role": "speed_quality_png", "path": sq["png"]},
+                            ]
+                        )
             except Exception:
                 pass
-        sq = _write_speed_quality_artifacts(
-            session_root,
-            inf_csv,
-            [baseline] + others,
-            metric_sources_payload,
-            scatter_x=str(getattr(args, "scatter_x", "avg_inference_ms_per_frame")),
-            scatter_y=str(getattr(args, "scatter_y", "mAP50-95")),
-        )
-        if sq:
-            artifacts.extend(
-                [
-                    {"role": "speed_quality_csv", "path": sq["csv"]},
-                    {"role": "speed_quality_png", "path": sq["png"]},
-                ]
-            )
 
-    if profile == "full" and data_yaml:
-        pr_png = os.path.join(session_root, "artifacts", "pr", "pr_all_classes.png")
-        pr_ns = argparse.Namespace(
-            runs_group_dir=runs_group_dir,
-            selected_run_dirs=selected_run_dirs,
-            data_yaml=data_yaml,
-            out_png=pr_png,
-            workspace=args.workspace,
-            models_root=args.models_root,
-            analytics_session=args.analytics_session,
-            pr_per_class=True,
-            reuse_run_cache=True,
-            cache_stats_out=os.path.join(session_root, "artifacts", "pr", "cache_stats.json"),
-            val_batch=int(getattr(args, "val_batch", 1)),
-            val_imgsz=int(getattr(args, "val_imgsz", 640)),
-            val_half=bool(getattr(args, "val_half", True)),
-            gpu_only_val=bool(getattr(args, "gpu_only_val", True)),
-        )
-        cmd_pr_curves(pr_ns)
-        artifacts.append({"role": "pr_png", "path": os.path.relpath(pr_png, session_root)})
-        pr_per_class_csv = os.path.join(session_root, "artifacts", "pr", "per_class", "pr_per_class.csv")
-        if os.path.isfile(pr_per_class_csv):
+    if profile == "full":
+        pr_groups, unresolved_for_pr = _group_runs_by_data_yaml(selected_run_dirs, run_data_yaml_map)
+        if unresolved_for_pr:
+            print("[WARN] PR stage: skipped runs without resolved data.yaml:")
+            for rd in unresolved_for_pr:
+                print(f"[WARN]  - {os.path.basename(rd.rstrip(os.sep))}")
+        pr_per_class_frames: list[pd.DataFrame] = []
+        pr_png_written = False
+        os.makedirs(os.path.join(session_root, "artifacts", "pr"), exist_ok=True)
+        for g_idx, (group_yaml, group_runs) in enumerate(sorted(pr_groups.items()), start=1):
+            pr_png = os.path.join(session_root, "artifacts", "pr", f"pr_all_classes_{g_idx}.png")
+            pr_ns = argparse.Namespace(
+                runs_group_dir=runs_group_dir,
+                selected_run_dirs=group_runs,
+                data_yaml=group_yaml,
+                out_png=pr_png,
+                workspace=args.workspace,
+                models_root=args.models_root,
+                analytics_session=args.analytics_session,
+                pr_per_class=True,
+                reuse_run_cache=True,
+                cache_stats_out=os.path.join(session_root, "artifacts", "pr", f"cache_stats_group_{g_idx}.json"),
+                val_batch=int(getattr(args, "val_batch", 1)),
+                val_imgsz=int(getattr(args, "val_imgsz", 640)),
+                val_half=bool(getattr(args, "val_half", True)),
+                gpu_only_val=bool(getattr(args, "gpu_only_val", True)),
+            )
+            cmd_pr_curves(pr_ns)
+            if os.path.isfile(pr_png):
+                artifacts.append({"role": "pr_png", "path": os.path.relpath(pr_png, session_root)})
+                pr_png_written = True
+            part_csv = os.path.join(session_root, "artifacts", "pr", "per_class", "pr_per_class.csv")
+            if os.path.isfile(part_csv):
+                try:
+                    pr_per_class_frames.append(pd.read_csv(part_csv))
+                except Exception:
+                    pass
+            pr_cache_stats = os.path.join(session_root, "artifacts", "pr", f"cache_stats_group_{g_idx}.json")
+            if os.path.isfile(pr_cache_stats):
+                try:
+                    cache_events.extend(json.load(open(pr_cache_stats, "r", encoding="utf-8")).get("cache", []))
+                except Exception:
+                    pass
+        if pr_per_class_frames:
+            pr_per_class_csv = os.path.join(session_root, "artifacts", "pr", "per_class", "pr_per_class.csv")
+            merged = pd.concat(pr_per_class_frames, ignore_index=True)
+            merged = merged.drop_duplicates()
+            merged.to_csv(pr_per_class_csv, index=False, encoding="utf-8")
             artifacts.append({"role": "pr_per_class_csv", "path": os.path.relpath(pr_per_class_csv, session_root)})
+        if not pr_png_written:
+            print("[WARN] PR stage completed without PR plot artifacts.")
         pr_per_class_dir = os.path.join(session_root, "artifacts", "pr", "per_class")
         if os.path.isdir(pr_per_class_dir):
             for p in sorted(glob(os.path.join(pr_per_class_dir, "*.png"))):
                 artifacts.append({"role": "pr_per_class_png", "path": os.path.relpath(p, session_root)})
-        pr_cache_stats = os.path.join(session_root, "artifacts", "pr", "cache_stats.json")
-        if os.path.isfile(pr_cache_stats):
-            try:
-                cache_events.extend(json.load(open(pr_cache_stats, "r", encoding="utf-8")).get("cache", []))
-            except Exception:
-                pass
 
     abbreviations = _build_abbreviations_for_report([baseline] + others)
     ultralytics_test_rows, ultralytics_test_artifacts = _collect_ultralytics_test_artifacts(
@@ -3771,6 +3916,8 @@ def cmd_all(args: argparse.Namespace) -> None:
             "conclusion",
         ],
         "abbreviations": abbreviations,
+        "run_data_yaml_map": run_data_yaml_map,
+        "runs_with_unresolved_data_yaml": unresolved_data_yaml_runs,
     }
     if ultralytics_test_rows:
         manifest["ultralytics_test"] = ultralytics_test_rows
