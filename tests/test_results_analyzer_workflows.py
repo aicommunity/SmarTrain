@@ -79,6 +79,232 @@ def _run_interactive(
     results_analyzer.cmd_interactive(ns)
 
 
+def test_scan_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch, capsys) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "demo_model"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    ns = argparse.Namespace(models_root=str(tmp_path / "runs"))
+    results_analyzer.cmd_scan(ns)
+    out = capsys.readouterr().out
+    assert "demo_model" in out
+    assert "ds_a" in out
+
+
+def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_b"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run_dir / "test_metrics.csv").write_text("mAP50-95,Box-F1\n0.5,0.6\n", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    ns = argparse.Namespace(
+        models_root=str(tmp_path / "runs"),
+        filter_dataset=None,
+        filter_model=None,
+        filter_training_ok=None,
+        filter_testing_ok=None,
+    )
+    rows = results_analyzer._filtered_run_records(ns)
+    assert len(rows) == 1
+    _rd, rec = rows[0]
+    assert rec.model == "canonical_model"
+    assert rec.dataset_name == "ds_a"
+
+
+def test_collect_ultralytics_test_artifacts_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    canonical = run_test_backend_dir(str(run_dir), "ultralytics")
+    canonical.mkdir(parents=True, exist_ok=True)
+    (canonical / "pr.csv").write_text("recall,precision\n0.5,0.6\n", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model_c"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    rows, _arts = results_analyzer._collect_ultralytics_test_artifacts(
+        str(tmp_path / "analytics" / "analyze-reports" / "s2"),
+        [str(run_dir)],
+        {"run_c": "R1"},
+    )
+    assert rows and rows[0]["exists"] is True
+    assert rows[0]["run_info"]["model"] == "canonical_model_c"
+    assert rows[0]["run_info"]["dataset_name"] == "ds_a"
+
+
+def test_export_table_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_export_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run_dir / "test_metrics.csv").write_text("mAP50-95,Box-F1\n0.5,0.6\n", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model_export"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    out_csv = tmp_path / "out" / "runs_summary.csv"
+    ns = argparse.Namespace(
+        models_root=str(tmp_path / "runs"),
+        workspace=str(tmp_path),
+        analytics_session=None,
+        output=str(out_csv),
+    )
+    results_analyzer.cmd_export_table(ns)
+    df = pd.read_csv(out_csv)
+    assert len(df) == 1
+    assert str(df.iloc[0]["model"]) == "canonical_model_export"
+    assert str(df.iloc[0]["dataset_name"]) == "ds_a"
+
+
+def test_write_system_profile_compare_csv_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_sysprof_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model_sys"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    out_csv = tmp_path / "system_profile_compare.csv"
+    written = results_analyzer._write_system_profile_compare_csv([str(run_dir)], str(out_csv))
+    assert written is not None
+    df = pd.read_csv(out_csv)
+    assert len(df) == 1
+    assert str(df.iloc[0]["model"]) == "canonical_model_sys"
+    assert str(df.iloc[0]["dataset_name"]) == "ds_a"
+
+
+def test_write_test_system_profile_compare_csv_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_test_sysprof_c"
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "onnx": {
+                        "artifacts": [
+                            {
+                                "target_path": "models/a.onnx",
+                                "test_system_profile": {
+                                    "cpu": {"model": "CPU-X", "logical_cores": 16},
+                                    "ram": {"total_gb": 64.0},
+                                    "gpu": {
+                                        "cuda_available": True,
+                                        "total_vram_gb": 24.0,
+                                        "devices": [{"name": "GPU-0", "total_vram_gb": 24.0}],
+                                    },
+                                    "platform": {"os": "Linux", "os_release": "6.8", "python_version": "3.10"},
+                                    "runtime": {"stage": "test", "format": "onnx", "backend": "onnxruntime"},
+                                },
+                            }
+                        ]
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model_test_sys"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    out_csv = tmp_path / "test_system_profile_compare.csv"
+    written = results_analyzer._write_test_system_profile_compare_csv([str(run_dir)], str(out_csv))
+    assert written is not None
+    df = pd.read_csv(out_csv)
+    assert len(df) == 1
+    assert str(df.iloc[0]["model"]) == "canonical_model_test_sys"
+    assert str(df.iloc[0]["dataset_name"]) == "ds_a"
+    assert str(df.iloc[0]["format"]) == "onnx"
+
+
+def test_collect_data_yaml_candidates_uses_canonical_dataset_name_when_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_data_yaml_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"pt")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"name": "ds_a"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
+    dataset_yaml.write_text("path: .\ntrain: images/train\nval: images/val\n", encoding="utf-8")
+
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+    monkeypatch.setattr(
+        results_analyzer,
+        "load_metadata",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("load_metadata should not be used in canonical mode")),
+    )
+
+    out = results_analyzer._collect_data_yaml_candidates_for_run(str(run_dir), str(tmp_path))
+    assert any(src == "training_metadata.dataset.name -> workspace/datasets" and Path(path) == dataset_yaml for path, src in out)
+
+
 def test_compare_writes_insights_and_delta(tmp_path: Path) -> None:
     baseline = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
     other = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)

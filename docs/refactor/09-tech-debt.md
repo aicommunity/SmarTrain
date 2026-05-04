@@ -1,0 +1,35 @@
+# Tech Debt Log
+
+Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
+
+## Open Items
+
+- [ ] Plan-audit debt (completed todo `orchestrator-split`): `analyze` decomposition is still not symmetric to train/test/inference. `results_analyzer.py` remains a large mixed-responsibility module without dedicated service/backend/artifact layers.
+- [ ] Plan-audit debt (completed todo `backend-abstraction`): capability contracts exist, but artifacts from target plan like dedicated `backends/ultralytics_adapter.py` and normalized external provider adapter layer are not fully separated from legacy modules.
+- [ ] Plan-audit debt (completed todo `task-abstraction`): `TaskType` contracts and routing hooks exist, but runtime paths still mostly execute detection-centric logic; classification/segmentation are readiness stubs rather than feature-complete task adapters.
+- [ ] Wave 6 debt: canonical read adapters (`run/model`) are introduced, but consumer modules (`model_test_cli` / `inference_cli` / `results_analyzer`) are not yet switched to canonical gateway as primary read path.
+- [ ] `train` flow extraction is now split into external/builtin/test-only handlers, but the handlers still depend on `model_training_module` namespace (`mtm.*`). Next step: decouple shared helpers into neutral modules to reduce dynamic coupling.
+- [ ] Reduce dynamic module coupling in `train_service`: current pattern imports `model_training_module` and references many helpers via `mtm.*`; move shared primitives to neutral modules (`services/common` or `backends/*`) to simplify tests and static checks.
+- [ ] `model_test_orchestrator` now delegates non-PT formats to `services/test_backend_dispatch.py`, but PT/PT-uni flow still lives inline; move PT logic into the same strategy framework for symmetrical dispatch.
+- [ ] Capability routing is task-aware for train/test registry, but runtime implementations are still detection-centric; add task-specific strategies/adapters for classification/segmentation instead of shared generic paths.
+
+## Notes
+
+- 2026-05-04: Added as persistent debt register per refactor process requirement. Update this file during each meaningful refactor step.
+- 2026-05-04: Introduced `smartrain/backends/train_test_registry.py` and wired `model_test_orchestrator` to resolve backend IDs via capability registry for test persistence paths. This is still detection-only and does not yet cover full train flow routing.
+- 2026-05-04: Extended capability routing into `train_service` metadata (`training_provider` for local/test-only flows now resolved via `resolve_train_backend`). Remaining gap: runtime execution path selection is still hardcoded by format branches, not backend strategy dispatch.
+- 2026-05-04: `model_test_orchestrator` now uses centralized non-PT dispatch helper (`_run_non_pt_format`) + unified backend resolver (`_backend_for`). Runtime logic is cleaner, but still closure-based inside one function; next cleanup is extracting dispatch strategies into dedicated module-level objects.
+- 2026-05-04: Completed extraction to module-level strategy helper `smartrain/services/test_backend_dispatch.py`; orchestrator now calls dispatch service directly. Also added task-aware routing input for `model test` via `--task` (with metadata inference fallback) and generalized train/test registry to `KNOWN_TASKS`.
+- 2026-05-04: Extracted external-provider training scenario into `_run_external_provider_flow(...)` inside `train_service`; behavior preserved, and main runner now delegates instead of embedding the full branch inline.
+- 2026-05-04: Completed split of remaining `train_service` logic into `_run_builtin_train_and_eval_flow(...)` and `_run_test_only_flow(...)`; `run_train_after_setup(...)` now acts as a thin scenario router.
+- 2026-05-04: Plan-vs-codebase audit added explicit debt markers for partially completed waves (orchestrator-split, backend-abstraction, task-abstraction) to track remaining scope hidden behind completed todo statuses.
+- 2026-05-04: Started Wave 6 implementation track: added canonical domain package (`domain/canonical/*`) with DTO + validation and initial read adapters (`adapters/canonical/read/*`) including factory and equivalence tests.
+- 2026-05-04: Added `orchestrators/canonical_gateway.py` and first staged consumer wiring in `model_test_cli` for task inference via feature flag `SMARTTRAIN_CANONICAL_READ=1` (with safe fallback to legacy metadata read path).
+- 2026-05-04: Added second staged consumer wiring in `inference_cli` model resolution (`--run`/`--model-name`) via `canonical_gateway` under `SMARTTRAIN_CANONICAL_READ=1`, preserving legacy fallback behavior.
+- 2026-05-04: Updated canonical consumer migration policy to no-fallback mode for new canonical paths: when `SMARTTRAIN_CANONICAL_READ=1`, `model_test_cli` task inference and `inference_cli` model resolution rely on canonical gateway without legacy fallback.
+- 2026-05-04: Added initial canonical consumer wiring in `results_analyzer.cmd_scan` under `SMARTTRAIN_CANONICAL_READ=1` (no-fallback path, explicit error reporting per run row).
+- 2026-05-04: Extended canonical read path in `results_analyzer` for `_filtered_run_records` and `cmd_leaderboard` under `SMARTTRAIN_CANONICAL_READ=1` via shared `_build_run_record_canonical`. Remaining gap: report helper branches (for example `_build_abbreviations_for_report` and artifact collectors) still read legacy metadata directly.
+- 2026-05-04: Extended canonical read path to additional report/helper branches in `results_analyzer` (`_build_abbreviations_for_report`, `_collect_ultralytics_test_artifacts`, `_collect_confidence_recommendation_tables`) under `SMARTTRAIN_CANONICAL_READ=1`. Remaining gap: several export/compare helpers still use direct `load_metadata/flatten_metadata` and are not yet switched to canonical source.
+- 2026-05-04: Extended canonical read path to export/system-profile helpers in `results_analyzer` (`cmd_export_table`, `_write_system_profile_compare_csv`) under `SMARTTRAIN_CANONICAL_READ=1` via shared `_flat_row_canonical`. Remaining gap: ` _write_test_system_profile_compare_csv` and some compare helpers still read `load_metadata/flatten_metadata` directly.
+- 2026-05-04: Extended canonical read path to `_write_test_system_profile_compare_csv` under `SMARTTRAIN_CANONICAL_READ=1`; model/dataset columns now come from canonical payload in test system-profile export too. Remaining gap: `_collect_data_yaml_candidates_for_run` and selected legacy-only helper branches still read `training_metadata.json` directly and need staged canonical replacement/adapter support.
+- 2026-05-04: Switched `_collect_data_yaml_candidates_for_run` to canonical mode under `SMARTTRAIN_CANONICAL_READ=1` (dataset `name` source now from canonical payload, no direct `load_metadata` calls in this mode). Remaining gap: canonical adapter still derives `dataset_ref` from run metadata internally, so full metadata-decoupling requires expanding canonical run adapter fields/producers.
