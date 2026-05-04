@@ -31,3 +31,14 @@ def test_run_adapter_reads_canonical_payload(tmp_path: Path) -> None:
     assert payload.models[0].format == "pt"
     assert payload.runs[0].run_id == "run_1"
 
+
+def test_run_adapter_infers_dataset_from_run_path_without_metadata(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds_path" / "run_2"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+
+    payload = RunAdapter().read(str(run_dir))
+    assert payload.runs
+    assert payload.runs[0].dataset_ref == "ds_path"
+

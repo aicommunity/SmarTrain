@@ -10,6 +10,24 @@ from smartrain.domain.canonical.models import CanonicalModelRef, CanonicalPayloa
 from .normalizers import normalize_backend, normalize_path, normalize_task
 
 
+def _dataset_ref_from_run_dir(run_dir: Path, ti: dict[str, Any]) -> str | None:
+    dataset = ti.get("dataset") if isinstance(ti, dict) else None
+    if isinstance(dataset, dict):
+        name = dataset.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    parts = [str(p).strip() for p in run_dir.parts]
+    lower_parts = [p.lower() for p in parts]
+    if "runs" in lower_parts:
+        idx = lower_parts.index("runs")
+        if idx + 1 < len(parts):
+            candidate = parts[idx + 1]
+            if candidate:
+                return candidate
+    parent_name = run_dir.parent.name.strip()
+    return parent_name or None
+
+
 class RunAdapter:
     def read(self, source_ref: str, options: dict[str, Any] | None = None) -> CanonicalPayload:
         run_dir = Path(source_ref).expanduser().resolve()
@@ -41,7 +59,7 @@ class RunAdapter:
         run = CanonicalRunRef(
             run_id=run_dir.name,
             workspace=str(run_dir.parent.parent.parent) if len(run_dir.parts) >= 3 else str(run_dir.parent),
-            dataset_ref=ti.get("dataset", {}).get("name") if isinstance(ti, dict) and isinstance(ti.get("dataset"), dict) else None,
+            dataset_ref=_dataset_ref_from_run_dir(run_dir, ti),
             training_ref=str(run_dir),
             task_type=task_type,
             backend_type=backend,
