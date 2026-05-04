@@ -398,3 +398,59 @@ def test_resolve_model_run_prefers_newest_profile_onnx_variant(tmp_path: Path, m
     assert model_path == new_variant.resolve()
 
 
+def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    run_dir = tmp_path / "runs" / "ds_a" / "run_c"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    target = models_dir / "from_gateway.onnx"
+    target.write_bytes(b"gateway")
+
+    class _M:
+        weights_path = str(target)
+        model_id = "mid"
+
+    class _R:
+        run_id = "rid"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    import argparse
+    from smartrain.workspace_paths import WorkspaceLayout
+
+    args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
+    model_path, name, source = _resolve_model(args, WorkspaceLayout(str(tmp_path)))
+    assert source == "runs"
+    assert name == "rid"
+    assert model_path == target.resolve()
+
+
+def test_resolve_model_falls_back_when_canonical_gateway_fails(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    run_dir = tmp_path / "runs" / "ds_a" / "run_d"
+    models_dir = run_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    fallback = models_dir / "run_d.onnx"
+    fallback.write_bytes(b"fallback")
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "smartrain.orchestrators.canonical_gateway.load_target",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    import argparse
+    from smartrain.workspace_paths import WorkspaceLayout
+
+    args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
+    with pytest.raises(RuntimeError):
+        _resolve_model(args, WorkspaceLayout(str(tmp_path)))
+

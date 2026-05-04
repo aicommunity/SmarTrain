@@ -7,16 +7,13 @@ import os
 import re
 import sys
 import tempfile
-import time
 from datetime import datetime
 from glob import glob
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import yaml
 from PIL import Image
-from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
@@ -28,11 +25,6 @@ from smartrain.datasets_json_former import find_yaml_file
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.path_portable import relativize_if_under
 from smartrain.results_analyzer import find_run_directories
-from smartrain.provider_global_index import get_provider_location
-from smartrain.external_providers.runner import run_external_infer
-from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
-from smartrain.external_providers.registry import list_provider_specs
-from smartrain.train_model_catalog import is_supported_external_provider_model, TrainModelCatalog
 from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.canonical_refs import canonical_target_from_model_dir, canonical_target_from_run
@@ -45,10 +37,8 @@ from smartrain.device_selector import (
 )
 from smartrain.model_context import infer_img_size_from_model_context
 from smartrain.run_artifacts import is_internal_conversion_artifact
-from smartrain.inference_backends import InferenceBackendRegistry, ExternalProviderBackend
-from smartrain.inference_perf import DualPerfProfiler
-from smartrain.environment_profile import collect_environment_profile, write_environment_profile
 from smartrain.artifact_schema_v2 import wrap_inference_report_v2
+from smartrain.services.inference_service import run_inference_job
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
@@ -199,11 +189,40 @@ def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, 
 
 
 def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Path, str, str]:
+    use_canonical = str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "1"
     if args.model_name:
+        if use_canonical:
+            from smartrain.orchestrators.canonical_gateway import load_target
+
+            mdir = (Path(layout.models) / str(args.model_name).strip()).resolve()
+            payload = load_target(str(mdir), source_kind="model")
+            if not payload.models:
+                raise FileNotFoundError(f"Canonical model payload has no models for: {mdir}")
+            model = payload.models[0]
+            p = Path(str(model.weights_path)).expanduser().resolve()
+            if not p.is_file():
+                raise FileNotFoundError(f"Canonical weights not found: {p}")
+            if p.suffix.lower() not in SUPPORTED_INFERENCE_EXTS:
+                raise FileNotFoundError(f"Unsupported canonical weights format: {p.suffix}")
+            return p, str(model.model_id or mdir.name), "models"
         p, model_key = _resolve_model_from_name(layout, str(args.model_name).strip())
         return p, model_key, "models"
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
+        if use_canonical:
+            from smartrain.orchestrators.canonical_gateway import load_target
+
+            payload = load_target(str(run_dir), source_kind="run")
+            if not payload.models:
+                raise FileNotFoundError(f"Canonical run payload has no models for: {run_dir}")
+            model = payload.models[0]
+            p = Path(str(model.weights_path)).expanduser().resolve()
+            if not p.is_file():
+                raise FileNotFoundError(f"Canonical weights not found: {p}")
+            if p.suffix.lower() not in SUPPORTED_INFERENCE_EXTS:
+                raise FileNotFoundError(f"Unsupported canonical weights format: {p.suffix}")
+            source_id = str(payload.runs[0].run_id) if payload.runs else run_dir.name
+            return p, source_id, "runs"
         canonical = canonical_target_from_run(run_dir)
         return canonical.model_path.resolve(), canonical.source_id, canonical.source_kind
     if args.weights:
@@ -576,334 +595,11 @@ def main(argv: list[str] | None = None) -> None:
     _ensure_device_available_or_exit(args.device)
     print(f"[INFO] Inference device: {device_display_name(args.device)}")
 
-    known_provider_ids = {spec.id for spec in list_provider_specs()}
-    try:
-        parsed_weights_ref = validate_external_model_ref(
-            parse_external_model_ref(getattr(args, "weights", None)),
-            known_provider_ids=known_provider_ids,
-        )
-        parsed_model_name_ref = validate_external_model_ref(
-            parse_external_model_ref(getattr(args, "model_name", None)),
-            known_provider_ids=known_provider_ids,
-        )
-    except ValueError as e:
-        print(f"[ERROR] {e}", file=sys.stderr)
-        raise SystemExit(2)
-    if parsed_weights_ref.is_external and parsed_weights_ref.provider_id and not getattr(args, "external_provider", None):
-        args.external_provider = parsed_weights_ref.provider_id
-        args.weights = parsed_weights_ref.model_ref
-        print(f"[INFO] External provider inferred from --weights: {parsed_weights_ref.provider_id}")
-    if parsed_model_name_ref.is_external and parsed_model_name_ref.provider_id and not getattr(args, "external_provider", None):
-        args.external_provider = parsed_model_name_ref.provider_id
-        args.model_name = None
-        args.weights = parsed_model_name_ref.model_ref
-        print(f"[INFO] External provider inferred from --model-name: {parsed_model_name_ref.provider_id}")
-
-    ext_provider = str(getattr(args, "external_provider", "") or "").strip()
-    if ext_provider and args.weights:
-        raw_weight = str(args.weights).strip()
-        maybe_path = Path(raw_weight).expanduser()
-        if maybe_path.is_file():
-            model_path = maybe_path.resolve()
-            model_name = model_path.stem
-            model_source = "weights"
-        else:
-            model_path = Path(raw_weight)
-            model_name = _sanitize_segment(model_path.name or raw_weight)
-            model_source = "external-model"
-    else:
-        try:
-            model_path, model_name, model_source = _resolve_model(args, layout)
-        except Exception as e:
-            print(f"[ERROR] Failed to resolve model: {e}", file=sys.stderr)
-            raise SystemExit(1)
-    if args.img_size is None:
-        inferred = _infer_img_size_from_model_context(model_path) if isinstance(model_path, Path) else None
-        args.img_size = int(inferred) if inferred is not None else 640
-
-    if ext_provider:
-        location = get_provider_location(ext_provider)
-        if location is None and not getattr(args, "external_repo", None):
-            print(
-                f"[ERROR] External provider {ext_provider!r} is not installed. "
-                "Use `smartrain providers install` or pass --external-repo.",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-        repo_path = str(getattr(args, "external_repo", "") or "").strip() or (location.repo_path if location else "")
-        venv_path = location.venv_path if location else os.path.join(repo_path, "venv")
-        if not venv_path:
-            print(f"[ERROR] Missing venv for external provider {ext_provider!r}.", file=sys.stderr)
-            raise SystemExit(1)
-        raw_model_value = str(getattr(args, "weights", "") or "")
-        maybe_file = Path(raw_model_value).expanduser()
-        if not maybe_file.is_file():
-            is_supported = is_supported_external_provider_model(
-                ext_provider,
-                raw_model_value,
-                provider_repo_path=repo_path or None,
-            )
-            if not is_supported:
-                aliases = TrainModelCatalog(
-                    provider=ext_provider,
-                    provider_repo_path=repo_path or None,
-                ).supported_aliases()
-                known = ", ".join(aliases) if aliases else "<none>"
-                print(
-                    f"[ERROR] Model {raw_model_value!r} is not supported by external provider "
-                    f"{ext_provider!r}. Supported aliases: {known}",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
-        source_for_external = _resolve_external_source(args, layout)
-        source_short = (
-            os.path.basename(os.path.abspath(os.path.expanduser(str(args.source_dir))).rstrip(os.sep)) or "folder"
-            if args.data_mode == "folder"
-            else f"{args.dataset}-{args.split}"
-        )
-        out_root = _resolve_output_root(layout, model_name, source_short)
-        report_path = os.path.join(out_root, "inference_results.json")
-        env_profile = collect_environment_profile()
-        env_path = os.path.join(out_root, "environment_profile.json")
-        write_environment_profile(env_path, env_profile)
-        ext_backend = ExternalProviderBackend(ext_provider, repo_path, venv_path)
-        rc = ext_backend.run_batch(
-            model_path=str(model_path),
-            source_path=source_for_external,
-            conf=float(args.conf),
-            imgsz=int(args.img_size),
-            device=str(args.device) if args.device else None,
-        )
-        external_report = {
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "workspace": {"root_absolute": layout.root},
-            "model": {
-                "source": "external",
-                "name": model_name,
-                "provider": {"type": "external", "id": ext_provider},
-                "weights_value": str(model_path),
-            },
-            "parameters": {
-                "conf": args.conf,
-                "img_size": int(args.img_size),
-                "device": args.device,
-                "data_mode": args.data_mode,
-            },
-            "source": _source_descriptor(args, source_for_external, source_short, layout),
-            "output": {
-                "dir_absolute": out_root,
-                "dir_relative": relativize_if_under(layout.root, out_root) or out_root,
-                "json_absolute": report_path,
-                "json_relative": relativize_if_under(layout.root, report_path) or report_path,
-            },
-            "external_execution": {
-                "provider_id": ext_provider,
-                "repo_path": repo_path,
-                "venv_path": venv_path,
-                "return_code": int(rc),
-            },
-            "summary": {"images_input": None, "images_processed": None, "images_skipped": None, "detections_total": None},
-            "performance": {
-                "end_to_end": None,
-                "infer_only": None,
-                "stage_breakdown_ms": {},
-                "methodology": {
-                    "profile_mode": "dual",
-                    "caveats": ["External provider currently does not expose per-image performance telemetry."],
-                },
-            },
-            "artifacts": {
-                "environment_profile": {
-                    "path_absolute": env_path,
-                    "path_relative": relativize_if_under(layout.root, env_path) or env_path,
-                }
-            },
-            "images": [],
-        }
-        _write_report(report_path, external_report)
-        print(f"[OK] External inference report: {report_path}")
-        raise SystemExit(rc)
-    registry = InferenceBackendRegistry()
-    model_format = str(model_path.suffix).lower().lstrip(".")
-    if model_format not in {"pt", "onnx", "engine", "trt"}:
-        print(f"[ERROR] Unsupported model format for inference: {model_format}", file=sys.stderr)
-        raise SystemExit(1)
-    try:
-        backend = registry.create_local_backend(model_format=model_format, model_path=str(model_path))
-    except Exception as e:
-        print(f"[ERROR] Failed to initialize inference backend: {e}", file=sys.stderr)
-        raise SystemExit(1)
-    roi_model = None
-    if args.roi_pre_detect:
-        from ultralytics import YOLO
-
-        if args.data_mode != "folder":
-            print("[ERROR] --roi-pre-detect is supported only for --data-mode folder.", file=sys.stderr)
-            raise SystemExit(1)
-        roi_w = args.roi_weights or str(model_path)
-        roi_model = YOLO(str(roi_w))
-        args.roi_weights = roi_w
-        args._ultralytics_roi_project = ultralytics_sidecar_dir(layout.root, ".cache", "ultralytics_roi_infer")
-
-    try:
-        if args.data_mode == "folder":
-            images = _collect_folder_images(str(args.source_dir), int(args.limit))
-            source_abs = os.path.abspath(os.path.expanduser(str(args.source_dir)))
-            source_short = os.path.basename(source_abs.rstrip(os.sep)) or "folder"
-        else:
-            images, split_dir = _collect_split_images_for_dataset(
-                layout,
-                str(args.dataset),
-                str(args.split),
-                int(args.limit),
-            )
-            source_abs = split_dir
-            source_short = f"{args.dataset}-{args.split}"
-    except Exception as e:
-        print(f"[ERROR] Failed to resolve inference source: {e}", file=sys.stderr)
-        raise SystemExit(1)
-    if not images:
-        print("[ERROR] No images found for inference.", file=sys.stderr)
-        raise SystemExit(1)
-
-    out_root = _resolve_output_root(layout, model_name, source_short)
-    report_path = os.path.join(out_root, "inference_results.json")
-    env_profile = collect_environment_profile()
-    env_path = os.path.join(out_root, "environment_profile.json")
-    write_environment_profile(env_path, env_profile)
-
-    image_rows: list[dict[str, Any]] = []
-    skipped = 0
-    perf = DualPerfProfiler(warmup_images=int(max(0, args.perf_warmup_images)))
-    perf_methodology = {
-        "profile_mode": "dual",
-        "warmup_images": int(max(0, args.perf_warmup_images)),
-        "end_to_end_includes": ["image_io", "roi_preprocess", "model_infer", "postprocess", "report_update"],
-        "infer_only_includes": ["model_infer_call"],
-        "backend": backend.name,
-        "model_format": model_format,
-    }
-    # Initialize output file early to make progress durable.
-    _write_report(
-        report_path,
-        _build_report(
-            args=args,
-            layout=layout,
-            model_source=model_source,
-            model_name=model_name,
-            model_path=model_path,
-            source_abs=source_abs,
-            source_short=source_short,
-            out_root=out_root,
-            report_path=report_path,
-            images_input_count=len(images),
-            image_rows=image_rows,
-            skipped=skipped,
-            performance=perf.to_payload(methodology=perf_methodology),
-            environment_artifact_path=env_path,
-        ),
-    )
-    progress_desc = f"inference:{args.data_mode}"
-    for image_path in tqdm(images, desc=progress_desc, unit="img"):
-        loop_t0 = time.perf_counter_ns()
-        image_path_abs = os.path.abspath(image_path)
-        with Image.open(image_path_abs) as im:
-            im_rgb = im.convert("RGB")
-            iw, ih = im_rgb.size
-            roi_box: tuple[int, int, int, int] | None = None
-            src_for_predict: Any = image_path_abs
-            if roi_model is not None:
-                rb = _predict_roi_crop(roi_model, image_path_abs, args)
-                if rb[0] < 0:
-                    skipped += 1
-                    _write_report(
-                        report_path,
-                        _build_report(
-                            args=args,
-                            layout=layout,
-                            model_source=model_source,
-                            model_name=model_name,
-                            model_path=model_path,
-                            source_abs=source_abs,
-                            source_short=source_short,
-                            out_root=out_root,
-                            report_path=report_path,
-                            images_input_count=len(images),
-                            image_rows=image_rows,
-                            skipped=skipped,
-                            performance=perf.to_payload(methodology=perf_methodology),
-                            environment_artifact_path=env_path,
-                        ),
-                    )
-                    perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
-                    continue
-                roi_box = rb
-                crop = im_rgb.crop((roi_box[0], roi_box[1], roi_box[2], roi_box[3]))
-                src_for_predict = np.asarray(crop)
-            elif args.data_mode == "folder":
-                roi_box = (0, 0, iw, ih)
-
-        pred_result = backend.predict(
-            src_for_predict,
-            conf=float(args.conf),
-            imgsz=int(args.img_size),
-            device=str(args.device),
-            half=bool(args.half),
-        )
-        perf.record_infer_only(int(pred_result.infer_only_ns))
-        for stage, dt in pred_result.stage_ns.items():
-            perf.record_stage(stage, int(dt))
-        boxes_payload: list[dict[str, Any]] = []
-        for det in pred_result.detections:
-            x1, y1, x2, y2 = [float(v) for v in det.get("bbox_roi_xyxy", [0.0, 0.0, 0.0, 0.0])]
-            if roi_box is not None:
-                ox1 = x1 + float(roi_box[0])
-                oy1 = y1 + float(roi_box[1])
-                ox2 = x2 + float(roi_box[0])
-                oy2 = y2 + float(roi_box[1])
-            else:
-                ox1, oy1, ox2, oy2 = x1, y1, x2, y2
-            boxes_payload.append(
-                {
-                    "bbox_roi_xyxy": [x1, y1, x2, y2],
-                    "bbox_original_xyxy": [ox1, oy1, ox2, oy2],
-                    "class_index": int(det.get("class_index", 0)),
-                    "class_name": str(det.get("class_name", det.get("class_index", ""))),
-                    "confidence": float(det.get("confidence", 0.0)),
-                }
-            )
-        image_rows.append(
-            {
-                "image_path_absolute": image_path_abs,
-                "image_path_relative": relativize_if_under(layout.root, image_path_abs) or image_path_abs,
-                "image_size": {"width": iw, "height": ih},
-                "roi_xyxy": list(roi_box) if roi_box is not None else None,
-                "detections": boxes_payload,
-            }
-        )
-        perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
-        _write_report(
-            report_path,
-            _build_report(
-                args=args,
-                layout=layout,
-                model_source=model_source,
-                model_name=model_name,
-                model_path=model_path,
-                source_abs=source_abs,
-                source_short=source_short,
-                out_root=out_root,
-                report_path=report_path,
-                images_input_count=len(images),
-                image_rows=image_rows,
-                skipped=skipped,
-                performance=perf.to_payload(methodology=perf_methodology),
-                environment_artifact_path=env_path,
-            ),
-        )
-
-    print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")
-    print(f"[OK] Report: {report_path}")
+    code, exit_via_sysexit = run_inference_job(args, layout)
+    if exit_via_sysexit:
+        raise SystemExit(code)
+    if code != 0:
+        raise SystemExit(code)
     if interactive_used:
         emit_replay(command_name="inference", parser=parser, args=args, stage="after execution")
 

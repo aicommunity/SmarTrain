@@ -15,17 +15,17 @@ from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_
 from smartrain.cli_contracts import emit_replay, make_command_request
 from smartrain.inference_cli import _resolve_model_from_name, _resolve_run_ref
 from smartrain.interactive_contract import is_interactive_allowed
-from smartrain.model_test_backends import run_native_format_backend, run_ultralytics_backend
 from smartrain import tensorrt_checks as trt_checks
+from smartrain.model_test_backends import run_native_format_backend, run_ultralytics_backend
 from smartrain.model_test_service import (
     SUPPORTED_TEST_FORMATS,
     complete_missing_test_artifacts,
     has_matching_test_artifacts,
     has_complete_test_artifacts,
     format_test_dir,
-    persist_target_test_artifacts_state,
     resolve_root_dir_for_target,
 )
+from smartrain.services.model_test_orchestrator import run_model_test_after_setup
 from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
 from smartrain.train_resume import resolve_dataset_path_for_resume
 from smartrain.run_artifacts import (
@@ -68,6 +68,13 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--conf", type=float, default=None, help="Validation confidence threshold.")
     p.add_argument("--iou", type=float, default=None, help="Validation IoU threshold.")
     p.add_argument("--batch", type=int, default=None, help="Validation batch size.")
+    p.add_argument(
+        "--task",
+        type=str,
+        choices=["detect", "segment", "classify", "detection", "segmentation", "classification"],
+        default=None,
+        help="Task for backend routing (default: inferred from training metadata, else detect).",
+    )
     p.add_argument("--device", type=str, default=None, help="Compute device: cpu, 0, cuda:0, or GPU name.")
     p.add_argument("--deep-diagnostics", action="store_true", help="Save deep per-image diagnostics artifacts.")
     p.add_argument(
@@ -443,6 +450,45 @@ def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | 
     return defaults
 
 
+def _normalize_task_for_backend(task: str | None) -> str:
+    value = str(task or "").strip().lower()
+    if value in {"detection", "detect", ""}:
+        return "detect"
+    if value in {"segmentation", "segment"}:
+        return "segment"
+    if value in {"classification", "classify"}:
+        return "classify"
+    return "detect"
+
+
+def _infer_task_from_training_metadata(root_dir: str) -> str | None:
+    if str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "1":
+        from smartrain.orchestrators.canonical_gateway import load_target
+
+        payload = load_target(root_dir)
+        if payload.models:
+            return _normalize_task_for_backend(payload.models[0].task_type)
+        if payload.runs:
+            return _normalize_task_for_backend(payload.runs[0].task_type)
+        return None
+    path = Path(root_dir) / "training_metadata.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    ti = payload.get("training_info")
+    if not isinstance(ti, dict):
+        return None
+    task_type = ti.get("task_type")
+    if not isinstance(task_type, str):
+        return None
+    return _normalize_task_for_backend(task_type)
+
+
 def _has_deep_diagnostics_artifacts(root_dir: str, format_name: str) -> bool:
     deep_dir = os.path.join(format_test_dir(root_dir, format_name), "deep_diagnostics")
     if not os.path.isdir(deep_dir):
@@ -783,6 +829,10 @@ def main(argv: list[str] | None = None) -> None:
             args.iou = float(defaults["iou"]) if defaults["iou"] is not None else None
         if args.batch is None:
             args.batch = 1
+    if args.task is None:
+        args.task = _infer_task_from_training_metadata(root_dir) or "detect"
+    else:
+        args.task = _normalize_task_for_backend(args.task)
     # Effective params after defaults — must match args.* so pt_uni / skip logic compares real imgsz.
     requested_imgsz = args.imgsz
     requested_conf = args.conf
@@ -796,324 +846,23 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(str(exc))
     print(f"[INFO] Test device: {device_display_name(args.device)}")
 
-    replay: str | None = None
-    results: list[tuple[str, bool, str | None]] = []
-    selected_artifacts: list[tuple[str, str]] = []
-    if interactive and target_kind == "runs":
-        candidates = _discover_run_artifact_candidates(root_dir)
-        enabled_formats = _prompt_export_backends_interactive(root_dir, candidates)
-        formats = [fmt for fmt in SUPPORTED_TEST_FORMATS if fmt in enabled_formats]
-        args.formats = ",".join(formats)
-        narrowed = {fmt: candidates[fmt] for fmt in formats if candidates.get(fmt)}
-        selected_artifacts = _prompt_artifact_selection_interactive(narrowed)
-        selected_formats = {fmt for fmt, _ in selected_artifacts}
-        if selected_formats:
-            formats = [fmt for fmt in SUPPORTED_TEST_FORMATS if fmt in selected_formats]
-            args.formats = ",".join(formats)
-    _print_test_plan(
+    run_model_test_after_setup(
+        parser=parser,
+        args=args,
+        request=request,
+        workspace_root=workspace_root,
+        interactive=interactive,
+        root_dir=root_dir,
+        primary_path=primary_path,
         target_kind=target_kind,
         target_label=target_label,
-        root_dir=root_dir,
         data_yaml=data_yaml,
         formats=formats,
-        split_name="test",
-    )
-    replay = emit_replay(command_name="test", parser=parser, args=args, stage="before execution")
-    predecisions = _collect_interactive_rerun_decisions(
-        interactive=interactive,
-        force=bool(args.force),
-        missing_only=bool(args.missing_only),
-        root_dir=root_dir,
-        target_kind=target_kind,
-        primary_path=primary_path,
-        formats=formats,
-        selected_artifacts=selected_artifacts,
-        data_yaml=data_yaml,
+        onnx_provider_policy=onnx_provider_policy,
         requested_imgsz=requested_imgsz,
         requested_conf=requested_conf,
         requested_iou=requested_iou,
-        deep_diagnostics=bool(args.deep_diagnostics),
     )
-
-    if "pt" in formats:
-        if target_kind == "runs" and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
-            print(f"  model[pt]: {primary_path}")
-            should_rerun = predecisions.get(_artifact_key("pt", primary_path))
-            if should_rerun is None:
-                should_rerun = _should_rerun_existing_match(
-                    interactive=interactive,
-                    force=bool(args.force),
-                    root_dir=root_dir,
-                    format_name="pt",
-                    target_path=primary_path,
-                    dataset_yaml=data_yaml,
-                    imgsz=requested_imgsz,
-                    conf=requested_conf,
-                    iou=requested_iou,
-                    deep_diagnostics=bool(args.deep_diagnostics),
-                )
-            if not should_rerun:
-                results.append(("pt", True, None))
-            else:
-                if bool(args.deep_diagnostics) or bool(args.perf):
-                    pt_result = run_ultralytics_backend(
-                        root_dir=root_dir,
-                        weights_path=primary_path,
-                        dataset_yaml_path=data_yaml,
-                        format_name="pt",
-                        imgsz=args.imgsz,
-                        val_conf=args.conf,
-                        val_iou=args.iou,
-                        val_batch=args.batch,
-                        deep_diagnostics=bool(args.deep_diagnostics),
-                        collect_performance=bool(args.perf),
-                        perf_warmup_images=int(max(0, args.perf_warmup_images)),
-                        runtime_device=args.device,
-                    )
-                    results.append(("pt", pt_result.success, pt_result.error))
-                else:
-                    complete_missing_test_artifacts(
-                        root_dir,
-                        workspace_root=workspace_root,
-                        pt_test_runner=__import__("smartrain.model_training_module", fromlist=["test_yolo"]).test_yolo,
-                        pt_test_runner_kwargs={
-                            "val_imgsz": args.imgsz,
-                            "val_conf": args.conf,
-                            "val_iou": args.iou,
-                            "val_batch": args.batch,
-                        },
-                    )
-                    persist_target_test_artifacts_state(
-                        root_dir,
-                        format_name="pt",
-                        target_path=primary_path,
-                        dataset_yaml=data_yaml,
-                        backend="ultralytics",
-                        status="ok",
-                    )
-                    results.append(("pt", True, None))
-        elif target_kind in {"models", "weights"} and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
-            print(f"  model[pt]: {primary_path}")
-            should_rerun = predecisions.get(_artifact_key("pt", primary_path))
-            if should_rerun is None:
-                should_rerun = _should_rerun_existing_match(
-                    interactive=interactive,
-                    force=bool(args.force),
-                    root_dir=root_dir,
-                    format_name="pt",
-                    target_path=primary_path,
-                    dataset_yaml=data_yaml,
-                    imgsz=requested_imgsz,
-                    conf=requested_conf,
-                    iou=requested_iou,
-                    deep_diagnostics=bool(args.deep_diagnostics),
-                )
-            if not should_rerun:
-                results.append(("pt", True, None))
-            else:
-                pt_result = run_ultralytics_backend(
-                    root_dir=root_dir,
-                    weights_path=primary_path,
-                    dataset_yaml_path=data_yaml,
-                    format_name="pt",
-                    imgsz=args.imgsz,
-                    val_conf=args.conf,
-                    val_iou=args.iou,
-                    val_batch=args.batch,
-                    deep_diagnostics=bool(args.deep_diagnostics),
-                    collect_performance=bool(args.perf),
-                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
-                    runtime_device=args.device,
-                )
-                results.append(("pt", pt_result.success, pt_result.error))
-
-    # Internal-only unified PT evaluation for PT vs PT-uni compare table.
-    if "pt" in formats:
-        run_internal_pt_uni = bool(args.force) or (not args.missing_only) or (not has_complete_test_artifacts(root_dir, "pt_uni"))
-        if run_internal_pt_uni:
-            should_rerun_pt_uni = _should_rerun_existing_match(
-                interactive=False,
-                force=bool(args.force),
-                root_dir=root_dir,
-                format_name="pt_uni",
-                target_path=primary_path,
-                dataset_yaml=data_yaml,
-                imgsz=requested_imgsz,
-                conf=requested_conf,
-                iou=requested_iou,
-                deep_diagnostics=bool(args.deep_diagnostics),
-            )
-            if should_rerun_pt_uni:
-                print("[INFO] Generating internal PT-vs-PT-uni comparison artifacts.")
-                pt_uni_result = run_native_format_backend(
-                    root_dir=root_dir,
-                    weights_path=primary_path,
-                    dataset_yaml_path=data_yaml,
-                    format_name="pt_uni",
-                    imgsz=args.imgsz,
-                    val_conf=args.conf,
-                    val_iou=args.iou,
-                    val_batch=args.batch,
-                    deep_diagnostics=bool(args.deep_diagnostics),
-                    collect_performance=bool(args.perf),
-                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
-                    onnx_provider_policy=onnx_provider_policy,
-                    runtime_device=args.device,
-                )
-                if not pt_uni_result.success:
-                    print(f"[WARN] Internal pt_uni compare artifacts failed: {pt_uni_result.error}")
-
-    queued: list[tuple[str, str]] = []
-    if selected_artifacts:
-        for fmt, path in selected_artifacts:
-            # .pt is evaluated earlier via Ultralytics; native runner supports only onnx/engine/trt.
-            if fmt in {"onnx", "engine", "trt"}:
-                queued.append((fmt, path))
-    else:
-        for fmt in ("onnx", "engine", "trt"):
-            if fmt not in formats:
-                continue
-            if args.missing_only and has_complete_test_artifacts(root_dir, fmt):
-                continue
-            try:
-                artifact_path = _resolve_existing_artifact(
-                    root_dir=root_dir,
-                    primary_path=primary_path,
-                    format_name=fmt,
-                    target_kind=target_kind,
-                )
-            except Exception as exc:
-                backend = "onnxruntime" if fmt == "onnx" else "tensorrt"
-                persist_target_test_artifacts_state(
-                    root_dir,
-                    format_name=fmt,
-                    target_path=None,
-                    dataset_yaml=data_yaml,
-                    backend=backend,
-                    status="failed",
-                    error=str(exc),
-                )
-                results.append((fmt, False, str(exc)))
-                continue
-            queued.append((fmt, artifact_path))
-
-    for fmt, artifact_path in queued:
-        try:
-            print(f"  model[{fmt}]: {artifact_path}")
-            should_rerun = predecisions.get(_artifact_key(fmt, artifact_path))
-            if should_rerun is None:
-                should_rerun = _should_rerun_existing_match(
-                    interactive=interactive,
-                    force=bool(args.force),
-                    root_dir=root_dir,
-                    format_name=fmt,
-                    target_path=artifact_path,
-                    dataset_yaml=data_yaml,
-                    imgsz=requested_imgsz,
-                    conf=requested_conf,
-                    iou=requested_iou,
-                    deep_diagnostics=bool(args.deep_diagnostics),
-                )
-            if not should_rerun:
-                results.append((fmt, True, None))
-                continue
-            if fmt in {"engine", "trt"}:
-                preflight_ok, preflight_reason = _check_native_format_preflight(fmt)
-                if not preflight_ok:
-                    backend = "tensorrt"
-                    persist_target_test_artifacts_state(
-                        root_dir,
-                        format_name=fmt,
-                        target_path=artifact_path,
-                        dataset_yaml=data_yaml,
-                        backend=backend,
-                        status="failed",
-                        error=preflight_reason,
-                    )
-                    results.append((fmt, False, preflight_reason))
-                    continue
-                ok, err = _run_native_backend_isolated(
-                    root_dir=root_dir,
-                    weights_path=artifact_path,
-                    dataset_yaml_path=data_yaml,
-                    format_name=fmt,
-                    imgsz=args.imgsz,
-                    val_conf=args.conf,
-                    val_iou=args.iou,
-                    val_batch=args.batch,
-                    collect_performance=bool(args.perf),
-                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
-                    runtime_device=args.device,
-                )
-                if not ok:
-                    backend = "tensorrt"
-                    persist_target_test_artifacts_state(
-                        root_dir,
-                        format_name=fmt,
-                        target_path=artifact_path,
-                        dataset_yaml=data_yaml,
-                        backend=backend,
-                        status="failed",
-                        error=err,
-                    )
-                results.append((fmt, ok, err))
-            else:
-                if fmt == "onnx":
-                    onnx_ok, onnx_reason = _check_onnx_format_preflight(onnx_provider_policy)
-                    if not onnx_ok:
-                        persist_target_test_artifacts_state(
-                            root_dir,
-                            format_name=fmt,
-                            target_path=artifact_path,
-                            dataset_yaml=data_yaml,
-                            backend="onnxruntime",
-                            status="failed",
-                            error=onnx_reason,
-                        )
-                        results.append((fmt, False, onnx_reason))
-                        continue
-                    if onnx_reason:
-                        print(f"[WARN] onnx preflight: {onnx_reason}")
-                result = run_native_format_backend(
-                    root_dir=root_dir,
-                    weights_path=artifact_path,
-                    dataset_yaml_path=data_yaml,
-                    format_name=fmt,
-                    imgsz=args.imgsz,
-                    val_conf=args.conf,
-                    val_iou=args.iou,
-                    val_batch=args.batch,
-                    deep_diagnostics=bool(args.deep_diagnostics),
-                    collect_performance=bool(args.perf),
-                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
-                    onnx_provider_policy=onnx_provider_policy if fmt == "onnx" else None,
-                    runtime_device=args.device,
-                )
-                results.append((fmt, result.success, result.error))
-        except Exception as exc:
-            backend = "onnxruntime" if fmt == "onnx" else "tensorrt"
-            persist_target_test_artifacts_state(
-                root_dir,
-                format_name=fmt,
-                target_path=None,
-                dataset_yaml=data_yaml,
-                backend=backend,
-                status="failed",
-                error=str(exc),
-            )
-            results.append((fmt, False, str(exc)))
-
-    if not results:
-        print(f"[INFO] No test artifacts needed for target: {target_label or root_dir}")
-    else:
-        for fmt, ok, error in results:
-            if ok:
-                print(f"[OK] {fmt}: artifacts are ready in {root_dir}")
-            else:
-                print(f"[WARN] {fmt}: {error}")
-    if replay:
-        request.interactive_used = bool(interactive)
-        emit_replay(command_name="test", parser=parser, args=args, stage="after execution")
 
 
 if __name__ == "__main__":

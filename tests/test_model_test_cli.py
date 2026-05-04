@@ -15,6 +15,7 @@ from PIL import Image
 from smartrain.model_test_cli import (
     _check_onnx_format_preflight,
     _discover_run_artifact_candidates,
+    _infer_task_from_training_metadata,
     _prompt_export_backends_interactive,
     _prompt_artifact_selection_interactive,
     _resolve_existing_artifact,
@@ -115,6 +116,32 @@ def test_model_test_cli_rejects_public_pt_uni_format(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError):
         smartrain_test_main(["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "pt_uni", "-y"])
+
+
+def test_infer_task_from_metadata_uses_canonical_gateway_when_enabled(monkeypatch, tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        task_type = "segmentation"
+
+    class _P:
+        models = [_M()]
+        runs = []
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    assert _infer_task_from_training_metadata(str(tmp_path)) == "segment"
+
+
+def test_infer_task_from_metadata_falls_back_to_legacy_when_gateway_fails(monkeypatch, tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+    monkeypatch.setattr(
+        "smartrain.orchestrators.canonical_gateway.load_target",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    with pytest.raises(RuntimeError):
+        _infer_task_from_training_metadata(str(tmp_path))
 
 
 def test_model_test_cli_prints_selected_model_and_dataset(monkeypatch, tmp_path: Path, capsys) -> None:
