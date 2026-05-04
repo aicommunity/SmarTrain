@@ -512,6 +512,14 @@ def persist_target_test_artifacts_state(
     )
     _update_run_metadata_after_test(root_dir)
     _update_model_manifest_after_test(root_dir)
+    if str(os.getenv("SMARTTRAIN_CANONICAL_WRITE", "")).strip() == "1" and (status or "").strip().lower() == "ok":
+        try:
+            from smartrain.adapters.canonical.read.resolvers import infer_source_kind
+            from smartrain.orchestrators.canonical_gateway import persist_canonical_snapshot
+
+            persist_canonical_snapshot(root_dir, source_kind=infer_source_kind(root_dir))
+        except Exception as exc:
+            print(f"[WARN] canonical snapshot not written: {exc}")
 
 
 def _normalize_compare_path(root_dir: str, value: str | None) -> str | None:

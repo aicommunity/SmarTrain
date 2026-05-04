@@ -11,16 +11,38 @@ Convention: `[ ]` не начато / не закрыто по критерия�
 
 ---
 
+## Wave 6 — сверка закрытых под-PR (код + тесты)
+
+### PR 6.1 (спецификация)
+
+- [x] **6.1** Документы `05b` / `05c` / `05d` присутствуют и задают контракт (дальнейшее расширение при write/migration не отменяет требований плана). Notes: `05b` краткий; при необходимости расширять примерами из шаблона PR 6.1 без ослабления полей.
+
+### PR 6.2 (domain DTO + validation)
+
+- [x] **6.2** Пакет `smartrain/domain/canonical/*` (models, types, validators, errors) + unit-тесты `tests/domain/canonical/`.
+
+### PR 6.3 (read adapters)
+
+- [x] **6.3** `smartrain/adapters/canonical/read/*`, `ReadAdapterFactory`, тесты `tests/adapters/canonical/read/`.
+
+### PR 6.5 (частично — только read-path consumers)
+
+- [x] **6.5-p1** `canonical_gateway.load_target` + валидация payload. Notes: `load_metrics` / `load_predictions` / `resolve_task_context` из шаблона PR 6.5 — **ещё не реализованы** (Phase B).
+- [x] **6.5-p2** Частичная миграция consumers под флаг `SMARTTRAIN_CANONICAL_READ` (`model_test_cli`, `inference_cli`, `results_analyzer`) с политикой no-fallback там, где включено.
+- [ ] **6.5-p3** Полное удаление source-specific веток в business-логике и расширение gateway — Phase B.
+
+---
+
 ## Приоритетный порядок (фазы A–F)
 
 Совпадает с таблицей roadmap в плане; выполнять по зависимостям из «Единый Execution Roadmap».
 
 ### Phase A — Wave 6 / PR 6.4 (canonical write + dual-write)
 
-- [ ] **6.4-A1** Реализовать слой записи по структуре из плана: `CanonicalWriter.write(...)`, `write_manifest`, layout, hash/provenance (см. шаблон PR 6.4).
-- [ ] **6.4-A2** Реализовать режимы dual-write (`canonical_only`, `dual_write_strict`, `dual_write_best_effort`) и отчёт `DualWriteReport` с полями из плана.
-- [ ] **6.4-A3** Интегрировать writer минимум в один production use-case (`train` / `test` / `inference`) с тестами из плана PR 6.4.
-- [ ] **6.4-A4** Тесты: layout, dual-write consistency, failure handling, rollback guidance (по перечню PR 6.4).
+- [x] **6.4-A1** Слой записи: `write_canonical_snapshot`, `build_manifest`, layout `…/.smartrain/canonical/`, hash в manifest (`smartrain/adapters/canonical/write/*`). Notes: первый инкремент PR 6.4; расширение полей manifest/provenance по мере зрелости writer.
+- [x] **6.4-A2** Режимы `run_dual_write` с `canonical_only` / `dual_write_strict` / `dual_write_best_effort` и `DualWriteReport` (canonical/legacy статусы, warnings, rollback_hint). Notes: strict не откатывает уже записанный canonical snapshot — hint фиксирует операционное действие.
+- [x] **6.4-A3** Интеграция в production-путь: после успешного `persist_target_test_artifacts_state(..., status="ok")` вызывается `persist_canonical_snapshot` при `SMARTTRAIN_CANONICAL_WRITE=1` (`model_test_service.py` + `canonical_gateway.py`).
+- [x] **6.4-A4** Тесты layout/manifest и dual-write (`tests/adapters/canonical/write/`). Notes: расширять по failure/rollback сценариям из полного тест-плана PR 6.4 по мере появления legacy writer hooks.
 
 Notes:
 
@@ -37,7 +59,7 @@ Notes:
 - [ ] **6.6-C1** `legacy` reader/mapper слой по путям из PR 6.6.
 - [ ] **6.6-C2** CLI миграции: `dry-run`, `apply`, `report-only`; машиночитаемый отчёт + summary.
 - [ ] **6.6-C3** Тесты: historical coverage, idempotency, safety (dry-run не пишет), reporting.
-- [ ] **6.7-C4** Cutover: default `canonical_only`, удаление временных мостей по policy; regression `test_canonical_cutover`, `test_no_legacy_branch_usage` (или эквиваленты из плана).
+- [ ] **6.7-C4** Cutover: default `canonical_only`, удаление временных мостов по policy; regression `test_canonical_cutover`, `test_no_legacy_branch_usage` (или эквиваленты из плана).
 
 Notes:
 
@@ -69,13 +91,10 @@ Notes:
 
 ---
 
-## Уже реализовано (high-level, для связности с репозиторием)
+## Ранее выполненные блоки вне Phase A–F (сводка)
 
-Не снимает обязанность закрыть фазы выше по полному DoD плана.
-
-- [x] Wave 6 ранняя реализация: domain canonical (`smartrain/domain/canonical/*`), read adapters, `ReadAdapterFactory`, `canonical_gateway.load_target`, staged consumers под `SMARTTRAIN_CANONICAL_READ`.
 - [x] Частичная декомпозиция сервисов: `smartrain/services/*` для train/test/inference; `test_backend_dispatch` для PT/non-PT test paths.
-- [x] `train_test_registry` и task-aware хуки для train/test backend id (см. `09-tech-debt.md` для ограничений).
+- [x] `train_test_registry` и task-aware хуки для train/test backend id (ограничения — в `09-tech-debt.md`).
 
 ---
 
