@@ -48,7 +48,10 @@ Notes:
 
 ### Phase B — Wave 6 / PR 6.5 (gateway + consumers)
 
-- [ ] **6.5-B1** Расширить `canonical_gateway`: помимо `load_target` — контракты уровня `load_metrics`, `load_predictions`, `resolve_task_context` (как в шаблоне PR 6.5; имена/API зафиксировать в коде и синхронизировать с планом при необходимости).
+- [x] **6.5-B1a** `canonical_gateway.resolve_task_context` → `TaskContext` (`domain/canonical/context.py`).
+- [x] **6.5-B1b** `canonical_gateway.load_metrics` → список `CanonicalMetricsRef` (обнаружение CSV через `metrics_reader`, namespace `{task}/test_{fmt}`).
+- [x] **6.5-B1c** `canonical_gateway.load_predictions` — заглушка API (пустой список до стандартизации prediction bundle).
+- [ ] **6.5-B1d** Довести PR 6.5 API: стабильный контракт prediction discovery, опции фильтрации split/format, документация в `05b`/CLI; golden-тесты из тест-плана PR 6.5.
 - [ ] **6.5-B2** Миграция `model_test_cli` / `inference_cli` / `results_analyzer`: убрать **бизнес-**ветвления run vs model в пользу canonical path там, где это предусмотрено PR 6.5 (инвентаризация веток → удаление/изоляция).
 - [ ] **6.5-B3** Интеграционные тесты consumer parity и feature-flag rollout (если используется) по тест-плану PR 6.5.
 

@@ -1,3 +1,4 @@
+from smartrain.domain.canonical.context import TaskContext
 from smartrain.domain.canonical.models import (
     CanonicalArtifactRef,
     CanonicalMetricsRef,
@@ -9,6 +10,7 @@ from smartrain.domain.canonical.models import (
 from smartrain.domain.canonical.validators import validate_payload, validate_schema_version
 
 __all__ = [
+    "TaskContext",
     "CanonicalArtifactRef",
     "CanonicalMetricsRef",
     "CanonicalModelRef",

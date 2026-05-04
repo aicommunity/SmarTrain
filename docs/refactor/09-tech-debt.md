@@ -4,6 +4,7 @@ Operational execution status and PR-level checkboxes: [`10-implementation-checkl
 
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
+- 2026-05-04: Extended **canonical_gateway** (PR 6.5 partial): `resolve_task_context`, `load_metrics` (test CSV → `CanonicalMetricsRef`), `load_predictions` stub. Remaining: prediction artifact contract, consumer callsites using these APIs instead of ad-hoc `metrics_reader` where policy mandates gateway-only reads.
 - 2026-05-04: Initial **canonical write** slice (PR 6.4 phase A): `smartrain/adapters/canonical/write/*`, `canonical_gateway.persist_canonical_snapshot`, optional dual-write helper `run_dual_write`. **Opt-in** snapshot after successful test artifact persist via `SMARTTRAIN_CANONICAL_WRITE=1` (best-effort warning on failure). Remaining PR 6.4 scope: richer manifest/provenance, real legacy writer hook in dual-write, hash coverage for individual artifact files per plan.
 
 ## Open Items
