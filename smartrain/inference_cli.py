@@ -19,8 +19,9 @@ from PIL import Image
 from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
 from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
-from smartrain.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.cli_contracts import emit_replay, make_command_request
 from smartrain.dataset_access import resolve_dataset_root_for_entry
 from smartrain.dataset_roi_yolo import ON_EMPTY_MODES, ROI_POLICIES, _clamp_crop, _full_image_crop, _select_roi_boxes
 from smartrain.datasets_json_former import find_yaml_file
@@ -34,6 +35,7 @@ from smartrain.external_providers.registry import list_provider_specs
 from smartrain.train_model_catalog import is_supported_external_provider_model, TrainModelCatalog
 from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.canonical_refs import canonical_target_from_model_dir, canonical_target_from_run
 from smartrain.device_selector import (
     default_device_value,
     device_display_name,
@@ -42,11 +44,11 @@ from smartrain.device_selector import (
     validate_device_available,
 )
 from smartrain.model_context import infer_img_size_from_model_context
-from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
-from smartrain.run_artifacts import is_internal_conversion_artifact, scan_run_models
+from smartrain.run_artifacts import is_internal_conversion_artifact
 from smartrain.inference_backends import InferenceBackendRegistry, ExternalProviderBackend
 from smartrain.inference_perf import DualPerfProfiler
 from smartrain.environment_profile import collect_environment_profile, write_environment_profile
+from smartrain.artifact_schema_v2 import wrap_inference_report_v2
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
@@ -192,20 +194,8 @@ def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, 
             p = (mdir / wf).resolve()
             if p.is_file():
                 return p, name
-    preferred = (
-        sorted([p for p in mdir.glob("*.pt") if p.is_file()])
-        + sorted([p for p in mdir.glob("*.onnx") if p.is_file()])
-        + sorted([p for p in mdir.glob("*.engine") if p.is_file()])
-        + sorted([p for p in mdir.glob("*.trt") if p.is_file()])
-    )
-    picked = _pick_preferred_model_path(preferred, prefer_onnx_variant=True)
-    if picked is not None:
-        return picked.resolve(), name
-    any_weight = sorted(p for p in mdir.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS)
-    picked_any = _pick_preferred_model_path(any_weight, prefer_onnx_variant=True)
-    if picked_any is not None:
-        return picked_any.resolve(), name
-    raise FileNotFoundError(f"No supported model files found in: {mdir}")
+    canonical = canonical_target_from_model_dir(mdir)
+    return canonical.model_path.resolve(), name
 
 
 def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Path, str, str]:
@@ -214,36 +204,8 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
         return p, model_key, "models"
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
-        scanned = scan_run_models(str(run_dir))
-        preferred_order = {"pt": 0, "onnx": 1, "engine": 2, "trt": 3}
-        candidates: list[Path] = []
-        if scanned:
-            sorted_scanned = sorted(
-                scanned,
-                key=lambda x: preferred_order.get(str(x.get("format") or "").strip().lower(), 999),
-            )
-            for rec in sorted_scanned:
-                p = Path(str(rec.get("path") or "")).expanduser()
-                if (
-                    p.is_file()
-                    and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS
-                    and not is_internal_conversion_artifact(p)
-                ):
-                    candidates.append(p.resolve())
-        if not candidates:
-            best = Path(canonical_run_model_path(str(run_dir), ".pt"))
-            if not best.is_file():
-                materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
-                if materialized is not None:
-                    best = Path(materialized)
-            if best.is_file():
-                candidates.append(best.resolve())
-        if not candidates:
-            raise FileNotFoundError(f"run model not found in run: {run_dir}")
-        picked = _pick_preferred_model_path(candidates, prefer_onnx_variant=True)
-        if picked is None:
-            raise FileNotFoundError(f"run model not found in run: {run_dir}")
-        return picked, run_dir.name, "runs"
+        canonical = canonical_target_from_run(run_dir)
+        return canonical.model_path.resolve(), canonical.source_id, canonical.source_kind
     if args.weights:
         w = Path(str(args.weights)).expanduser()
         if not w.is_absolute():
@@ -574,12 +536,14 @@ def _build_report(
 
 
 def _write_report(path: str, report: dict[str, Any]) -> None:
+    report = wrap_inference_report_v2(report)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
 
 def main(argv: list[str] | None = None) -> None:
     argv = list(argv or [])
+    request = make_command_request("inference", argv, interactive_allowed=is_interactive_allowed(argv))
     parser = build_inference_arg_parser()
     args = parser.parse_args(argv)
     args.device = resolve_device_request(args.device or default_device_value())
@@ -592,7 +556,7 @@ def main(argv: list[str] | None = None) -> None:
     layout = WorkspaceLayout(workspace_root)
     atexit.register(lambda wr=workspace_root: best_effort_prune_workspace_runs_detect(wr))
     os.makedirs(os.path.join(layout.root, "inference"), exist_ok=True)
-    interactive_allowed = is_interactive_allowed(argv)
+    interactive_allowed = request.interactive_allowed
     interactive_used = False
     if len(argv) == 0 and interactive_allowed:
         if not sys.stdin.isatty():
@@ -605,8 +569,8 @@ def main(argv: list[str] | None = None) -> None:
         if not _interactive_fill(args, layout):
             raise SystemExit(1)
         interactive_used = True
-        replay_cmd = build_non_interactive_command("inference", parser, args)
-        print_replay_command("before launch", replay_cmd)
+        request.interactive_used = True
+        emit_replay(command_name="inference", parser=parser, args=args, stage="before launch")
     else:
         _validate_non_interactive_args(parser, args)
     _ensure_device_available_or_exit(args.device)
@@ -941,8 +905,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")
     print(f"[OK] Report: {report_path}")
     if interactive_used:
-        replay_cmd = build_non_interactive_command("inference", parser, args)
-        print_replay_command("after execution", replay_cmd)
+        emit_replay(command_name="inference", parser=parser, args=args, stage="after execution")
 
 
 def _resolve_external_source(args: argparse.Namespace, layout: WorkspaceLayout) -> str:
