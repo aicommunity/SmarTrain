@@ -23,7 +23,7 @@ from ultralytics import YOLO
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_prompts import print_numbered_options, prompt_text
-from smartrain.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.cli_contracts import emit_replay, make_command_request
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.train_resume import (
@@ -1138,17 +1138,17 @@ def _apply_external_provider_defaults(args) -> None:
     provider = str(getattr(args, "external_provider", "") or "").strip().lower()
     if not provider:
         return
-    if not hasattr(args, "model"):
+    if getattr(args, "model", None) is None:
         rec = _get_installed_external_provider_record(provider)
         repo_path = str(rec.get("repo_path", "")).strip() if isinstance(rec, dict) else None
         aliases = TrainModelCatalog(provider=provider, provider_repo_path=repo_path or None).supported_aliases()
         if aliases:
             args.model = aliases[0]
-    if not hasattr(args, "epochs"):
+    if getattr(args, "epochs", None) is None:
         args.epochs = 70
-    if not hasattr(args, "batch"):
+    if getattr(args, "batch", None) is None:
         args.batch = 8
-    if not hasattr(args, "img_size"):
+    if getattr(args, "img_size", None) is None:
         args.img_size = 640
 
 
@@ -1355,10 +1355,9 @@ def _prompt_base_run_args_yaml(runs: list[dict[str, str]], default_path: str | N
 
 
 def _get_interactive_default(args, attr: str, fallback, baseline_cfg: dict[str, Any], baseline_key: str):
-    if hasattr(args, attr):
-        val = getattr(args, attr)
-        if val is not None and (fallback is None or val != fallback):
-            return val
+    val = getattr(args, attr, None)
+    if val is not None and (fallback is None or val != fallback):
+        return val
     if baseline_key in baseline_cfg:
         return baseline_cfg[baseline_key]
     return fallback
@@ -1977,7 +1976,7 @@ def _merge_sources_with_priority(
         }
         overridden_by_cli: list[str] = []
         for yaml_key, cli_attr in cli_key_map.items():
-            if yaml_key in u_from_ultra and hasattr(args, cli_attr):
+            if yaml_key in u_from_ultra and getattr(args, cli_attr, None) is not None:
                 overridden_by_cli.append(yaml_key)
         if overridden_by_cli:
             print(
@@ -2748,6 +2747,7 @@ def _ensure_device_available_or_raise(device: str | None) -> None:
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
+    request = make_command_request("train", argv, interactive_allowed=is_interactive_allowed(argv))
     if argv and argv[0] == "resume":
         return _run_resume_command(argv[1:])
     if argv and argv[0] == "calc-confidence":
@@ -2768,7 +2768,7 @@ def main(argv=None):
         args.model = parsed_ref.model_ref
         print(f"[INFO] External provider inferred from --model: {parsed_ref.provider_id}")
     parser = build_train_arg_parser()
-    interactive_mode = is_interactive_allowed(argv)
+    interactive_mode = request.interactive_allowed
     replay_cmd = None
     if interactive_mode:
         if not sys.stdin.isatty():
@@ -2784,8 +2784,8 @@ def main(argv=None):
             return
         if not ok:
             return
-        replay_cmd = build_non_interactive_command("train", parser, args)
-        print_replay_command("before launch", replay_cmd)
+        request.interactive_used = True
+        replay_cmd = emit_replay(command_name="train", parser=parser, args=args, stage="before launch")
 
     profile = load_train_profile(args.config) if args.config else {}
     ultra_profile = _load_ultralytics_yaml(getattr(args, "ultralytics_yaml", None))
@@ -3248,7 +3248,7 @@ def main(argv=None):
         else:
             print("[ERROR] Model path not specified")
     if replay_cmd:
-        print_replay_command("after execution", replay_cmd)
+        emit_replay(command_name="train", parser=parser, args=args, stage="after execution")
 
 
 if __name__ == "__main__":

@@ -478,12 +478,12 @@ def cmd_train(ctx: typer.Context) -> None:
       - Writes outputs to workspace runs/.
       - Use smartrain analyze scan to inspect completed runs.
     """
-    from smartrain.model_training_module import build_train_arg_parser
+    from smartrain.cli_apps.train_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.model_training_module",
-        build_parser=build_train_arg_parser,
+        module="smartrain.cli_apps.train_app",
+        build_parser=build_arg_parser,
         prog="smartrain train",
         empty_args_mode="invoke",
     )
@@ -658,12 +658,12 @@ def cmd_roi(ctx: typer.Context) -> None:
 )
 def cmd_test(ctx: typer.Context) -> None:
     """Complete missing test artifacts for runs/models."""
-    from smartrain.model_test_cli import build_model_test_arg_parser
+    from smartrain.cli_apps.test_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.model_test_cli",
-        build_parser=build_model_test_arg_parser,
+        module="smartrain.cli_apps.test_app",
+        build_parser=build_arg_parser,
         prog="smartrain test",
         empty_args_mode="invoke",
     )
@@ -676,12 +676,12 @@ def cmd_test(ctx: typer.Context) -> None:
 )
 def cmd_inference(ctx: typer.Context) -> None:
     """Run inference and save JSON report to workspace inference/."""
-    from smartrain.inference_cli import build_inference_arg_parser
+    from smartrain.cli_apps.inference_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.inference_cli",
-        build_parser=build_inference_arg_parser,
+        module="smartrain.cli_apps.inference_app",
+        build_parser=build_arg_parser,
         prog="smartrain inference",
         empty_args_mode="invoke",
     )

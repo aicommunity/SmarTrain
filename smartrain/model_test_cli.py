@@ -12,7 +12,7 @@ from typing import Any
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
-from smartrain.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.cli_contracts import emit_replay, make_command_request
 from smartrain.inference_cli import _resolve_model_from_name, _resolve_run_ref
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.model_test_backends import run_native_format_backend, run_ultralytics_backend
@@ -703,6 +703,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_model_test_arg_parser()
     args = parser.parse_args(argv)
     interactive = is_interactive_allowed(bool(getattr(args, "non_interactive", False)))
+    request = make_command_request("test", argv if argv is not None else [], interactive_allowed=interactive)
     workspace_root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(workspace_root)
     atexit.register(lambda wr=workspace_root: best_effort_prune_workspace_runs_detect(wr))
@@ -817,7 +818,7 @@ def main(argv: list[str] | None = None) -> None:
         formats=formats,
         split_name="test",
     )
-    replay = build_non_interactive_command("test", parser, args)
+    replay = emit_replay(command_name="test", parser=parser, args=args, stage="before execution")
     predecisions = _collect_interactive_rerun_decisions(
         interactive=interactive,
         force=bool(args.force),
@@ -1111,7 +1112,8 @@ def main(argv: list[str] | None = None) -> None:
             else:
                 print(f"[WARN] {fmt}: {error}")
     if replay:
-        print_replay_command("after execution", replay)
+        request.interactive_used = bool(interactive)
+        emit_replay(command_name="test", parser=parser, args=args, stage="after execution")
 
 
 if __name__ == "__main__":
