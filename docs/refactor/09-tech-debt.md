@@ -1,5 +1,7 @@
 # Tech Debt Log
 
+Operational execution status and PR-level checkboxes: [`10-implementation-checklist.md`](./10-implementation-checklist.md).
+
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
 ## Open Items
