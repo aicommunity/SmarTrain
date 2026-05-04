@@ -32,7 +32,11 @@ def run_model_test_after_setup(
         has_complete_test_artifacts,
         persist_target_test_artifacts_state,
     )
-    from smartrain.services.test_backend_dispatch import run_non_pt_test_backend
+    from smartrain.services.test_backend_dispatch import (
+        run_internal_pt_uni_backend,
+        run_non_pt_test_backend,
+        run_pt_test_backend,
+    )
     from smartrain.train_profile import task_to_metadata_task_type
 
     task_type = task_to_metadata_task_type(getattr(args, "task", None))
@@ -99,44 +103,16 @@ def run_model_test_after_setup(
             if not should_rerun:
                 results.append(("pt", True, None))
             else:
-                if bool(args.deep_diagnostics) or bool(args.perf):
-                    pt_result = mtc.run_ultralytics_backend(
-                        root_dir=root_dir,
-                        weights_path=primary_path,
-                        dataset_yaml_path=data_yaml,
-                        format_name="pt",
-                        imgsz=args.imgsz,
-                        val_conf=args.conf,
-                        val_iou=args.iou,
-                        val_batch=args.batch,
-                        deep_diagnostics=bool(args.deep_diagnostics),
-                        collect_performance=bool(args.perf),
-                        perf_warmup_images=int(max(0, args.perf_warmup_images)),
-                        runtime_device=args.device,
-                    )
-                    results.append(("pt", pt_result.success, pt_result.error))
-                else:
-                    mtc.complete_missing_test_artifacts(
-                        root_dir,
-                        workspace_root=workspace_root,
-                        pt_test_runner=__import__("smartrain.model_training_module", fromlist=["test_yolo"]).test_yolo,
-                        pt_test_runner_kwargs={
-                            "val_imgsz": args.imgsz,
-                            "val_conf": args.conf,
-                            "val_iou": args.iou,
-                            "val_batch": args.batch,
-                        },
-                    )
-                    pt_backend = _backend_for("pt")
-                    persist_target_test_artifacts_state(
-                        root_dir,
-                        format_name="pt",
-                        target_path=primary_path,
-                        dataset_yaml=data_yaml,
-                        backend=pt_backend,
-                        status="ok",
-                    )
-                    results.append(("pt", True, None))
+                ok, err = run_pt_test_backend(
+                    task_type=task_type,
+                    target_kind="runs",
+                    root_dir=root_dir,
+                    primary_path=primary_path,
+                    data_yaml=data_yaml,
+                    workspace_root=workspace_root,
+                    args=args,
+                )
+                results.append(("pt", ok, err))
         elif target_kind in {"models", "weights"} and (not args.missing_only or not has_complete_test_artifacts(root_dir, "pt")):
             print(f"  model[pt]: {primary_path}")
             should_rerun = predecisions.get(mtc._artifact_key("pt", primary_path))
@@ -156,21 +132,16 @@ def run_model_test_after_setup(
             if not should_rerun:
                 results.append(("pt", True, None))
             else:
-                pt_result = mtc.run_ultralytics_backend(
+                ok, err = run_pt_test_backend(
+                    task_type=task_type,
+                    target_kind=target_kind,
                     root_dir=root_dir,
-                    weights_path=primary_path,
-                    dataset_yaml_path=data_yaml,
-                    format_name="pt",
-                    imgsz=args.imgsz,
-                    val_conf=args.conf,
-                    val_iou=args.iou,
-                    val_batch=args.batch,
-                    deep_diagnostics=bool(args.deep_diagnostics),
-                    collect_performance=bool(args.perf),
-                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
-                    runtime_device=args.device,
+                    primary_path=primary_path,
+                    data_yaml=data_yaml,
+                    workspace_root=workspace_root,
+                    args=args,
                 )
-                results.append(("pt", pt_result.success, pt_result.error))
+                results.append(("pt", ok, err))
 
     # Internal-only unified PT evaluation for PT vs PT-uni compare table.
     if "pt" in formats:
@@ -190,23 +161,15 @@ def run_model_test_after_setup(
             )
             if should_rerun_pt_uni:
                 print("[INFO] Generating internal PT-vs-PT-uni comparison artifacts.")
-                pt_uni_result = mtc.run_native_format_backend(
+                _ok, err = run_internal_pt_uni_backend(
                     root_dir=root_dir,
-                    weights_path=primary_path,
-                    dataset_yaml_path=data_yaml,
-                    format_name="pt_uni",
-                    imgsz=args.imgsz,
-                    val_conf=args.conf,
-                    val_iou=args.iou,
-                    val_batch=args.batch,
-                    deep_diagnostics=bool(args.deep_diagnostics),
-                    collect_performance=bool(args.perf),
-                    perf_warmup_images=int(max(0, args.perf_warmup_images)),
+                    primary_path=primary_path,
+                    data_yaml=data_yaml,
+                    args=args,
                     onnx_provider_policy=onnx_provider_policy,
-                    runtime_device=args.device,
                 )
-                if not pt_uni_result.success:
-                    print(f"[WARN] Internal pt_uni compare artifacts failed: {pt_uni_result.error}")
+                if not _ok:
+                    print(f"[WARN] Internal pt_uni compare artifacts failed: {err}")
 
     queued: list[tuple[str, str]] = []
     if selected_artifacts:
