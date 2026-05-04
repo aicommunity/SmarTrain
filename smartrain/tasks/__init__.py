@@ -1,0 +1,2 @@
+"""Task adapters and contracts."""
+

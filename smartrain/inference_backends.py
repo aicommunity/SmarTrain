@@ -5,6 +5,9 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from smartrain.backends.contracts import BackendCapabilities
+from smartrain.backends.registry import CapabilityRegistry
+from smartrain.tasks.contracts import TASK_DETECTION
 from smartrain.ultralytics_ephemeral import ultralytics_sidecar_dir
 
 from smartrain.external_providers.runner import run_external_infer
@@ -81,8 +84,20 @@ class ExternalProviderBackend:
 
 
 class InferenceBackendRegistry:
+    def __init__(self) -> None:
+        self._capabilities = CapabilityRegistry()
+        self._capabilities.register(
+            BackendCapabilities(
+                backend="ultralytics",
+                task_types=(TASK_DETECTION,),
+                model_formats=("pt", "onnx", "engine", "trt"),
+                can_infer=True,
+            )
+        )
+
     def create_local_backend(self, *, model_format: str, model_path: str) -> InferenceBackend:
         fmt = str(model_format or "").strip().lower()
+        self._capabilities.resolve(task_type=TASK_DETECTION, model_format=fmt, require="infer")
         if fmt in {"pt", "onnx", "engine", "trt"}:
             return UltralyticsBackend(model_path, backend_name=f"ultralytics:{fmt}")
         raise ValueError(f"Unsupported model format for local inference backend: {model_format}")
