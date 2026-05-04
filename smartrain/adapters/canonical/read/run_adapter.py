@@ -28,6 +28,24 @@ def _dataset_ref_from_run_dir(run_dir: Path, ti: dict[str, Any]) -> str | None:
     return parent_name or None
 
 
+def _infer_task_from_target_name(target_name: str) -> str:
+    name = str(target_name or "").strip().lower()
+    if "-cls" in name or "class" in name:
+        return "classification"
+    if "-seg" in name or "segment" in name:
+        return "segmentation"
+    return "detection"
+
+
+def _infer_backend_from_format(model_format: str) -> str:
+    fmt = str(model_format or "").strip().lower()
+    if fmt == "onnx":
+        return "onnxruntime"
+    if fmt in {"engine", "trt"}:
+        return "tensorrt"
+    return "ultralytics"
+
+
 class RunAdapter:
     def read(self, source_ref: str, options: dict[str, Any] | None = None) -> CanonicalPayload:
         run_dir = Path(source_ref).expanduser().resolve()
@@ -41,14 +59,22 @@ class RunAdapter:
             except Exception:
                 md = {}
         ti = md.get("training_info", {}) if isinstance(md, dict) else {}
-        task_type = normalize_task(ti.get("task_type") if isinstance(ti, dict) else None)
-        provider = ti.get("provider", {}) if isinstance(ti, dict) else {}
-        backend = normalize_backend(provider.get("id") if isinstance(provider, dict) else None)
 
         target = canonical_target_from_run(run_dir)
+        model_format = target.model_path.suffix.lower().lstrip(".") or "pt"
+        raw_task = ti.get("task_type") if isinstance(ti, dict) else None
+        task_type = normalize_task(raw_task)
+        if not str(raw_task or "").strip():
+            task_type = _infer_task_from_target_name(target.model_path.name)
+        provider = ti.get("provider", {}) if isinstance(ti, dict) else {}
+        raw_backend = provider.get("id") if isinstance(provider, dict) else None
+        backend = normalize_backend(raw_backend)
+        if not str(raw_backend or "").strip():
+            backend = _infer_backend_from_format(model_format)
+
         model = CanonicalModelRef(
             model_id=target.source_id,
-            format=target.model_path.suffix.lower().lstrip(".") or "pt",
+            format=model_format,
             weights_path=normalize_path(str(target.model_path)),
             config_path=None,
             labels_path=None,

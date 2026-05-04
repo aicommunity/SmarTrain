@@ -42,3 +42,16 @@ def test_run_adapter_infers_dataset_from_run_path_without_metadata(tmp_path: Pat
     assert payload.runs
     assert payload.runs[0].dataset_ref == "ds_path"
 
+
+def test_run_adapter_infers_task_and_backend_from_model_artifact_without_metadata(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds_fmt" / "run_onnx_cls"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best-cls.onnx").write_bytes(b"fake")
+
+    payload = RunAdapter().read(str(run_dir))
+    assert payload.models
+    assert payload.models[0].format == "onnx"
+    assert payload.models[0].task_type == "classification"
+    assert payload.models[0].backend_type == "onnxruntime"
+
