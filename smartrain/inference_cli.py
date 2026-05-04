@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import re
 import sys
+import tempfile
 import time
 from datetime import datetime
 from glob import glob
@@ -30,6 +32,7 @@ from smartrain.external_providers.runner import run_external_infer
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.external_providers.registry import list_provider_specs
 from smartrain.train_model_catalog import is_supported_external_provider_model, TrainModelCatalog
+from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.device_selector import (
     default_device_value,
@@ -332,7 +335,18 @@ def _class_name_from_names(names: Any, idx: int) -> str:
 def _predict_roi_crop(roi_model: Any, image_path: str, args: argparse.Namespace) -> tuple[int, int, int, int]:
     with Image.open(image_path) as im:
         iw, ih = im.size
-    roi_pred = roi_model.predict(source=image_path, conf=float(args.roi_conf), verbose=False)
+    proj = getattr(args, "_ultralytics_roi_project", None) or ultralytics_sidecar_dir(
+        tempfile.gettempdir(), "smartrain_roi_infer"
+    )
+    roi_pred = roi_model.predict(
+        source=image_path,
+        conf=float(args.roi_conf),
+        verbose=False,
+        save=False,
+        project=proj,
+        name="roi-crop",
+        exist_ok=True,
+    )
     if not roi_pred:
         if args.roi_on_empty == "fail":
             raise RuntimeError(f"No ROI detections for: {image_path}")
@@ -576,6 +590,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[ERROR] {e}", file=sys.stderr)
         raise SystemExit(1)
     layout = WorkspaceLayout(workspace_root)
+    atexit.register(lambda wr=workspace_root: best_effort_prune_workspace_runs_detect(wr))
     os.makedirs(os.path.join(layout.root, "inference"), exist_ok=True)
     interactive_allowed = is_interactive_allowed(argv)
     interactive_used = False
@@ -764,6 +779,7 @@ def main(argv: list[str] | None = None) -> None:
         roi_w = args.roi_weights or str(model_path)
         roi_model = YOLO(str(roi_w))
         args.roi_weights = roi_w
+        args._ultralytics_roi_project = ultralytics_sidecar_dir(layout.root, ".cache", "ultralytics_roi_infer")
 
     try:
         if args.data_mode == "folder":

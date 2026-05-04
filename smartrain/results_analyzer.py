@@ -66,6 +66,7 @@ from smartrain.metrics_reader import (
 )
 from smartrain.model_test_service import load_test_artifacts_manifest
 from smartrain.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
+from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.confidence_recommendation import recommendation_file_path, read_recommendation_file
 
@@ -96,6 +97,8 @@ def _run_val_memory_safe(
     val_imgsz: int,
     val_half: bool,
     gpu_only: bool,
+    ultra_project: str,
+    ultra_name: str = "val-analyze",
 ) -> Any:
     cuda_available = False
     try:
@@ -122,6 +125,9 @@ def _run_val_memory_safe(
                     plots=False,
                     save=False,
                     verbose=False,
+                    project=ultra_project,
+                    name=ultra_name,
+                    exist_ok=True,
                     **extra,
                 )
             except Exception as e:
@@ -141,6 +147,9 @@ def _run_val_memory_safe(
         plots=False,
         save=False,
         verbose=False,
+        project=ultra_project,
+        name=ultra_name,
+        exist_ok=True,
         workers=0,
         device="cpu",
     )
@@ -420,6 +429,7 @@ def _recompute_run_test_metrics(
         default_imgsz=val_imgsz,
         default_half=val_half,
     )
+    ultra_proj = ultralytics_sidecar_dir(run_dir, ".ultralytics_scratch")
     result = _run_val_memory_safe(
         model,
         data_yaml=data_yaml,
@@ -428,6 +438,8 @@ def _recompute_run_test_metrics(
         val_imgsz=ri,
         val_half=rh,
         gpu_only=gpu_only,
+        ultra_project=ultra_proj,
+        ultra_name="val-recompute",
     )
     _clear_gpu_memory()
     csv_text = result.to_csv()
@@ -2724,6 +2736,7 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
                     default_imgsz=int(getattr(args, "val_imgsz", 640)),
                     default_half=bool(getattr(args, "val_half", True)),
                 )
+                ultra_proj = ultralytics_sidecar_dir(run_dir, ".ultralytics_scratch")
                 metrics = _run_val_memory_safe(
                     model,
                     data_yaml=data_yaml,
@@ -2732,6 +2745,8 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
                     val_imgsz=ri,
                     val_half=rh,
                     gpu_only=bool(getattr(args, "gpu_only_val", True)),
+                    ultra_project=ultra_proj,
+                    ultra_name="val-pr-curves",
                 )
             except Exception as e:
                 print(f"[WARN] {label}: val() error: {e}")
@@ -2973,13 +2988,18 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
         try:
             _clear_gpu_memory()
             model = YOLO(best_pt)
-            # Warm-up to reduce first-iteration skew.
-            model.predict(
-                source=images[0],
+            pred_proj = ultralytics_sidecar_dir(run_dir, ".ultralytics_predict_scratch")
+            pred_kw = dict(
                 verbose=False,
                 device=effective_device,
                 half=effective_half,
+                save=False,
+                project=pred_proj,
+                name="infer-bench",
+                exist_ok=True,
             )
+            # Warm-up to reduce first-iteration skew.
+            model.predict(source=images[0], **pred_kw)
             timings_ms: list[float] = []
             prep_ms: list[float] = []
             infer_ms: list[float] = []
@@ -2992,12 +3012,7 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
                 disable=len(images) < 3,
             ):
                 t0 = time.perf_counter()
-                results = model.predict(
-                    source=img_path,
-                    verbose=False,
-                    device=effective_device,
-                    half=effective_half,
-                )
+                results = model.predict(source=img_path, **pred_kw)
                 t1 = time.perf_counter()
                 timings_ms.append((t1 - t0) * 1000.0)
                 if results:
@@ -4699,7 +4714,16 @@ def main(argv=None) -> None:
     parser = build_analyze_arg_parser()
     args = parser.parse_args(argv)
     args.models_root = resolve_models_scan_root(args.workspace, args.models_root)
-    args.func(args)
+    ws_prune: str | None = None
+    try:
+        ws_prune = resolve_workspace_root(getattr(args, "workspace", None))
+    except ValueError:
+        pass
+    try:
+        args.func(args)
+    finally:
+        if ws_prune:
+            best_effort_prune_workspace_runs_detect(ws_prune)
 
 
 if __name__ == "__main__":

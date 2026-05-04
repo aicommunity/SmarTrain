@@ -29,6 +29,7 @@ from smartrain.datasets_json_former import (
     load_yaml,
 )
 from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -806,6 +807,10 @@ def main(argv=None) -> None:
         os.makedirs(output_root, exist_ok=True)
 
         model = YOLO(cfg["weights"])
+        pred_proj = ultralytics_sidecar_dir(
+            workspace_root if workspace_root is not None else temp_root,
+            ".ultralytics_roi_predict",
+        )
         if cfg["mode"] == "yolo_segment" and getattr(model, "task", None) != "segment":
             print(
                 f"[WARNING] mode=yolo_segment, but model task={getattr(model, 'task', None)}; "
@@ -862,6 +867,10 @@ def main(argv=None) -> None:
                 source=src_img,
                 conf=cfg["conf"],
                 verbose=False,
+                save=False,
+                project=pred_proj,
+                name="dataset-roi",
+                exist_ok=True,
             )
             r = results[0]
             if r.boxes is None or len(r.boxes) == 0:
@@ -993,6 +1002,8 @@ def main(argv=None) -> None:
         )
     if replay_cmd:
         print_replay_command("after execution", replay_cmd)
+    if workspace_root:
+        best_effort_prune_workspace_runs_detect(workspace_root)
 
 
 if __name__ == "__main__":

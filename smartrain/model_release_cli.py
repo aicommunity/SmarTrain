@@ -21,6 +21,7 @@ from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.run_bundle_copy import copy_run_bundle
 
 
 def build_model_release_arg_parser() -> argparse.ArgumentParser:
@@ -310,40 +311,8 @@ def _target_paths(layout: WorkspaceLayout, run_dir: Path, md: dict[str, Any]) ->
 
 
 def _copy_run_results(run_dir: Path, release_dir: Path) -> None:
-    """
-    Copy run `train` and `test` artifacts into release directory.
-    `train/weights` is intentionally excluded.
-    """
-    src_train = run_dir / "train"
-    src_test = run_dir / "test"
-    dst_train = release_dir / "train"
-    dst_test = release_dir / "test"
-    release_dir.mkdir(parents=True, exist_ok=True)
-
-    if src_train.is_dir():
-        shutil.copytree(
-            str(src_train),
-            str(dst_train),
-            dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("weights"),
-        )
-    if src_test.is_dir():
-        shutil.copytree(
-            str(src_test),
-            str(dst_test),
-            dirs_exist_ok=True,
-        )
-
-    # Copy key run-level artifacts for reproducibility.
-    root_level_files = [
-        "training_metadata.json",
-        "test_metrics.csv",
-        "_runtime_data_test.yaml",
-    ]
-    for name in root_level_files:
-        src = run_dir / name
-        if src.is_file():
-            shutil.copy2(str(src), str(release_dir / name))
+    """Delegate to shared bundle copy (release keeps legacy scope: no ``tests/``, no ``models/``)."""
+    copy_run_bundle(run_dir, release_dir, include_tests=False, copy_run_models=False)
 
 
 def _same_release(

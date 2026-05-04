@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import math
 import os
+import tempfile
 from collections import defaultdict
 import random
 import shutil
@@ -27,6 +29,7 @@ from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_r
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -610,11 +613,18 @@ def _detect_roi_box(image_path: str, args) -> tuple[int, int, int, int] | None:
         _ROI_MODEL_CACHE[model_path] = YOLO(model_path)
     model = _ROI_MODEL_CACHE[model_path]
     class_ids = _parse_roi_class_ids(getattr(args, "roi_class_ids", None))
+    proj = getattr(args, "_ultralytics_roi_predict_project", None) or ultralytics_sidecar_dir(
+        tempfile.gettempdir(), "smartrain_augment_roi"
+    )
     results = model.predict(
         source=image_path,
         conf=float(getattr(args, "roi_conf", 0.25)),
         classes=class_ids,
         verbose=False,
+        save=False,
+        project=proj,
+        name="augment-roi",
+        exist_ok=True,
     )
     if not results:
         return None
@@ -1210,6 +1220,7 @@ def main(argv=None):
     interactive_used = False
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
+    atexit.register(lambda wr=root: best_effort_prune_workspace_runs_detect(wr))
     catalog = _load_catalog(layout)
     if not catalog:
         print("[ERROR] datasets_info.json was not found or is empty.")
@@ -1297,6 +1308,11 @@ def main(argv=None):
     ) == "detector"
     need_detector_for_copy = bool(args.enable_bbox_copy) and str(getattr(args, "placement_mode", "detector")) == "detector"
     if need_detector_for_rotate or need_detector_for_copy:
+        setattr(
+            args,
+            "_ultralytics_roi_predict_project",
+            ultralytics_sidecar_dir(layout.root, ".cache", "ultralytics_augment_roi"),
+        )
         detector_roi_cache = _build_detector_roi_cache(items, args)
     class_usage: dict[int, int] = {}
     class_freq = _collect_class_freq(items)

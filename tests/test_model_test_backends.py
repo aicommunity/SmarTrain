@@ -19,6 +19,17 @@ from smartrain.model_test_service import (
 from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
 
 
+def _stub_prepare_trt_runtime(_engine_path: str) -> dict:
+    """Avoid deserializing real TensorRT in tests — fake engine bytes can SIGABRT the interpreter."""
+    return {
+        "trt": None,
+        "cudart": None,
+        "engine": object(),
+        "context": object(),
+        "init_ns": 42_000_000,
+    }
+
+
 class _FakeInput:
     name = "images"
     shape = [1, 3, 640, 640]
@@ -391,6 +402,7 @@ def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path
 
         return [_Pred(image_path=image_path, cls_id=0, conf=0.95, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
 
+    monkeypatch.setattr("smartrain.model_test_backends._prepare_trt_runtime", _stub_prepare_trt_runtime)
     monkeypatch.setattr("smartrain.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
 
     result = run_native_format_backend(
@@ -438,6 +450,7 @@ def test_run_native_tensorrt_backend_marks_partial_ok_when_val_fails(monkeypatch
             raise RuntimeError("val split forced failure")
         return orig_collect_gt(data_yaml, split)
 
+    monkeypatch.setattr("smartrain.model_test_backends._prepare_trt_runtime", _stub_prepare_trt_runtime)
     monkeypatch.setattr("smartrain.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
     monkeypatch.setattr("smartrain.model_test_backends._collect_gt", _collect_gt_with_val_failure)
 
@@ -543,6 +556,7 @@ def test_run_native_tensorrt_uses_artifact_imgsz_when_requested_differs(monkeypa
         "smartrain.model_test_backends.read_model_sidecar_metadata",
         lambda _path: {"params": {"imgsz": 640}},
     )
+    monkeypatch.setattr("smartrain.model_test_backends._prepare_trt_runtime", _stub_prepare_trt_runtime)
     monkeypatch.setattr("smartrain.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
 
     result = run_native_format_backend(

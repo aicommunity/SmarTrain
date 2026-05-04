@@ -10,10 +10,12 @@ import os
 import re
 import shutil
 import sys
+from pathlib import Path
 from datetime import datetime, timezone
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
 
@@ -156,15 +158,30 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
     dest_dir = _unique_model_dir(ctx.models_dir, base)
     friendly = os.path.basename(dest_dir)
     os.makedirs(dest_dir, exist_ok=True)
-    weights_name = f"{friendly}.pt"
-    dest_pt = os.path.join(dest_dir, weights_name)
-    shutil.copy2(best, dest_pt)
+
+    run_root = Path(run_path).resolve()
+    best_p = Path(best).resolve()
+    try:
+        weights_rel = best_p.relative_to(run_root).as_posix()
+    except ValueError:
+        weights_rel = Path("models") / best_p.name
+        weights_rel = weights_rel.as_posix()
+
+    copy_run_bundle(run_root, Path(dest_dir), include_tests=True, copy_run_models=True)
+
+    dest_weights = Path(dest_dir).joinpath(*weights_rel.split("/"))
+    if not dest_weights.is_file():
+        dest_weights.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(best_p), str(dest_weights))
+
+    normalize_training_metadata_paths_for_bundle(Path(dest_dir) / "training_metadata.json", weights_rel)
+
     promoted = datetime.now(timezone.utc).isoformat()
     ti = md["training_info"]
     ds = ti["dataset"]
     manifest = {
         "friendly_name": friendly,
-        "weights_file": weights_name,
+        "weights_file": weights_rel,
         "source_run": run_path,
         "source_run_relative": os.path.relpath(run_path, ctx.workspace_root),
         "training_end": md["timestamps"]["training"]["end"],
@@ -173,10 +190,11 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
         "dataset_hash": ds["hash"],
         "promoted_at": promoted,
         "workspace_root": ctx.workspace_root,
+        "bundle_layout_version": 2,
     }
     with open(os.path.join(dest_dir, MANIFEST_NAME), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
-    print(f"[OK] Model: {dest_pt}")
+    print(f"[OK] Model: {dest_weights}")
     print(f"[OK] Manifest: {os.path.join(dest_dir, MANIFEST_NAME)}")
 
 
@@ -244,7 +262,10 @@ def build_registry_arg_parser() -> argparse.ArgumentParser:
     )
     p_rm.set_defaults(handler="runs_metrics")
 
-    p_ma = sub.add_parser("models-add", help="Copy run model .pt to models/<friendly>/")
+    p_ma = sub.add_parser(
+        "models-add",
+        help="Promote run into models/<friendly>/ (weights under models/, train-*, tests/, train/test roots, metadata)",
+    )
     p_ma.add_argument(
         "run_path",
         type=str,

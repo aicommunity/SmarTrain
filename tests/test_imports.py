@@ -20,6 +20,7 @@ def test_import_cli_modules() -> None:
         "smartrain.training_queue",
         "smartrain.training_queue_cli",
         "smartrain.registry_cli",
+        "smartrain.run_bundle_copy",
         "smartrain.results_analyzer",
         "smartrain.analyze_models",
         "smartrain.run_discovery",

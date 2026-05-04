@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Any
+
+from smartrain.ultralytics_ephemeral import ultralytics_sidecar_dir
 
 from smartrain.external_providers.runner import run_external_infer
 
@@ -27,6 +30,9 @@ class UltralyticsBackend(InferenceBackend):
 
         self.name = backend_name
         self._model = YOLO(str(weights_path))
+        self._predict_project = ultralytics_sidecar_dir(
+            tempfile.gettempdir(), "smartrain_ultralytics_inference"
+        )
 
     def predict(self, image_source: Any, *, conf: float, imgsz: int, device: str | None, half: bool) -> BackendPrediction:
         t0 = time.perf_counter_ns()
@@ -37,6 +43,10 @@ class UltralyticsBackend(InferenceBackend):
             verbose=False,
             device=str(device) if device is not None else None,
             half=bool(half),
+            save=False,
+            project=self._predict_project,
+            name="inference-cli",
+            exist_ok=True,
         )
         t1 = time.perf_counter_ns()
         return BackendPrediction(detections=_extract_detections(self._model, preds), infer_only_ns=int(t1 - t0), stage_ns={})

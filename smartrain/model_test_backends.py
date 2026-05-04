@@ -4,6 +4,7 @@ import os
 import sys
 import gc
 import time
+import tempfile
 import json
 import re
 import subprocess
@@ -44,6 +45,7 @@ from smartrain.model_test_service import (
 )
 from smartrain.run_artifacts import ensure_run_layout, read_model_sidecar_metadata
 from smartrain import tensorrt_checks as trt_checks
+from smartrain.ultralytics_ephemeral import best_effort_prune_runs_detect_near_run, ultralytics_sidecar_dir
 from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
 from smartrain.unified_validator_core import EvalProvenance, normalize_eval_params
 
@@ -1563,10 +1565,19 @@ def _run_onnx_split_in_subprocess(
 
 
 def _infer_with_pt_model(
-    model: Any, image_path: str, input_hw: tuple[int, int], conf_thr: float, iou_thr: float
+    model: Any,
+    image_path: str,
+    input_hw: tuple[int, int],
+    conf_thr: float,
+    iou_thr: float,
+    *,
+    ultra_predict_project: str | None = None,
 ) -> tuple[list[_Pred], dict[str, int]]:
     t0 = time.perf_counter_ns()
     out: list[_Pred] = []
+    proj = ultra_predict_project or ultralytics_sidecar_dir(
+        tempfile.gettempdir(), "smartrain_ultralytics_pt_predict"
+    )
     try:
         results = model.predict(
             source=image_path,
@@ -1574,6 +1585,10 @@ def _infer_with_pt_model(
             conf=float(conf_thr),
             iou=float(iou_thr),
             verbose=False,
+            save=False,
+            project=proj,
+            name="model-test-pt",
+            exist_ok=True,
         )
         if not results:
             return out, {"total": int(time.perf_counter_ns() - t0), "infer": int(time.perf_counter_ns() - t0)}
@@ -1877,6 +1892,9 @@ def _ensure_confidence_recommendations_for_explicit_artifact(
         "plots": False,
         "save": False,
         "verbose": False,
+        "project": root_dir,
+        "name": f"val-recs-{format_name}",
+        "exist_ok": True,
     }
     if imgsz is not None:
         val_kwargs["imgsz"] = imgsz
@@ -2061,6 +2079,13 @@ def run_ultralytics_backend(
             conf_thr = float(eval_params["conf"])
             iou_thr = float(eval_params["iou"])
             names = _load_names(dataset_yaml_path)
+            pred_proj = ultralytics_sidecar_dir(root_dir, ".ultralytics_predict_scratch")
+            pred_common = {
+                "save": False,
+                "project": pred_proj,
+                "name": "deep-diagnostics",
+                "exist_ok": True,
+            }
 
             # Deep diagnostics are optional, but when enabled they must be produced for test and val.
             for split in ("test", "val"):
@@ -2134,6 +2159,7 @@ def run_ultralytics_backend(
                             verbose=False,
                             batch=int(val_batch) if val_batch is not None else 1,
                             stream=True,
+                            **pred_common,
                         )
                         _append_preds_from_results(results_iter, chunk_paths=chunk_paths, chunk_start_idx=chunk_start)
                     except Exception as exc:
@@ -2153,6 +2179,7 @@ def run_ultralytics_backend(
                                 device="cpu",
                                 batch=1,
                                 stream=True,
+                                **pred_common,
                             )
                             _append_preds_from_results(results_iter, chunk_paths=chunk_paths, chunk_start_idx=chunk_start)
                         else:
@@ -2259,6 +2286,8 @@ def run_ultralytics_backend(
             target_path=weights_path,
             error=str(exc),
         )
+    finally:
+        best_effort_prune_runs_detect_near_run(root_dir)
 
 
 def run_native_format_backend(

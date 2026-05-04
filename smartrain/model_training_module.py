@@ -2348,6 +2348,9 @@ def _ensure_confidence_recommendations(
         "plots": False,
         "save": False,
         "verbose": False,
+        "project": str(run_tests_dir(model_dir)),
+        "name": "val-ultralytics-recs",
+        "exist_ok": True,
     }
     if imgsz is not None:
         val_kwargs["imgsz"] = imgsz

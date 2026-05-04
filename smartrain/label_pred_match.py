@@ -23,7 +23,10 @@ from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 
 from smartrain.cli_argparse import CliArgumentParser
-from smartrain.ultralytics_ephemeral import ephemeral_ultralytics_project
+from smartrain.ultralytics_ephemeral import (
+    best_effort_prune_workspace_runs_detect,
+    ephemeral_ultralytics_project,
+)
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 # Default under workspace analytics/ (folder name matches CLI subcommand).
@@ -638,6 +641,12 @@ def main(argv: list[str] | None = None) -> None:
         f"instances(gt/pred)={grand['gt_instances_total']}/{grand['pred_instances_total']}, "
         f"TP={grand['tp_total']}, TN={grand['tn_total']}, FP={grand['fp_total']}, FN={grand['fn_total']}"
     )
+    try:
+        ws = resolve_workspace_root(getattr(args, "workspace", None))
+    except ValueError:
+        pass
+    else:
+        best_effort_prune_workspace_runs_detect(ws)
 
 
 if __name__ == "__main__":

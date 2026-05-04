@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import subprocess
@@ -25,6 +26,7 @@ from smartrain.model_test_service import (
     persist_target_test_artifacts_state,
     resolve_root_dir_for_target,
 )
+from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
 from smartrain.train_resume import resolve_dataset_path_for_resume
 from smartrain.run_artifacts import (
     canonical_run_model_path,
@@ -703,6 +705,7 @@ def main(argv: list[str] | None = None) -> None:
     interactive = is_interactive_allowed(bool(getattr(args, "non_interactive", False)))
     workspace_root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(workspace_root)
+    atexit.register(lambda wr=workspace_root: best_effort_prune_workspace_runs_detect(wr))
     user_onnx_policy = getattr(args, "onnx_provider_policy", None)
     args.device = resolve_device_request(getattr(args, "device", None) or default_device_value())
     onnx_provider_policy = str(
