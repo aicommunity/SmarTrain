@@ -28,6 +28,11 @@ from smartrain.cli_replay import build_non_interactive_command, print_replay_com
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.dataset_hash import calculate_dataset_hash
 from smartrain.dataset_passport import next_dataset_name, write_dataset_passport
+from smartrain.dataset_cli_common import (
+    detect_split_from_path,
+    load_dataset_catalog,
+    update_datasets_sidecar,
+)
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
@@ -157,25 +162,11 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
 
 
 def _load_catalog(layout: WorkspaceLayout) -> dict:
-    info_path = layout.work_datasets_info_path()
-    if not os.path.isfile(info_path):
-        return {}
-    with open(info_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data if isinstance(data, dict) else {}
+    return load_dataset_catalog(layout)
 
 
 def _detect_split(images_path: str) -> str:
-    low = images_path.lower()
-    if "/train/" in low:
-        return "train"
-    if "/valid/" in low:
-        return "valid"
-    if "/val/" in low:
-        return "val"
-    if "/test/" in low:
-        return "test"
-    return "train"
+    return detect_split_from_path(images_path, prefer_valid_name=True)
 
 
 def _read_yolo_classes(label_path: str) -> set[int]:
@@ -1028,38 +1019,13 @@ def _update_datasets_sidecar(
     target_dir: str,
     output_hash: str,
 ) -> None:
-    os.makedirs(layout.datasets, exist_ok=True)
-    rel = os.path.relpath(os.path.abspath(target_dir), layout.root)
-    entry = {
-        "classes": {str(k): int(v) for k, v in sorted(class_map.items(), key=lambda kv: int(kv[1]))},
-        "structure": "split",
-        "elements_count": None,
-        "data_path": rel,
-        "dataset_hash": output_hash,
-        "modified": False,
-    }
-    info_path = layout.work_datasets_info_path()
-    previous: dict = {}
-    if os.path.isfile(info_path):
-        with open(info_path, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
-        if isinstance(loaded, dict):
-            previous = loaded
-    previous[output_key] = entry
-    with open(info_path, "w", encoding="utf-8") as f:
-        json.dump(previous, f, ensure_ascii=False, indent=4)
-
-    cn_path = layout.work_class_names_path()
-    class_names_out: dict[str, str] = {}
-    if os.path.isfile(cn_path):
-        with open(cn_path, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
-        if isinstance(loaded, dict):
-            class_names_out = {str(k): str(v) for k, v in loaded.items()}
-    for c in class_map.keys():
-        class_names_out[str(c)] = str(c)
-    with open(cn_path, "w", encoding="utf-8") as f:
-        json.dump(class_names_out, f, ensure_ascii=False, indent=4)
+    update_datasets_sidecar(
+        layout=layout,
+        output_key=output_key,
+        class_map=class_map,
+        target_dir=target_dir,
+        output_hash=output_hash,
+    )
 
 
 def _list_workspace_detector_models(workspace_root: str) -> list[str]:
