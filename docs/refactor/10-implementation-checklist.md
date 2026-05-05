@@ -99,6 +99,7 @@ Notes:
 - 2026-05-05: Продолжена декомпозиция `results_analyzer` (3-E3): compare-пайплайн (`cmd_compare`) переведён на выделенный service `services/analyze_compare_service.py` (`run_compare_workflow`) с сохранением интерактивного/CLI контракта и регрессий.
 - 2026-05-05: Продолжена декомпозиция `results_analyzer` (3-E3): artifact-builders для analyze-сессий (`confidence_recommendations`, `speed_quality`) вынесены в `services/analyze_artifact_builders.py`; публичное поведение сохранено через thin-wrapper функции в `results_analyzer`.
 - 2026-05-05: Продолжена декомпозиция `results_analyzer` (3-E3): вынесен `format_compare` builder в `services/analyze_format_compare_service.py`; `_write_format_compare_artifacts` в `results_analyzer` теперь thin-wrapper.
+- 2026-05-05: Продолжена декомпозиция `results_analyzer` (3-E3): интерактивная orchestration-логика (`cmd_interactive` flow) вынесена в `services/analyze_interactive_service.py` (`run_interactive_workflow`), при этом CLI-контракт и сценарии quality/speed/full сохранены.
 
 ### Phase F — Wave 8 (clean-code hardening)
 
