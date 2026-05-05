@@ -52,7 +52,7 @@ Notes:
 - [x] **6.5-B1b** `canonical_gateway.load_metrics` → список `CanonicalMetricsRef` (обнаружение CSV через `metrics_reader`, namespace `{task}/test_{fmt}`).
 - [x] **6.5-B1c** `canonical_gateway.load_predictions` — заглушка API (пустой список до стандартизации prediction bundle).
 - [ ] **6.5-B1d** Довести PR 6.5 API: стабильный контракт prediction discovery, опции фильтрации split/format, документация в `05b`/CLI; golden-тесты из тест-плана PR 6.5.
-- [ ] **6.5-B2a** `results_analyzer` canonical-run метрики (`_build_run_record_canonical`) теперь идут через `canonical_gateway.load_metrics` (не напрямую через `read_test_metrics_row`).
+- [x] **6.5-B2a** `results_analyzer` canonical-run метрики (`_build_run_record_canonical`) теперь идут через `canonical_gateway.load_metrics` (не напрямую через `read_test_metrics_row`).
 - [ ] **6.5-B2b** Миграция оставшихся consumer-веток `model_test_cli` / `inference_cli` / `results_analyzer`: убрать **бизнес-**ветвления run vs model в пользу canonical path там, где это предусмотрено PR 6.5 (инвентаризация веток → удаление/изоляция).
 - [ ] **6.5-B3** Интеграционные тесты consumer parity и feature-flag rollout (если используется) по тест-плану PR 6.5.
 

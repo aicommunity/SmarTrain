@@ -6,6 +6,7 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 
 - 2026-05-04: Extended **canonical_gateway** (PR 6.5 partial): `resolve_task_context`, `load_metrics` (test CSV → `CanonicalMetricsRef`), `load_predictions` stub. Remaining: prediction artifact contract, consumer callsites using these APIs instead of ad-hoc `metrics_reader` where policy mandates gateway-only reads.
 - 2026-05-05: Migrated `results_analyzer._build_run_record_canonical` test-metrics loading to `canonical_gateway.load_metrics` (gateway API) instead of direct `read_test_metrics_row`, reducing consumer-level bypass of canonical gateway. Remaining: propagate this gateway-first metrics read pattern to other consumer flows covered by PR 6.5.
+- 2026-05-05: Extended this migration within `results_analyzer` compare/recompute helper paths (`cmd_compare`, `_build_speed_quality_artifacts`, `_collect_missing_metrics_recompute_plan`) by routing test-metrics reads through shared `_read_test_metrics_for_run`, which now uses `canonical_gateway.load_metrics` in canonical mode.
 - 2026-05-04: Initial **canonical write** slice (PR 6.4 phase A): `smartrain/adapters/canonical/write/*`, `canonical_gateway.persist_canonical_snapshot`, optional dual-write helper `run_dual_write`. **Opt-in** snapshot after successful test artifact persist via `SMARTTRAIN_CANONICAL_WRITE=1` (best-effort warning on failure). Remaining PR 6.4 scope: richer manifest/provenance, real legacy writer hook in dual-write, hash coverage for individual artifact files per plan.
 
 ## Open Items

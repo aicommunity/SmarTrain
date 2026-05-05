@@ -791,11 +791,11 @@ def cmd_compare(args: argparse.Namespace) -> None:
             print(f"[ERROR] Not a run (missing training_metadata.json): {p}", file=sys.stderr)
             sys.exit(1)
 
-    base_metrics = read_test_metrics_row(baseline)
+    base_metrics = _read_test_metrics_for_run(baseline)
     if not base_metrics:
         print("[WARN] Baseline has no test_metrics*.csv; deltas only from train/results.csv", file=sys.stderr)
 
-    other_rows = [read_test_metrics_row(other) for other in others]
+    other_rows = [_read_test_metrics_for_run(other) for other in others]
     delta_rows = build_delta_rows(baseline, base_metrics, others, other_rows)
 
     os.makedirs(os.path.dirname(os.path.abspath(out_csv)) or ".", exist_ok=True)
@@ -886,7 +886,7 @@ def _matches_optional_bool(value: bool | None, expected: bool | None) -> bool:
 
 
 def _build_run_record_canonical(run_dir: str) -> RunRecord:
-    from smartrain.orchestrators.canonical_gateway import load_metrics, load_target
+    from smartrain.orchestrators.canonical_gateway import load_target
 
     payload = load_target(run_dir, source_kind="run")
     model_name: str | None = None
@@ -895,11 +895,7 @@ def _build_run_record_canonical(run_dir: str) -> RunRecord:
         model_name = str(payload.models[0].model_id or "").strip() or None
     if payload.runs:
         dataset_name = str(payload.runs[0].dataset_ref or "").strip() or None
-    metrics: dict[str, Any] = {}
-    metric_refs = load_metrics(run_dir, source_kind="run", format_name="pt")
-    if metric_refs:
-        metrics = dict(metric_refs[0].primary_metrics or {})
-        metrics.update(dict(metric_refs[0].secondary_metrics or {}))
+    metrics = _read_test_metrics_for_run(run_dir)
     return RunRecord(
         run_dir=run_dir,
         model=model_name,
@@ -910,6 +906,19 @@ def _build_run_record_canonical(run_dir: str) -> RunRecord:
         test_metrics=metrics,
         train_last_metrics={},
     )
+
+
+def _read_test_metrics_for_run(run_dir: str, *, format_name: str = "pt") -> dict[str, Any]:
+    if _canonical_read_enabled():
+        from smartrain.orchestrators.canonical_gateway import load_metrics
+
+        metric_refs = load_metrics(run_dir, source_kind="run", format_name=format_name)
+        if metric_refs:
+            out = dict(metric_refs[0].primary_metrics or {})
+            out.update(dict(metric_refs[0].secondary_metrics or {}))
+            return out
+        return {}
+    return read_test_metrics_row(run_dir, format_name) or {}
 
 
 def _flat_row_canonical(run_dir: str) -> dict[str, Any]:
@@ -1418,7 +1427,7 @@ def _write_speed_quality_artifacts(
             ["_status_score", "_val_score"], ascending=[True, True]
         )
         rec = sub.iloc[0].to_dict()
-        base_metrics = read_test_metrics_row(run_dir)
+        base_metrics = _read_test_metrics_for_run(run_dir)
         recomputed_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
         if os.path.isfile(recomputed_csv):
             try:
@@ -1502,7 +1511,7 @@ def _collect_missing_metrics_recompute_plan(
     recompute: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for run_dir in run_dirs:
-        row = read_test_metrics_row(run_dir) or {}
+        row = _read_test_metrics_for_run(run_dir)
         recomputed_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
         if os.path.isfile(recomputed_csv):
             try:
