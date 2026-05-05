@@ -60,3 +60,20 @@ def test_load_predictions_discovers_debug_jsonl(tmp_path: Path) -> None:
     assert len(preds) == 1
     assert preds[0].count == 2
     assert preds[0].items_path.endswith("debug_test.jsonl")
+
+
+def test_load_metrics_uses_task_specific_metrics_adapter(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_cls"
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best-cls.onnx").write_bytes(b"x")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"task_type": "classification", "dataset": {"name": "ds"}}}),
+        encoding="utf-8",
+    )
+    (run_dir / "test_metrics_onnx.csv").write_text("top1,top5,mAP50-95\n0.8,0.95,0.3\n", encoding="utf-8")
+
+    metrics = load_metrics(str(run_dir), source_kind="run", format_name="onnx")
+    assert metrics
+    assert metrics[0].namespace == "classification/test_onnx"
+    assert metrics[0].primary_metrics.get("top1") == 0.8
+    assert metrics[0].primary_metrics.get("top5") == 0.95

@@ -84,12 +84,13 @@ Notes:
 
 ### Phase E — Wave 5 + Analyze / Artifact v2 (волны 5, 3 analyze, 7)
 
-- [ ] **5-E1** Task contracts/context; detection adapter extraction; metrics adapter framework (PR 5.1–5.3).
+- [x] **5-E1** Task contracts/context; detection adapter extraction; metrics adapter framework (PR 5.1–5.3).
 - [ ] **5-E2** Classification/segmentation readiness + consumer wiring (PR 5.4–5.5).
 - [ ] **3-E3** Декомпозиция **`results_analyzer`** на слои args / interactive / service / backends / artifacts (доделать симметрию с train/test/inference по Волне 3).
 - [ ] **7-E4** Schema v2 артефактов + миграция analyze на unified read; legacy reader контролируем и документирован (Волна 7).
 
 Notes:
+- 2026-05-05: Закрыт 5-E1: добавлены `tasks/context.py` (`TaskExecutionContext`) и `tasks/metrics.py` (task-aware metrics adapter framework), расширен `tasks/__init__.py`, и подключена task-aware metrics normalization в `canonical_gateway.load_metrics` (namespace + primary metrics через task adapter). Добавлены/обновлены тесты `tests/test_task_contracts.py` и `tests/orchestrators/test_canonical_gateway_extensions.py`.
 
 ### Phase F — Wave 8 (clean-code hardening)
 

@@ -18,6 +18,8 @@ from smartrain.metrics_reader import (
     read_test_metrics_by_format,
     read_test_metrics_row,
 )
+from smartrain.tasks.context import TaskExecutionContext
+from smartrain.tasks.metrics import resolve_task_metrics_adapter
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,7 @@ def _pd_is_na(v: Any) -> bool:
 def _collect_test_metrics(ref: str, *, task_type: TaskType, format_name: str | None) -> list[CanonicalMetricsRef]:
     by_fmt = read_test_metrics_by_format(ref, include_internal=True)
     out: list[CanonicalMetricsRef] = []
+    task_metrics_adapter = resolve_task_metrics_adapter(str(task_type))
     for fmt, csv_path in sorted(by_fmt.items()):
         if format_name and fmt != format_name.strip().lower():
             continue
@@ -97,7 +100,12 @@ def _collect_test_metrics(ref: str, *, task_type: TaskType, format_name: str | N
         secondary: dict[str, Any] = {
             str(k): v for k, v in row.items() if str(k) not in primary and str(k).lower() != "class"
         }
-        ns = f"{task_type}/test_{fmt}"
+        normalized_task_metrics = task_metrics_adapter.normalize({str(k): v for k, v in row.items()})
+        ns = TaskExecutionContext(task_type=str(task_type), stage="test", split="test").metrics_namespace(format_name=fmt)
+        if normalized_task_metrics:
+            for k, v in normalized_task_metrics.items():
+                primary[k] = v
+                secondary.pop(k, None)
         out.append(
             CanonicalMetricsRef(
                 namespace=ns,
