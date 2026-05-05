@@ -135,6 +135,34 @@ def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path
     assert rec.dataset_name == "ds_a"
 
 
+def test_build_run_record_canonical_uses_gateway_metrics(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_metrics_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    class _M:
+        model_id = "cm"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    class _Metric:
+        primary_metrics = {"mAP50-95": 0.7}
+        secondary_metrics = {"Box-F1": 0.8}
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
+    rec = results_analyzer._build_run_record_canonical(str(run_dir))
+    assert rec.model == "cm"
+    assert rec.dataset_name == "ds_a"
+    assert rec.test_metrics.get("mAP50-95") == 0.7
+    assert rec.test_metrics.get("Box-F1") == 0.8
+
+
 def test_collect_ultralytics_test_artifacts_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_c"
     run_dir.mkdir(parents=True, exist_ok=True)

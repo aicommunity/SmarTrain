@@ -886,7 +886,7 @@ def _matches_optional_bool(value: bool | None, expected: bool | None) -> bool:
 
 
 def _build_run_record_canonical(run_dir: str) -> RunRecord:
-    from smartrain.orchestrators.canonical_gateway import load_target
+    from smartrain.orchestrators.canonical_gateway import load_metrics, load_target
 
     payload = load_target(run_dir, source_kind="run")
     model_name: str | None = None
@@ -895,7 +895,11 @@ def _build_run_record_canonical(run_dir: str) -> RunRecord:
         model_name = str(payload.models[0].model_id or "").strip() or None
     if payload.runs:
         dataset_name = str(payload.runs[0].dataset_ref or "").strip() or None
-    metrics = read_test_metrics_row(run_dir) or {}
+    metrics: dict[str, Any] = {}
+    metric_refs = load_metrics(run_dir, source_kind="run", format_name="pt")
+    if metric_refs:
+        metrics = dict(metric_refs[0].primary_metrics or {})
+        metrics.update(dict(metric_refs[0].secondary_metrics or {}))
     return RunRecord(
         run_dir=run_dir,
         model=model_name,

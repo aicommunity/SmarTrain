@@ -124,7 +124,7 @@ def load_metrics(
     base = load_target(ref, source_kind=source_kind, options=options)
     if not base.models:
         return []
-    task_type = base.models[0].task_type
+    task_type = getattr(base.models[0], "task_type", "detection")
     return _collect_test_metrics(ref, task_type=task_type, format_name=format_name)
 
 
