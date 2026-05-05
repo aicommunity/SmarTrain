@@ -18,8 +18,15 @@ class CapabilityRegistry:
         key = capabilities.backend.strip().lower()
         self._entries[key] = BackendEntry(capabilities=capabilities)
 
-    def resolve(self, *, task_type: str, model_format: str, require: str) -> BackendCapabilities:
+    @staticmethod
+    def _normalize_require(require: str) -> str:
         req = str(require or "").strip().lower()
+        if req not in {"train", "test", "infer"}:
+            raise ValueError(f"Unsupported capability requirement: {require!r}")
+        return req
+
+    def resolve(self, *, task_type: str, model_format: str, require: str) -> BackendCapabilities:
+        req = self._normalize_require(require)
         for entry in self._entries.values():
             caps = entry.capabilities
             if not caps.supports(task_type=task_type, model_format=model_format):
@@ -30,5 +37,8 @@ class CapabilityRegistry:
                 return caps
             if req == "infer" and caps.can_infer:
                 return caps
-        raise ValueError(f"No backend for task={task_type!r}, format={model_format!r}, require={require!r}")
+        raise ValueError(f"No backend for task={task_type!r}, format={model_format!r}, require={req!r}")
+
+    def resolve_backend_id(self, *, task_type: str, model_format: str, require: str) -> str:
+        return self.resolve(task_type=task_type, model_format=model_format, require=require).backend
 
