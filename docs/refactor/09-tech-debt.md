@@ -4,6 +4,9 @@ Operational execution status and PR-level checkboxes: [`10-implementation-checkl
 
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
+- 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
+- 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
+
 - 2026-05-04: Extended **canonical_gateway** (PR 6.5 partial): `resolve_task_context`, `load_metrics` (test CSV → `CanonicalMetricsRef`), `load_predictions` stub. Remaining: prediction artifact contract, consumer callsites using these APIs instead of ad-hoc `metrics_reader` where policy mandates gateway-only reads.
 - 2026-05-05: Migrated `results_analyzer._build_run_record_canonical` test-metrics loading to `canonical_gateway.load_metrics` (gateway API) instead of direct `read_test_metrics_row`, reducing consumer-level bypass of canonical gateway. Remaining: propagate this gateway-first metrics read pattern to other consumer flows covered by PR 6.5.
 - 2026-05-05: Extended this migration within `results_analyzer` compare/recompute helper paths (`cmd_compare`, `_build_speed_quality_artifacts`, `_collect_missing_metrics_recompute_plan`) by routing test-metrics reads through shared `_read_test_metrics_for_run`, which now uses `canonical_gateway.load_metrics` in canonical mode.
@@ -30,6 +33,8 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-05: Added external provider structured inference contract on consumer side: external runner return can now include `images[].task_outputs` and `return_code`; `inference_service` normalizes this payload into the same task-aware report shape used by local backends. Remaining 5-E2 debt: provider-specific launchers still mostly return rc-only; production providers need gradual adoption of structured payload contract for full cls/seg parity.
 - 2026-05-05: Reduced provider-side gap for 5-E2: external infer adapters now pass `--result-json`, runner loads structured payload from launcher output, and default infer launchers (`mp_infer_launcher`, `mfel_infer_launcher`) emit `images[].task_outputs` with detections. Remaining 5-E2 debt: richer non-detection payloads (classification top-k / segmentation polygons from external providers) still depend on provider-specific model/task support and launcher extensions.
 - 2026-05-05: Extended provider-side task richness for external infer launchers: `--task` is propagated end-to-end and structured output builders now emit classification (`top1`/`top_k`) and segmentation (`polygon_roi_xy`) payloads when runtime predictions expose required fields. Remaining 5-E2 debt: not all provider forks/models expose `probs`/`masks` consistently, so some external runs still legitimately produce detection-only or empty task-specific payloads.
+- 2026-05-05: Closed Phase D residual policy debt: inference capability mismatch is no longer warning-only; `inference_service` now aborts on incompatible runtime backend id, with explicit alias mapping for expected runtime naming variants (`ultralytics:engine/trt/onnx`).
+- 2026-05-05: Continued train-coupling reduction with compatibility-safe helper extraction: neutral runtime helpers moved to `services/train_runtime_helpers.py` (`build_run_name`, `resolve_external_eval_source`, `json_safe_train_summary`, `load_batch_from_training_metadata`); `train_service` now imports these directly while keeping monkeypatch-compatible fallback to `mtm._*` symbols.
 - 2026-05-05: Started Wave 3-E3 structural split for `results_analyzer`: extracted session/artifact path helpers, data-yaml discovery, and table workflows (`scan`/`export-table`) into dedicated service modules with compatibility wrappers in `results_analyzer.py`. Remaining 3-E3 debt: migrate compare/interactive/report-artifact orchestration into dedicated service modules to complete full args/interactive/service/backends/artifacts symmetry.
 - 2026-05-05: Continued Wave 3-E3 split: compare execution workflow moved to `services/analyze_compare_service.py` and wired from `results_analyzer.cmd_compare`. Remaining 3-E3 debt now concentrates on interactive/session report orchestration and large artifact builders (`format-compare`, recommendation/speed-quality bundles).
 - 2026-05-05: Continued Wave 3-E3 split: moved recommendation/speed-quality artifact builders to `services/analyze_artifact_builders.py` and kept compatibility wrappers in `results_analyzer`. Remaining 3-E3 debt: extract `format-compare` builder and interactive orchestration/session assembly into dedicated services to finish symmetry.
@@ -40,11 +45,20 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 
 ## Open Items
 
-- [ ] Plan-audit debt (completed todo `orchestrator-split`): базовая analyze-декомпозиция в service/helper слои завершена, но `results_analyzer.py` все ещё содержит заметный фасадный объём и часть benchmark/PR helper-логики; при необходимости продолжить дробление без изменения CLI-контракта.
-- [ ] Plan-audit debt (completed todo `task-abstraction`): `TaskType` contracts and routing hooks exist, but runtime paths still mostly execute detection-centric logic; classification/segmentation are readiness stubs rather than feature-complete task adapters.
-- [ ] `train` flow extraction is now split into external/builtin/test-only handlers, but the handlers still depend on `model_training_module` namespace (`mtm.*`). Next step: decouple shared helpers into neutral modules to reduce dynamic coupling.
-- [ ] Reduce dynamic module coupling in `train_service`: current pattern imports `model_training_module` and references many helpers via `mtm.*`; move shared primitives to neutral modules (`services/common` or `backends/*`) to simplify tests and static checks.
-- [ ] Capability routing is task-aware for train/test registry, but runtime implementations are still detection-centric; add task-specific strategies/adapters for classification/segmentation instead of shared generic paths.
+- [ ] **P0 / Wave 8 (8-F1):** системный anti-pattern pass по правилам из `docs/refactor/07-clean-code-rules.md` (начать с runtime-critical модулей: `services/inference_service.py`, `services/train_service.py`, external launchers).
+- [ ] **P0 / Wave 8 (8-F2):** зафиксировать CI/review guardrails (минимум: автоматический quality gate + PR checklist + проверка policy-критериев).
+- [ ] **P1 / Wave 8 (8-F3):** удалить legacy-ветки/мосты по deprecation-policy (`docs/refactor/06-deprecation-and-alias-policy.md`) только после явных gate-условий и регрессий.
+- [ ] **P1 / train coupling:** `train_service` coupling с `model_training_module` дополнительно снижен (вынесены runtime helper-ы в `services/train_runtime_helpers.py`), но бизнес-вызовы (`train_yolo`, `test_yolo`, metadata/system-profile helpers и external fallback helpers) всё ещё идут через `mtm.*`; следующий шаг — поэтапно вынести эти shared primitives в нейтральные модули (`services/common` или `backends/*`).
+- [ ] **P2 / analyzer facade cleanup:** `results_analyzer.py` остаётся крупным фасадом; дальнейшее дробление допустимо как low-risk cleanup без изменения CLI-контрактов.
+
+## Next Execution Backlog (ready-to-start)
+
+1. Wave 8 bootstrap PR: добавить guardrails/checklists + минимальный CI quality gate.
+2. Anti-pattern PR #1: runtime-critical cleanup (`inference_service` + external launchers), без функциональных изменений.
+3. Train decoupling PR #1: вынести первые `mtm.*` shared helpers в нейтральный модуль и перевести `train_service` на новые импорты.
+4. Legacy-removal PR (8-F3): удалить готовые мосты только после прохождения новых guardrails и explicit deprecation gates.
+
+- 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 
 ## Notes
 

@@ -41,7 +41,15 @@ def _backend_name_matches_capability(runtime_name: str | None, capability_backen
     expected = str(capability_backend or "").strip().lower()
     if not actual or not expected:
         return False
-    return actual == expected or actual.startswith(f"{expected}:")
+    if actual == expected or actual.startswith(f"{expected}:"):
+        return True
+    # Capability backends are logical IDs, while runtime backends may expose
+    # implementation-specific names (for example "ultralytics:engine").
+    alias_accept: dict[str, tuple[str, ...]] = {
+        "tensorrt": ("ultralytics:engine", "ultralytics:trt"),
+        "onnxruntime": ("ultralytics:onnx",),
+    }
+    return any(actual == token or actual.startswith(f"{token}:") for token in alias_accept.get(expected, ()))
 
 
 def _offset_bbox(bbox_roi_xyxy: list[Any], roi_box: tuple[int, int, int, int] | None) -> tuple[list[float], list[float]]:
@@ -156,6 +164,19 @@ def _task_outputs_count(task_type: str, task_outputs: dict[str, Any]) -> int:
     return len(dets) if isinstance(dets, list) else 0
 
 
+def _normalize_task_outputs_for_task(task_type: str, task_outputs: dict[str, Any], detections: list[dict[str, Any]]) -> dict[str, Any]:
+    if task_type == "classification":
+        cls = task_outputs.get("classification")
+        return {"classification": cls if isinstance(cls, dict) else {}}
+    if task_type == "segmentation":
+        segs = task_outputs.get("segments")
+        return {"segments": segs if isinstance(segs, list) else []}
+    dets = task_outputs.get("detections")
+    if isinstance(dets, list):
+        return {"detections": dets}
+    return {"detections": detections}
+
+
 def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for row in rows:
@@ -168,6 +189,7 @@ def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -
         # Bridge legacy external payloads: allow flat "detections" without task_outputs.
         if not task_outputs and detections:
             task_outputs = {"detections": detections}
+        normalized_task = _normalize_task_outputs_for_task(task_type, task_outputs, detections)
         normalized.append(
             {
                 "image_path_absolute": row.get("image_path_absolute"),
@@ -176,7 +198,7 @@ def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -
                 "roi_xyxy": row.get("roi_xyxy"),
                 "task_type": task_to_metadata_task_type(row.get("task_type", task_type)),
                 "detections": detections,
-                "task_outputs": task_outputs,
+                "task_outputs": normalized_task,
             }
         )
     return normalized
@@ -373,17 +395,18 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         return 1, False
     adapter = UltralyticsAdapter()
     try:
-        backend = adapter.create_inference_backend(model_format=model_format, model_path=str(model_path))
+        backend = adapter.create_inference_backend(model_format=model_format, model_path=str(model_path), task_type=task_type)
     except Exception as e:
         print(f"[ERROR] Failed to initialize inference backend: {e}", file=sys.stderr)
         return 1, False
     if not _backend_name_matches_capability(getattr(backend, "name", None), expected_caps.backend):
         print(
-            f"[WARN] Inference backend mismatch: capability resolver expects {expected_caps.backend!r} "
+            f"[ERROR] Inference backend mismatch: capability resolver expects {expected_caps.backend!r} "
             f"for format {model_format!r}, got {getattr(backend, 'name', None)!r}. "
-            "Continuing with runtime-selected backend.",
+            "Aborting to keep capability routing deterministic.",
             file=sys.stderr,
         )
+        return 1, False
     roi_model = None
     if args.roi_pre_detect:
         from ultralytics import YOLO

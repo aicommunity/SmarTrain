@@ -443,6 +443,55 @@ def test_inference_writes_segmentation_task_outputs(tmp_path: Path, monkeypatch)
     assert segments[0]["polygon_original_xy"][0] == [1.0, 2.0]
 
 
+def test_inference_fails_on_backend_capability_mismatch(tmp_path: Path, monkeypatch, capsys) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    class _Caps:
+        backend = "ultralytics"
+
+    class _BadBackend:
+        name = "foreign-runtime:pt"
+
+        def predict(self, *_args, **_kwargs):
+            raise AssertionError("predict should not be called on capability mismatch")
+
+    monkeypatch.setattr("smartrain.services.inference_service.resolve_infer_backend", lambda **_kwargs: _Caps())
+    monkeypatch.setattr(
+        "smartrain.backends.ultralytics_adapter.UltralyticsAdapter.create_inference_backend",
+        lambda self, **_kwargs: _BadBackend(),
+    )
+
+    with pytest.raises(SystemExit) as ex:
+        inference_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--model-name",
+                "demo_model",
+                "--data-mode",
+                "folder",
+                "--source-dir",
+                str(src),
+            ]
+        )
+    assert int(ex.value.code or 0) == 1
+    err = capsys.readouterr().err
+    assert "Inference backend mismatch" in err
+    assert "Aborting to keep capability routing deterministic" in err
+
+
 def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
@@ -578,6 +627,96 @@ def test_inference_external_provider_accepts_task_outputs_payload(monkeypatch, t
     assert report["summary"]["images_processed"] == 1
     assert report["summary"]["task_outputs_total"] == 1
     assert report["images"][0]["task_outputs"]["classification"]["top1"]["class_name"] == "dog"
+
+
+def test_inference_external_provider_classification_empty_payload_normalized(monkeypatch, tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    def _fake_run_external_infer(_provider_id: str, _repo_path: str, _venv_path: str, **_kwargs):
+        return {
+            "return_code": 0,
+            "images": [
+                {
+                    "image_path_absolute": str(src / "a.jpg"),
+                    "image_path_relative": "raw_images/a.jpg",
+                    "task_outputs": {},
+                    "detections": [],
+                }
+            ],
+        }
+
+    monkeypatch.setattr("smartrain.inference_backends.run_external_infer", _fake_run_external_infer)
+    with pytest.raises(SystemExit) as ex:
+        inference_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--weights",
+                "dr-yolo:yolov8n",
+                "--external-repo",
+                str(tmp_path / "dr-repo"),
+                "--data-mode",
+                "folder",
+                "--source-dir",
+                str(src),
+                "--task",
+                "classify",
+            ]
+        )
+    assert int(ex.value.code or 0) == 0
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["task_type"] == "classification"
+    assert report["summary"]["task_outputs_total"] == 0
+    assert report["images"][0]["task_outputs"] == {"classification": {}}
+
+
+def test_inference_external_provider_segmentation_empty_payload_normalized(monkeypatch, tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    def _fake_run_external_infer(_provider_id: str, _repo_path: str, _venv_path: str, **_kwargs):
+        return {
+            "return_code": 0,
+            "images": [
+                {
+                    "image_path_absolute": str(src / "a.jpg"),
+                    "image_path_relative": "raw_images/a.jpg",
+                    "task_outputs": {},
+                    "detections": [],
+                }
+            ],
+        }
+
+    monkeypatch.setattr("smartrain.inference_backends.run_external_infer", _fake_run_external_infer)
+    with pytest.raises(SystemExit) as ex:
+        inference_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--weights",
+                "dr-yolo:yolov8n",
+                "--external-repo",
+                str(tmp_path / "dr-repo"),
+                "--data-mode",
+                "folder",
+                "--source-dir",
+                str(src),
+                "--task",
+                "segment",
+            ]
+        )
+    assert int(ex.value.code or 0) == 0
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["task_type"] == "segmentation"
+    assert report["summary"]["task_outputs_total"] == 0
+    assert report["images"][0]["task_outputs"] == {"segments": []}
 
 
 def test_inference_unknown_provider_in_weights_returns_error(monkeypatch, tmp_path: Path, capsys) -> None:

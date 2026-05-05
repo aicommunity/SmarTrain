@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import shutil
+import traceback
+from datetime import datetime
 from typing import Any
 
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
+from smartrain.services.train_runtime_helpers import (
+    build_run_name,
+    json_safe_train_summary,
+    load_batch_from_training_metadata,
+    resolve_external_eval_source,
+)
+from smartrain.train_profile import task_to_metadata_task_type
 
 
 def _run_external_provider_flow(
@@ -25,7 +37,7 @@ def _run_external_provider_flow(
     rec = mtm._get_installed_external_provider_record(external_provider)
     repo_for_catalog = str(rec.get("repo_path", "")).strip() if isinstance(rec, dict) else None
     requested_model = str(getattr(args, "model", "") or model_version)
-    if not mtm.os.path.isfile(requested_model):
+    if not os.path.isfile(requested_model):
         is_supported = mtm.is_supported_external_provider_model(
             external_provider,
             requested_model,
@@ -42,7 +54,7 @@ def _run_external_provider_flow(
                 f"{external_provider!r}. Supported aliases: {known}"
             )
             return 2
-    training_start_time = mtm.datetime.now()
+    training_start_time = datetime.now()
     location = mtm.get_provider_location(external_provider)
     if location is None and not getattr(args, "external_repo", None):
         print(
@@ -51,7 +63,7 @@ def _run_external_provider_flow(
         )
         return 1
     repo_path = str(getattr(args, "external_repo", "") or "").strip() or (location.repo_path if location else "")
-    venv_path = location.venv_path if location else mtm.os.path.join(repo_path, "venv")
+    venv_path = location.venv_path if location else os.path.join(repo_path, "venv")
     external_adapter = ExternalProviderAdapter(
         provider_id=external_provider,
         repo_path=repo_path,
@@ -67,7 +79,8 @@ def _run_external_provider_flow(
         dataset_hash = mtm.calculate_dataset_hash(data)
     except Exception:
         dataset_hash = None
-    run_name = mtm._build_run_name(external_provider, model_version, epochs, batch, dataset_hash)
+    run_name_builder = getattr(mtm, "_build_run_name", build_run_name)
+    run_name = run_name_builder(external_provider, model_version, epochs, batch, dataset_hash)
     print(f"[INFO] External run name: {run_name}")
     rc = external_adapter.run_train(
         dataset_path=data,
@@ -79,10 +92,10 @@ def _run_external_provider_flow(
         target_dir=target_dir,
         run_name=run_name,
     )
-    training_end_time = mtm.datetime.now()
-    dataset_name = mtm.os.path.basename(mtm.os.path.normpath(data))
-    external_run_dir = mtm.os.path.join(target_dir, dataset_name, run_name)
-    mtm.os.makedirs(external_run_dir, exist_ok=True)
+    training_end_time = datetime.now()
+    dataset_name = os.path.basename(os.path.normpath(data))
+    external_run_dir = os.path.join(target_dir, dataset_name, run_name)
+    os.makedirs(external_run_dir, exist_ok=True)
     mtm._normalize_external_run_layout(external_run_dir)
     mtm._ensure_external_best_checkpoint_layout(external_run_dir)
     test_success = False
@@ -112,12 +125,13 @@ def _run_external_provider_flow(
             )
             test_success = True
         except Exception as e:
-            test_error = f"{str(e)}\n{mtm.traceback.format_exc()}"
+            test_error = f"{str(e)}\n{traceback.format_exc()}"
             print(f"[ERROR] Error during external provider testing: {e}")
             best_model = mtm._ensure_external_best_checkpoint_layout(external_run_dir)
             if best_model:
-                fallback_start = mtm.datetime.now()
-                fallback_source = mtm._resolve_external_eval_source(data)
+                fallback_start = datetime.now()
+                eval_source_resolver = getattr(mtm, "_resolve_external_eval_source", resolve_external_eval_source)
+                fallback_source = eval_source_resolver(data)
                 fallback_conf = float(args.val_conf) if args.val_conf is not None else 0.25
                 fallback_imgsz = int(args.val_imgsz) if args.val_imgsz is not None else int(img_size)
                 if external_provider == "mfel-yolo":
@@ -125,7 +139,7 @@ def _run_external_provider_flow(
                         repo_path=repo_path,
                         venv_path=venv_path,
                         model_path=best_model,
-                        data_yaml=mtm.os.path.join(data, "data.yaml"),
+                        data_yaml=os.path.join(data, "data.yaml"),
                         model_dir=external_run_dir,
                         imgsz=fallback_imgsz,
                         conf=args.val_conf,
@@ -143,15 +157,15 @@ def _run_external_provider_flow(
                         target_dir=external_run_dir,
                         run_name="test",
                     )
-                fallback_end = mtm.datetime.now()
+                fallback_end = datetime.now()
                 if fallback_rc == 0:
                     if external_provider == "mfel-yolo":
-                        test_results_csv = mtm.os.path.join(
+                        test_results_csv = os.path.join(
                             str(mtm.run_test_backend_dir(external_run_dir, "ultralytics")), "results.csv"
                         )
-                        if mtm.os.path.isfile(test_results_csv):
-                            mtm.shutil.copy2(
-                                test_results_csv, mtm.os.path.join(str(mtm.run_tests_dir(external_run_dir)), "test_metrics.csv")
+                        if os.path.isfile(test_results_csv):
+                            shutil.copy2(
+                                test_results_csv, os.path.join(str(mtm.run_tests_dir(external_run_dir)), "test_metrics.csv")
                             )
                         else:
                             mtm._write_external_fallback_metrics(
@@ -218,7 +232,7 @@ def _run_external_provider_flow(
         dataset_hash=dataset_hash,
         inference=inference_info,
         workspace_root=workspace_root,
-        task_type=mtm.task_to_metadata_task_type(u_cfg.get("task")),
+        task_type=task_to_metadata_task_type(u_cfg.get("task")),
         training_provider=external_provider,
         external_provider_id=external_provider,
         system_profile=mtm.collect_system_profile(external_run_dir),
@@ -232,7 +246,7 @@ def _run_external_provider_flow(
     )
     try:
         marker = {
-            "created_at": mtm.datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.utcnow().isoformat() + "Z",
             "provider": {"type": "external", "id": external_provider},
             "model": model_version,
             "dataset_path": data,
@@ -242,10 +256,10 @@ def _run_external_provider_flow(
             "venv_path": venv_path,
             "return_code": int(rc),
         }
-        marker_path = mtm.os.path.join(target_dir, "_external_train_last.json")
-        mtm.os.makedirs(target_dir, exist_ok=True)
+        marker_path = os.path.join(target_dir, "_external_train_last.json")
+        os.makedirs(target_dir, exist_ok=True)
         with open(marker_path, "w", encoding="utf-8") as f:
-            mtm.json.dump(marker, f, ensure_ascii=False, indent=2)
+            json.dump(marker, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
     return rc
@@ -301,16 +315,17 @@ def _run_builtin_train_and_eval_flow(
     except Exception as e:
         training_success = False
         training_error = str(e)
-        training_end_time = mtm.datetime.now()
+        training_end_time = datetime.now()
         print(f"[ERROR] Error during training: {e}")
-        training_error = f"{str(e)}\n{mtm.traceback.format_exc()}"
+        training_error = f"{str(e)}\n{traceback.format_exc()}"
         try:
             dataset_hash = mtm.calculate_dataset_hash(data)
         except Exception:
             dataset_hash = None
         if not model_dir:
-            dataset_name = mtm.os.path.basename(mtm.os.path.normpath(data))
-            folder_name = mtm._build_run_name(
+            dataset_name = os.path.basename(os.path.normpath(data))
+            run_name_builder = getattr(mtm, "_build_run_name", build_run_name)
+            folder_name = run_name_builder(
                 "ultralytics",
                 model_version,
                 epochs,
@@ -318,10 +333,10 @@ def _run_builtin_train_and_eval_flow(
                 dataset_hash,
                 timestamp=training_start_time,
             )
-            model_dir = mtm.os.path.join(target_dir, dataset_name, folder_name)
-            mtm.os.makedirs(model_dir, exist_ok=True)
+            model_dir = os.path.join(target_dir, dataset_name, folder_name)
+            os.makedirs(model_dir, exist_ok=True)
         meta_extras = {
-            "task_type": mtm.task_to_metadata_task_type(u_cfg.get("task")),
+            "task_type": task_to_metadata_task_type(u_cfg.get("task")),
             "train_kw": {k: v for k, v in u_cfg.items() if k != "data"},
             "training_ok": False,
             "mpl_runtime": mtm.ensure_matplotlib_training_runtime(
@@ -352,9 +367,9 @@ def _run_builtin_train_and_eval_flow(
         except Exception as e:
             test_success = False
             test_error = str(e)
-            test_end_time = mtm.datetime.now()
+            test_end_time = datetime.now()
             print(f"[ERROR] Error during testing: {e}")
-            test_error = f"{str(e)}\n{mtm.traceback.format_exc()}"
+            test_error = f"{str(e)}\n{traceback.format_exc()}"
 
     if model_dir:
         _mpl_meta = (
@@ -381,8 +396,10 @@ def _run_builtin_train_and_eval_flow(
             dataset_hash=dataset_hash,
             inference=inference_info,
             workspace_root=workspace_root,
-            task_type=meta_extras.get("task_type") or mtm.task_to_metadata_task_type(u_cfg.get("task")),
-            ultralytics_train_summary=mtm._json_safe_train_summary(meta_extras.get("train_kw")),
+            task_type=meta_extras.get("task_type") or task_to_metadata_task_type(u_cfg.get("task")),
+            ultralytics_train_summary=getattr(mtm, "_json_safe_train_summary", json_safe_train_summary)(
+                meta_extras.get("train_kw")
+            ),
             training_provider=resolve_train_backend(task_type=task_type, model_format="pt").backend,
             external_provider_id=None,
             system_profile=mtm.collect_system_profile(model_dir),
@@ -422,7 +439,7 @@ def _run_test_only_flow(
         val_batch = (
             args.val_batch
             if args.val_batch is not None
-            else (mtm._load_batch_from_training_metadata(model_dir) or batch)
+            else (getattr(mtm, "_load_batch_from_training_metadata", load_batch_from_training_metadata)(model_dir) or batch)
         )
         test_start_time, test_end_time, inference_info = mtm.test_yolo(
             model_dir,
@@ -441,9 +458,9 @@ def _run_test_only_flow(
     except Exception as e:
         test_success = False
         test_error = str(e)
-        test_end_time = mtm.datetime.now()
+        test_end_time = datetime.now()
         print(f"[ERROR] Error during testing: {e}")
-        test_error = f"{str(e)}\n{mtm.traceback.format_exc()}"
+        test_error = f"{str(e)}\n{traceback.format_exc()}"
 
     _test_only_mpl = None
     if isinstance(inference_info, dict):
@@ -458,7 +475,7 @@ def _run_test_only_flow(
         test_error=test_error,
         inference=inference_info,
         workspace_root=workspace_root,
-        task_type=mtm.task_to_metadata_task_type(u_cfg.get("task")),
+        task_type=task_to_metadata_task_type(u_cfg.get("task")),
         training_provider=resolve_train_backend(task_type=task_type, model_format="pt").backend,
         external_provider_id=None,
         system_profile=mtm.collect_system_profile(model_dir),
@@ -491,7 +508,7 @@ def run_train_after_setup(
     """Runs training+test (local or external), writes metadata, returns exit code."""
     from smartrain import model_training_module as mtm
     # Keep behavior identical: this function is a thin relocation of main() tail.
-    task_type = mtm.task_to_metadata_task_type(u_cfg.get("task"))
+    task_type = task_to_metadata_task_type(u_cfg.get("task"))
 
     external_provider = str(getattr(args, "external_provider", "") or "").strip()
     if external_provider:
