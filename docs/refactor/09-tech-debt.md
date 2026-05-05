@@ -18,6 +18,7 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-05: Completed PR 4.4 in current codebase scope: `ExternalProviderAdapter` now normalizes external inference and external train execution wiring; `train_service` uses adapter contract with injected legacy runners for compatibility.
 - 2026-05-05: Upgraded `services/test_backend_dispatch.py` from strategy function-map to explicit strategy objects (`PtStrategy`, `PtUniStrategy`, `NonPtNativeStrategy`) while keeping callable monkeypatch compatibility in registry dispatcher.
 - 2026-05-05: Phase E (5-E1) foundation completed: task execution context + task metrics adapter framework wired into canonical gateway metrics path. Remaining Phase E debt: full classification/segmentation consumer flows and analyze-layer decomposition (`3-E3`), then artifact schema v2 migration (`7-E4`).
+- 2026-05-05: Added task-aware guard for internal `pt_uni` compare path in model testing: detection-only behavior is now explicit; classification/segmentation routes skip this internal compare branch cleanly.
 - 2026-05-04: Initial **canonical write** slice (PR 6.4 phase A): `smartrain/adapters/canonical/write/*`, `canonical_gateway.persist_canonical_snapshot`, optional dual-write helper `run_dual_write`. **Opt-in** snapshot after successful test artifact persist via `SMARTTRAIN_CANONICAL_WRITE=1` (best-effort warning on failure). Remaining PR 6.4 scope: richer manifest/provenance, real legacy writer hook in dual-write, hash coverage for individual artifact files per plan.
 
 ## Open Items

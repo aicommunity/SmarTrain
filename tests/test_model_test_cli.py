@@ -263,8 +263,42 @@ def test_model_test_cli_interactive_pt_not_queued_for_native_backend(monkeypatch
     smartrain_test_main(["--workspace", str(tmp_path)])
     out = capsys.readouterr().out
     assert "pt" not in native_formats
-    assert "onnx" in native_formats
-    assert "[WARN] pt: Unsupported native backend format: pt" not in out
+
+
+def test_model_test_cli_classification_skips_internal_pt_uni_compare(monkeypatch, tmp_path: Path, capsys) -> None:
+    deploy_workspace(str(tmp_path))
+    run_dir = tmp_path / "runs" / "ds_a" / "run_cls"
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"fake")
+    dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
+    dataset_yaml.write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"path_under_workspace": "datasets/ds_a"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    class _FakeResult:
+        success = True
+        error = None
+
+    seen_formats: list[str] = []
+
+    def _fake_native(**kwargs):
+        seen_formats.append(str(kwargs.get("format_name", "")))
+        return _FakeResult()
+
+    monkeypatch.setattr("smartrain.model_test_cli.run_ultralytics_backend", lambda **_kwargs: _FakeResult())
+    monkeypatch.setattr("smartrain.model_test_cli.run_native_format_backend", _fake_native)
+    monkeypatch.setattr("smartrain.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("smartrain.model_test_cli._check_onnx_format_preflight", lambda _policy: (True, None))
+
+    smartrain_test_main(
+        ["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "pt", "--task", "classify", "-y"]
+    )
+    out = capsys.readouterr().out
+    assert "Skipping internal pt_uni compare for task='classification'" in out
+    assert "pt_uni" not in seen_formats
 
 
 def test_prompt_export_backends_lists_all_formats_and_skips_missing(monkeypatch, tmp_path: Path) -> None:

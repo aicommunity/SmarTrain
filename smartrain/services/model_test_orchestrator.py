@@ -144,7 +144,8 @@ def run_model_test_after_setup(
                 results.append(("pt", ok, err))
 
     # Internal-only unified PT evaluation for PT vs PT-uni compare table.
-    if "pt" in formats:
+    # Keep this path detection-only until dedicated cls/seg compare contract exists.
+    if "pt" in formats and task_type == "detection":
         run_internal_pt_uni = bool(args.force) or (not args.missing_only) or (not has_complete_test_artifacts(root_dir, "pt_uni"))
         if run_internal_pt_uni:
             should_rerun_pt_uni = mtc._should_rerun_existing_match(
@@ -170,6 +171,8 @@ def run_model_test_after_setup(
                 )
                 if not _ok:
                     print(f"[WARN] Internal pt_uni compare artifacts failed: {err}")
+    elif "pt" in formats:
+        print(f"[INFO] Skipping internal pt_uni compare for task={task_type!r}; detection-only path.")
 
     queued: list[tuple[str, str]] = []
     if selected_artifacts:
