@@ -32,3 +32,26 @@ def test_external_provider_adapter_returns_success_from_runtime(monkeypatch) -> 
     )
     assert result.success is True
     assert result.backend == "external:dr-yolo"
+
+
+def test_external_provider_adapter_run_train_delegates_to_runner(monkeypatch) -> None:
+    adapter = ExternalProviderAdapter(provider_id="dr-yolo", repo_path="/tmp/repo", venv_path="/tmp/venv")
+    captured: dict[str, object] = {}
+
+    def _fake_train(provider_id, repo_path, venv_path, **kwargs):
+        captured["provider_id"] = provider_id
+        captured["repo_path"] = repo_path
+        captured["venv_path"] = venv_path
+        captured["kwargs"] = kwargs
+        return 0
+
+    monkeypatch.setattr("smartrain.backends.external_provider_adapter.run_external_train", _fake_train)
+    rc = adapter.run_train(
+        dataset_path="/tmp/ds",
+        model="yolo11n",
+        epochs=1,
+        batch=2,
+        imgsz=640,
+    )
+    assert rc == 0
+    assert captured["provider_id"] == "dr-yolo"

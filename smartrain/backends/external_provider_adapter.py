@@ -5,6 +5,7 @@ from typing import Any
 
 from smartrain.backends.contracts import BackendExecutionResult, InferenceBackend
 from smartrain.inference_backends import ExternalProviderBackend
+from smartrain.external_providers.runner import run_external_train
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,32 @@ class ExternalProviderAdapter:
             conf=conf,
             imgsz=imgsz,
             device=device,
+        )
+
+    def run_train(
+        self,
+        *,
+        dataset_path: str,
+        model: str,
+        epochs: int,
+        batch: int,
+        imgsz: int,
+        device: str | None = None,
+        target_dir: str | None = None,
+        run_name: str | None = None,
+    ) -> int:
+        return run_external_train(
+            self.provider_id,
+            self.repo_path,
+            self.venv_path,
+            dataset_path=dataset_path,
+            model=model,
+            epochs=epochs,
+            batch=batch,
+            imgsz=imgsz,
+            device=device,
+            target_dir=target_dir,
+            run_name=run_name,
         )
 
     def infer(self, *, request: Any) -> BackendExecutionResult:
