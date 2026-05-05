@@ -16,6 +16,7 @@ from smartrain.metrics_reader import (
 )
 from smartrain.model_test_service import load_test_artifacts_manifest
 from smartrain.run_artifacts import resolve_run_model_with_legacy_fallback
+from smartrain.orchestrators.canonical_gateway import load_metrics as canonical_load_metrics
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
@@ -462,6 +463,14 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         issues: list[dict[str, Any]] = []
         for run_dir in run_dirs:
             run_name = os.path.basename(run_dir.rstrip(os.sep))
+            # canonical_gateway.load_metrics can trigger legacy-to-canonical
+            # migration with file moves; recompute legacy paths after migration.
+            metrics_ref_by_raw_path: dict[str, dict[str, Any]] = {}
+            for ref in canonical_load_metrics(run_dir, source_kind="run", split=split_name):
+                merged = dict(ref.primary_metrics or {})
+                merged.update(dict(ref.secondary_metrics or {}))
+                metrics_ref_by_raw_path[str(ref.raw_path)] = merged
+
             manifest = load_test_artifacts_manifest(run_dir)
             formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
             metrics_paths = read_metrics_by_format_for_split(run_dir, split_name)
@@ -509,7 +518,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                             continue
                         if split_name != "val" and not has_explicit_failure:
                             continue
-                    metric_row = _read_metric_row(metrics_path)
+                    metric_row = metrics_ref_by_raw_path.get(os.path.abspath(str(metrics_path or "")), {}) if metrics_path else {}
                     invalid_zero_metrics = metrics_exists and _is_invalid_zero_metrics(fmt, metric_row)
                     row: dict[str, Any] = {
                         "run_dir": run_dir,
@@ -613,6 +622,12 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         for split_name in ("test", "val"):
             for run_dir in run_dirs:
                 run_name = os.path.basename(run_dir.rstrip(os.sep))
+                metrics_ref_by_raw_path: dict[str, dict[str, Any]] = {}
+                for ref in canonical_load_metrics(run_dir, source_kind="run", split=split_name):
+                    merged = dict(ref.primary_metrics or {})
+                    merged.update(dict(ref.secondary_metrics or {}))
+                    metrics_ref_by_raw_path[str(ref.raw_path)] = merged
+
                 manifest = load_test_artifacts_manifest(run_dir)
                 formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
                 metrics_paths = read_metrics_by_format_for_split(run_dir, split_name, include_internal=True)
@@ -658,7 +673,11 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                                 continue
                             if split_name != "val" and not has_explicit_failure:
                                 continue
-                        metric_row = _read_metric_row(metrics_path)
+                        metric_row = (
+                            metrics_ref_by_raw_path.get(os.path.abspath(str(metrics_path or "")), {})
+                            if metrics_path
+                            else {}
+                        )
                         row: dict[str, Any] = {
                             "run_dir": run_dir,
                             "run_name": run_name,

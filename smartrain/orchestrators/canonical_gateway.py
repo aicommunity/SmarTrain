@@ -13,11 +13,7 @@ from smartrain.domain.canonical.context import TaskContext
 from smartrain.domain.canonical.models import CanonicalMetricsRef, CanonicalPayload, CanonicalPredictionRef
 from smartrain.domain.canonical.types import TaskType
 from smartrain.domain.canonical.validators import validate_payload
-from smartrain.metrics_reader import (
-    METRIC_AGG_COLUMNS,
-    read_test_metrics_by_format,
-    read_test_metrics_row,
-)
+from smartrain.metrics_reader import METRIC_AGG_COLUMNS, read_metrics_by_format_for_split
 from smartrain.tasks.context import TaskExecutionContext
 from smartrain.tasks.metrics import resolve_task_metrics_adapter
 
@@ -77,8 +73,57 @@ def _pd_is_na(v: Any) -> bool:
         return False
 
 
-def _collect_test_metrics(ref: str, *, task_type: TaskType, format_name: str | None) -> list[CanonicalMetricsRef]:
-    by_fmt = read_test_metrics_by_format(ref, include_internal=True)
+def _read_metrics_row_from_csv(metrics_path: str) -> dict[str, Any]:
+    """
+    Read a "canonical test metrics row" from a metrics CSV.
+
+    This intentionally matches the behavior of ``metrics_reader.read_test_metrics_row``
+    so that downstream consumers (e.g. format-compare) can use primary/secondary
+    metrics consistently.
+    """
+    import pandas as pd
+
+    if not metrics_path:
+        return {}
+    if not os.path.isfile(metrics_path):
+        return {}
+
+    try:
+        df = pd.read_csv(metrics_path)
+    except Exception:
+        return {}
+    if len(df) == 0:
+        return {}
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # Prefer explicit aggregate row if present.
+    if "Class" in df.columns:
+        cls = df["Class"].astype(str).str.strip().str.lower()
+        all_mask = cls.eq("all")
+        if bool(all_mask.any()):
+            return df.loc[all_mask].iloc[0].to_dict()
+
+    # If metrics are per-class without an "all" row, build macro-average.
+    if "Class" in df.columns and len(df) > 1:
+        out: dict[str, Any] = {}
+        for col in METRIC_AGG_COLUMNS:
+            if col in df.columns:
+                out[col] = pd.to_numeric(df[col], errors="coerce").mean()
+        if out:
+            out["Class"] = "all"
+            return out
+
+    return df.iloc[0].to_dict()
+
+
+def _collect_test_metrics(
+    ref: str,
+    *,
+    task_type: TaskType,
+    format_name: str | None,
+    split: str,
+) -> list[CanonicalMetricsRef]:
+    by_fmt = read_metrics_by_format_for_split(ref, split, include_internal=True)
     out: list[CanonicalMetricsRef] = []
     task_metrics_adapter = resolve_task_metrics_adapter(str(task_type))
     for fmt, csv_path in sorted(by_fmt.items()):
@@ -86,7 +131,7 @@ def _collect_test_metrics(ref: str, *, task_type: TaskType, format_name: str | N
             continue
         if not csv_path or not os.path.isfile(csv_path):
             continue
-        row = read_test_metrics_row(ref, fmt)
+        row = _read_metrics_row_from_csv(csv_path)
         if not row:
             continue
         primary: dict[str, Any] = {}
@@ -101,7 +146,7 @@ def _collect_test_metrics(ref: str, *, task_type: TaskType, format_name: str | N
             str(k): v for k, v in row.items() if str(k) not in primary and str(k).lower() != "class"
         }
         normalized_task_metrics = task_metrics_adapter.normalize({str(k): v for k, v in row.items()})
-        ns = TaskExecutionContext(task_type=str(task_type), stage="test", split="test").metrics_namespace(format_name=fmt)
+        ns = TaskExecutionContext(task_type=str(task_type), stage=split, split=split).metrics_namespace(format_name=fmt)
         if normalized_task_metrics:
             for k, v in normalized_task_metrics.items():
                 primary[k] = v
@@ -123,19 +168,20 @@ def load_metrics(
     ref: str,
     *,
     source_kind: str | None = None,
+    split: str = "test",
     format_name: str | None = None,
     options: CanonicalGatewayOptions | None = None,
 ) -> list[CanonicalMetricsRef]:
     """
     Load test metrics CSVs for a run or model root as canonical metric refs (PR 6.5).
 
-    Uses the same discovery rules as ``metrics_reader.read_test_metrics_by_format``.
+    Uses the same discovery rules as ``metrics_reader.read_metrics_by_format_for_split``.
     """
     base = load_target(ref, source_kind=source_kind, options=options)
     if not base.models:
         return []
     task_type = getattr(base.models[0], "task_type", "detection")
-    return _collect_test_metrics(ref, task_type=task_type, format_name=format_name)
+    return _collect_test_metrics(ref, task_type=task_type, format_name=format_name, split=split)
 
 
 def load_predictions(
