@@ -122,6 +122,7 @@ Notes:
 - [ ] **8-F3** Удаление legacy-веток после окончания deprecation windows из [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md).
 
 Notes:
+- 2026-05-05: Стартован Wave 8 / 8-F2 bootstrap: добавлен `.github/pull_request_template.md` с policy checklist (clean-code + refactor debt hygiene) и regression guard `tests/regression/test_train_service_guardrails.py`, фиксирующий запрет на прямые `mtm.*` обращения вне composition root `run_train_after_setup`.
 
 ---
 
