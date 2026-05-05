@@ -8,16 +8,49 @@ import os
 import shutil
 import traceback
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
+from smartrain.cli_contracts import emit_replay
+from smartrain.confidence_recommendation import write_not_available_recommendations
+from smartrain.dataset_hash import calculate_dataset_hash
+from smartrain.external_providers.runner import run_external_infer, run_external_train
+from smartrain.mpl_runtime import ensure_matplotlib_training_runtime
+from smartrain.provider_global_index import get_provider_location, list_provider_records, reconcile_stale_provider_paths
+from smartrain.run_artifacts import run_test_backend_dir, run_tests_dir
 from smartrain.services.train_runtime_helpers import (
     build_run_name,
+    ensure_external_best_checkpoint_layout,
     json_safe_train_summary,
     load_batch_from_training_metadata,
+    maybe_free_cuda_memory,
+    normalize_external_run_layout,
+    run_mfel_external_val_fallback,
     resolve_external_eval_source,
+    write_external_fallback_metrics,
 )
+from smartrain.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model
 from smartrain.train_profile import task_to_metadata_task_type
+
+
+def _get_installed_external_provider_record(provider_id: str) -> dict[str, Any] | None:
+    key = str(provider_id or "").strip().lower()
+    if not key:
+        return None
+    reconcile_stale_provider_paths()
+    for rec in list_provider_records():
+        pid = str(rec.get("provider_id", "")).strip().lower()
+        if pid != key:
+            continue
+        if str(rec.get("install_state", "")).strip().lower() != "installed":
+            continue
+        repo_path = Path(str(rec.get("repo_path", "")).strip()).expanduser()
+        venv_path = Path(str(rec.get("venv_path", "")).strip()).expanduser()
+        if not repo_path.is_dir() or not venv_path.is_dir():
+            continue
+        return rec
+    return None
 
 
 def _run_external_provider_flow(
@@ -34,17 +67,17 @@ def _run_external_provider_flow(
     img_size: int,
 ) -> int:
     external_provider = str(getattr(args, "external_provider", "") or "").strip()
-    rec = mtm._get_installed_external_provider_record(external_provider)
+    rec = _get_installed_external_provider_record(external_provider)
     repo_for_catalog = str(rec.get("repo_path", "")).strip() if isinstance(rec, dict) else None
     requested_model = str(getattr(args, "model", "") or model_version)
     if not os.path.isfile(requested_model):
-        is_supported = mtm.is_supported_external_provider_model(
+        is_supported = is_supported_external_provider_model(
             external_provider,
             requested_model,
             provider_repo_path=repo_for_catalog or None,
         )
         if not is_supported:
-            ext_aliases = mtm.TrainModelCatalog(
+            ext_aliases = TrainModelCatalog(
                 provider=external_provider,
                 provider_repo_path=repo_for_catalog or None,
             ).supported_aliases()
@@ -55,7 +88,7 @@ def _run_external_provider_flow(
             )
             return 2
     training_start_time = datetime.now()
-    location = mtm.get_provider_location(external_provider)
+    location = get_provider_location(external_provider)
     if location is None and not getattr(args, "external_repo", None):
         print(
             f"[ERROR] External provider {external_provider!r} is not installed. "
@@ -68,15 +101,15 @@ def _run_external_provider_flow(
         provider_id=external_provider,
         repo_path=repo_path,
         venv_path=venv_path,
-        train_runner=mtm.run_external_train,
-        infer_runner=mtm.run_external_infer,
+        train_runner=getattr(mtm, "run_external_train", run_external_train),
+        infer_runner=getattr(mtm, "run_external_infer", run_external_infer),
     )
 
     if not venv_path:
         print(f"[ERROR] Missing venv for external provider {external_provider!r}. Reinstall provider.")
         return 1
     try:
-        dataset_hash = mtm.calculate_dataset_hash(data)
+        dataset_hash = calculate_dataset_hash(data)
     except Exception:
         dataset_hash = None
     run_name_builder = getattr(mtm, "_build_run_name", build_run_name)
@@ -96,8 +129,8 @@ def _run_external_provider_flow(
     dataset_name = os.path.basename(os.path.normpath(data))
     external_run_dir = os.path.join(target_dir, dataset_name, run_name)
     os.makedirs(external_run_dir, exist_ok=True)
-    mtm._normalize_external_run_layout(external_run_dir)
-    mtm._ensure_external_best_checkpoint_layout(external_run_dir)
+    normalize_external_run_layout(external_run_dir)
+    ensure_external_best_checkpoint_layout(external_run_dir)
     test_success = False
     test_error = None
     test_start_time = None
@@ -105,7 +138,7 @@ def _run_external_provider_flow(
     inference_info = None
     if rc == 0:
         try:
-            mtm._maybe_free_cuda_memory()
+            maybe_free_cuda_memory()
             val_batch = args.val_batch if args.val_batch is not None else batch
             test_start_time, test_end_time, inference_info = mtm.test_yolo(
                 external_run_dir,
@@ -127,7 +160,7 @@ def _run_external_provider_flow(
         except Exception as e:
             test_error = f"{str(e)}\n{traceback.format_exc()}"
             print(f"[ERROR] Error during external provider testing: {e}")
-            best_model = mtm._ensure_external_best_checkpoint_layout(external_run_dir)
+            best_model = ensure_external_best_checkpoint_layout(external_run_dir)
             if best_model:
                 fallback_start = datetime.now()
                 eval_source_resolver = getattr(mtm, "_resolve_external_eval_source", resolve_external_eval_source)
@@ -135,7 +168,7 @@ def _run_external_provider_flow(
                 fallback_conf = float(args.val_conf) if args.val_conf is not None else 0.25
                 fallback_imgsz = int(args.val_imgsz) if args.val_imgsz is not None else int(img_size)
                 if external_provider == "mfel-yolo":
-                    fallback_rc = mtm._run_mfel_external_val_fallback(
+                    fallback_rc = run_mfel_external_val_fallback(
                         repo_path=repo_path,
                         venv_path=venv_path,
                         model_path=best_model,
@@ -161,18 +194,18 @@ def _run_external_provider_flow(
                 if fallback_rc == 0:
                     if external_provider == "mfel-yolo":
                         test_results_csv = os.path.join(
-                            str(mtm.run_test_backend_dir(external_run_dir, "ultralytics")), "results.csv"
+                            str(run_test_backend_dir(external_run_dir, "ultralytics")), "results.csv"
                         )
                         if os.path.isfile(test_results_csv):
                             shutil.copy2(
-                                test_results_csv, os.path.join(str(mtm.run_tests_dir(external_run_dir)), "test_metrics.csv")
+                                test_results_csv, os.path.join(str(run_tests_dir(external_run_dir)), "test_metrics.csv")
                             )
                         else:
-                            mtm._write_external_fallback_metrics(
+                            write_external_fallback_metrics(
                                 external_run_dir, provider_id=external_provider, rc=fallback_rc
                             )
                     else:
-                        mtm._write_external_fallback_metrics(
+                        write_external_fallback_metrics(
                             external_run_dir, provider_id=external_provider, rc=fallback_rc
                         )
                     test_start_time = fallback_start
@@ -183,7 +216,7 @@ def _run_external_provider_flow(
                         "mode": "external_infer_fallback",
                     }
                     reason = "external_fallback_without_ultralytics_val_metrics"
-                    mtm.write_not_available_recommendations(
+                    write_not_available_recommendations(
                         model_dir=external_run_dir,
                         split="test",
                         reason=reason,
@@ -191,7 +224,7 @@ def _run_external_provider_flow(
                         beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
                         fallback_confidence=float(getattr(args, "conf_rec_fallback", 0.25)),
                     )
-                    mtm.write_not_available_recommendations(
+                    write_not_available_recommendations(
                         model_dir=external_run_dir,
                         split="val",
                         reason=reason,
@@ -213,7 +246,7 @@ def _run_external_provider_flow(
         _c = inference_info.get("matplotlib_runtime")
         _ext_mpl = _c if isinstance(_c, dict) else None
     if _ext_mpl is None:
-        _ext_mpl = mtm.ensure_matplotlib_training_runtime(non_interactive=args.non_interactive).as_dict()
+        _ext_mpl = ensure_matplotlib_training_runtime(non_interactive=args.non_interactive).as_dict()
     mtm.save_training_metadata(
         model_dir=external_run_dir,
         dataset_path=data,
@@ -319,7 +352,7 @@ def _run_builtin_train_and_eval_flow(
         print(f"[ERROR] Error during training: {e}")
         training_error = f"{str(e)}\n{traceback.format_exc()}"
         try:
-            dataset_hash = mtm.calculate_dataset_hash(data)
+            dataset_hash = calculate_dataset_hash(data)
         except Exception:
             dataset_hash = None
         if not model_dir:
@@ -339,14 +372,14 @@ def _run_builtin_train_and_eval_flow(
             "task_type": task_to_metadata_task_type(u_cfg.get("task")),
             "train_kw": {k: v for k, v in u_cfg.items() if k != "data"},
             "training_ok": False,
-            "mpl_runtime": mtm.ensure_matplotlib_training_runtime(
+            "mpl_runtime": ensure_matplotlib_training_runtime(
                 non_interactive=args.non_interactive
             ).as_dict(),
         }
 
     if training_success and model_dir:
         try:
-            mtm._maybe_free_cuda_memory()
+            maybe_free_cuda_memory()
             val_batch = args.val_batch if args.val_batch is not None else batch
             test_start_time, test_end_time, inference_info = mtm.test_yolo(
                 model_dir,
@@ -553,6 +586,6 @@ def run_train_after_setup(
         )
 
     if replay_cmd:
-        mtm.emit_replay(command_name="train", parser=parser, args=args, stage="after execution")
+        emit_replay(command_name="train", parser=parser, args=args, stage="after execution")
 
     return None

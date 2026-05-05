@@ -3,9 +3,19 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import gc
 from pathlib import Path
 from typing import Any
 from datetime import datetime
+
+from smartrain.run_artifacts import (
+    materialize_canonical_run_model,
+    resolve_run_model_with_legacy_fallback,
+    run_test_backend_dir,
+    run_tests_dir,
+    run_train_backend_dir,
+)
 
 
 def build_run_name(
@@ -79,3 +89,117 @@ def load_batch_from_training_metadata(model_dir: str) -> int | None:
         return bs_i if bs_i > 0 else None
     except Exception:
         return None
+
+
+def normalize_external_run_layout(run_dir: str) -> None:
+    root = Path(run_dir).expanduser().resolve()
+    if not root.is_dir():
+        return
+    train_dir = run_train_backend_dir(str(root), "ultralytics")
+    train_dir.mkdir(parents=True, exist_ok=True)
+    for entry in list(root.iterdir()):
+        if entry.name in {"training_metadata.json", "models", "tmp", "tests"} or entry.name.startswith("train-"):
+            continue
+        target = train_dir / entry.name
+        if target.exists():
+            continue
+        entry.rename(target)
+
+
+def _materialize_canonical_run_model(run_dir: str, source_path: str | None = None) -> str | None:
+    target = materialize_canonical_run_model(
+        run_dir,
+        ext=".pt",
+        source_path=source_path,
+        move=True,
+        normalize_metadata=True,
+    )
+    return str(target) if target is not None else None
+
+
+def _find_external_best_checkpoint(run_dir: str) -> str | None:
+    found = resolve_run_model_with_legacy_fallback(run_dir, ".pt")
+    return str(found) if found is not None else None
+
+
+def ensure_external_best_checkpoint_layout(run_dir: str) -> str | None:
+    return _materialize_canonical_run_model(run_dir, _find_external_best_checkpoint(run_dir))
+
+
+def write_external_fallback_metrics(model_dir: str, *, provider_id: str, rc: int) -> str:
+    test_dir = str(run_test_backend_dir(model_dir, "ultralytics"))
+    os.makedirs(test_dir, exist_ok=True)
+    marker = os.path.join(test_dir, "fallback_infer.txt")
+    with open(marker, "w", encoding="utf-8") as f:
+        f.write("external infer fallback was used for test stage\n")
+    csv_path = os.path.join(str(run_tests_dir(model_dir)), "test_metrics.csv")
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write("provider,test_mode,return_code\n")
+        f.write(f"{provider_id},external_infer_fallback,{int(rc)}\n")
+    return csv_path
+
+
+def run_mfel_external_val_fallback(
+    *,
+    repo_path: str,
+    venv_path: str,
+    model_path: str,
+    data_yaml: str,
+    model_dir: str,
+    imgsz: int,
+    conf: float | None,
+    iou: float | None,
+    batch: int | None,
+    device: str | None,
+) -> int:
+    python_bin = os.path.join(venv_path, "Scripts" if os.name == "nt" else "bin", "python")
+    launcher = (
+        Path(__file__).resolve().parent.parent
+        / "external_providers"
+        / "launchers"
+        / "mfel_val_launcher.py"
+    )
+    cmd = [
+        python_bin,
+        str(launcher),
+        "--repo",
+        repo_path,
+        "--model",
+        model_path,
+        "--data",
+        data_yaml,
+        "--imgsz",
+        str(int(imgsz)),
+        "--project",
+        model_dir,
+        "--name",
+        "test",
+    ]
+    if conf is not None:
+        cmd.extend(["--conf", str(float(conf))])
+    if iou is not None:
+        cmd.extend(["--iou", str(float(iou))])
+    if batch is not None:
+        cmd.extend(["--batch", str(int(batch))])
+    if device:
+        cmd.extend(["--device", str(device)])
+    proc = subprocess.run(cmd, cwd=repo_path)
+    return int(proc.returncode)
+
+
+def maybe_free_cuda_memory() -> None:
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+    except Exception:
+        pass

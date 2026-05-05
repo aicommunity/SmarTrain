@@ -69,9 +69,14 @@ from smartrain.path_portable import relativize_if_under
 from smartrain.services.train_service import run_train_after_setup
 from smartrain.services.train_runtime_helpers import (
     build_run_name as _shared_build_run_name,
+    ensure_external_best_checkpoint_layout as _shared_ensure_external_best_checkpoint_layout,
     json_safe_train_summary as _shared_json_safe_train_summary,
     load_batch_from_training_metadata as _shared_load_batch_from_training_metadata,
+    maybe_free_cuda_memory as _shared_maybe_free_cuda_memory,
+    normalize_external_run_layout as _shared_normalize_external_run_layout,
+    run_mfel_external_val_fallback as _shared_run_mfel_external_val_fallback,
     resolve_external_eval_source as _shared_resolve_external_eval_source,
+    write_external_fallback_metrics as _shared_write_external_fallback_metrics,
 )
 from smartrain.confidence_recommendation import (
     compute_confidence_recommendations,
@@ -1841,18 +1846,7 @@ def _build_run_name(
 
 
 def _normalize_external_run_layout(run_dir: str) -> None:
-    root = Path(run_dir).expanduser().resolve()
-    if not root.is_dir():
-        return
-    train_dir = run_train_backend_dir(str(root), "ultralytics")
-    train_dir.mkdir(parents=True, exist_ok=True)
-    for entry in list(root.iterdir()):
-        if entry.name in {"training_metadata.json", "models", "tmp", "tests"} or entry.name.startswith("train-"):
-            continue
-        target = train_dir / entry.name
-        if target.exists():
-            continue
-        entry.rename(target)
+    _shared_normalize_external_run_layout(run_dir)
 
 
 def _materialize_canonical_run_model(run_dir: str, source_path: str | None = None) -> str | None:
@@ -1872,7 +1866,7 @@ def _find_external_best_checkpoint(run_dir: str) -> str | None:
 
 
 def _ensure_external_best_checkpoint_layout(run_dir: str) -> str | None:
-    return _materialize_canonical_run_model(run_dir, _find_external_best_checkpoint(run_dir))
+    return _shared_ensure_external_best_checkpoint_layout(run_dir)
 
 
 def _resolve_external_eval_source(dataset_path: str) -> str:
@@ -1880,16 +1874,7 @@ def _resolve_external_eval_source(dataset_path: str) -> str:
 
 
 def _write_external_fallback_metrics(model_dir: str, *, provider_id: str, rc: int) -> str:
-    test_dir = str(run_test_backend_dir(model_dir, "ultralytics"))
-    os.makedirs(test_dir, exist_ok=True)
-    marker = os.path.join(test_dir, "fallback_infer.txt")
-    with open(marker, "w", encoding="utf-8") as f:
-        f.write("external infer fallback was used for test stage\n")
-    csv_path = os.path.join(str(run_tests_dir(model_dir)), "test_metrics.csv")
-    with open(csv_path, "w", encoding="utf-8") as f:
-        f.write("provider,test_mode,return_code\n")
-        f.write(f"{provider_id},external_infer_fallback,{int(rc)}\n")
-    return csv_path
+    return _shared_write_external_fallback_metrics(model_dir, provider_id=provider_id, rc=rc)
 
 
 def _run_mfel_external_val_fallback(
@@ -1905,39 +1890,18 @@ def _run_mfel_external_val_fallback(
     batch: int | None,
     device: str | None,
 ) -> int:
-    python_bin = os.path.join(venv_path, "Scripts" if os.name == "nt" else "bin", "python")
-    launcher = (
-        Path(__file__).resolve().parent
-        / "external_providers"
-        / "launchers"
-        / "mfel_val_launcher.py"
+    return _shared_run_mfel_external_val_fallback(
+        repo_path=repo_path,
+        venv_path=venv_path,
+        model_path=model_path,
+        data_yaml=data_yaml,
+        model_dir=model_dir,
+        imgsz=imgsz,
+        conf=conf,
+        iou=iou,
+        batch=batch,
+        device=device,
     )
-    cmd = [
-        python_bin,
-        str(launcher),
-        "--repo",
-        repo_path,
-        "--model",
-        model_path,
-        "--data",
-        data_yaml,
-        "--imgsz",
-        str(int(imgsz)),
-        "--project",
-        model_dir,
-        "--name",
-        "test",
-    ]
-    if conf is not None:
-        cmd.extend(["--conf", str(float(conf))])
-    if iou is not None:
-        cmd.extend(["--iou", str(float(iou))])
-    if batch is not None:
-        cmd.extend(["--batch", str(int(batch))])
-    if device:
-        cmd.extend(["--device", str(device)])
-    proc = subprocess.run(cmd, cwd=repo_path)
-    return int(proc.returncode)
 
 
 def _merge_sources_with_priority(
@@ -2683,26 +2647,7 @@ def _load_batch_from_training_metadata(model_dir: str) -> int | None:
 
 
 def _maybe_free_cuda_memory() -> None:
-    """
-    Mitigating OOM between train and val/test in one process.
-    """
-    try:
-        gc.collect()
-    except Exception:
-        pass
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            # Sometimes it helps to collect the IPC cache, but is not required.
-            try:
-                torch.cuda.ipc_collect()
-            except Exception:
-                pass
-    except Exception:
-        # torch may not be available in non-GPU/torch environments; it's not critical.
-        pass
+    _shared_maybe_free_cuda_memory()
 
 
 def _ensure_device_available_or_raise(device: str | None) -> None:
