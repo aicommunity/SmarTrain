@@ -60,9 +60,9 @@ Notes:
 
 ### Phase C — Wave 6 / PR 6.6–6.7 (migration + cutover)
 
-- [ ] **6.6-C1** `legacy` reader/mapper слой по путям из PR 6.6.
-- [ ] **6.6-C2** CLI миграции: `dry-run`, `apply`, `report-only`; машиночитаемый отчёт + summary.
-- [ ] **6.6-C3** Тесты: historical coverage, idempotency, safety (dry-run не пишет), reporting.
+- [x] **6.6-C1** `legacy` reader/mapper слой по путям из PR 6.6.
+- [x] **6.6-C2** CLI миграции: `dry-run`, `apply`, `report-only`; машиночитаемый отчёт + summary.
+- [x] **6.6-C3** Тесты: historical coverage, idempotency, safety (dry-run не пишет), reporting.
 - [ ] **6.7-C4** Cutover: default `canonical_only`, удаление временных мостов по policy; regression `test_canonical_cutover`, `test_no_legacy_branch_usage` (или эквиваленты из плана).
 
 Notes:

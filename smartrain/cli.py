@@ -1206,6 +1206,29 @@ def cmd_plot(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "migrate",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_migrate(ctx: typer.Context) -> None:
+    """Canonical migration utilities.
+
+    Examples:
+      smartrain migrate canonical --mode dry-run
+      smartrain migrate canonical --mode apply --continue-on-error
+      smartrain migrate canonical --source-kind run --report analytics/migration-reports/run-only.json
+    """
+    from smartrain.cli_migration import build_migration_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.cli_migration",
+        build_parser=build_migration_arg_parser,
+        prog="smartrain migrate",
+    )
+
+
+@app.command(
     "migrate-models",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
