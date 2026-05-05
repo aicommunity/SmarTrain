@@ -29,7 +29,7 @@ Convention: `[ ]` не начато / не закрыто по критерия�
 
 - [x] **6.5-p1** `canonical_gateway.load_target` + валидация payload. Notes: `load_metrics` / `load_predictions` / `resolve_task_context` из шаблона PR 6.5 — **ещё не реализованы** (Phase B).
 - [x] **6.5-p2** Частичная миграция consumers под флаг `SMARTTRAIN_CANONICAL_READ` (`model_test_cli`, `inference_cli`, `results_analyzer`) с политикой no-fallback там, где включено.
-- [ ] **6.5-p3** Полное удаление source-specific веток в business-логике и расширение gateway — Phase B.
+- [x] **6.5-p3** Полное удаление source-specific веток в business-логике и расширение gateway — Phase B. Notes: синхронизировано со статусом закрытых пунктов 6.5-B1..B3 и текущими canonical-only consumer regression.
 
 ---
 
