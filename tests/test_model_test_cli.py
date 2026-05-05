@@ -31,14 +31,6 @@ from smartrain.model_test_service import (
 from smartrain.workspace_paths import deploy_workspace
 
 
-@pytest.fixture(autouse=True)
-def _legacy_mode_for_existing_cli_fixtures(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Historical fixtures in this module are metadata-first and remain valid
-    # through explicit legacy fallback policy in tests.
-    monkeypatch.setenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "1")
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "0")
-
-
 class _FakeInput:
     name = "images"
     shape = [1, 3, 640, 640]
@@ -497,8 +489,10 @@ def test_model_test_cli_skips_matching_existing_test_non_interactive(monkeypatch
     deploy_workspace(str(tmp_path))
     run_dir = tmp_path / "runs" / "ds_a" / "run_skip"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
     onnx_path = run_dir / "train" / "weights" / "best.onnx"
     onnx_path.write_bytes(b"fake-onnx")
+    (run_dir / "models" / "best.onnx").write_bytes(b"fake-onnx")
     dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
     dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
     dataset_yaml.write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
@@ -530,8 +524,10 @@ def test_model_test_cli_force_reruns_matching_existing_test_non_interactive(monk
     deploy_workspace(str(tmp_path))
     run_dir = tmp_path / "runs" / "ds_a" / "run_force"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
     onnx_path = run_dir / "train" / "weights" / "best.onnx"
     onnx_path.write_bytes(b"fake-onnx")
+    (run_dir / "models" / "best.onnx").write_bytes(b"fake-onnx")
     dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
     dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
     dataset_yaml.write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
@@ -609,8 +605,10 @@ def test_model_test_cli_skips_matching_existing_test_from_args_yaml_fallback(mon
     deploy_workspace(str(tmp_path))
     run_dir = tmp_path / "runs" / "ds_a" / "run_skip_args_yaml"
     (run_dir / "train-ultralytics" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
     onnx_path = run_dir / "train-ultralytics" / "weights" / "best.onnx"
     onnx_path.write_bytes(b"fake-onnx")
+    (run_dir / "models" / "best.onnx").write_bytes(b"fake-onnx")
     dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
     dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
     dataset_yaml.write_text("train: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
@@ -640,7 +638,7 @@ def test_model_test_cli_skips_matching_existing_test_from_args_yaml_fallback(mon
                 "formats": {
                     "onnx": {
                         "format": "onnx",
-                        "target_path": "train-ultralytics/weights/best.onnx",
+                            "target_path": "models/best.onnx",
                         "status": "ok",
                     }
                 }

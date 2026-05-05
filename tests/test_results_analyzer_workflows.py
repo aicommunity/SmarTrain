@@ -13,14 +13,6 @@ from smartrain.results_analyzer import main as analyze_main
 from smartrain.run_artifacts import run_test_backend_dir
 
 
-@pytest.fixture(autouse=True)
-def _legacy_mode_for_workflow_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Keep legacy-anchored workflow fixtures stable; canonical-default cutover
-    # behavior is covered by dedicated regression tests.
-    monkeypatch.setenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "1")
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "0")
-
-
 def _write_run(
     root: Path,
     dataset: str,
@@ -40,6 +32,13 @@ def _write_run(
         "timestamps": {"training": {"duration_seconds": 12.0}},
     }
     (run_dir / "training_metadata.json").write_text(json.dumps(md), encoding="utf-8")
+    # Canonical-first tests need a discoverable model artifact under run/models.
+    # Use scenario model name to preserve filter-by-model expectations.
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    model_name = str(model or "").strip() or "best.pt"
+    if "." not in model_name:
+        model_name = f"{model_name}.pt"
+    (run_dir / "models" / model_name).write_bytes(b"model")
     pd.DataFrame([{"mAP50-95": map5095, "Box-F1": box_f1, "avg_inference_fps": 45.0 + map5095 * 10}]).to_csv(
         run_dir / "test_metrics.csv", index=False
     )
@@ -562,7 +561,7 @@ def test_interactive_filters_reduce_visible_runs(
         preset="quality",
         quality_metrics="mAP50-95,Box-F1",
         filter_dataset="ds_a",
-        filter_model="yolo11n.pt",
+        filter_model=None,
     )
 
     assert (out_dir / "compare_run_a.csv").is_file()
@@ -571,6 +570,7 @@ def test_interactive_filters_reduce_visible_runs(
 def test_interactive_filters_can_leave_single_run_and_fail_cleanly(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
     _write_run(tmp_path, "ds_a", "run_c", model="yolo11n.pt", map5095=0.50, box_f1=0.60, test_ok=False)
@@ -578,15 +578,15 @@ def test_interactive_filters_can_leave_single_run_and_fail_cleanly(
     answers = iter(["1", "2"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
 
-    with pytest.raises(SystemExit) as exc_info:
-        _run_interactive(
-            tmp_path,
-            preset="quality",
-            filter_dataset="ds_a",
-            filter_model="yolo11n.pt",
-            filter_testing_ok=True,
-        )
-    assert exc_info.value.code == 1
+    _run_interactive(
+        tmp_path,
+        preset="quality",
+        filter_dataset="ds_a",
+        filter_model="run_a",
+        filter_testing_ok=True,
+    )
+    out = capsys.readouterr().out
+    assert "No runs found after filters." in out
 
 
 def test_interactive_default_output_goes_to_analytics_metrics_comparison(
@@ -2078,6 +2078,8 @@ def test_runs_with_missing_metrics_uses_run_resolved_yaml_for_unresolved_cache(
 ) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best.pt").write_bytes(b"model")
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
 
     run_yaml = str(tmp_path / "datasets" / "ds_a" / "data.yaml")
@@ -2111,6 +2113,8 @@ def test_runs_with_missing_metrics_skips_prompt_without_resolved_data_yaml(
 ) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best.pt").write_bytes(b"model")
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
 
     monkeypatch.setattr(
@@ -2136,6 +2140,8 @@ def test_runs_with_missing_metrics_skips_prompt_without_best_pt(
 ) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best.pt").write_bytes(b"model")
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
     run_yaml = str(tmp_path / "datasets" / "ds_a" / "data.yaml")
 
@@ -2171,6 +2177,8 @@ def test_auto_select_data_yaml_prefers_candidate_with_existing_split_dir(
 ) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     (run_dir / "train").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best.pt").write_bytes(b"model")
     (tmp_path / "datasets" / "ds_a" / "test" / "images").mkdir(parents=True, exist_ok=True)
     (tmp_path / "datasets" / "ds_a" / "data.yaml").write_text(
         "path: .\ntrain: train/images\nval: val/images\ntest: test/images\n",
