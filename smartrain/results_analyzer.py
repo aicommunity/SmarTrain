@@ -80,6 +80,10 @@ from smartrain.services.analyze_artifact_builders import (
 )
 from smartrain.services.analyze_format_compare_service import write_format_compare_artifacts
 from smartrain.services.analyze_interactive_service import run_interactive_workflow
+from smartrain.services.analyze_leaderboard_service import (
+    build_leaderboard_records,
+    write_leaderboard_csv,
+)
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
@@ -817,101 +821,28 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
     if selected_norm:
         runs = [r for r in runs if os.path.abspath(r) in selected_norm]
         print(f"[INFO] Leaderboard scope: {len(runs)} run(s) selected")
-    records = []
     use_canonical = _canonical_read_enabled()
-
-    def _resolve_speed_metric_from_performance(run_dir: str, metric_name: str) -> float | None:
-        metric = str(metric_name or "").strip().lower()
-        if not metric:
-            return None
-        perf_by_fmt = read_test_performance_by_format_artifacts(run_dir)
-        candidates: list[float] = []
-        for rows in perf_by_fmt.values():
-            for row in rows:
-                perf = row.get("performance") if isinstance(row, dict) else None
-                if not isinstance(perf, dict):
-                    continue
-                value: Any = None
-                if metric in {"avg_inference_fps", "throughput_img_s"}:
-                    value = perf.get("throughput_img_s")
-                elif metric in {"avg_inference_ms_per_frame", "latency_p50_ms"}:
-                    latency_ms = perf.get("latency_ms")
-                    if isinstance(latency_ms, dict):
-                        steady = latency_ms.get("steady")
-                        all_stats = latency_ms.get("all")
-                        if isinstance(steady, dict) and steady.get("p50") is not None:
-                            value = steady.get("p50")
-                        elif isinstance(all_stats, dict):
-                            value = all_stats.get("p50")
-                elif metric == "latency_p95_ms":
-                    latency_ms = perf.get("latency_ms")
-                    if isinstance(latency_ms, dict):
-                        steady = latency_ms.get("steady")
-                        all_stats = latency_ms.get("all")
-                        if isinstance(steady, dict) and steady.get("p95") is not None:
-                            value = steady.get("p95")
-                        elif isinstance(all_stats, dict):
-                            value = all_stats.get("p95")
-                try:
-                    if value is None:
-                        continue
-                    fv = float(value)
-                except (TypeError, ValueError):
-                    continue
-                if np.isfinite(fv):
-                    candidates.append(fv)
-        if not candidates:
-            return None
-        # Prefer best attainable speed for run-level leaderboard.
-        if "fps" in metric or "throughput" in metric:
-            return float(max(candidates))
-        return float(min(candidates))
-
-    for run_dir in runs:
-        try:
-            rec = _build_run_record_canonical(run_dir) if use_canonical else build_run_record(run_dir)
-        except Exception as e:
-            print(f"[WARN] {run_dir}: failed to load run ({e})")
-            continue
-        speed_value = rec.test_metrics.get(args.speed_metric)
-        if speed_value is None or (isinstance(speed_value, float) and pd.isna(speed_value)):
-            fallback_speed = _resolve_speed_metric_from_performance(run_dir, str(args.speed_metric or ""))
-            if fallback_speed is not None:
-                rec.test_metrics[args.speed_metric] = fallback_speed
-        score = compute_composite_score(
-            rec,
-            weight_quality=args.weight_quality,
-            weight_speed=args.weight_speed,
-            weight_stability=args.weight_stability,
-            quality_metric=args.quality_metric,
-            speed_metric=args.speed_metric,
-        )
-        records.append(
-            {
-                "run_dir": rec.run_dir,
-                "model": rec.model,
-                "dataset_name": rec.dataset_name,
-                "training_ok": rec.training_ok,
-                "testing_ok": rec.testing_ok,
-                "quality_metric": rec.test_metrics.get(args.quality_metric),
-                "speed_metric": rec.test_metrics.get(args.speed_metric),
-                "composite_score": score,
-            }
-        )
+    records = build_leaderboard_records(
+        runs=runs,
+        speed_metric=str(args.speed_metric or ""),
+        quality_metric=str(args.quality_metric or ""),
+        weight_quality=float(args.weight_quality),
+        weight_speed=float(args.weight_speed),
+        weight_stability=float(args.weight_stability),
+        load_run_record=(lambda rd: _build_run_record_canonical(rd) if use_canonical else build_run_record(rd)),
+        read_test_performance_by_format_artifacts=read_test_performance_by_format_artifacts,
+        compute_composite_score=compute_composite_score,
+    )
     if not records:
         print("[ERROR] No runs for leaderboard.", file=sys.stderr)
-        sys.exit(1)
-    df = pd.DataFrame(records)
-    df = df.dropna(subset=["composite_score"]).sort_values("composite_score", ascending=False)
-    if len(df) == 0:
-        print("[ERROR] No runs with enough metrics for leaderboard.", file=sys.stderr)
         sys.exit(1)
     out_csv = _default_relative_output(
         args.workspace, args.analytics_session, "leaderboard", "leaderboard.csv", args.out_csv
     )
-    os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
-    df.to_csv(out_csv, index=False, encoding="utf-8")
-    print(f"[OK] Leaderboard CSV: {out_csv}")
+    rc = write_leaderboard_csv(records=records, out_csv=out_csv)
+    if rc != 0:
+        print("[ERROR] No runs with enough metrics for leaderboard.", file=sys.stderr)
+        sys.exit(1)
 
 
 def _extract_pr_curve_from_metrics(metrics_obj: Any) -> tuple[np.ndarray, np.ndarray] | None:

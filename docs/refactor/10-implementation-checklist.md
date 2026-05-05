@@ -86,7 +86,7 @@ Notes:
 
 - [x] **5-E1** Task contracts/context; detection adapter extraction; metrics adapter framework (PR 5.1–5.3).
 - [ ] **5-E2** Classification/segmentation readiness + consumer wiring (PR 5.4–5.5).
-- [ ] **3-E3** Декомпозиция **`results_analyzer`** на слои args / interactive / service / backends / artifacts (доделать симметрию с train/test/inference по Волне 3).
+- [x] **3-E3** Декомпозиция **`results_analyzer`** на слои args / interactive / service / backends / artifacts (доделать симметрию с train/test/inference по Волне 3).
 - [ ] **7-E4** Schema v2 артефактов + миграция analyze на unified read; legacy reader контролируем и документирован (Волна 7).
 
 Notes:
@@ -100,6 +100,7 @@ Notes:
 - 2026-05-05: Продолжена декомпозиция `results_analyzer` (3-E3): artifact-builders для analyze-сессий (`confidence_recommendations`, `speed_quality`) вынесены в `services/analyze_artifact_builders.py`; публичное поведение сохранено через thin-wrapper функции в `results_analyzer`.
 - 2026-05-05: Продолжена декомпозиция `results_analyzer` (3-E3): вынесен `format_compare` builder в `services/analyze_format_compare_service.py`; `_write_format_compare_artifacts` в `results_analyzer` теперь thin-wrapper.
 - 2026-05-05: Продолжена декомпозиция `results_analyzer` (3-E3): интерактивная orchestration-логика (`cmd_interactive` flow) вынесена в `services/analyze_interactive_service.py` (`run_interactive_workflow`), при этом CLI-контракт и сценарии quality/speed/full сохранены.
+- 2026-05-05: Закрыт 3-E3 в текущем scope: `leaderboard` orchestration и speed fallback вынесены в `services/analyze_leaderboard_service.py`; `results_analyzer` оставлен thin facade над выделенными service/helper слоями.
 
 ### Phase F — Wave 8 (clean-code hardening)
 
