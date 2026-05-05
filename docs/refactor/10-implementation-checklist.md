@@ -118,11 +118,13 @@ Notes:
 ### Phase F — Wave 8 (clean-code hardening)
 
 - [ ] **8-F1** Системная замена анти-паттернов из [`07-clean-code-rules.md`](./07-clean-code-rules.md).
-- [ ] **8-F2** CI/review guardrails (линт-правила, чеклисты PR).
+- [x] **8-F2** CI/review guardrails (линт-правила, чеклисты PR).
 - [ ] **8-F3** Удаление legacy-веток после окончания deprecation windows из [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md).
 
 Notes:
 - 2026-05-05: Стартован Wave 8 / 8-F2 bootstrap: добавлен `.github/pull_request_template.md` с policy checklist (clean-code + refactor debt hygiene) и regression guard `tests/regression/test_train_service_guardrails.py`, фиксирующий запрет на прямые `mtm.*` обращения вне composition root `run_train_after_setup`.
+- 2026-05-05: Выполнен первый 8-F1 anti-pattern slice для runtime-critical зоны: в external launchers (`mp_infer`, `mfel_infer`, `mfel_val`, `mfel_train`) убраны runtime `hasattr(...)` проверки в пользу явных `getattr`/`callable` guard'ов без изменения поведения; добавлен regression gate `tests/regression/test_phase8_no_runtime_hasattr.py` на запрет `hasattr` в `train_service`, `inference_service` и целевых launchers.
+- 2026-05-05: Закрыт baseline `8-F2`: добавлен CI workflow `.github/workflows/phase8-guardrails.yml` с автоматическим policy-gate (`scripts/ci/check_phase8_guardrails.py`) на push/PR; gate проверяет запрет `hasattr` в runtime-critical модулях и запрет прямых `mtm.*` вне composition root.
 
 ---
 

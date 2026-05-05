@@ -39,8 +39,9 @@ def main(argv: list[str] | None = None) -> int:
 
 def _to_float(v):
     try:
-        if hasattr(v, "item"):
-            return float(v.item())
+        to_scalar = getattr(v, "item", None)
+        if callable(to_scalar):
+            return float(to_scalar())
         return float(v)
     except Exception:
         return None
@@ -101,8 +102,9 @@ def _extract_task_outputs(preds, task_type: str) -> dict[str, object]:
             polygon_xy: list[list[float]] = []
             if isinstance(polygons, (list, tuple)) and i < len(polygons):
                 poly = polygons[i]
-                if hasattr(poly, "tolist"):
-                    poly = poly.tolist()
+                to_list = getattr(poly, "tolist", None)
+                if callable(to_list):
+                    poly = to_list()
                 if isinstance(poly, list):
                     for point in poly:
                         if isinstance(point, (list, tuple)) and len(point) >= 2:

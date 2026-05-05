@@ -122,7 +122,7 @@ def _patch_mfel_missing_symbols() -> None:
         from ultralytics.nn.modules import block as block_mod
     except Exception:
         return
-    if hasattr(block_mod, "ConvModule"):
+    if getattr(block_mod, "ConvModule", None) is not None:
         return
 
     class _PatchedConvModule(MFELConvModuleShim, nn.Module):  # type: ignore[misc]

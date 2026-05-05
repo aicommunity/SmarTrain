@@ -34,6 +34,27 @@ from smartrain.train_model_catalog import TrainModelCatalog, is_supported_extern
 from smartrain.train_profile import task_to_metadata_task_type
 
 
+def _confidence_recommendation_params(args: argparse.Namespace) -> tuple[bool, float, float, float]:
+    return (
+        bool(getattr(args, "conf_rec_disable", False)),
+        float(getattr(args, "conf_rec_beta_recall", 2.0)),
+        float(getattr(args, "conf_rec_beta_precision", 0.5)),
+        float(getattr(args, "conf_rec_fallback", 0.25)),
+    )
+
+
+def _confidence_recommendation_config(args: argparse.Namespace) -> dict[str, Any]:
+    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback = (
+        _confidence_recommendation_params(args)
+    )
+    return {
+        "enabled": not conf_rec_disable,
+        "beta_recall": conf_rec_beta_recall,
+        "beta_precision": conf_rec_beta_precision,
+        "fallback_confidence": conf_rec_fallback,
+    }
+
+
 def _get_installed_external_provider_record(provider_id: str) -> dict[str, Any] | None:
     key = str(provider_id or "").strip().lower()
     if not key:
@@ -125,6 +146,9 @@ def _run_external_provider_flow(
     batch: int,
     img_size: int,
 ) -> int:
+    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback = (
+        _confidence_recommendation_params(args)
+    )
     external_provider = str(getattr(args, "external_provider", "") or "").strip()
     rec = _get_installed_external_provider_record(external_provider)
     repo_for_catalog = str(rec.get("repo_path", "")).strip() if isinstance(rec, dict) else None
@@ -208,10 +232,10 @@ def _run_external_provider_flow(
                 val_conf=args.val_conf,
                 val_iou=args.val_iou,
                 val_batch=val_batch,
-                conf_rec_disable=bool(getattr(args, "conf_rec_disable", False)),
-                conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
-                conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
-                conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
+                conf_rec_disable=conf_rec_disable,
+                conf_rec_beta_recall=conf_rec_beta_recall,
+                conf_rec_beta_precision=conf_rec_beta_precision,
+                conf_rec_fallback=conf_rec_fallback,
                 non_interactive=args.non_interactive,
             )
             test_success = True
@@ -277,17 +301,17 @@ def _run_external_provider_flow(
                         model_dir=external_run_dir,
                         split="test",
                         reason=reason,
-                        beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
-                        beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
-                        fallback_confidence=float(getattr(args, "conf_rec_fallback", 0.25)),
+                        beta_recall=conf_rec_beta_recall,
+                        beta_precision=conf_rec_beta_precision,
+                        fallback_confidence=conf_rec_fallback,
                     )
                     write_not_available_recommendations(
                         model_dir=external_run_dir,
                         split="val",
                         reason=reason,
-                        beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
-                        beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
-                        fallback_confidence=float(getattr(args, "conf_rec_fallback", 0.25)),
+                        beta_recall=conf_rec_beta_recall,
+                        beta_precision=conf_rec_beta_precision,
+                        fallback_confidence=conf_rec_fallback,
                     )
                     test_success = True
                     test_error = None
@@ -327,12 +351,7 @@ def _run_external_provider_flow(
         external_provider_id=external_provider,
         system_profile=runtime_ops.collect_system_profile(external_run_dir),
         matplotlib_runtime=_ext_mpl,
-        confidence_recommendation_config={
-            "enabled": not bool(getattr(args, "conf_rec_disable", False)),
-            "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
-            "beta_precision": float(getattr(args, "conf_rec_beta_precision", 0.5)),
-            "fallback_confidence": float(getattr(args, "conf_rec_fallback", 0.25)),
-        },
+        confidence_recommendation_config=_confidence_recommendation_config(args),
     )
     try:
         marker = {
@@ -371,6 +390,9 @@ def _run_builtin_train_and_eval_flow(
     task_type: str,
 ) -> None:
     from smartrain.backends.train_test_registry import resolve_train_backend
+    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback = (
+        _confidence_recommendation_params(args)
+    )
 
     training_success = False
     training_error = None
@@ -447,10 +469,10 @@ def _run_builtin_train_and_eval_flow(
                 val_conf=args.val_conf,
                 val_iou=args.val_iou,
                 val_batch=val_batch,
-                conf_rec_disable=bool(getattr(args, "conf_rec_disable", False)),
-                conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
-                conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
-                conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
+                conf_rec_disable=conf_rec_disable,
+                conf_rec_beta_recall=conf_rec_beta_recall,
+                conf_rec_beta_precision=conf_rec_beta_precision,
+                conf_rec_fallback=conf_rec_fallback,
                 non_interactive=args.non_interactive,
             )
         except Exception as e:
@@ -491,12 +513,7 @@ def _run_builtin_train_and_eval_flow(
             external_provider_id=None,
             system_profile=runtime_ops.collect_system_profile(model_dir),
             matplotlib_runtime=_mpl_meta,
-            confidence_recommendation_config={
-                "enabled": not bool(getattr(args, "conf_rec_disable", False)),
-                "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
-                "beta_precision": float(getattr(args, "conf_rec_beta_precision", 0.5)),
-                "fallback_confidence": float(getattr(args, "conf_rec_fallback", 0.25)),
-            },
+            confidence_recommendation_config=_confidence_recommendation_config(args),
         )
 
 
@@ -512,6 +529,9 @@ def _run_test_only_flow(
     task_type: str,
 ) -> None:
     from smartrain.backends.train_test_registry import resolve_train_backend
+    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback = (
+        _confidence_recommendation_params(args)
+    )
 
     model_dir = args.model_dir
     if not model_dir:
@@ -536,10 +556,10 @@ def _run_test_only_flow(
             val_conf=args.val_conf,
             val_iou=args.val_iou,
             val_batch=val_batch,
-            conf_rec_disable=bool(getattr(args, "conf_rec_disable", False)),
-            conf_rec_beta_recall=float(getattr(args, "conf_rec_beta_recall", 2.0)),
-            conf_rec_beta_precision=float(getattr(args, "conf_rec_beta_precision", 0.5)),
-            conf_rec_fallback=float(getattr(args, "conf_rec_fallback", 0.25)),
+            conf_rec_disable=conf_rec_disable,
+            conf_rec_beta_recall=conf_rec_beta_recall,
+            conf_rec_beta_precision=conf_rec_beta_precision,
+            conf_rec_fallback=conf_rec_fallback,
             non_interactive=args.non_interactive,
         )
     except Exception as e:
@@ -567,12 +587,7 @@ def _run_test_only_flow(
         external_provider_id=None,
         system_profile=runtime_ops.collect_system_profile(model_dir),
         matplotlib_runtime=_test_only_mpl,
-        confidence_recommendation_config={
-            "enabled": not bool(getattr(args, "conf_rec_disable", False)),
-            "beta_recall": float(getattr(args, "conf_rec_beta_recall", 2.0)),
-            "beta_precision": float(getattr(args, "conf_rec_beta_precision", 0.5)),
-            "fallback_confidence": float(getattr(args, "conf_rec_fallback", 0.25)),
-        },
+        confidence_recommendation_config=_confidence_recommendation_config(args),
     )
 
 
