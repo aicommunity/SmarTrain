@@ -66,6 +66,7 @@ Notes:
 - [ ] **6.7-C4** Cutover: default `canonical_only`, удаление временных мостов по policy; regression `test_canonical_cutover`, `test_no_legacy_branch_usage` (или эквиваленты из плана).
 
 Notes:
+- 2026-05-05: Усилен reporting для PR 6.6: в report добавлены `operator_guidance` и per-item `rollback_hint`; добавлен regression test на наличие guidance для failed item.
 
 ### Phase D — Wave 4 (backend abstraction)
 

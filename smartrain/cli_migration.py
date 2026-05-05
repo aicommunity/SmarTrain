@@ -28,6 +28,7 @@ class MigrationItem:
     reason: str | None = None
     payload_hash_sha256: str | None = None
     snapshot_path: str | None = None
+    rollback_hint: str | None = None
 
 
 def _payload_hash(payload: Any) -> str:
@@ -96,10 +97,29 @@ def run_migration(
             ph = _payload_hash(payload)
             old = _existing_snapshot_hash(ref)
             if old == ph:
-                items.append(MigrationItem(ref=ref, source_kind=sk, status="skipped", reason="up_to_date", payload_hash_sha256=ph))
+                items.append(
+                    MigrationItem(
+                        ref=ref,
+                        source_kind=sk,
+                        status="skipped",
+                        reason="up_to_date",
+                        payload_hash_sha256=ph,
+                    )
+                )
                 continue
             if mode in {"dry-run", "report-only"}:
-                items.append(MigrationItem(ref=ref, source_kind=sk, status="planned", reason=mode, payload_hash_sha256=ph))
+                items.append(
+                    MigrationItem(
+                        ref=ref,
+                        source_kind=sk,
+                        status="planned",
+                        reason=mode,
+                        payload_hash_sha256=ph,
+                        rollback_hint=(
+                            "Dry-run/report-only: no files changed. Re-run with --mode apply to execute migration."
+                        ),
+                    )
+                )
                 continue
             rep = write_canonical_snapshot(payload, ref)
             items.append(
@@ -109,10 +129,21 @@ def run_migration(
                     status="migrated",
                     payload_hash_sha256=ph,
                     snapshot_path=rep.snapshot_path,
+                    rollback_hint="Delete .smartrain/canonical/snapshot.json and manifest.json to revert this migrated target.",
                 )
             )
         except Exception as exc:
-            items.append(MigrationItem(ref=ref, source_kind=sk, status="failed", reason=str(exc)))
+            items.append(
+                MigrationItem(
+                    ref=ref,
+                    source_kind=sk,
+                    status="failed",
+                    reason=str(exc),
+                    rollback_hint=(
+                        "Fix source artifacts/metadata and retry with --continue-on-error, or scope migration using --source-kind/--runs-root/--models-root."
+                    ),
+                )
+            )
             if not continue_on_error:
                 break
     stats = {
@@ -128,6 +159,11 @@ def run_migration(
         "mode": mode,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "stats": stats,
+        "operator_guidance": {
+            "dry_run": "Use --mode dry-run to preview; no writes occur.",
+            "apply": "Use --mode apply to write canonical snapshots.",
+            "rollback": "Per-target rollback hint is included in each item (rollback_hint).",
+        },
         "items": [asdict(x) for x in items],
     }
 
