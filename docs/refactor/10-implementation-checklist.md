@@ -74,13 +74,13 @@ Notes:
 - [x] **4-D1** Интерфейсы `TrainBackend` / `TestBackend` / `InferenceBackend` и общий контракт результатов (PR 4.1).
 - [x] **4-D2** Capability registry selection по матрице (PR 4.2); не сужать матрицу из [`04-task-backend-capabilities.md`](./04-task-backend-capabilities.md) без явного решения.
 - [x] **4-D3** **`UltralyticsAdapter`** как эталонная реализация (PR 4.3).
-- [ ] **4-D4** Нормализация external providers под общий adapter contract (PR 4.4).
+- [x] **4-D4** Нормализация external providers под общий adapter contract (PR 4.4).
 
 Notes:
 - 2026-05-05: Реализован PR 4.1 foundation: в `smartrain/backends/contracts.py` добавлены protocol-интерфейсы `TrainBackend`/`TestBackend`/`InferenceBackend` и общий `BackendExecutionResult`; `CapabilityRegistry` усилен строгой валидацией `require` и helper `resolve_backend_id`; добавлены contract-тесты `tests/test_backend_registry_capabilities.py`.
 - 2026-05-05: Реализован PR 4.2 базового уровня: расширен `train_test_registry` до train/test/infer capability routing (`resolve_infer_backend`), добавлено покрытие `tests/test_train_test_registry.py`; `inference_service` подключён к capability resolver как policy-слой (с warning при runtime mismatch, без жёсткого падения).
 - 2026-05-05: Реализован PR 4.3 базового уровня: добавлен `smartrain/backends/ultralytics_adapter.py` как reference adapter (capability contract + infer entrypoint), `inference_service` использует adapter для локального backend creation; добавлены тесты `tests/test_ultralytics_adapter.py`.
-- 2026-05-05: PR 4.4 начат: добавлен `smartrain/backends/external_provider_adapter.py` и `inference_service` переведён на adapter-вызов для external inference path; покрытие `tests/test_external_provider_adapter.py`. Оставшийся объём 4.4: аналогичная нормализация external train/test entrypoints.
+- 2026-05-05: Реализован PR 4.4 в текущем scope: `ExternalProviderAdapter` покрывает external inference и external train execution wiring; `inference_service` и `train_service` используют adapter contract (в `train_service` через совместимую инъекцию runner-функций для сохранения тестового/legacy поведения). Тесты: `tests/test_external_provider_adapter.py`, `tests/test_inference_cli.py`, `tests/test_train_interactive.py`.
 
 ### Phase E — Wave 5 + Analyze / Artifact v2 (волны 5, 3 analyze, 7)
 

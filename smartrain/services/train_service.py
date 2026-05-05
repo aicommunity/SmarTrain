@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
+from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
+
 
 def _run_external_provider_flow(
     *,
@@ -50,6 +52,14 @@ def _run_external_provider_flow(
         return 1
     repo_path = str(getattr(args, "external_repo", "") or "").strip() or (location.repo_path if location else "")
     venv_path = location.venv_path if location else mtm.os.path.join(repo_path, "venv")
+    external_adapter = ExternalProviderAdapter(
+        provider_id=external_provider,
+        repo_path=repo_path,
+        venv_path=venv_path,
+        train_runner=mtm.run_external_train,
+        infer_runner=mtm.run_external_infer,
+    )
+
     if not venv_path:
         print(f"[ERROR] Missing venv for external provider {external_provider!r}. Reinstall provider.")
         return 1
@@ -59,10 +69,7 @@ def _run_external_provider_flow(
         dataset_hash = None
     run_name = mtm._build_run_name(external_provider, model_version, epochs, batch, dataset_hash)
     print(f"[INFO] External run name: {run_name}")
-    rc = mtm.run_external_train(
-        external_provider,
-        repo_path,
-        venv_path,
+    rc = external_adapter.run_train(
         dataset_path=data,
         model=model_version,
         epochs=epochs,
@@ -127,10 +134,7 @@ def _run_external_provider_flow(
                         device=str(u_cfg.get("device")) if u_cfg.get("device") is not None else None,
                     )
                 else:
-                    fallback_rc = mtm.run_external_infer(
-                        external_provider,
-                        repo_path,
-                        venv_path,
+                    fallback_rc = external_adapter.run_batch(
                         model_path=best_model,
                         source_path=fallback_source,
                         conf=fallback_conf,

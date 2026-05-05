@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from smartrain.backends.contracts import BackendExecutionResult, InferenceBackend
 from smartrain.inference_backends import ExternalProviderBackend
@@ -19,6 +19,8 @@ class ExternalProviderAdapter:
     provider_id: str
     repo_path: str
     venv_path: str
+    train_runner: Callable[..., int] | None = None
+    infer_runner: Callable[..., int] | None = None
 
     @property
     def backend_id(self) -> str:
@@ -35,7 +37,24 @@ class ExternalProviderAdapter:
         conf: float,
         imgsz: int,
         device: str | None,
+        target_dir: str | None = None,
+        run_name: str | None = None,
     ) -> int:
+        if self.infer_runner is not None:
+            return int(
+                self.infer_runner(
+                    self.provider_id,
+                    self.repo_path,
+                    self.venv_path,
+                    model_path=model_path,
+                    source_path=source_path,
+                    conf=conf,
+                    imgsz=imgsz,
+                    device=device,
+                    target_dir=target_dir,
+                    run_name=run_name,
+                )
+            )
         backend = self.create_runtime_backend()
         return backend.run_batch(
             model_path=model_path,
@@ -57,6 +76,22 @@ class ExternalProviderAdapter:
         target_dir: str | None = None,
         run_name: str | None = None,
     ) -> int:
+        if self.train_runner is not None:
+            return int(
+                self.train_runner(
+                    self.provider_id,
+                    self.repo_path,
+                    self.venv_path,
+                    dataset_path=dataset_path,
+                    model=model,
+                    epochs=epochs,
+                    batch=batch,
+                    imgsz=imgsz,
+                    device=device,
+                    target_dir=target_dir,
+                    run_name=run_name,
+                )
+            )
         return run_external_train(
             self.provider_id,
             self.repo_path,
