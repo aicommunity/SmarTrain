@@ -78,6 +78,13 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--roi-class-ids", type=str, default=None, help="CSV class ids for ROI detector (empty=all).")
     p.add_argument("--external-provider", type=str, default=None, help="External provider id for inference.")
     p.add_argument("--external-repo", type=str, default=None, help="Override external provider repository path.")
+    p.add_argument(
+        "--task",
+        type=str,
+        default=None,
+        choices=["detect", "segment", "classify", "detection", "segmentation", "classification"],
+        help="Task type hint for task-aware backend routing (default: detection).",
+    )
     return p
 
 

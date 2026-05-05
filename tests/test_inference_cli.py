@@ -219,6 +219,51 @@ def test_inference_supports_engine_weights(tmp_path: Path, monkeypatch) -> None:
     assert report["summary"]["images_processed"] == 1
 
 
+def test_inference_passes_task_hint_to_capability_resolution(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    captured: dict[str, str] = {}
+
+    def _fake_resolve_infer_backend(*, task_type: str, model_format: str):
+        captured["task_type"] = task_type
+        captured["model_format"] = model_format
+
+        class _Caps:
+            backend = "ultralytics"
+
+        return _Caps()
+
+    monkeypatch.setattr("smartrain.services.inference_service.resolve_infer_backend", _fake_resolve_infer_backend)
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--task",
+            "segment",
+        ]
+    )
+    assert captured["task_type"] == "segmentation"
+    assert captured["model_format"] == "pt"
+
+
 def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))

@@ -92,6 +92,7 @@ Notes:
 Notes:
 - 2026-05-05: Закрыт 5-E1: добавлены `tasks/context.py` (`TaskExecutionContext`) и `tasks/metrics.py` (task-aware metrics adapter framework), расширен `tasks/__init__.py`, и подключена task-aware metrics normalization в `canonical_gateway.load_metrics` (namespace + primary metrics через task adapter). Добавлены/обновлены тесты `tests/test_task_contracts.py` и `tests/orchestrators/test_canonical_gateway_extensions.py`.
 - 2026-05-05: Частичный прогресс по 5-E2: в `model_test_orchestrator` добавлен task-aware guard для internal `pt_uni` compare (только detection), cls/seg path теперь явно пропускает detection-only compare с информативным сообщением; добавлен regression тест в `tests/test_model_test_cli.py`.
+- 2026-05-05: Дополнен consumer wiring по 5-E2 для inference runtime: в `inference_cli` добавлен `--task` (detect/classify/segment aliases), а в `services/inference_service` capability routing (`resolve_infer_backend`) теперь получает нормализованный `task_type` вместо жёсткого `"detection"`; добавлен regression `test_inference_passes_task_hint_to_capability_resolution`.
 
 ### Phase F — Wave 8 (clean-code hardening)
 

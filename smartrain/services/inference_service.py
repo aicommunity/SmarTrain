@@ -31,6 +31,7 @@ from smartrain.inference_perf import DualPerfProfiler
 from smartrain.path_portable import relativize_if_under
 from smartrain.provider_global_index import get_provider_location
 from smartrain.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model
+from smartrain.train_profile import task_to_metadata_task_type
 from smartrain.ultralytics_ephemeral import ultralytics_sidecar_dir
 from smartrain.workspace_paths import WorkspaceLayout
 
@@ -79,6 +80,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         print(f"[INFO] External provider inferred from --model-name: {parsed_model_name_ref.provider_id}")
 
     ext_provider = str(getattr(args, "external_provider", "") or "").strip()
+    task_type = task_to_metadata_task_type(getattr(args, "task", None))
     if ext_provider and args.weights:
         raw_weight = str(args.weights).strip()
         maybe_path = Path(raw_weight).expanduser()
@@ -212,7 +214,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         print(f"[ERROR] Unsupported model format for inference: {model_format}", file=sys.stderr)
         return 1, False
     try:
-        expected_caps = resolve_infer_backend(task_type="detection", model_format=model_format)
+        expected_caps = resolve_infer_backend(task_type=task_type, model_format=model_format)
     except Exception as e:
         print(f"[ERROR] No registered inference backend capability for format {model_format!r}: {e}", file=sys.stderr)
         return 1, False
