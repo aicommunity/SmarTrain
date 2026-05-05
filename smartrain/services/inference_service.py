@@ -23,6 +23,7 @@ from tqdm import tqdm
 
 from smartrain.environment_profile import collect_environment_profile, write_environment_profile
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
+from smartrain.backends.train_test_registry import resolve_infer_backend
 from smartrain.external_providers.registry import list_provider_specs
 from smartrain.inference_backends import ExternalProviderBackend, InferenceBackendRegistry
 from smartrain.inference_perf import DualPerfProfiler
@@ -31,6 +32,14 @@ from smartrain.provider_global_index import get_provider_location
 from smartrain.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model
 from smartrain.ultralytics_ephemeral import ultralytics_sidecar_dir
 from smartrain.workspace_paths import WorkspaceLayout
+
+
+def _backend_name_matches_capability(runtime_name: str | None, capability_backend: str) -> bool:
+    actual = str(runtime_name or "").strip().lower()
+    expected = str(capability_backend or "").strip().lower()
+    if not actual or not expected:
+        return False
+    return actual == expected or actual.startswith(f"{expected}:")
 
 
 def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[int, bool]:
@@ -199,10 +208,22 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         print(f"[ERROR] Unsupported model format for inference: {model_format}", file=sys.stderr)
         return 1, False
     try:
+        expected_caps = resolve_infer_backend(task_type="detection", model_format=model_format)
+    except Exception as e:
+        print(f"[ERROR] No registered inference backend capability for format {model_format!r}: {e}", file=sys.stderr)
+        return 1, False
+    try:
         backend = registry.create_local_backend(model_format=model_format, model_path=str(model_path))
     except Exception as e:
         print(f"[ERROR] Failed to initialize inference backend: {e}", file=sys.stderr)
         return 1, False
+    if not _backend_name_matches_capability(getattr(backend, "name", None), expected_caps.backend):
+        print(
+            f"[WARN] Inference backend mismatch: capability resolver expects {expected_caps.backend!r} "
+            f"for format {model_format!r}, got {getattr(backend, 'name', None)!r}. "
+            "Continuing with runtime-selected backend.",
+            file=sys.stderr,
+        )
     roi_model = None
     if args.roi_pre_detect:
         from ultralytics import YOLO

@@ -13,6 +13,7 @@ _REGISTRY.register(
         model_formats=("pt",),
         can_train=True,
         can_test=True,
+        can_infer=True,
     )
 )
 _REGISTRY.register(
@@ -21,6 +22,7 @@ _REGISTRY.register(
         task_types=KNOWN_TASKS,
         model_formats=("onnx",),
         can_test=True,
+        can_infer=True,
     )
 )
 _REGISTRY.register(
@@ -29,6 +31,7 @@ _REGISTRY.register(
         task_types=KNOWN_TASKS,
         model_formats=("engine", "trt"),
         can_test=True,
+        can_infer=True,
     )
 )
 
@@ -39,4 +42,8 @@ def resolve_train_backend(*, task_type: str, model_format: str) -> BackendCapabi
 
 def resolve_test_backend(*, task_type: str, model_format: str) -> BackendCapabilities:
     return _REGISTRY.resolve(task_type=task_type, model_format=model_format, require="test")
+
+
+def resolve_infer_backend(*, task_type: str, model_format: str) -> BackendCapabilities:
+    return _REGISTRY.resolve(task_type=task_type, model_format=model_format, require="infer")
 
