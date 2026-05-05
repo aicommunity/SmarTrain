@@ -9,6 +9,19 @@ from smartrain.external_providers.runner import run_external_train
 from smartrain.train_profile import task_to_metadata_task_type
 
 
+def _extract_return_code(value: Any) -> int:
+    if isinstance(value, dict):
+        raw = value.get("return_code", value.get("rc", value.get("code", 1)))
+        try:
+            return int(raw)
+        except Exception:
+            return 1
+    try:
+        return int(value)
+    except Exception:
+        return 1
+
+
 @dataclass(frozen=True)
 class ExternalProviderAdapter:
     """
@@ -21,7 +34,7 @@ class ExternalProviderAdapter:
     repo_path: str
     venv_path: str
     train_runner: Callable[..., int] | None = None
-    infer_runner: Callable[..., int] | None = None
+    infer_runner: Callable[..., Any] | None = None
 
     @property
     def backend_id(self) -> str:
@@ -40,10 +53,10 @@ class ExternalProviderAdapter:
         device: str | None,
         target_dir: str | None = None,
         run_name: str | None = None,
-    ) -> int:
+        task_type: str | None = None,
+    ) -> Any:
         if self.infer_runner is not None:
-            return int(
-                self.infer_runner(
+            return self.infer_runner(
                     self.provider_id,
                     self.repo_path,
                     self.venv_path,
@@ -54,8 +67,8 @@ class ExternalProviderAdapter:
                     device=device,
                     target_dir=target_dir,
                     run_name=run_name,
+                    task_type=task_type,
                 )
-            )
         backend = self.create_runtime_backend()
         return backend.run_batch(
             model_path=model_path,
@@ -63,6 +76,7 @@ class ExternalProviderAdapter:
             conf=conf,
             imgsz=imgsz,
             device=device,
+            task_type=task_type,
         )
 
     def run_train(
@@ -119,13 +133,15 @@ class ExternalProviderAdapter:
                 model_format=str(getattr(request, "model_format", "") or "external"),
                 error="model_path/source_path are required for ExternalProviderAdapter.infer",
             )
-        rc = self.run_batch(
+        raw_result = self.run_batch(
             model_path=model_path,
             source_path=source_path,
             conf=float(getattr(request, "conf", 0.25)),
             imgsz=int(getattr(request, "imgsz", 640)),
             device=str(getattr(request, "device", "") or "") or None,
+            task_type=task_type,
         )
+        rc = _extract_return_code(raw_result)
         return BackendExecutionResult(
             success=(int(rc) == 0),
             backend=self.backend_id,

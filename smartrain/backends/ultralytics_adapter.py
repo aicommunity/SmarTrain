@@ -28,9 +28,9 @@ class UltralyticsAdapter:
         can_infer=True,
     )
 
-    def create_inference_backend(self, *, model_format: str, model_path: str) -> InferenceBackend:
+    def create_inference_backend(self, *, model_format: str, model_path: str, task_type: str | None = None) -> InferenceBackend:
         registry = InferenceBackendRegistry()
-        return registry.create_local_backend(model_format=model_format, model_path=model_path)
+        return registry.create_local_backend(model_format=model_format, model_path=model_path, task_type=task_type)
 
     def infer(self, *, request: Any) -> BackendExecutionResult:
         model_format = str(getattr(request, "model_format", "")).strip().lower()
@@ -44,7 +44,7 @@ class UltralyticsAdapter:
                 model_format=model_format or "unknown",
                 error="model_format/model_path are required for UltralyticsAdapter.infer",
             )
-        self.create_inference_backend(model_format=model_format, model_path=model_path)
+        self.create_inference_backend(model_format=model_format, model_path=model_path, task_type=task_type)
         return BackendExecutionResult(
             success=True,
             backend=self.backend_id,

@@ -23,9 +23,16 @@ def test_ultralytics_adapter_infer_validates_request() -> None:
 
 def test_ultralytics_adapter_infer_uses_task_hint(monkeypatch) -> None:
     adapter = UltralyticsAdapter()
-    monkeypatch.setattr(UltralyticsAdapter, "create_inference_backend", lambda self, **kwargs: object())
+    captured: dict[str, str] = {}
+
+    def _fake_create(self, **kwargs):
+        captured["task_type"] = str(kwargs.get("task_type"))
+        return object()
+
+    monkeypatch.setattr(UltralyticsAdapter, "create_inference_backend", _fake_create)
     result = adapter.infer(
         request=SimpleNamespace(model_format="pt", model_path="/tmp/model.pt", task_type="classify")
     )
     assert result.success is True
     assert result.task_type == "classification"
+    assert captured["task_type"] == "classification"

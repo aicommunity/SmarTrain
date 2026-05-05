@@ -512,6 +512,25 @@ def _build_report(
     environment_artifact_path: str | None = None,
 ) -> dict[str, Any]:
     task_type = task_to_metadata_task_type(getattr(args, "task", None))
+    detections_total = sum(len(x.get("detections", [])) for x in image_rows)
+    task_outputs_total = 0
+    for row in image_rows:
+        task_outputs = row.get("task_outputs")
+        if not isinstance(task_outputs, dict):
+            continue
+        if task_type == "classification":
+            cls = task_outputs.get("classification")
+            if isinstance(cls, dict) and cls:
+                task_outputs_total += 1
+            continue
+        if task_type == "segmentation":
+            segs = task_outputs.get("segments")
+            if isinstance(segs, list):
+                task_outputs_total += len(segs)
+            continue
+        dets = task_outputs.get("detections")
+        if isinstance(dets, list):
+            task_outputs_total += len(dets)
     return {
         "created_at": datetime.utcnow().isoformat() + "Z",
         "task_type": task_type,
@@ -555,7 +574,8 @@ def _build_report(
             "images_input": images_input_count,
             "images_processed": len(image_rows),
             "images_skipped": skipped,
-            "detections_total": sum(len(x.get("detections", [])) for x in image_rows),
+            "detections_total": detections_total,
+            "task_outputs_total": task_outputs_total,
         },
         "performance": performance if isinstance(performance, dict) else None,
         "artifacts": {

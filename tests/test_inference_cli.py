@@ -9,6 +9,7 @@ from types import ModuleType
 import pytest
 from PIL import Image
 
+from smartrain.inference_backends import BackendPrediction
 from smartrain.inference_cli import main as inference_main
 from smartrain.inference_cli import _resolve_model
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
@@ -267,6 +268,181 @@ def test_inference_passes_task_hint_to_capability_resolution(tmp_path: Path, mon
     assert report["v2"]["metrics"]["namespace"] == "segmentation"
 
 
+def test_inference_passes_task_hint_to_runtime_backend_predict(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    class _FakeBackend:
+        name = "ultralytics:pt"
+
+        def predict(self, _image_source, **kwargs):
+            captured["task_type"] = str(kwargs.get("task_type"))
+            return BackendPrediction(
+                task_type=captured["task_type"],
+                infer_only_ns=0,
+                stage_ns={},
+                outputs={"detections": []},
+            )
+
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        "smartrain.backends.ultralytics_adapter.UltralyticsAdapter.create_inference_backend",
+        lambda self, **_kwargs: _FakeBackend(),
+    )
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--task",
+            "classify",
+        ]
+    )
+
+    assert captured["task_type"] == "classification"
+
+
+def test_inference_writes_classification_task_outputs(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    class _FakeBackend:
+        name = "ultralytics:pt"
+
+        def predict(self, _image_source, **_kwargs):
+            return BackendPrediction(
+                task_type="classification",
+                infer_only_ns=0,
+                stage_ns={},
+                outputs={
+                    "classification": {
+                        "top1": {"class_index": 2, "class_name": "cat", "confidence": 0.91},
+                        "top_k": [{"class_index": 2, "class_name": "cat", "confidence": 0.91}],
+                    }
+                },
+            )
+
+    monkeypatch.setattr(
+        "smartrain.backends.ultralytics_adapter.UltralyticsAdapter.create_inference_backend",
+        lambda self, **_kwargs: _FakeBackend(),
+    )
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--task",
+            "classify",
+        ]
+    )
+
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["task_type"] == "classification"
+    assert report["summary"]["detections_total"] == 0
+    assert report["summary"]["task_outputs_total"] == 1
+    assert report["images"][0]["detections"] == []
+    assert report["images"][0]["task_outputs"]["classification"]["top1"]["class_name"] == "cat"
+
+
+def test_inference_writes_segmentation_task_outputs(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    class _FakeBackend:
+        name = "ultralytics:pt"
+
+        def predict(self, _image_source, **_kwargs):
+            return BackendPrediction(
+                task_type="segmentation",
+                infer_only_ns=0,
+                stage_ns={},
+                outputs={
+                    "segments": [
+                        {
+                            "bbox_roi_xyxy": [1.0, 2.0, 10.0, 12.0],
+                            "class_index": 0,
+                            "class_name": "obj",
+                            "confidence": 0.88,
+                            "polygon_roi_xy": [[1.0, 2.0], [5.0, 6.0], [10.0, 12.0]],
+                        }
+                    ]
+                },
+            )
+
+    monkeypatch.setattr(
+        "smartrain.backends.ultralytics_adapter.UltralyticsAdapter.create_inference_backend",
+        lambda self, **_kwargs: _FakeBackend(),
+    )
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--task",
+            "segment",
+        ]
+    )
+
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["task_type"] == "segmentation"
+    assert report["summary"]["task_outputs_total"] == 1
+    segments = report["images"][0]["task_outputs"]["segments"]
+    assert len(segments) == 1
+    assert segments[0]["class_name"] == "obj"
+    assert segments[0]["polygon_original_xy"][0] == [1.0, 2.0]
+
+
 def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
@@ -345,7 +521,63 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
     assert report["model"]["provider"]["type"] == "external"
     assert report["model"]["provider"]["id"] == "dr-yolo"
     assert report["external_execution"]["provider_id"] == "dr-yolo"
+    assert report["summary"]["task_outputs_total"] == 0
+    assert report["summary"]["detections_total"] == 0
+    assert report["images"] == []
     assert Path(report["artifacts"]["environment_profile"]["path_absolute"]).is_file()
+
+
+def test_inference_external_provider_accepts_task_outputs_payload(monkeypatch, tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    def _fake_run_external_infer(provider_id: str, repo_path: str, venv_path: str, **kwargs):
+        assert provider_id == "dr-yolo"
+        assert kwargs.get("model_path") == "yolov8n"
+        return {
+            "return_code": 0,
+            "images": [
+                {
+                    "image_path_absolute": str(src / "a.jpg"),
+                    "image_path_relative": "raw_images/a.jpg",
+                    "task_outputs": {
+                        "classification": {
+                            "top1": {"class_index": 1, "class_name": "dog", "confidence": 0.77},
+                            "top_k": [{"class_index": 1, "class_name": "dog", "confidence": 0.77}],
+                        }
+                    },
+                    "detections": [],
+                }
+            ],
+        }
+
+    monkeypatch.setattr("smartrain.inference_backends.run_external_infer", _fake_run_external_infer)
+    with pytest.raises(SystemExit) as ex:
+        inference_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--weights",
+                "dr-yolo:yolov8n",
+                "--external-repo",
+                str(tmp_path / "dr-repo"),
+                "--data-mode",
+                "folder",
+                "--source-dir",
+                str(src),
+                "--task",
+                "classify",
+            ]
+        )
+    assert int(ex.value.code or 0) == 0
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["task_type"] == "classification"
+    assert report["summary"]["images_processed"] == 1
+    assert report["summary"]["task_outputs_total"] == 1
+    assert report["images"][0]["task_outputs"]["classification"]["top1"]["class_name"] == "dog"
 
 
 def test_inference_unknown_provider_in_weights_returns_error(monkeypatch, tmp_path: Path, capsys) -> None:

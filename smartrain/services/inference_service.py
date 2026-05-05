@@ -44,6 +44,144 @@ def _backend_name_matches_capability(runtime_name: str | None, capability_backen
     return actual == expected or actual.startswith(f"{expected}:")
 
 
+def _offset_bbox(bbox_roi_xyxy: list[Any], roi_box: tuple[int, int, int, int] | None) -> tuple[list[float], list[float]]:
+    x1, y1, x2, y2 = [float(v) for v in (bbox_roi_xyxy[:4] + [0.0, 0.0, 0.0, 0.0])[:4]]
+    if roi_box is None:
+        return [x1, y1, x2, y2], [x1, y1, x2, y2]
+    ox1 = x1 + float(roi_box[0])
+    oy1 = y1 + float(roi_box[1])
+    ox2 = x2 + float(roi_box[0])
+    oy2 = y2 + float(roi_box[1])
+    return [x1, y1, x2, y2], [ox1, oy1, ox2, oy2]
+
+
+def _offset_polygon(
+    polygon_roi_xy: list[list[Any]] | Any,
+    roi_box: tuple[int, int, int, int] | None,
+) -> list[list[float]]:
+    if not isinstance(polygon_roi_xy, list):
+        return []
+    out: list[list[float]] = []
+    for point in polygon_roi_xy:
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            continue
+        try:
+            x = float(point[0])
+            y = float(point[1])
+        except Exception:
+            continue
+        if roi_box is not None:
+            x += float(roi_box[0])
+            y += float(roi_box[1])
+        out.append([x, y])
+    return out
+
+
+def _build_task_outputs_payload(
+    task_type: str,
+    outputs: dict[str, Any],
+    *,
+    roi_box: tuple[int, int, int, int] | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    detections_payload: list[dict[str, Any]] = []
+    task_payload: dict[str, Any] = {}
+    if task_type == "classification":
+        cls = outputs.get("classification")
+        task_payload["classification"] = cls if isinstance(cls, dict) else {}
+        return detections_payload, task_payload
+    if task_type == "segmentation":
+        segments_raw = outputs.get("segments")
+        segments_payload: list[dict[str, Any]] = []
+        if isinstance(segments_raw, list):
+            for seg in segments_raw:
+                if not isinstance(seg, dict):
+                    continue
+                bbox_roi, bbox_original = _offset_bbox(seg.get("bbox_roi_xyxy", []), roi_box)
+                segments_payload.append(
+                    {
+                        "bbox_roi_xyxy": bbox_roi,
+                        "bbox_original_xyxy": bbox_original,
+                        "class_index": int(seg.get("class_index", 0)),
+                        "class_name": str(seg.get("class_name", seg.get("class_index", ""))),
+                        "confidence": float(seg.get("confidence", 0.0)),
+                        "polygon_roi_xy": _offset_polygon(seg.get("polygon_roi_xy", []), None),
+                        "polygon_original_xy": _offset_polygon(seg.get("polygon_roi_xy", []), roi_box),
+                    }
+                )
+        task_payload["segments"] = segments_payload
+        return detections_payload, task_payload
+    detections_raw = outputs.get("detections")
+    if isinstance(detections_raw, list):
+        for det in detections_raw:
+            if not isinstance(det, dict):
+                continue
+            bbox_roi, bbox_original = _offset_bbox(det.get("bbox_roi_xyxy", []), roi_box)
+            detections_payload.append(
+                {
+                    "bbox_roi_xyxy": bbox_roi,
+                    "bbox_original_xyxy": bbox_original,
+                    "class_index": int(det.get("class_index", 0)),
+                    "class_name": str(det.get("class_name", det.get("class_index", ""))),
+                    "confidence": float(det.get("confidence", 0.0)),
+                }
+            )
+    task_payload["detections"] = detections_payload
+    return detections_payload, task_payload
+
+
+def _normalize_external_batch_result(raw_result: Any) -> tuple[int, list[dict[str, Any]]]:
+    if isinstance(raw_result, dict):
+        rc_raw = raw_result.get("return_code", raw_result.get("rc", raw_result.get("code", 0)))
+        try:
+            rc = int(rc_raw)
+        except Exception:
+            rc = 1
+        images_raw = raw_result.get("images")
+        images = images_raw if isinstance(images_raw, list) else []
+        return rc, [img for img in images if isinstance(img, dict)]
+    try:
+        return int(raw_result), []
+    except Exception:
+        return 1, []
+
+
+def _task_outputs_count(task_type: str, task_outputs: dict[str, Any]) -> int:
+    if task_type == "classification":
+        cls = task_outputs.get("classification")
+        return 1 if isinstance(cls, dict) and cls else 0
+    if task_type == "segmentation":
+        segs = task_outputs.get("segments")
+        return len(segs) if isinstance(segs, list) else 0
+    dets = task_outputs.get("detections")
+    return len(dets) if isinstance(dets, list) else 0
+
+
+def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        task_outputs = row.get("task_outputs")
+        if not isinstance(task_outputs, dict):
+            task_outputs = {}
+        detections = row.get("detections")
+        if not isinstance(detections, list):
+            detections = []
+        # Bridge legacy external payloads: allow flat "detections" without task_outputs.
+        if not task_outputs and detections:
+            task_outputs = {"detections": detections}
+        normalized.append(
+            {
+                "image_path_absolute": row.get("image_path_absolute"),
+                "image_path_relative": row.get("image_path_relative"),
+                "image_size": row.get("image_size"),
+                "roi_xyxy": row.get("roi_xyxy"),
+                "task_type": task_to_metadata_task_type(row.get("task_type", task_type)),
+                "detections": detections,
+                "task_outputs": task_outputs,
+            }
+        )
+    return normalized
+
+
 def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[int, bool]:
     """
     Run inference after CLI validated workspace, device, and interactive/non-interactive args.
@@ -152,12 +290,20 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             repo_path=repo_path,
             venv_path=venv_path,
         )
-        rc = ext_adapter.run_batch(
+        raw_result = ext_adapter.run_batch(
             model_path=str(model_path),
             source_path=source_for_external,
             conf=float(args.conf),
             imgsz=int(args.img_size),
             device=str(args.device) if args.device else None,
+            task_type=task_type,
+        )
+        rc, ext_images = _normalize_external_batch_result(raw_result)
+        ext_image_rows = _normalize_external_image_rows(task_type, ext_images)
+        detections_total = sum(len(x.get("detections", [])) for x in ext_image_rows)
+        task_outputs_total = sum(
+            _task_outputs_count(task_type, x.get("task_outputs") if isinstance(x.get("task_outputs"), dict) else {})
+            for x in ext_image_rows
         )
         external_report = {
             "created_at": datetime.utcnow().isoformat() + "Z",
@@ -188,7 +334,13 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 "venv_path": venv_path,
                 "return_code": int(rc),
             },
-            "summary": {"images_input": None, "images_processed": None, "images_skipped": None, "detections_total": None},
+            "summary": {
+                "images_input": len(ext_image_rows),
+                "images_processed": len(ext_image_rows),
+                "images_skipped": 0,
+                "detections_total": detections_total,
+                "task_outputs_total": task_outputs_total,
+            },
             "performance": {
                 "end_to_end": None,
                 "infer_only": None,
@@ -204,7 +356,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                     "path_relative": relativize_if_under(layout.root, env_path) or env_path,
                 }
             },
-            "images": [],
+            "images": ext_image_rows,
         }
         ic._write_report(report_path, external_report)
         print(f"[OK] External inference report: {report_path}")
@@ -347,36 +499,26 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             imgsz=int(args.img_size),
             device=str(args.device),
             half=bool(args.half),
+            task_type=task_type,
         )
         perf.record_infer_only(int(pred_result.infer_only_ns))
         for stage, dt in pred_result.stage_ns.items():
             perf.record_stage(stage, int(dt))
-        boxes_payload: list[dict[str, Any]] = []
-        for det in pred_result.detections:
-            x1, y1, x2, y2 = [float(v) for v in det.get("bbox_roi_xyxy", [0.0, 0.0, 0.0, 0.0])]
-            if roi_box is not None:
-                ox1 = x1 + float(roi_box[0])
-                oy1 = y1 + float(roi_box[1])
-                ox2 = x2 + float(roi_box[0])
-                oy2 = y2 + float(roi_box[1])
-            else:
-                ox1, oy1, ox2, oy2 = x1, y1, x2, y2
-            boxes_payload.append(
-                {
-                    "bbox_roi_xyxy": [x1, y1, x2, y2],
-                    "bbox_original_xyxy": [ox1, oy1, ox2, oy2],
-                    "class_index": int(det.get("class_index", 0)),
-                    "class_name": str(det.get("class_name", det.get("class_index", ""))),
-                    "confidence": float(det.get("confidence", 0.0)),
-                }
-            )
+        resolved_pred_task = task_to_metadata_task_type(getattr(pred_result, "task_type", task_type))
+        detections_payload, task_outputs_payload = _build_task_outputs_payload(
+            resolved_pred_task,
+            pred_result.outputs if isinstance(pred_result.outputs, dict) else {},
+            roi_box=roi_box,
+        )
         image_rows.append(
             {
                 "image_path_absolute": image_path_abs,
                 "image_path_relative": relativize_if_under(layout.root, image_path_abs) or image_path_abs,
                 "image_size": {"width": iw, "height": ih},
                 "roi_xyxy": list(roi_box) if roi_box is not None else None,
-                "detections": boxes_payload,
+                "task_type": resolved_pred_task,
+                "detections": detections_payload,
+                "task_outputs": task_outputs_payload,
             }
         )
         perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
