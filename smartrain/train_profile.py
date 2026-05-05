@@ -35,8 +35,10 @@ def load_train_profile(path: str) -> dict[str, Any]:
 
 def task_to_metadata_task_type(task: str | None) -> str:
     t = (task or "detect").strip().lower()
-    if t == "segment":
+    if t in ("segment", "segmentation"):
         return "segmentation"
+    if t in ("detect", "detection", ""):
+        return "detection"
     if t in ("classify", "classification"):
         return "classification"
     if t == "pose":

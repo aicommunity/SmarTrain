@@ -38,6 +38,7 @@ from smartrain.device_selector import (
 from smartrain.model_context import infer_img_size_from_model_context
 from smartrain.run_artifacts import is_internal_conversion_artifact
 from smartrain.artifact_schema_v2 import wrap_inference_report_v2
+from smartrain.train_profile import task_to_metadata_task_type
 from smartrain.services.inference_service import run_inference_job
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -510,8 +511,10 @@ def _build_report(
     performance: dict[str, Any] | None = None,
     environment_artifact_path: str | None = None,
 ) -> dict[str, Any]:
+    task_type = task_to_metadata_task_type(getattr(args, "task", None))
     return {
         "created_at": datetime.utcnow().isoformat() + "Z",
+        "task_type": task_type,
         "workspace": {
             "root_absolute": layout.root,
             "root_relative": relativize_if_under(layout.root, layout.root) or ".",

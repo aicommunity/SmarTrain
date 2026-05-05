@@ -262,6 +262,9 @@ def test_inference_passes_task_hint_to_capability_resolution(tmp_path: Path, mon
     )
     assert captured["task_type"] == "segmentation"
     assert captured["model_format"] == "pt"
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["task_type"] == "segmentation"
+    assert report["v2"]["metrics"]["namespace"] == "segmentation"
 
 
 def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:

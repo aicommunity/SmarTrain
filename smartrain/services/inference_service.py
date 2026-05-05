@@ -161,6 +161,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         )
         external_report = {
             "created_at": datetime.utcnow().isoformat() + "Z",
+            "task_type": task_type,
             "workspace": {"root_absolute": layout.root},
             "model": {
                 "source": "external",

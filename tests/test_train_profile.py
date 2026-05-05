@@ -64,7 +64,9 @@ def test_merge_cli_overrides_all_defaults():
 
 def test_task_to_metadata_task_type():
     assert task_to_metadata_task_type("detect") == "detection"
+    assert task_to_metadata_task_type("detection") == "detection"
     assert task_to_metadata_task_type("segment") == "segmentation"
+    assert task_to_metadata_task_type("segmentation") == "segmentation"
     assert task_to_metadata_task_type("classify") == "classification"
 
 
