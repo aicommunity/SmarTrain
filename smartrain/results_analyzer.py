@@ -77,6 +77,7 @@ from smartrain.services.analyze_artifacts import (
 )
 from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
 from smartrain.services.analyze_table_service import export_runs_table, scan_runs
+from smartrain.services.analyze_compare_service import run_compare_workflow
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
@@ -671,85 +672,20 @@ def cmd_compare(args: argparse.Namespace) -> None:
     base_metrics = _read_test_metrics_for_run(baseline)
     if not base_metrics:
         print("[WARN] Baseline has no test_metrics*.csv; deltas only from train/results.csv", file=sys.stderr)
-
-    other_rows = [_read_test_metrics_for_run(other) for other in others]
-    delta_rows = build_delta_rows(baseline, base_metrics, others, other_rows)
-
-    os.makedirs(os.path.dirname(os.path.abspath(out_csv)) or ".", exist_ok=True)
-    pd.DataFrame(delta_rows).to_csv(out_csv, index=False, encoding="utf-8")
-    print(f"[OK] Test metrics comparison: {out_csv}")
-    insight_lines = generate_compare_insights(baseline, others, delta_rows)
-    os.makedirs(os.path.dirname(out_insights) or ".", exist_ok=True)
-    with open(out_insights, "w", encoding="utf-8") as f:
-        f.write("\n".join(insight_lines).rstrip() + "\n")
-    print(f"[OK] Insights: {out_insights}")
-
-    metric_col = args.metric_column
-    plt.figure(figsize=(12, 7))
-    plotted = False
-    labels: list[str] = []
-    for i, rd in enumerate(all_runs):
-        rc = results_csv_path(rd)
-        label = os.path.basename(rd.rstrip(os.sep))[:40]
-        labels.append(label)
-        if not rc:
-            print(f"[WARN] Missing train/results.csv: {rd}")
-            continue
-        try:
-            df = pd.read_csv(rc)
-            df.columns = [str(c).strip() for c in df.columns]
-            mcol = metric_col if metric_col in df.columns else pick_map_column(df)
-            if mcol is None or "epoch" not in df.columns:
-                print(f"[WARN] Missing epoch / mAP columns in {rc}")
-                continue
-            plt.plot(df["epoch"], df[mcol], label=label, linewidth=2)
-            plotted = True
-        except Exception as e:
-            print(f"[WARN] {rc}: {e}")
-
-    if plotted:
-        plt.title("Metrics Comparison Across Epochs")
-        plt.xlabel("Epoch")
-        plt.ylabel(metric_col or DEFAULT_MAP_COL)
-        plt.grid(True, linestyle="--", alpha=0.7)
-        plt.legend(title="Model", fontsize=9)
-        plt.tight_layout()
-        plt.savefig(out_png, dpi=200)
-        plt.close()
-        print(f"[OK] Plot: {out_png}")
-    else:
-        plt.close()
-
-    # Bar chart using last-epoch mAP from results.csv
-    last_vals: list[float] = []
-    last_labs: list[str] = []
-    for rd, lab in zip(all_runs, labels):
-        rc = results_csv_path(rd)
-        if not rc:
-            continue
-        try:
-            df = pd.read_csv(rc)
-            df.columns = [str(c).strip() for c in df.columns]
-            mcol = metric_col if metric_col in df.columns else pick_map_column(df)
-            if mcol and len(df) > 0:
-                v = df[mcol].iloc[-1]
-                if pd.notna(v):
-                    last_vals.append(float(v))
-                    last_labs.append(lab)
-        except Exception:
-            pass
-    if len(last_vals) >= 2:
-        plt.figure(figsize=(10, 5))
-        x = range(len(last_labs))
-        plt.bar(x, last_vals, tick_label=last_labs)
-        plt.ylabel(metric_col or DEFAULT_MAP_COL)
-        plt.title("Last Epoch Comparison")
-        plt.xticks(rotation=25, ha="right")
-        plt.tight_layout()
-        bar_path = re.sub(r"\.png$", "_bars.png", out_png)
-        plt.savefig(bar_path, dpi=200)
-        plt.close()
-        print(f"[OK] Bar chart: {bar_path}")
+    bar_path, _delta_rows = run_compare_workflow(
+        baseline=baseline,
+        others=others,
+        out_csv=out_csv,
+        out_insights=out_insights,
+        out_png=out_png,
+        metric_column=args.metric_column,
+        read_test_metrics_for_run=_read_test_metrics_for_run,
+        build_delta_rows=build_delta_rows,
+        generate_compare_insights=generate_compare_insights,
+        results_csv_path=results_csv_path,
+        pick_map_column=pick_map_column,
+        default_map_col=DEFAULT_MAP_COL,
+    )
 
     _finalize_compare_analytics_session(
         args, baseline, others, out_csv, out_png, bar_path, out_insights
