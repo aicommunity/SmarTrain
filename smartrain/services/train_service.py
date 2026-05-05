@@ -9,7 +9,7 @@ import shutil
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
 from smartrain.cli_contracts import emit_replay
@@ -53,9 +53,54 @@ def _get_installed_external_provider_record(provider_id: str) -> dict[str, Any] 
     return None
 
 
+class _MtmRuntimeOps:
+    """Compatibility adapter for business runtime calls still backed by mtm."""
+
+    def __init__(self, mtm: Any) -> None:
+        self._mtm = mtm
+
+    def _fn(self, name: str, default: Callable[..., Any] | None = None) -> Callable[..., Any]:
+        fn = getattr(self._mtm, name, None)
+        if callable(fn):
+            return fn
+        if default is not None:
+            return default
+        raise AttributeError(f"Required runtime operation is missing: {name}")
+
+    def train_yolo(self, **kwargs: Any) -> Any:
+        return self._fn("train_yolo")(**kwargs)
+
+    def test_yolo(self, *args: Any, **kwargs: Any) -> Any:
+        return self._fn("test_yolo")(*args, **kwargs)
+
+    def save_training_metadata(self, **kwargs: Any) -> Any:
+        return self._fn("save_training_metadata")(**kwargs)
+
+    def collect_system_profile(self, model_dir: str) -> dict[str, Any]:
+        return self._fn("collect_system_profile")(model_dir)
+
+    def build_run_name(self, *args: Any, **kwargs: Any) -> str:
+        return self._fn("_build_run_name", build_run_name)(*args, **kwargs)
+
+    def resolve_external_eval_source(self, dataset_path: str) -> str:
+        return self._fn("_resolve_external_eval_source", resolve_external_eval_source)(dataset_path)
+
+    def json_safe_train_summary(self, train_kw: dict[str, Any] | None) -> dict[str, Any] | None:
+        return self._fn("_json_safe_train_summary", json_safe_train_summary)(train_kw)
+
+    def load_batch_from_training_metadata(self, model_dir: str) -> int | None:
+        return self._fn("_load_batch_from_training_metadata", load_batch_from_training_metadata)(model_dir)
+
+    def run_external_train(self, *args: Any, **kwargs: Any) -> Any:
+        return self._fn("run_external_train", run_external_train)(*args, **kwargs)
+
+    def run_external_infer(self, *args: Any, **kwargs: Any) -> Any:
+        return self._fn("run_external_infer", run_external_infer)(*args, **kwargs)
+
+
 def _run_external_provider_flow(
     *,
-    mtm: Any,
+    runtime_ops: _MtmRuntimeOps,
     args: argparse.Namespace,
     u_cfg: dict[str, Any],
     workspace_root: str,
@@ -101,8 +146,8 @@ def _run_external_provider_flow(
         provider_id=external_provider,
         repo_path=repo_path,
         venv_path=venv_path,
-        train_runner=getattr(mtm, "run_external_train", run_external_train),
-        infer_runner=getattr(mtm, "run_external_infer", run_external_infer),
+        train_runner=runtime_ops.run_external_train,
+        infer_runner=runtime_ops.run_external_infer,
     )
 
     if not venv_path:
@@ -112,8 +157,7 @@ def _run_external_provider_flow(
         dataset_hash = calculate_dataset_hash(data)
     except Exception:
         dataset_hash = None
-    run_name_builder = getattr(mtm, "_build_run_name", build_run_name)
-    run_name = run_name_builder(external_provider, model_version, epochs, batch, dataset_hash)
+    run_name = runtime_ops.build_run_name(external_provider, model_version, epochs, batch, dataset_hash)
     print(f"[INFO] External run name: {run_name}")
     rc = external_adapter.run_train(
         dataset_path=data,
@@ -140,7 +184,7 @@ def _run_external_provider_flow(
         try:
             maybe_free_cuda_memory()
             val_batch = args.val_batch if args.val_batch is not None else batch
-            test_start_time, test_end_time, inference_info = mtm.test_yolo(
+            test_start_time, test_end_time, inference_info = runtime_ops.test_yolo(
                 external_run_dir,
                 data,
                 training_start_time=training_start_time,
@@ -163,8 +207,7 @@ def _run_external_provider_flow(
             best_model = ensure_external_best_checkpoint_layout(external_run_dir)
             if best_model:
                 fallback_start = datetime.now()
-                eval_source_resolver = getattr(mtm, "_resolve_external_eval_source", resolve_external_eval_source)
-                fallback_source = eval_source_resolver(data)
+                fallback_source = runtime_ops.resolve_external_eval_source(data)
                 fallback_conf = float(args.val_conf) if args.val_conf is not None else 0.25
                 fallback_imgsz = int(args.val_imgsz) if args.val_imgsz is not None else int(img_size)
                 if external_provider == "mfel-yolo":
@@ -247,7 +290,7 @@ def _run_external_provider_flow(
         _ext_mpl = _c if isinstance(_c, dict) else None
     if _ext_mpl is None:
         _ext_mpl = ensure_matplotlib_training_runtime(non_interactive=args.non_interactive).as_dict()
-    mtm.save_training_metadata(
+    runtime_ops.save_training_metadata(
         model_dir=external_run_dir,
         dataset_path=data,
         model_version=model_version.replace(".pt", ""),
@@ -268,7 +311,7 @@ def _run_external_provider_flow(
         task_type=task_to_metadata_task_type(u_cfg.get("task")),
         training_provider=external_provider,
         external_provider_id=external_provider,
-        system_profile=mtm.collect_system_profile(external_run_dir),
+        system_profile=runtime_ops.collect_system_profile(external_run_dir),
         matplotlib_runtime=_ext_mpl,
         confidence_recommendation_config={
             "enabled": not bool(getattr(args, "conf_rec_disable", False)),
@@ -300,7 +343,7 @@ def _run_external_provider_flow(
 
 def _run_builtin_train_and_eval_flow(
     *,
-    mtm: Any,
+    runtime_ops: _MtmRuntimeOps,
     args: argparse.Namespace,
     u_cfg: dict[str, Any],
     sm_opts: dict[str, Any],
@@ -336,7 +379,7 @@ def _run_builtin_train_and_eval_flow(
             dataset_hash,
             _,
             meta_extras,
-        ) = mtm.train_yolo(
+        ) = runtime_ops.train_yolo(
             dataset_path=data,
             target_dir=target_dir,
             non_interactive=args.non_interactive,
@@ -357,8 +400,7 @@ def _run_builtin_train_and_eval_flow(
             dataset_hash = None
         if not model_dir:
             dataset_name = os.path.basename(os.path.normpath(data))
-            run_name_builder = getattr(mtm, "_build_run_name", build_run_name)
-            folder_name = run_name_builder(
+            folder_name = runtime_ops.build_run_name(
                 "ultralytics",
                 model_version,
                 epochs,
@@ -381,7 +423,7 @@ def _run_builtin_train_and_eval_flow(
         try:
             maybe_free_cuda_memory()
             val_batch = args.val_batch if args.val_batch is not None else batch
-            test_start_time, test_end_time, inference_info = mtm.test_yolo(
+            test_start_time, test_end_time, inference_info = runtime_ops.test_yolo(
                 model_dir,
                 data,
                 training_start_time=training_start_time,
@@ -411,7 +453,7 @@ def _run_builtin_train_and_eval_flow(
         if _mpl_meta is None and isinstance(inference_info, dict):
             _cand = inference_info.get("matplotlib_runtime")
             _mpl_meta = _cand if isinstance(_cand, dict) else None
-        mtm.save_training_metadata(
+        runtime_ops.save_training_metadata(
             model_dir=model_dir,
             dataset_path=data,
             model_version=model_version.replace(".pt", ""),
@@ -430,12 +472,10 @@ def _run_builtin_train_and_eval_flow(
             inference=inference_info,
             workspace_root=workspace_root,
             task_type=meta_extras.get("task_type") or task_to_metadata_task_type(u_cfg.get("task")),
-            ultralytics_train_summary=getattr(mtm, "_json_safe_train_summary", json_safe_train_summary)(
-                meta_extras.get("train_kw")
-            ),
+            ultralytics_train_summary=runtime_ops.json_safe_train_summary(meta_extras.get("train_kw")),
             training_provider=resolve_train_backend(task_type=task_type, model_format="pt").backend,
             external_provider_id=None,
-            system_profile=mtm.collect_system_profile(model_dir),
+            system_profile=runtime_ops.collect_system_profile(model_dir),
             matplotlib_runtime=_mpl_meta,
             confidence_recommendation_config={
                 "enabled": not bool(getattr(args, "conf_rec_disable", False)),
@@ -448,7 +488,7 @@ def _run_builtin_train_and_eval_flow(
 
 def _run_test_only_flow(
     *,
-    mtm: Any,
+    runtime_ops: _MtmRuntimeOps,
     args: argparse.Namespace,
     u_cfg: dict[str, Any],
     workspace_root: str,
@@ -472,9 +512,9 @@ def _run_test_only_flow(
         val_batch = (
             args.val_batch
             if args.val_batch is not None
-            else (getattr(mtm, "_load_batch_from_training_metadata", load_batch_from_training_metadata)(model_dir) or batch)
+            else (runtime_ops.load_batch_from_training_metadata(model_dir) or batch)
         )
-        test_start_time, test_end_time, inference_info = mtm.test_yolo(
+        test_start_time, test_end_time, inference_info = runtime_ops.test_yolo(
             model_dir,
             data,
             train_img_size=img_size,
@@ -499,7 +539,7 @@ def _run_test_only_flow(
     if isinstance(inference_info, dict):
         _tc = inference_info.get("matplotlib_runtime")
         _test_only_mpl = _tc if isinstance(_tc, dict) else None
-    mtm.save_training_metadata(
+    runtime_ops.save_training_metadata(
         model_dir=model_dir,
         dataset_path=data,
         test_start_time=test_start_time,
@@ -511,7 +551,7 @@ def _run_test_only_flow(
         task_type=task_to_metadata_task_type(u_cfg.get("task")),
         training_provider=resolve_train_backend(task_type=task_type, model_format="pt").backend,
         external_provider_id=None,
-        system_profile=mtm.collect_system_profile(model_dir),
+        system_profile=runtime_ops.collect_system_profile(model_dir),
         matplotlib_runtime=_test_only_mpl,
         confidence_recommendation_config={
             "enabled": not bool(getattr(args, "conf_rec_disable", False)),
@@ -541,12 +581,13 @@ def run_train_after_setup(
     """Runs training+test (local or external), writes metadata, returns exit code."""
     from smartrain import model_training_module as mtm
     # Keep behavior identical: this function is a thin relocation of main() tail.
+    runtime_ops = _MtmRuntimeOps(mtm)
     task_type = task_to_metadata_task_type(u_cfg.get("task"))
 
     external_provider = str(getattr(args, "external_provider", "") or "").strip()
     if external_provider:
         return _run_external_provider_flow(
-            mtm=mtm,
+            runtime_ops=runtime_ops,
             args=args,
             u_cfg=u_cfg,
             workspace_root=workspace_root,
@@ -560,7 +601,7 @@ def run_train_after_setup(
 
     if not args.test_only:
         _run_builtin_train_and_eval_flow(
-            mtm=mtm,
+            runtime_ops=runtime_ops,
             args=args,
             u_cfg=u_cfg,
             sm_opts=sm_opts,
@@ -575,7 +616,7 @@ def run_train_after_setup(
         )
     else:
         _run_test_only_flow(
-            mtm=mtm,
+            runtime_ops=runtime_ops,
             args=args,
             u_cfg=u_cfg,
             workspace_root=workspace_root,
