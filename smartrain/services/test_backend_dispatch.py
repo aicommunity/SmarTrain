@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -184,12 +184,35 @@ def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
     return result.success, result.error
 
 
-_DISPATCH_STRATEGIES = {
-    "pt": _dispatch_pt,
-    "pt_uni": _dispatch_pt_uni,
-    "onnx": _dispatch_non_pt,
-    "engine": _dispatch_non_pt,
-    "trt": _dispatch_non_pt,
+class TestBackendStrategy(Protocol):
+    def run(self, ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
+        ...
+
+
+@dataclass(frozen=True)
+class PtStrategy:
+    def run(self, ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
+        return _dispatch_pt(ctx)
+
+
+@dataclass(frozen=True)
+class PtUniStrategy:
+    def run(self, ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
+        return _dispatch_pt_uni(ctx)
+
+
+@dataclass(frozen=True)
+class NonPtNativeStrategy:
+    def run(self, ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
+        return _dispatch_non_pt(ctx)
+
+
+_DISPATCH_STRATEGIES: dict[str, TestBackendStrategy | Any] = {
+    "pt": PtStrategy(),
+    "pt_uni": PtUniStrategy(),
+    "onnx": NonPtNativeStrategy(),
+    "engine": NonPtNativeStrategy(),
+    "trt": NonPtNativeStrategy(),
 }
 
 
@@ -204,7 +227,11 @@ def run_test_backend_via_registry(ctx: TestBackendDispatchContext) -> tuple[bool
     handler = _DISPATCH_STRATEGIES.get(fmt)
     if handler is None:
         return False, f"Unsupported test backend format: {fmt!r}"
-    return handler(ctx)
+    # Keep backward-compatibility for tests/extensions that monkeypatch
+    # registry entries with callables instead of strategy objects.
+    if callable(handler):
+        return handler(ctx)
+    return handler.run(ctx)
 
 
 def run_pt_test_backend(

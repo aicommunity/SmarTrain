@@ -16,17 +16,15 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-05: Expanded capability routing to inference (`resolve_infer_backend`) and connected `inference_service` to capability policy checks. Runtime backend mismatch is currently warning-only to preserve compatibility with existing inference backend factory behavior; revisit after dedicated `UltralyticsAdapter` extraction in PR 4.3.
 - 2026-05-05: Added reference `UltralyticsAdapter` and routed local inference backend creation through it. Remaining Phase D debt concentrates in PR 4.4: normalize external providers under the same adapter contract (train/test/inference entrypoints still use provider-specific wiring).
 - 2026-05-05: Completed PR 4.4 in current codebase scope: `ExternalProviderAdapter` now normalizes external inference and external train execution wiring; `train_service` uses adapter contract with injected legacy runners for compatibility.
+- 2026-05-05: Upgraded `services/test_backend_dispatch.py` from strategy function-map to explicit strategy objects (`PtStrategy`, `PtUniStrategy`, `NonPtNativeStrategy`) while keeping callable monkeypatch compatibility in registry dispatcher.
 - 2026-05-04: Initial **canonical write** slice (PR 6.4 phase A): `smartrain/adapters/canonical/write/*`, `canonical_gateway.persist_canonical_snapshot`, optional dual-write helper `run_dual_write`. **Opt-in** snapshot after successful test artifact persist via `SMARTTRAIN_CANONICAL_WRITE=1` (best-effort warning on failure). Remaining PR 6.4 scope: richer manifest/provenance, real legacy writer hook in dual-write, hash coverage for individual artifact files per plan.
 
 ## Open Items
 
 - [ ] Plan-audit debt (completed todo `orchestrator-split`): `analyze` decomposition is still not symmetric to train/test/inference. `results_analyzer.py` remains a large mixed-responsibility module without dedicated service/backend/artifact layers.
-- [ ] Plan-audit debt (completed todo `backend-abstraction`): capability contracts exist, but artifacts from target plan like dedicated `backends/ultralytics_adapter.py` and normalized external provider adapter layer are not fully separated from legacy modules.
 - [ ] Plan-audit debt (completed todo `task-abstraction`): `TaskType` contracts and routing hooks exist, but runtime paths still mostly execute detection-centric logic; classification/segmentation are readiness stubs rather than feature-complete task adapters.
-- [ ] Wave 6 debt: canonical read adapters (`run/model`) are introduced, but consumer modules (`model_test_cli` / `inference_cli` / `results_analyzer`) are not yet switched to canonical gateway as primary read path.
 - [ ] `train` flow extraction is now split into external/builtin/test-only handlers, but the handlers still depend on `model_training_module` namespace (`mtm.*`). Next step: decouple shared helpers into neutral modules to reduce dynamic coupling.
 - [ ] Reduce dynamic module coupling in `train_service`: current pattern imports `model_training_module` and references many helpers via `mtm.*`; move shared primitives to neutral modules (`services/common` or `backends/*`) to simplify tests and static checks.
-- [ ] `model_test_orchestrator` delegates PT and non-PT formats via `services/test_backend_dispatch.py`; format strategy registry exists, remaining gap: move from function-map to dedicated strategy objects if backend matrix grows further.
 - [ ] Capability routing is task-aware for train/test registry, but runtime implementations are still detection-centric; add task-specific strategies/adapters for classification/segmentation instead of shared generic paths.
 
 ## Notes
