@@ -85,6 +85,7 @@ Notes:
 - 2026-05-05: Дополнительно снижен coupling train-service к `model_training_module`: вынесены нейтральные helper-ы (`build_run_name`, `resolve_external_eval_source`, `json_safe_train_summary`, `load_batch_from_training_metadata`) в `services/train_runtime_helpers.py`; `train_service` переведён на прямые импорты с сохранением monkeypatch-совместимости через fallback на `mtm._*`.
 - 2026-05-05: Углублён шаг снижения train coupling: в shared helper-слой вынесены также `normalize_external_run_layout`, `ensure_external_best_checkpoint_layout`, `write_external_fallback_metrics`, `run_mfel_external_val_fallback`, `maybe_free_cuda_memory`; `train_service` переключён на прямые импорты provider/catalog/hash/recommendation/runtime helper-ов с совместимыми fallback-ами для тестовых monkeypatch.
 - 2026-05-05: Выполнен следующий целевой срез deep train coupling: в `train_service` введён runtime adapter `_MtmRuntimeOps`, и бизнес-путь больше не использует прямые `mtm.*` вызовы; операции train/test/metadata/system-profile вызываются через адаптер с сохранением текущих monkeypatch-контрактов.
+- 2026-05-05: Доведён финальный pre-Phase-8 срез train decoupling: `_MtmRuntimeOps` переведён на explicit callable composition (внедрение зависимостей в composition root `run_train_after_setup`), что убирает namespace-coupling service-слоя с `model_training_module` и оставляет единичную wiring-точку интеграции.
 
 ### Phase E — Wave 5 + Analyze / Artifact v2 (волны 5, 3 analyze, 7)
 

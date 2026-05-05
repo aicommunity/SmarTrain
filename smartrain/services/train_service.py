@@ -54,48 +54,62 @@ def _get_installed_external_provider_record(provider_id: str) -> dict[str, Any] 
 
 
 class _MtmRuntimeOps:
-    """Compatibility adapter for business runtime calls still backed by mtm."""
+    """Runtime operations bundle for train/test execution."""
 
-    def __init__(self, mtm: Any) -> None:
-        self._mtm = mtm
-
-    def _fn(self, name: str, default: Callable[..., Any] | None = None) -> Callable[..., Any]:
-        fn = getattr(self._mtm, name, None)
-        if callable(fn):
-            return fn
-        if default is not None:
-            return default
-        raise AttributeError(f"Required runtime operation is missing: {name}")
+    def __init__(
+        self,
+        *,
+        train_yolo_fn: Callable[..., Any],
+        test_yolo_fn: Callable[..., Any],
+        save_training_metadata_fn: Callable[..., Any],
+        collect_system_profile_fn: Callable[..., Any],
+        build_run_name_fn: Callable[..., Any] | None = None,
+        resolve_external_eval_source_fn: Callable[..., Any] | None = None,
+        json_safe_train_summary_fn: Callable[..., Any] | None = None,
+        load_batch_from_training_metadata_fn: Callable[..., Any] | None = None,
+        run_external_train_fn: Callable[..., Any] | None = None,
+        run_external_infer_fn: Callable[..., Any] | None = None,
+    ) -> None:
+        self._train_yolo_fn = train_yolo_fn
+        self._test_yolo_fn = test_yolo_fn
+        self._save_training_metadata_fn = save_training_metadata_fn
+        self._collect_system_profile_fn = collect_system_profile_fn
+        self._build_run_name_fn = build_run_name_fn or build_run_name
+        self._resolve_external_eval_source_fn = resolve_external_eval_source_fn or resolve_external_eval_source
+        self._json_safe_train_summary_fn = json_safe_train_summary_fn or json_safe_train_summary
+        self._load_batch_from_training_metadata_fn = load_batch_from_training_metadata_fn or load_batch_from_training_metadata
+        self._run_external_train_fn = run_external_train_fn or run_external_train
+        self._run_external_infer_fn = run_external_infer_fn or run_external_infer
 
     def train_yolo(self, **kwargs: Any) -> Any:
-        return self._fn("train_yolo")(**kwargs)
+        return self._train_yolo_fn(**kwargs)
 
     def test_yolo(self, *args: Any, **kwargs: Any) -> Any:
-        return self._fn("test_yolo")(*args, **kwargs)
+        return self._test_yolo_fn(*args, **kwargs)
 
     def save_training_metadata(self, **kwargs: Any) -> Any:
-        return self._fn("save_training_metadata")(**kwargs)
+        return self._save_training_metadata_fn(**kwargs)
 
     def collect_system_profile(self, model_dir: str) -> dict[str, Any]:
-        return self._fn("collect_system_profile")(model_dir)
+        return self._collect_system_profile_fn(model_dir)
 
     def build_run_name(self, *args: Any, **kwargs: Any) -> str:
-        return self._fn("_build_run_name", build_run_name)(*args, **kwargs)
+        return self._build_run_name_fn(*args, **kwargs)
 
     def resolve_external_eval_source(self, dataset_path: str) -> str:
-        return self._fn("_resolve_external_eval_source", resolve_external_eval_source)(dataset_path)
+        return self._resolve_external_eval_source_fn(dataset_path)
 
     def json_safe_train_summary(self, train_kw: dict[str, Any] | None) -> dict[str, Any] | None:
-        return self._fn("_json_safe_train_summary", json_safe_train_summary)(train_kw)
+        return self._json_safe_train_summary_fn(train_kw)
 
     def load_batch_from_training_metadata(self, model_dir: str) -> int | None:
-        return self._fn("_load_batch_from_training_metadata", load_batch_from_training_metadata)(model_dir)
+        return self._load_batch_from_training_metadata_fn(model_dir)
 
     def run_external_train(self, *args: Any, **kwargs: Any) -> Any:
-        return self._fn("run_external_train", run_external_train)(*args, **kwargs)
+        return self._run_external_train_fn(*args, **kwargs)
 
     def run_external_infer(self, *args: Any, **kwargs: Any) -> Any:
-        return self._fn("run_external_infer", run_external_infer)(*args, **kwargs)
+        return self._run_external_infer_fn(*args, **kwargs)
 
 
 def _run_external_provider_flow(
@@ -580,8 +594,19 @@ def run_train_after_setup(
 ) -> int | None:
     """Runs training+test (local or external), writes metadata, returns exit code."""
     from smartrain import model_training_module as mtm
-    # Keep behavior identical: this function is a thin relocation of main() tail.
-    runtime_ops = _MtmRuntimeOps(mtm)
+    # Keep behavior identical while localizing mtm wiring in one composition root.
+    runtime_ops = _MtmRuntimeOps(
+        train_yolo_fn=mtm.train_yolo,
+        test_yolo_fn=mtm.test_yolo,
+        save_training_metadata_fn=mtm.save_training_metadata,
+        collect_system_profile_fn=mtm.collect_system_profile,
+        build_run_name_fn=getattr(mtm, "_build_run_name", None),
+        resolve_external_eval_source_fn=getattr(mtm, "_resolve_external_eval_source", None),
+        json_safe_train_summary_fn=getattr(mtm, "_json_safe_train_summary", None),
+        load_batch_from_training_metadata_fn=getattr(mtm, "_load_batch_from_training_metadata", None),
+        run_external_train_fn=getattr(mtm, "run_external_train", None),
+        run_external_infer_fn=getattr(mtm, "run_external_infer", None),
+    )
     task_type = task_to_metadata_task_type(u_cfg.get("task"))
 
     external_provider = str(getattr(args, "external_provider", "") or "").strip()
