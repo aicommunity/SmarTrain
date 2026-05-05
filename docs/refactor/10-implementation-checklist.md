@@ -97,6 +97,7 @@ Notes:
 - 2026-05-05: Дополнена task-aware целостность inference artifact path: `inference` report теперь несёт `task_type`, `wrap_inference_report_v2` формирует `task_type`/`v2.metrics.namespace` из payload, а `task_to_metadata_task_type` расширен для canonical значений (`detection`/`segmentation`) без регресса в alias-режиме.
 - 2026-05-05: Запущена декомпозиция `results_analyzer` (3-E3) с сохранением CLI-совместимости: вынесены service/helper-слои `services/analyze_artifacts.py` (session/output paths), `services/analyze_data_yaml.py` (data.yaml discovery), `services/analyze_table_service.py` (`scan`/`export-table` workflow); в `results_analyzer` оставлены thin-wrapper entrypoints.
 - 2026-05-05: Продолжена декомпозиция `results_analyzer` (3-E3): compare-пайплайн (`cmd_compare`) переведён на выделенный service `services/analyze_compare_service.py` (`run_compare_workflow`) с сохранением интерактивного/CLI контракта и регрессий.
+- 2026-05-05: Продолжена декомпозиция `results_analyzer` (3-E3): artifact-builders для analyze-сессий (`confidence_recommendations`, `speed_quality`) вынесены в `services/analyze_artifact_builders.py`; публичное поведение сохранено через thin-wrapper функции в `results_analyzer`.
 
 ### Phase F — Wave 8 (clean-code hardening)
 
