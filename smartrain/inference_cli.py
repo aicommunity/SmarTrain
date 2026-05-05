@@ -189,7 +189,11 @@ def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, 
 
 
 def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Path, str, str]:
-    use_canonical = str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "1"
+    # Wave 6 / PR 6.7 cutover policy:
+    # canonical read path is default; legacy path is emergency-only and must be
+    # explicitly allowed via SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK=1.
+    legacy_fallback_allowed = str(os.getenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "")).strip() == "1"
+    use_canonical = not (legacy_fallback_allowed and str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0")
     if args.model_name:
         if use_canonical:
             from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context

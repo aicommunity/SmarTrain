@@ -63,10 +63,11 @@ Notes:
 - [x] **6.6-C1** `legacy` reader/mapper слой по путям из PR 6.6.
 - [x] **6.6-C2** CLI миграции: `dry-run`, `apply`, `report-only`; машиночитаемый отчёт + summary.
 - [x] **6.6-C3** Тесты: historical coverage, idempotency, safety (dry-run не пишет), reporting.
-- [ ] **6.7-C4** Cutover: default `canonical_only`, удаление временных мостов по policy; regression `test_canonical_cutover`, `test_no_legacy_branch_usage` (или эквиваленты из плана).
+- [x] **6.7-C4** Cutover: default `canonical_only`, удаление временных мостов по policy; regression `test_canonical_cutover`, `test_no_legacy_branch_usage` (или эквиваленты из плана).
 
 Notes:
 - 2026-05-05: Усилен reporting для PR 6.6: в report добавлены `operator_guidance` и per-item `rollback_hint`; добавлен regression test на наличие guidance для failed item.
+- 2026-05-05: Выполнен cutover policy для consumer read-path: canonical включён по умолчанию, legacy разрешён только через явный аварийный policy-флаг `SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK=1` вместе с `SMARTTRAIN_CANONICAL_READ=0`; добавлены regression тесты `tests/regression/test_canonical_cutover.py` и `tests/regression/test_no_legacy_branch_usage.py`.
 
 ### Phase D — Wave 4 (backend abstraction)
 

@@ -13,6 +13,14 @@ from smartrain.results_analyzer import main as analyze_main
 from smartrain.run_artifacts import run_test_backend_dir
 
 
+@pytest.fixture(autouse=True)
+def _legacy_mode_for_workflow_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep legacy-anchored workflow fixtures stable; canonical-default cutover
+    # behavior is covered by dedicated regression tests.
+    monkeypatch.setenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "1")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "0")
+
+
 def _write_run(
     root: Path,
     dataset: str,

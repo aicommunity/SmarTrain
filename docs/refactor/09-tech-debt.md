@@ -10,6 +10,7 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-05: Completed PR 6.5 consumer/gateway slice in current codebase scope: `model_test_cli` task inference now uses `resolve_task_context`; `inference_cli` canonical resolution uses `resolve_task_context` + `load_target`; gateway `load_predictions` now supports split/format filtering with file discovery contract and integration tests. Remaining wave-level concern is rollout policy (flag defaults/cutover), handled by PR 6.6–6.7.
 - 2026-05-05: Implemented PR 6.6 baseline migration layer: `adapters/canonical/legacy/reader.py` + `mapper.py`, CLI command `smartrain migrate canonical` (`dry-run`/`apply`/`report-only`) with JSON+Markdown reports, and migration tests for apply, dry-run safety, and idempotency.
 - 2026-05-05: Expanded migration report payload with per-item `rollback_hint` and top-level `operator_guidance`; added regression test to keep guidance present for failed targets. Remaining 6.6 depth: broader historical fixture matrix.
+- 2026-05-05: Applied PR 6.7 cutover policy for canonical consumers: canonical read is default, legacy read path is emergency-only via explicit policy flag (`SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK=1` + `SMARTTRAIN_CANONICAL_READ=0`); added dedicated regressions for cutover/no-legacy usage.
 - 2026-05-04: Initial **canonical write** slice (PR 6.4 phase A): `smartrain/adapters/canonical/write/*`, `canonical_gateway.persist_canonical_snapshot`, optional dual-write helper `run_dual_write`. **Opt-in** snapshot after successful test artifact persist via `SMARTTRAIN_CANONICAL_WRITE=1` (best-effort warning on failure). Remaining PR 6.4 scope: richer manifest/provenance, real legacy writer hook in dual-write, hash coverage for individual artifact files per plan.
 
 ## Open Items
@@ -22,6 +23,7 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - [ ] Reduce dynamic module coupling in `train_service`: current pattern imports `model_training_module` and references many helpers via `mtm.*`; move shared primitives to neutral modules (`services/common` or `backends/*`) to simplify tests and static checks.
 - [ ] `model_test_orchestrator` delegates PT and non-PT formats via `services/test_backend_dispatch.py`; format strategy registry exists, remaining gap: move from function-map to dedicated strategy objects if backend matrix grows further.
 - [ ] Capability routing is task-aware for train/test registry, but runtime implementations are still detection-centric; add task-specific strategies/adapters for classification/segmentation instead of shared generic paths.
+- [ ] Часть исторических workflow-тестов (`test_model_test_cli.py`, `test_results_analyzer_workflows.py`) временно зафиксирована в explicit legacy mode через policy env для стабильности старых фикстур; убрать этот test-level bridge после обновления фикстур под canonical-first входы.
 
 ## Notes
 

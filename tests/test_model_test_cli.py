@@ -31,6 +31,14 @@ from smartrain.model_test_service import (
 from smartrain.workspace_paths import deploy_workspace
 
 
+@pytest.fixture(autouse=True)
+def _legacy_mode_for_existing_cli_fixtures(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Historical fixtures in this module are metadata-first and remain valid
+    # through explicit legacy fallback policy in tests.
+    monkeypatch.setenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "1")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "0")
+
+
 class _FakeInput:
     name = "images"
     shape = [1, 3, 640, 640]

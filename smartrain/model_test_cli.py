@@ -462,7 +462,9 @@ def _normalize_task_for_backend(task: str | None) -> str:
 
 
 def _infer_task_from_training_metadata(root_dir: str) -> str | None:
-    if str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "1":
+    legacy_fallback_allowed = str(os.getenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "")).strip() == "1"
+    use_canonical = not (legacy_fallback_allowed and str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0")
+    if use_canonical:
         from smartrain.orchestrators.canonical_gateway import resolve_task_context
 
         ctx = resolve_task_context(root_dir)
