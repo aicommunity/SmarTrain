@@ -6,6 +6,7 @@ from typing import Any, Callable
 from smartrain.backends.contracts import BackendExecutionResult, InferenceBackend
 from smartrain.inference_backends import ExternalProviderBackend
 from smartrain.external_providers.runner import run_external_train
+from smartrain.train_profile import task_to_metadata_task_type
 
 
 @dataclass(frozen=True)
@@ -109,11 +110,12 @@ class ExternalProviderAdapter:
     def infer(self, *, request: Any) -> BackendExecutionResult:
         model_path = str(getattr(request, "model_path", "") or "")
         source_path = str(getattr(request, "source_path", "") or "")
+        task_type = task_to_metadata_task_type(getattr(request, "task_type", None))
         if not model_path or not source_path:
             return BackendExecutionResult(
                 success=False,
                 backend=self.backend_id,
-                task_type="detection",
+                task_type=task_type,
                 model_format=str(getattr(request, "model_format", "") or "external"),
                 error="model_path/source_path are required for ExternalProviderAdapter.infer",
             )
@@ -127,7 +129,7 @@ class ExternalProviderAdapter:
         return BackendExecutionResult(
             success=(int(rc) == 0),
             backend=self.backend_id,
-            task_type="detection",
+            task_type=task_type,
             model_format=str(getattr(request, "model_format", "") or "external"),
             error=None if int(rc) == 0 else f"external inference returned code {int(rc)}",
             metadata={"return_code": int(rc)},

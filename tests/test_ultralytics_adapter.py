@@ -19,3 +19,13 @@ def test_ultralytics_adapter_infer_validates_request() -> None:
     result = adapter.infer(request=SimpleNamespace(model_format="", model_path=""))
     assert result.success is False
     assert result.error
+
+
+def test_ultralytics_adapter_infer_uses_task_hint(monkeypatch) -> None:
+    adapter = UltralyticsAdapter()
+    monkeypatch.setattr(UltralyticsAdapter, "create_inference_backend", lambda self, **kwargs: object())
+    result = adapter.infer(
+        request=SimpleNamespace(model_format="pt", model_path="/tmp/model.pt", task_type="classify")
+    )
+    assert result.success is True
+    assert result.task_type == "classification"

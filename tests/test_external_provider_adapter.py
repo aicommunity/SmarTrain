@@ -32,6 +32,27 @@ def test_external_provider_adapter_returns_success_from_runtime(monkeypatch) -> 
     )
     assert result.success is True
     assert result.backend == "external:dr-yolo"
+    assert result.task_type == "detection"
+
+
+def test_external_provider_adapter_propagates_task_hint(monkeypatch) -> None:
+    adapter = ExternalProviderAdapter(provider_id="dr-yolo", repo_path="/tmp/repo", venv_path="/tmp/venv")
+
+    class _Runtime:
+        def run_batch(self, **_kwargs):
+            return 0
+
+    monkeypatch.setattr(ExternalProviderAdapter, "create_runtime_backend", lambda self: _Runtime())
+    result = adapter.infer(
+        request=SimpleNamespace(
+            model_path="/tmp/model.pt",
+            source_path="/tmp/images",
+            model_format="external",
+            task_type="segment",
+        )
+    )
+    assert result.success is True
+    assert result.task_type == "segmentation"
 
 
 def test_external_provider_adapter_run_train_delegates_to_runner(monkeypatch) -> None:

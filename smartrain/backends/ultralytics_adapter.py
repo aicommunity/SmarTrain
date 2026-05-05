@@ -6,6 +6,7 @@ from typing import Any
 from smartrain.backends.contracts import BackendCapabilities, BackendExecutionResult, InferenceBackend
 from smartrain.inference_backends import InferenceBackendRegistry
 from smartrain.tasks.contracts import KNOWN_TASKS
+from smartrain.train_profile import task_to_metadata_task_type
 
 
 @dataclass(frozen=True)
@@ -34,11 +35,12 @@ class UltralyticsAdapter:
     def infer(self, *, request: Any) -> BackendExecutionResult:
         model_format = str(getattr(request, "model_format", "")).strip().lower()
         model_path = str(getattr(request, "model_path", ""))
+        task_type = task_to_metadata_task_type(getattr(request, "task_type", None))
         if not model_format or not model_path:
             return BackendExecutionResult(
                 success=False,
                 backend=self.backend_id,
-                task_type="detection",
+                task_type=task_type,
                 model_format=model_format or "unknown",
                 error="model_format/model_path are required for UltralyticsAdapter.infer",
             )
@@ -46,7 +48,7 @@ class UltralyticsAdapter:
         return BackendExecutionResult(
             success=True,
             backend=self.backend_id,
-            task_type="detection",
+            task_type=task_type,
             model_format=model_format,
             metadata={"model_path": model_path},
         )
