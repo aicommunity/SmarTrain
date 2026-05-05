@@ -80,6 +80,7 @@ Notes:
 - 2026-05-05: Реализован PR 4.1 foundation: в `smartrain/backends/contracts.py` добавлены protocol-интерфейсы `TrainBackend`/`TestBackend`/`InferenceBackend` и общий `BackendExecutionResult`; `CapabilityRegistry` усилен строгой валидацией `require` и helper `resolve_backend_id`; добавлены contract-тесты `tests/test_backend_registry_capabilities.py`.
 - 2026-05-05: Реализован PR 4.2 базового уровня: расширен `train_test_registry` до train/test/infer capability routing (`resolve_infer_backend`), добавлено покрытие `tests/test_train_test_registry.py`; `inference_service` подключён к capability resolver как policy-слой (с warning при runtime mismatch, без жёсткого падения).
 - 2026-05-05: Реализован PR 4.3 базового уровня: добавлен `smartrain/backends/ultralytics_adapter.py` как reference adapter (capability contract + infer entrypoint), `inference_service` использует adapter для локального backend creation; добавлены тесты `tests/test_ultralytics_adapter.py`.
+- 2026-05-05: PR 4.4 начат: добавлен `smartrain/backends/external_provider_adapter.py` и `inference_service` переведён на adapter-вызов для external inference path; покрытие `tests/test_external_provider_adapter.py`. Оставшийся объём 4.4: аналогичная нормализация external train/test entrypoints.
 
 ### Phase E — Wave 5 + Analyze / Artifact v2 (волны 5, 3 analyze, 7)
 

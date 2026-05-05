@@ -22,11 +22,11 @@ from PIL import Image
 from tqdm import tqdm
 
 from smartrain.environment_profile import collect_environment_profile, write_environment_profile
+from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
 from smartrain.backends.ultralytics_adapter import UltralyticsAdapter
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.backends.train_test_registry import resolve_infer_backend
 from smartrain.external_providers.registry import list_provider_specs
-from smartrain.inference_backends import ExternalProviderBackend
 from smartrain.inference_perf import DualPerfProfiler
 from smartrain.path_portable import relativize_if_under
 from smartrain.provider_global_index import get_provider_location
@@ -145,8 +145,12 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         env_profile = collect_environment_profile()
         env_path = os.path.join(out_root, "environment_profile.json")
         write_environment_profile(env_path, env_profile)
-        ext_backend = ExternalProviderBackend(ext_provider, repo_path, venv_path)
-        rc = ext_backend.run_batch(
+        ext_adapter = ExternalProviderAdapter(
+            provider_id=ext_provider,
+            repo_path=repo_path,
+            venv_path=venv_path,
+        )
+        rc = ext_adapter.run_batch(
             model_path=str(model_path),
             source_path=source_for_external,
             conf=float(args.conf),
