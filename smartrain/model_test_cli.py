@@ -463,14 +463,10 @@ def _normalize_task_for_backend(task: str | None) -> str:
 
 def _infer_task_from_training_metadata(root_dir: str) -> str | None:
     if str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "1":
-        from smartrain.orchestrators.canonical_gateway import load_target
+        from smartrain.orchestrators.canonical_gateway import resolve_task_context
 
-        payload = load_target(root_dir)
-        if payload.models:
-            return _normalize_task_for_backend(payload.models[0].task_type)
-        if payload.runs:
-            return _normalize_task_for_backend(payload.runs[0].task_type)
-        return None
+        ctx = resolve_task_context(root_dir)
+        return _normalize_task_for_backend(ctx.task_type)
     path = Path(root_dir) / "training_metadata.json"
     if not path.is_file():
         return None

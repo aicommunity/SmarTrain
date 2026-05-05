@@ -122,14 +122,10 @@ def test_infer_task_from_metadata_uses_canonical_gateway_when_enabled(monkeypatc
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
-    class _M:
+    class _C:
         task_type = "segmentation"
 
-    class _P:
-        models = [_M()]
-        runs = []
-
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.resolve_task_context", lambda *_a, **_k: _C())
     assert _infer_task_from_training_metadata(str(tmp_path)) == "segment"
 
 
@@ -137,7 +133,7 @@ def test_infer_task_from_metadata_falls_back_to_legacy_when_gateway_fails(monkey
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
     monkeypatch.setattr(
-        "smartrain.orchestrators.canonical_gateway.load_target",
+        "smartrain.orchestrators.canonical_gateway.resolve_task_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     with pytest.raises(RuntimeError):

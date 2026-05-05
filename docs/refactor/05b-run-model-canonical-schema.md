@@ -22,3 +22,15 @@ Unify data access for entities that currently come from either `runs` or `models
 
 - Read adapters map legacy source to canonical payload.
 - Write adapters persist canonical payload and manifest.
+
+### Canonical Gateway API (PR 6.5)
+
+- `load_target(ref, source_kind?, options?) -> CanonicalPayload`
+- `resolve_task_context(ref, source_kind?, options?) -> TaskContext`
+- `load_metrics(ref, source_kind?, format_name?, options?) -> list[CanonicalMetricsRef]`
+- `load_predictions(ref, source_kind?, format_name?, split?, options?) -> list[CanonicalPredictionRef]`
+
+Notes:
+
+- `load_predictions` currently uses conservative file discovery (`debug_*` jsonl and `*pred*.json[l]`) until a strict prediction bundle is formalized.
+- `load_metrics` namespaces follow `{task_type}/test_{format}` and must pass canonical validators.

@@ -420,7 +420,11 @@ def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Pat
         models = [_M()]
         runs = [_R()]
 
+    class _C:
+        run_id = "rid"
+
     monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.resolve_task_context", lambda *_a, **_k: _C())
     import argparse
     from smartrain.workspace_paths import WorkspaceLayout
 
@@ -445,6 +449,10 @@ def test_resolve_model_falls_back_when_canonical_gateway_fails(tmp_path: Path, m
 
     monkeypatch.setattr(
         "smartrain.orchestrators.canonical_gateway.load_target",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    monkeypatch.setattr(
+        "smartrain.orchestrators.canonical_gateway.resolve_task_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     import argparse

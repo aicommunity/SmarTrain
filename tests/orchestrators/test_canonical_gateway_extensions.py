@@ -45,3 +45,18 @@ def test_load_predictions_empty(tmp_path: Path) -> None:
     (run_dir / "train" / "weights" / "best.pt").write_bytes(b"x")
     (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
     assert load_predictions(str(run_dir), source_kind="run") == []
+
+
+def test_load_predictions_discovers_debug_jsonl(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run3"
+    dd = run_dir / "tests" / "test-pt" / "deep_diagnostics"
+    dd.mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"x")
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (dd / "debug_test.jsonl").write_text("{\"a\":1}\n{\"a\":2}\n", encoding="utf-8")
+
+    preds = load_predictions(str(run_dir), source_kind="run", split="test")
+    assert len(preds) == 1
+    assert preds[0].count == 2
+    assert preds[0].items_path.endswith("debug_test.jsonl")

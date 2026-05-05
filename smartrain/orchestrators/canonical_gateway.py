@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from glob import glob
+from pathlib import Path
 from typing import Any
 
 from smartrain.adapters.canonical.read.factory import ReadAdapterFactory
@@ -132,12 +134,70 @@ def load_predictions(
     ref: str,
     *,
     source_kind: str | None = None,
+    format_name: str | None = None,
+    split: str | None = None,
     options: CanonicalGatewayOptions | None = None,
 ) -> list[CanonicalPredictionRef]:
     """
-    Reserved for prediction artifact discovery (PR 6.5).
+    Load available prediction artifacts as canonical prediction refs (PR 6.5).
 
-    Currently returns an empty list when no standardized prediction bundle is registered.
+    Discovery is file-based and intentionally conservative until a strict
+    prediction bundle contract is finalized.
     """
-    _ = load_target(ref, source_kind=source_kind, options=options)
-    return []
+    base = load_target(ref, source_kind=source_kind, options=options)
+    if not base.models:
+        return []
+    task_type = getattr(base.models[0], "task_type", "detection")
+    schema_version = base.schema_version
+    root = os.path.abspath(os.path.expanduser(str(ref).strip()))
+    patterns = [
+        "**/deep_diagnostics/debug_test.jsonl",
+        "**/deep_diagnostics/debug_val.jsonl",
+        "**/predictions.jsonl",
+        "**/predictions.json",
+        "**/*pred*.jsonl",
+        "**/*pred*.json",
+    ]
+    split_filter = str(split or "").strip().lower()
+    fmt_filter = str(format_name or "").strip().lower()
+    out: list[CanonicalPredictionRef] = []
+    seen: set[str] = set()
+    for pat in patterns:
+        for p in sorted(glob(os.path.join(root, pat), recursive=True)):
+            ap = os.path.abspath(p)
+            if ap in seen or not os.path.isfile(ap):
+                continue
+            name_l = os.path.basename(ap).lower()
+            if split_filter:
+                if split_filter == "test" and "test" not in name_l:
+                    continue
+                if split_filter == "val" and "val" not in name_l:
+                    continue
+            if fmt_filter:
+                # Keep conservative format routing by path token only.
+                if f"_{fmt_filter}." not in name_l and f"/{fmt_filter}/" not in ap.replace("\\", "/").lower():
+                    continue
+            cnt = 0
+            try:
+                if ap.endswith(".jsonl"):
+                    with open(ap, "r", encoding="utf-8") as f:
+                        cnt = sum(1 for ln in f if str(ln).strip())
+                else:
+                    import json
+
+                    payload = json.loads(Path(ap).read_text(encoding="utf-8"))
+                    if isinstance(payload, list):
+                        cnt = len(payload)
+            except Exception:
+                cnt = 0
+            out.append(
+                CanonicalPredictionRef(
+                    task_type=task_type,
+                    items_path=ap,
+                    schema_version=schema_version,
+                    producer="smartrain.canonical_gateway",
+                    count=int(max(0, cnt)),
+                )
+            )
+            seen.add(ap)
+    return out

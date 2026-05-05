@@ -192,9 +192,10 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
     use_canonical = str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "1"
     if args.model_name:
         if use_canonical:
-            from smartrain.orchestrators.canonical_gateway import load_target
+            from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
 
             mdir = (Path(layout.models) / str(args.model_name).strip()).resolve()
+            _ = resolve_task_context(str(mdir), source_kind="model")
             payload = load_target(str(mdir), source_kind="model")
             if not payload.models:
                 raise FileNotFoundError(f"Canonical model payload has no models for: {mdir}")
@@ -210,8 +211,9 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
         if use_canonical:
-            from smartrain.orchestrators.canonical_gateway import load_target
+            from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
 
+            ctx = resolve_task_context(str(run_dir), source_kind="run")
             payload = load_target(str(run_dir), source_kind="run")
             if not payload.models:
                 raise FileNotFoundError(f"Canonical run payload has no models for: {run_dir}")
@@ -221,7 +223,7 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
                 raise FileNotFoundError(f"Canonical weights not found: {p}")
             if p.suffix.lower() not in SUPPORTED_INFERENCE_EXTS:
                 raise FileNotFoundError(f"Unsupported canonical weights format: {p.suffix}")
-            source_id = str(payload.runs[0].run_id) if payload.runs else run_dir.name
+            source_id = str(ctx.run_id or (payload.runs[0].run_id if payload.runs else run_dir.name))
             return p, source_id, "runs"
         canonical = canonical_target_from_run(run_dir)
         return canonical.model_path.resolve(), canonical.source_id, canonical.source_kind
