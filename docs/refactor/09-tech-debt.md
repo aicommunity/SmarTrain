@@ -19,7 +19,7 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - [ ] Wave 6 debt: canonical read adapters (`run/model`) are introduced, but consumer modules (`model_test_cli` / `inference_cli` / `results_analyzer`) are not yet switched to canonical gateway as primary read path.
 - [ ] `train` flow extraction is now split into external/builtin/test-only handlers, but the handlers still depend on `model_training_module` namespace (`mtm.*`). Next step: decouple shared helpers into neutral modules to reduce dynamic coupling.
 - [ ] Reduce dynamic module coupling in `train_service`: current pattern imports `model_training_module` and references many helpers via `mtm.*`; move shared primitives to neutral modules (`services/common` or `backends/*`) to simplify tests and static checks.
-- [ ] `model_test_orchestrator` delegates PT and non-PT formats via `services/test_backend_dispatch.py`; remaining gap: richer strategy objects/registry instead of free functions if more backends are added.
+- [ ] `model_test_orchestrator` delegates PT and non-PT formats via `services/test_backend_dispatch.py`; format strategy registry exists, remaining gap: move from function-map to dedicated strategy objects if backend matrix grows further.
 - [ ] Capability routing is task-aware for train/test registry, but runtime implementations are still detection-centric; add task-specific strategies/adapters for classification/segmentation instead of shared generic paths.
 
 ## Notes
@@ -46,3 +46,4 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-04: Reduced canonical run adapter dependency for task/backend metadata too: when metadata is missing, `RunAdapter` infers `task_type` from target model naming (`-cls`/`-seg`) and `backend_type` from model format (`onnx`/`engine`/`trt`). Remaining gap: inference quality still depends on naming conventions and should be replaced by explicit canonical producer fields.
 - 2026-05-04: Reduced `results_analyzer` duplication by introducing unified run row access (`_flat_row_for_run`) with canonical/legacy switching in one place; scan/export/system-profile/recommendation consumers now reuse it instead of repeating branch-specific metadata logic.
 - 2026-05-04: Moved PT and internal `pt_uni` test execution from `model_test_orchestrator` into `test_backend_dispatch` (`run_pt_test_backend`, `run_internal_pt_uni_backend`) for symmetrical backend dispatch next to non-PT paths.
+- 2026-05-05: Upgraded `services/test_backend_dispatch.py` from plain helper calls to a central format registry dispatcher (`run_test_backend_via_registry` + `TestBackendDispatchContext`), keeping wrapper compatibility while reducing orchestration branching and easing future backend additions.
