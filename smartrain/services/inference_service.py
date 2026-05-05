@@ -22,10 +22,11 @@ from PIL import Image
 from tqdm import tqdm
 
 from smartrain.environment_profile import collect_environment_profile, write_environment_profile
+from smartrain.backends.ultralytics_adapter import UltralyticsAdapter
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.backends.train_test_registry import resolve_infer_backend
 from smartrain.external_providers.registry import list_provider_specs
-from smartrain.inference_backends import ExternalProviderBackend, InferenceBackendRegistry
+from smartrain.inference_backends import ExternalProviderBackend
 from smartrain.inference_perf import DualPerfProfiler
 from smartrain.path_portable import relativize_if_under
 from smartrain.provider_global_index import get_provider_location
@@ -202,7 +203,6 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         print(f"[OK] External inference report: {report_path}")
         return int(rc), True
 
-    registry = InferenceBackendRegistry()
     model_format = str(model_path.suffix).lower().lstrip(".")
     if model_format not in {"pt", "onnx", "engine", "trt"}:
         print(f"[ERROR] Unsupported model format for inference: {model_format}", file=sys.stderr)
@@ -212,8 +212,9 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
     except Exception as e:
         print(f"[ERROR] No registered inference backend capability for format {model_format!r}: {e}", file=sys.stderr)
         return 1, False
+    adapter = UltralyticsAdapter()
     try:
-        backend = registry.create_local_backend(model_format=model_format, model_path=str(model_path))
+        backend = adapter.create_inference_backend(model_format=model_format, model_path=str(model_path))
     except Exception as e:
         print(f"[ERROR] Failed to initialize inference backend: {e}", file=sys.stderr)
         return 1, False
