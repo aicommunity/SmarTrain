@@ -95,6 +95,7 @@ Notes:
 - 2026-05-05: Дополнен consumer wiring по 5-E2 для inference runtime: в `inference_cli` добавлен `--task` (detect/classify/segment aliases), а в `services/inference_service` capability routing (`resolve_infer_backend`) теперь получает нормализованный `task_type` вместо жёсткого `"detection"`; добавлен regression `test_inference_passes_task_hint_to_capability_resolution`.
 - 2026-05-05: Дополнен adapter contract слой для 5-E2: `UltralyticsAdapter.infer` и `ExternalProviderAdapter.infer` теперь заполняют `BackendExecutionResult.task_type` из task hint (`task_to_metadata_task_type`) вместо детект-only default; добавлены тесты `test_ultralytics_adapter_infer_uses_task_hint` и `test_external_provider_adapter_propagates_task_hint`.
 - 2026-05-05: Дополнена task-aware целостность inference artifact path: `inference` report теперь несёт `task_type`, `wrap_inference_report_v2` формирует `task_type`/`v2.metrics.namespace` из payload, а `task_to_metadata_task_type` расширен для canonical значений (`detection`/`segmentation`) без регресса в alias-режиме.
+- 2026-05-05: Запущена декомпозиция `results_analyzer` (3-E3) с сохранением CLI-совместимости: вынесены service/helper-слои `services/analyze_artifacts.py` (session/output paths), `services/analyze_data_yaml.py` (data.yaml discovery), `services/analyze_table_service.py` (`scan`/`export-table` workflow); в `results_analyzer` оставлены thin-wrapper entrypoints.
 
 ### Phase F — Wave 8 (clean-code hardening)
 

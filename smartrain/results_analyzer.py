@@ -38,7 +38,6 @@ from smartrain.run_artifacts import (
     materialize_canonical_run_model,
     resolve_run_model_with_legacy_fallback,
     run_test_backend_dir,
-    run_tmp_dir,
 )
 from smartrain.analyze_cache import (
     append_cache_entry,
@@ -70,6 +69,14 @@ from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_det
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.confidence_recommendation import recommendation_file_path, read_recommendation_file
 from smartrain.analyze_models import RunRecord
+from smartrain.services.analyze_artifacts import (
+    default_relative_output,
+    session_artifacts_dir,
+    session_name,
+    session_root,
+)
+from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
+from smartrain.services.analyze_table_service import export_runs_table, scan_runs
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
@@ -201,29 +208,15 @@ def _resolve_run_val_profile(
 
 
 def _session_name(raw: str | None) -> str:
-    value = (raw or "").strip()
-    if value:
-        return value
-    return f"analyze_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    return session_name(raw)
 
 
 def _session_root(workspace_cli: str | None, analytics_session: str | None) -> str:
-    try:
-        ws = resolve_workspace_root(workspace_cli)
-        base = WorkspaceLayout(ws).analytics
-    except ValueError:
-        base = os.path.join(os.getcwd(), "analytics")
-    name = _session_name(analytics_session)
-    root = os.path.join(base, "analyze-reports", name)
-    os.makedirs(root, exist_ok=True)
-    return root
+    return session_root(workspace_cli, analytics_session)
 
 
 def _session_artifacts_dir(workspace_cli: str | None, analytics_session: str | None, category: str) -> str:
-    root = _session_root(workspace_cli, analytics_session)
-    out = os.path.join(root, "artifacts", category)
-    os.makedirs(out, exist_ok=True)
-    return out
+    return session_artifacts_dir(workspace_cli, analytics_session, category)
 
 
 def _default_relative_output(
@@ -233,12 +226,7 @@ def _default_relative_output(
     file_name: str,
     raw: str | None,
 ) -> str:
-    r = (raw or "").strip()
-    if os.path.isabs(r):
-        return os.path.abspath(r)
-    if r:
-        return os.path.join(_session_artifacts_dir(workspace_cli, analytics_session, category), os.path.basename(r))
-    return os.path.join(_session_artifacts_dir(workspace_cli, analytics_session, category), file_name)
+    return default_relative_output(workspace_cli, analytics_session, category, file_name, raw)
 
 
 def _resolve_data_yaml_for_run(run_dir: str, workspace_cli: str | None) -> tuple[str | None, str | None]:
@@ -249,84 +237,13 @@ def _resolve_data_yaml_for_run(run_dir: str, workspace_cli: str | None) -> tuple
 
 
 def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | None) -> list[tuple[str, str]]:
-    rd = os.path.abspath(run_dir)
-    out: list[tuple[str, str]] = []
-    seen: set[str] = set()
-
-    def _add(p: str | None, src: str) -> None:
-        if not p:
-            return
-        ap = os.path.abspath(p)
-        if ap in seen or not os.path.isfile(ap):
-            return
-        seen.add(ap)
-        out.append((ap, src))
-
-    args_yaml = os.path.join(rd, "train-ultralytics", "args.yaml")
-    if not os.path.isfile(args_yaml):
-        args_yaml = os.path.join(rd, "train", "args.yaml")
-    if os.path.isfile(args_yaml):
-        try:
-            payload = yaml.safe_load(open(args_yaml, encoding="utf-8")) or {}
-            data_val = payload.get("data")
-            if isinstance(data_val, str) and data_val.strip():
-                p = os.path.expanduser(data_val.strip())
-                if os.path.isabs(p) and os.path.isfile(p):
-                    _add(p, "train/args.yaml:data")
-                p_run = os.path.abspath(os.path.join(rd, p))
-                if os.path.isfile(p_run):
-                    _add(p_run, "train/args.yaml:data(run-relative)")
-                try:
-                    ws = resolve_workspace_root(workspace_cli)
-                    p_ws = os.path.abspath(os.path.join(ws, p))
-                    if os.path.isfile(p_ws):
-                        _add(p_ws, "train/args.yaml:data(workspace-relative)")
-                except ValueError:
-                    pass
-        except Exception:
-            pass
-
-    runtime_yaml = os.path.join(str(run_tmp_dir(rd)), "_runtime_data_train.yaml")
-    if os.path.isfile(runtime_yaml):
-        _add(runtime_yaml, "_runtime_data_train.yaml")
-    else:
-        runtime_yaml = os.path.join(rd, "_runtime_data_train.yaml")
-        if os.path.isfile(runtime_yaml):
-            _add(runtime_yaml, "_runtime_data_train.yaml(legacy)")
-
-    ds: dict[str, Any] = {}
-    if _canonical_read_enabled():
-        rec = _build_run_record_canonical(rd)
-        if rec.dataset_name:
-            ds["name"] = rec.dataset_name
-    else:
-        try:
-            md = load_metadata(rd)
-        except Exception:
-            return out
-        ds = (md.get("training_info") or {}).get("dataset") or {}
-    try:
-        ws = resolve_workspace_root(workspace_cli)
-    except ValueError:
-        ws = os.getcwd()
-    for key in ("path_under_workspace", "path_absolute", "path_relative"):
-        val = ds.get(key)
-        if not isinstance(val, str) or not val.strip():
-            continue
-        if key == "path_under_workspace":
-            cand = os.path.join(ws, val, "data.yaml")
-        elif key == "path_absolute":
-            cand = os.path.join(os.path.expanduser(val), "data.yaml")
-        else:
-            cand = os.path.join(rd, val, "data.yaml")
-        if os.path.isfile(cand):
-            _add(cand, f"training_metadata.dataset.{key}")
-    name = ds.get("name")
-    if isinstance(name, str) and name.strip():
-        cand = os.path.join(ws, "datasets", name.strip(), "data.yaml")
-        if os.path.isfile(cand):
-            _add(cand, "training_metadata.dataset.name -> workspace/datasets")
-    return out
+    return collect_data_yaml_candidates_for_run(
+        run_dir,
+        workspace_cli,
+        canonical_read_enabled=_canonical_read_enabled(),
+        dataset_name_resolver=lambda rd: _build_run_record_canonical(rd).dataset_name or None,
+        metadata_loader=load_metadata,
+    )
 
 
 def _has_split_dir(data_yaml_path: str, split_name: str) -> bool:
@@ -488,19 +405,7 @@ def _load_dataset_class_names(data_yaml: str) -> dict[int, str]:
 
 def cmd_scan(args: argparse.Namespace) -> None:
     runs = find_run_directories(args.models_root)
-    if not runs:
-        print("(no runs with training_metadata.json found)")
-        return
-    print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'run_dir'}")
-    print("-" * 100)
-    for i, rd in enumerate(runs, start=1):
-        try:
-            flat = _flat_row_for_run(rd)
-            m = flat.get("model") or "?"
-            ds = flat.get("dataset_name") or "?"
-            print(f"{i:4d}  {str(m)[:14]:<14}  {str(ds)[:24]:<24}  {rd}")
-        except Exception as e:
-            print(f"{i:4d}  {'?':<14}  {'?':<24}  {rd}  [error: {e}]")
+    scan_runs(runs=runs, flat_row_for_run=_flat_row_for_run)
 
 
 def cmd_export_table(args: argparse.Namespace) -> None:
@@ -527,45 +432,16 @@ def cmd_export_table(args: argparse.Namespace) -> None:
         analytics_dir = os.path.join(layout.analytics, session_name)
         os.makedirs(analytics_dir, exist_ok=True)
         out_path = os.path.join(analytics_dir, os.path.basename(args.output))
-    rows: list[dict[str, Any]] = []
-    for rd in runs:
-        try:
-            row = _flat_row_for_run(rd)
-        except Exception as e:
-            print(f"[WARN] {rd}: {e}", file=sys.stderr)
-            continue
-        tm = latest_test_metrics_path(rd)
-        if tm:
-            try:
-                tdf = pd.read_csv(tm)
-                tdf.columns = [str(c).strip() for c in tdf.columns]
-                if len(tdf) > 0:
-                    for col in tdf.columns:
-                        row[f"test_{col}"] = tdf[col].iloc[0]
-            except Exception as e:
-                row["test_read_error"] = str(e)
-        rc = results_csv_path(rd)
-        if rc:
-            try:
-                rdf = pd.read_csv(rc)
-                rdf.columns = [str(c).strip() for c in rdf.columns]
-                mcol = pick_map_column(rdf)
-                if mcol and "epoch" in rdf.columns and len(rdf) > 0:
-                    last = rdf.iloc[-1]
-                    row["train_last_epoch"] = last.get("epoch")
-                    row[f"train_last_{mcol}"] = last.get(mcol)
-            except Exception as e:
-                row["train_read_error"] = str(e)
-        rows.append(row)
-    if not rows:
-        print("[ERROR] No data to export.", file=sys.stderr)
-        sys.exit(1)
-    df = pd.DataFrame(rows)
-    out_dir = os.path.dirname(os.path.abspath(out_path))
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
-    df.to_csv(out_path, index=False, encoding="utf-8")
-    print(f"[OK] Summary table: {out_path} ({len(df)} rows)")
+    rc = export_runs_table(
+        runs=runs,
+        out_path=out_path,
+        latest_test_metrics_path=latest_test_metrics_path,
+        results_csv_path=results_csv_path,
+        pick_map_column=pick_map_column,
+        flat_row_for_run=_flat_row_for_run,
+    )
+    if rc != 0:
+        sys.exit(rc)
     if analytics_dir is not None:
         manifest = {
             "scan_root": args.models_root,
