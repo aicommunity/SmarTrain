@@ -25,7 +25,7 @@ from smartrain.workspace_paths import (
     CLASS_NAMES_FILE,
     DATASETS_SCAN_SUMMARY_FILE,
 )
-from smartrain.provider_global_index import reconcile_stale_provider_paths
+from smartrain.providers.core.global_index import reconcile_stale_provider_paths
 
 
 sys.stdout.reconfigure(encoding='utf-8')

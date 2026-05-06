@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from smartrain.datasets_json_former import main as datasets_json_main
-from smartrain.provider_global_index import list_provider_records, upsert_provider_record
+from smartrain.providers.core.global_index import list_provider_records, upsert_provider_record
 from smartrain.workspace_paths import (
     CLASS_NAMES_FILE,
     DATASETS_INFO_FILE,

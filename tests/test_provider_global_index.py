@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from smartrain import provider_global_index as pgi
+from smartrain.providers.core import global_index as pgi
 
 
 def test_provider_global_index_roundtrip(tmp_path: Path, monkeypatch) -> None:

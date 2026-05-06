@@ -19,7 +19,7 @@ from rich.markdown import Markdown
 from smartrain.interactive_contract import INTERACTIVE_ALLOWED_ENV
 from smartrain.train_backend_registry import default_train_provider
 from smartrain.train_model_catalog import TrainModelCatalog
-from smartrain.provider_global_index import list_provider_records
+from smartrain.providers.core.global_index import list_provider_records
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 app = typer.Typer(
@@ -883,27 +883,27 @@ providers_app = typer.Typer(
 
 @providers_app.command("install", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_providers_install(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.providers_cli", ["install", *list(ctx.args)])
+    _invoke_module_main("smartrain.providers.cli", ["install", *list(ctx.args)])
 
 
 @providers_app.command("uninstall", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_providers_uninstall(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.providers_cli", ["uninstall", *list(ctx.args)])
+    _invoke_module_main("smartrain.providers.cli", ["uninstall", *list(ctx.args)])
 
 
 @providers_app.command("status", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_providers_status(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.providers_cli", ["status", *list(ctx.args)])
+    _invoke_module_main("smartrain.providers.cli", ["status", *list(ctx.args)])
 
 
 @providers_app.command("doctor", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_providers_doctor(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.providers_cli", ["doctor", *list(ctx.args)])
+    _invoke_module_main("smartrain.providers.cli", ["doctor", *list(ctx.args)])
 
 
 def _providers_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        from smartrain.providers_cli import build_providers_arg_parser
+        from smartrain.providers.cli import build_providers_arg_parser
 
         p = build_providers_arg_parser()
         p.prog = "smartrain providers"

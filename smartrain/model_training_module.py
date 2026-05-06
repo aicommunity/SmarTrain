@@ -57,7 +57,7 @@ from smartrain.train_model_catalog import (
     is_supported_external_provider_model,
 )
 from smartrain.train_model_resolver import TrainModelResolver
-from smartrain.provider_global_index import (
+from smartrain.providers.core.global_index import (
     get_provider_location,
     list_provider_records,
     reconcile_stale_provider_paths,

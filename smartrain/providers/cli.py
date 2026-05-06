@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
-from pathlib import Path
 
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_yes_no
 from smartrain.external_providers.installer import install_provider, providers_root, uninstall_provider
 from smartrain.external_providers.probe import probe_provider_repo
 from smartrain.external_providers.registry import list_provider_specs
-from smartrain.provider_global_index import list_provider_records
+from smartrain.providers.core.global_index import list_provider_records
 
 
 def build_providers_arg_parser() -> argparse.ArgumentParser:
