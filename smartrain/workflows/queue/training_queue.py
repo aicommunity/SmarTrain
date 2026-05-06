@@ -2,6 +2,7 @@ import os
 import subprocess
 import time
 import argparse
+from pathlib import Path
 
 from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.workspace_paths import (
@@ -10,7 +11,8 @@ from smartrain.workspace_paths import (
     workspace_queue_status_path,
 )
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Keep default queue/status files under package root (`smartrain/`) after module move.
+BASE_DIR = str(Path(__file__).resolve().parents[2])
 QUEUE_TXT = os.path.join(BASE_DIR, "training_queue.txt")
 STATUS_FILE = os.path.join(BASE_DIR, "tmp/status.txt")
 

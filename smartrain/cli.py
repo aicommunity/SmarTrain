@@ -741,36 +741,36 @@ queue_app = typer.Typer(
 @queue_app.command("list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_list(ctx: typer.Context) -> None:
     """List queued training tasks and statuses."""
-    _invoke_module_main("smartrain.training_queue_cli", ["list", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["list", *list(ctx.args)])
 
 
 @queue_app.command("add", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_add(ctx: typer.Context) -> None:
     """Add a training command to queue."""
-    _invoke_module_main("smartrain.training_queue_cli", ["add", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["add", *list(ctx.args)])
 
 
 @queue_app.command("remove", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_remove(ctx: typer.Context) -> None:
     """Remove a queued task by id."""
-    _invoke_module_main("smartrain.training_queue_cli", ["remove", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["remove", *list(ctx.args)])
 
 
 @queue_app.command("clear", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_clear(ctx: typer.Context) -> None:
     """Remove all tasks from queue."""
-    _invoke_module_main("smartrain.training_queue_cli", ["clear", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["clear", *list(ctx.args)])
 
 
 @queue_app.command("run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_run_sub(ctx: typer.Context) -> None:
     """Run queue executor through queue subcommand."""
-    _invoke_module_main("smartrain.training_queue_cli", ["run", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["run", *list(ctx.args)])
 
 
 def _queue_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        from smartrain.training_queue_cli import build_queue_cli_arg_parser
+        from smartrain.workflows.queue.training_queue_cli import build_queue_cli_arg_parser
 
         p = build_queue_cli_arg_parser()
         p.prog = "smartrain queue"
@@ -799,11 +799,11 @@ def cmd_queue_run(ctx: typer.Context) -> None:
       smartrain queue-run --no-gui
       smartrain queue-run --workspace /data/MarsSmarTrain
     """
-    from smartrain.training_queue import build_queue_run_arg_parser
+    from smartrain.workflows.queue.training_queue import build_queue_run_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.training_queue",
+        module="smartrain.workflows.queue.training_queue",
         build_parser=build_queue_run_arg_parser,
         prog="smartrain queue-run",
     )
@@ -818,48 +818,48 @@ registry_app = typer.Typer(
 @registry_app.command("runs-list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_runs_list(ctx: typer.Context) -> None:
     """List runs in workspace runs/."""
-    _invoke_module_main("smartrain.registry_cli", ["runs-list", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["runs-list", *list(ctx.args)])
 
 
 @registry_app.command("runs-info", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_runs_info(ctx: typer.Context) -> None:
     """Show training_info and key paths for a run."""
-    _invoke_module_main("smartrain.registry_cli", ["runs-info", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["runs-info", *list(ctx.args)])
 
 
 @registry_app.command("runs-metrics", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_runs_metrics(ctx: typer.Context) -> None:
     """Show metrics files for a run."""
-    _invoke_module_main("smartrain.registry_cli", ["runs-metrics", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["runs-metrics", *list(ctx.args)])
 
 
 @registry_app.command("models-add", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_models_add(ctx: typer.Context) -> None:
     """Promote model artifact from run into models/."""
-    _invoke_module_main("smartrain.registry_cli", ["models-add", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["models-add", *list(ctx.args)])
 
 
 @registry_app.command("models-list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_models_list(ctx: typer.Context) -> None:
     """List promoted models in models/."""
-    _invoke_module_main("smartrain.registry_cli", ["models-list", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["models-list", *list(ctx.args)])
 
 
 @registry_app.command("models-info", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_models_info(ctx: typer.Context) -> None:
     """Show model manifest for a promoted model."""
-    _invoke_module_main("smartrain.registry_cli", ["models-info", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["models-info", *list(ctx.args)])
 
 
 @registry_app.command("models-remove", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_models_remove(ctx: typer.Context) -> None:
     """Remove a promoted model from models/."""
-    _invoke_module_main("smartrain.registry_cli", ["models-remove", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["models-remove", *list(ctx.args)])
 
 
 def _registry_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        from smartrain.registry_cli import build_registry_arg_parser
+        from smartrain.workflows.registry.registry_cli import build_registry_arg_parser
 
         p = build_registry_arg_parser()
         p.prog = "smartrain registry"

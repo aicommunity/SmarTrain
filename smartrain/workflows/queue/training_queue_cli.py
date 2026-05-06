@@ -8,7 +8,7 @@ import sys
 import tempfile
 import shutil
 
-import smartrain.training_queue as tq
+import smartrain.workflows.queue.training_queue as tq
 from smartrain.cli_support.cli_argparse import CliArgumentParser
 
 
