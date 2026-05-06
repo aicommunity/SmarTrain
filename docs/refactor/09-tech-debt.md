@@ -54,8 +54,8 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 
 ## Open Items
 
-- [ ] **P0 / Wave 8 (8-F1):** системный anti-pattern pass по правилам из `docs/refactor/07-clean-code-rules.md` (начать с runtime-critical модулей: `services/inference_service.py`, `services/train_service.py`, external launchers).
-- [ ] **P1 / Wave 8 (8-F3):** удалить legacy-ветки/мосты по deprecation-policy (`docs/refactor/06-deprecation-and-alias-policy.md`) только после явных gate-условий и регрессий.
+- [x] **P0 / Wave 8 (8-F1):** системный anti-pattern pass по правилам из `docs/refactor/07-clean-code-rules.md` (runtime-critical модули: `services/inference_service.py`, `services/train_service.py`, external launchers). Notes: закрыто коммитом `8ed547c`.
+- [x] **P1 / Wave 8 (8-F3):** удалить legacy-ветки/мосты по deprecation-policy (`docs/refactor/06-deprecation-and-alias-policy.md`) только после явных gate-условий и регрессий. Notes: закрыто коммитами `2f6f19d` + `8e9455a` (и релиз-ноты/депрекейшн подготовлены коммитом `9d605dc`).
 
 ## Next Execution Backlog (ready-to-start)
 

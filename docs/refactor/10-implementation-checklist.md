@@ -117,9 +117,9 @@ Notes:
 
 ### Phase F — Wave 8 (clean-code hardening)
 
-- [ ] **8-F1** Системная замена анти-паттернов из [`07-clean-code-rules.md`](./07-clean-code-rules.md).
+- [x] **8-F1** Системная замена анти-паттернов из [`07-clean-code-rules.md`](./07-clean-code-rules.md). Notes: закрыто коммитом `8ed547c`.
 - [x] **8-F2** CI/review guardrails (линт-правила, чеклисты PR).
-- [ ] **8-F3** Удаление legacy-веток после окончания deprecation windows из [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md).
+- [x] **8-F3** Удаление legacy-веток после окончания deprecation windows из [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md). Notes: подготовлено коммитом `9d605dc`, удалено/зафиксировано коммитами `2f6f19d` + `8e9455a`.
 
 Notes:
 - 2026-05-05: Стартован Wave 8 / 8-F2 bootstrap: добавлен `.github/pull_request_template.md` с policy checklist (clean-code + refactor debt hygiene) и regression guard `tests/regression/test_train_service_guardrails.py`, фиксирующий запрет на прямые `mtm.*` обращения вне composition root `run_train_after_setup`.
