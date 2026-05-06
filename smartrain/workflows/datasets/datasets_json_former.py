@@ -16,6 +16,13 @@ from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.workflows.datasets.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.workflows.datasets.dataset_passport import write_dataset_passport
+from smartrain.workflows.datasets.dataset_scan import (
+    find_obj_data_file,
+    find_obj_names_file,
+    find_yaml_file,
+    load_obj_data,
+    load_obj_names,
+)
 from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -38,59 +45,6 @@ DATASET_HASH_KEY = "dataset_hash"
 SOURCE_HASH_KEY = "source_hash"
 SOURCE_REF_KEY = "source_ref"
 MODIFIED_KEY = "modified"
-
-
-def find_yaml_file(folder_path):
-    for root, _, files in os.walk(folder_path):
-        for f in files:
-            if f.lower() in ("data.yaml", "data.yml"):
-                return os.path.join(root, f)
-    return None
-
-
-def find_obj_names_file(folder_path):
-    for root, _, files in os.walk(folder_path):
-        for f in files:
-            if f.lower() == "obj.names":
-                return os.path.join(root, f)
-    return None
-
-
-def find_obj_data_file(folder_path):
-    for root, _, files in os.walk(folder_path):
-        for f in files:
-            if f.lower() == "obj.data":
-                return os.path.join(root, f)
-    return None
-
-
-def load_obj_names(file_path):
-    """Reading obj.names file (one class per line)"""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            names = [line.strip() for line in f.readlines() if line.strip()]
-        return names
-    except Exception as e:
-        print(f"[ERROR] Failed to read {file_path}: {e}")
-        return None
-
-
-def load_obj_data(file_path):
-    """Parsing obj.data file to get the number of classes"""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        # Looking for the line classes = X
-        for line in content.split('\n'):
-            line = line.strip()
-            if line.startswith('classes'):
-                parts = line.split('=')
-                if len(parts) == 2:
-                    return int(parts[1].strip())
-        return None
-    except Exception as e:
-        print(f"[ERROR] Failed to read {file_path}: {e}")
-        return None
 
 
 def _find_cvat_annotations_xml(folder_path: str) -> Optional[str]:

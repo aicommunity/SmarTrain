@@ -48,7 +48,6 @@ from smartrain.core.training.train_profile import (
 from smartrain.core.runtime.device_selector import (
     default_device_value,
     device_display_name,
-    prompt_device_selection,
     resolve_device_request,
     validate_device_available,
 )
@@ -67,6 +66,10 @@ from smartrain.core.training.external_model_ref import parse_external_model_ref,
 from smartrain.external_providers.registry import list_provider_specs
 from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.services.train_service import run_train_after_setup
+from smartrain.workflows.training.train_options import (
+    prompt_input as _train_prompt_input,
+    prompt_train_device as _train_prompt_device,
+)
 from smartrain.services.train_runtime_helpers import (
     build_run_name as _shared_build_run_name,
     ensure_external_best_checkpoint_layout as _shared_ensure_external_best_checkpoint_layout,
@@ -998,23 +1001,12 @@ def _ensure_resume_confidence_recommendations(
 
 
 def _prompt_input(label: str, default: str = "", completer=None, show_default_hint: bool = True) -> str:
-    from prompt_toolkit import prompt
-
-    prompt_label = f"{label} [default: {default}]: " if (default != "" and show_default_hint) else label
-    value = str(prompt(prompt_label, default="", completer=completer, complete_while_typing=True)).strip()
-    if value:
-        return value
-    if default != "":
-        if sys.stdin.isatty():
-            try:
-                sys.stdout.write("\x1b[1A\r")
-                sys.stdout.write(f"{prompt_label}{default}\n")
-                sys.stdout.flush()
-            except Exception:
-                print(default)
-        else:
-            print(default)
-    return str(default)
+    return _train_prompt_input(
+        label=label,
+        default=default,
+        completer=completer,
+        show_default_hint=show_default_hint,
+    )
 
 
 def _prompt_yes_no(label: str, default: bool = False) -> bool:
@@ -1062,7 +1054,7 @@ def _prompt_optional_float(label: str, default: float | None = None) -> float | 
 
 
 def _prompt_train_device(default: str | None = None) -> str:
-    return prompt_device_selection(title="Train devices", default_device=default or default_device_value())
+    return _train_prompt_device(default=default)
 
 
 def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:

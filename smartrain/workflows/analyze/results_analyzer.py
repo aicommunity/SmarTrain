@@ -62,11 +62,11 @@ from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_works
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.training.confidence_recommendation import recommendation_file_path, read_recommendation_file
 from smartrain.workflows.analyze.analyze_models import RunRecord
-from smartrain.services.analyze_artifacts import (
-    default_relative_output,
-    session_artifacts_dir,
-    session_name,
-    session_root,
+from smartrain.workflows.analyze.analyze_compare_session_service import (
+    resolve_default_relative_output,
+    resolve_session_artifacts_dir,
+    resolve_session_name,
+    resolve_session_root,
 )
 from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
 from smartrain.services.analyze_table_service import export_runs_table, scan_runs
@@ -213,15 +213,15 @@ def _resolve_run_val_profile(
 
 
 def _session_name(raw: str | None) -> str:
-    return session_name(raw)
+    return resolve_session_name(raw)
 
 
 def _session_root(workspace_cli: str | None, analytics_session: str | None) -> str:
-    return session_root(workspace_cli, analytics_session)
+    return resolve_session_root(workspace_cli, analytics_session)
 
 
 def _session_artifacts_dir(workspace_cli: str | None, analytics_session: str | None, category: str) -> str:
-    return session_artifacts_dir(workspace_cli, analytics_session, category)
+    return resolve_session_artifacts_dir(workspace_cli, analytics_session, category)
 
 
 def _default_relative_output(
@@ -231,7 +231,7 @@ def _default_relative_output(
     file_name: str,
     raw: str | None,
 ) -> str:
-    return default_relative_output(workspace_cli, analytics_session, category, file_name, raw)
+    return resolve_default_relative_output(workspace_cli, analytics_session, category, file_name, raw)
 
 
 def _resolve_data_yaml_for_run(run_dir: str, workspace_cli: str | None) -> tuple[str | None, str | None]:
