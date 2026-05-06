@@ -204,19 +204,50 @@ def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -
     return normalized
 
 
-def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[int, bool]:
-    """
-    Run inference after CLI validated workspace, device, and interactive/non-interactive args.
+def _write_local_inference_report(
+    *,
+    ic_module: Any,
+    report_path: str,
+    args: argparse.Namespace,
+    layout: WorkspaceLayout,
+    model_source: str,
+    model_name: str,
+    model_path: Path,
+    source_abs: str,
+    source_short: str,
+    out_root: str,
+    images_input_count: int,
+    image_rows: list[dict[str, Any]],
+    skipped: int,
+    performance_payload: dict[str, Any],
+    environment_artifact_path: str,
+) -> None:
+    ic_module._write_report(
+        report_path,
+        ic_module._build_report(
+            args=args,
+            layout=layout,
+            model_source=model_source,
+            model_name=model_name,
+            model_path=model_path,
+            source_abs=source_abs,
+            source_short=source_short,
+            out_root=out_root,
+            report_path=report_path,
+            images_input_count=images_input_count,
+            image_rows=image_rows,
+            skipped=skipped,
+            performance=performance_payload,
+            environment_artifact_path=environment_artifact_path,
+        ),
+    )
 
-    Returns ``(exit_code, always_system_exit)``. External-provider runs historically always
-    finished with ``SystemExit(code)`` (including code 0); ``always_system_exit`` is True for
-    those. Local Ultralytics/backend runs use ``(code, False)`` so the CLI can return normally
-    on success (code 0) and only raise on error.
-    """
-    # Late import: helpers live in inference_cli; avoids import cycle with cli module.
-    from smartrain import inference_cli as ic
 
-    known_provider_ids = {spec.id for spec in list_provider_specs()}
+def _apply_external_provider_inference_from_refs(
+    args: argparse.Namespace,
+    *,
+    known_provider_ids: set[str],
+) -> tuple[int, bool] | None:
     try:
         parsed_weights_ref = validate_external_model_ref(
             parse_external_model_ref(getattr(args, "weights", None)),
@@ -238,6 +269,56 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         args.model_name = None
         args.weights = parsed_model_name_ref.model_ref
         print(f"[INFO] External provider inferred from --model-name: {parsed_model_name_ref.provider_id}")
+    return None
+
+
+def _validate_external_inference_model_or_fail(
+    *,
+    ext_provider: str,
+    raw_model_value: str,
+    repo_path: str,
+) -> tuple[int, bool] | None:
+    maybe_file = Path(raw_model_value).expanduser()
+    if maybe_file.is_file():
+        return None
+    is_supported = is_supported_external_provider_model(
+        ext_provider,
+        raw_model_value,
+        provider_repo_path=repo_path or None,
+    )
+    if is_supported:
+        return None
+    aliases = TrainModelCatalog(
+        provider=ext_provider,
+        provider_repo_path=repo_path or None,
+    ).supported_aliases()
+    known = ", ".join(aliases) if aliases else "<none>"
+    print(
+        f"[ERROR] Model {raw_model_value!r} is not supported by external provider "
+        f"{ext_provider!r}. Supported aliases: {known}",
+        file=sys.stderr,
+    )
+    return 2, True
+
+
+def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[int, bool]:
+    """
+    Run inference after CLI validated workspace, device, and interactive/non-interactive args.
+
+    Returns ``(exit_code, always_system_exit)``. External-provider runs historically always
+    finished with ``SystemExit(code)`` (including code 0); ``always_system_exit`` is True for
+    those. Local Ultralytics/backend runs use ``(code, False)`` so the CLI can return normally
+    on success (code 0) and only raise on error.
+    """
+    # Late import: helpers live in inference_cli; avoids import cycle with cli module.
+    from smartrain import inference_cli as ic
+
+    known_provider_ids = {spec.id for spec in list_provider_specs()}
+    external_ref_outcome = _apply_external_provider_inference_from_refs(
+        args, known_provider_ids=known_provider_ids
+    )
+    if external_ref_outcome is not None:
+        return external_ref_outcome
 
     ext_provider = str(getattr(args, "external_provider", "") or "").strip()
     task_type = task_to_metadata_task_type(getattr(args, "task", None))
@@ -277,25 +358,13 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             print(f"[ERROR] Missing venv for external provider {ext_provider!r}.", file=sys.stderr)
             return 1, True
         raw_model_value = str(getattr(args, "weights", "") or "")
-        maybe_file = Path(raw_model_value).expanduser()
-        if not maybe_file.is_file():
-            is_supported = is_supported_external_provider_model(
-                ext_provider,
-                raw_model_value,
-                provider_repo_path=repo_path or None,
-            )
-            if not is_supported:
-                aliases = TrainModelCatalog(
-                    provider=ext_provider,
-                    provider_repo_path=repo_path or None,
-                ).supported_aliases()
-                known = ", ".join(aliases) if aliases else "<none>"
-                print(
-                    f"[ERROR] Model {raw_model_value!r} is not supported by external provider "
-                    f"{ext_provider!r}. Supported aliases: {known}",
-                    file=sys.stderr,
-                )
-                return 2, True
+        model_validation_outcome = _validate_external_inference_model_or_fail(
+            ext_provider=ext_provider,
+            raw_model_value=raw_model_value,
+            repo_path=repo_path,
+        )
+        if model_validation_outcome is not None:
+            return model_validation_outcome
         source_for_external = ic._resolve_external_source(args, layout)
         source_short = (
             os.path.basename(os.path.abspath(os.path.expanduser(str(args.source_dir))).rstrip(os.sep)) or "folder"
@@ -457,24 +526,22 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         "backend": backend.name,
         "model_format": model_format,
     }
-    ic._write_report(
-        report_path,
-        ic._build_report(
-            args=args,
-            layout=layout,
-            model_source=model_source,
-            model_name=model_name,
-            model_path=model_path,
-            source_abs=source_abs,
-            source_short=source_short,
-            out_root=out_root,
-            report_path=report_path,
-            images_input_count=len(images),
-            image_rows=image_rows,
-            skipped=skipped,
-            performance=perf.to_payload(methodology=perf_methodology),
-            environment_artifact_path=env_path,
-        ),
+    _write_local_inference_report(
+        ic_module=ic,
+        report_path=report_path,
+        args=args,
+        layout=layout,
+        model_source=model_source,
+        model_name=model_name,
+        model_path=model_path,
+        source_abs=source_abs,
+        source_short=source_short,
+        out_root=out_root,
+        images_input_count=len(images),
+        image_rows=image_rows,
+        skipped=skipped,
+        performance_payload=perf.to_payload(methodology=perf_methodology),
+        environment_artifact_path=env_path,
     )
     progress_desc = f"inference:{args.data_mode}"
     for image_path in tqdm(images, desc=progress_desc, unit="img"):
@@ -489,24 +556,22 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 rb = ic._predict_roi_crop(roi_model, image_path_abs, args)
                 if rb[0] < 0:
                     skipped += 1
-                    ic._write_report(
-                        report_path,
-                        ic._build_report(
-                            args=args,
-                            layout=layout,
-                            model_source=model_source,
-                            model_name=model_name,
-                            model_path=model_path,
-                            source_abs=source_abs,
-                            source_short=source_short,
-                            out_root=out_root,
-                            report_path=report_path,
-                            images_input_count=len(images),
-                            image_rows=image_rows,
-                            skipped=skipped,
-                            performance=perf.to_payload(methodology=perf_methodology),
-                            environment_artifact_path=env_path,
-                        ),
+                    _write_local_inference_report(
+                        ic_module=ic,
+                        report_path=report_path,
+                        args=args,
+                        layout=layout,
+                        model_source=model_source,
+                        model_name=model_name,
+                        model_path=model_path,
+                        source_abs=source_abs,
+                        source_short=source_short,
+                        out_root=out_root,
+                        images_input_count=len(images),
+                        image_rows=image_rows,
+                        skipped=skipped,
+                        performance_payload=perf.to_payload(methodology=perf_methodology),
+                        environment_artifact_path=env_path,
                     )
                     perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
                     continue
@@ -545,24 +610,22 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             }
         )
         perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
-        ic._write_report(
-            report_path,
-            ic._build_report(
-                args=args,
-                layout=layout,
-                model_source=model_source,
-                model_name=model_name,
-                model_path=model_path,
-                source_abs=source_abs,
-                source_short=source_short,
-                out_root=out_root,
-                report_path=report_path,
-                images_input_count=len(images),
-                image_rows=image_rows,
-                skipped=skipped,
-                performance=perf.to_payload(methodology=perf_methodology),
-                environment_artifact_path=env_path,
-            ),
+        _write_local_inference_report(
+            ic_module=ic,
+            report_path=report_path,
+            args=args,
+            layout=layout,
+            model_source=model_source,
+            model_name=model_name,
+            model_path=model_path,
+            source_abs=source_abs,
+            source_short=source_short,
+            out_root=out_root,
+            images_input_count=len(images),
+            image_rows=image_rows,
+            skipped=skipped,
+            performance_payload=perf.to_payload(methodology=perf_methodology),
+            environment_artifact_path=env_path,
         )
 
     print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")

@@ -125,6 +125,8 @@ Notes:
 - 2026-05-05: Стартован Wave 8 / 8-F2 bootstrap: добавлен `.github/pull_request_template.md` с policy checklist (clean-code + refactor debt hygiene) и regression guard `tests/regression/test_train_service_guardrails.py`, фиксирующий запрет на прямые `mtm.*` обращения вне composition root `run_train_after_setup`.
 - 2026-05-05: Выполнен первый 8-F1 anti-pattern slice для runtime-critical зоны: в external launchers (`mp_infer`, `mfel_infer`, `mfel_val`, `mfel_train`) убраны runtime `hasattr(...)` проверки в пользу явных `getattr`/`callable` guard'ов без изменения поведения; добавлен regression gate `tests/regression/test_phase8_no_runtime_hasattr.py` на запрет `hasattr` в `train_service`, `inference_service` и целевых launchers.
 - 2026-05-05: Закрыт baseline `8-F2`: добавлен CI workflow `.github/workflows/phase8-guardrails.yml` с автоматическим policy-gate (`scripts/ci/check_phase8_guardrails.py`) на push/PR; gate проверяет запрет `hasattr` в runtime-critical модулях и запрет прямых `mtm.*` вне composition root.
+- 2026-05-05: Выполнен следующий 8-F1 срез в `inference_service`: устранено дублирование report-write orchestration в local inference loop через helper `_write_local_inference_report(...)` (initial/skip/regular update paths), поведение не изменено; regression `tests/test_inference_cli.py` и guardrails тесты зелёные.
+- 2026-05-05: Выполнен дополнительный 8-F1 срез в `inference_service`: вынесены в явные helper-границы external-provider preflight шаги (`_apply_external_provider_inference_from_refs`, `_validate_external_inference_model_or_fail`), что уменьшает смешение orchestration/validation логики в `run_inference_job` без изменения функционального поведения.
 
 ---
 
