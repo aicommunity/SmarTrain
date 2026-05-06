@@ -16,3 +16,12 @@
   - migration tooling exists,
   - usage checks are green,
   - release notes are published.
+
+## Current deprecation targets (canonical read legacy env flags)
+
+- `SMARTTRAIN_CANONICAL_READ`
+  - Deprecated: canonical read legacy toggle is removed as part of the Wave 6–7 cutover.
+  - Removal target: `0.0.3`.
+- `SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK`
+  - Deprecated: legacy fallback behavior is removed as part of the Wave 6–7 cutover.
+  - Removal target: `0.0.3`.

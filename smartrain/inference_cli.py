@@ -40,6 +40,7 @@ from smartrain.run_artifacts import is_internal_conversion_artifact
 from smartrain.artifact_schema_v2 import wrap_inference_report_v2
 from smartrain.train_profile import task_to_metadata_task_type
 from smartrain.services.inference_service import run_inference_job
+from smartrain.deprecation_policy import emit_legacy_read_deprecation_warnings
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
@@ -210,6 +211,7 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
     # explicitly allowed via SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK=1.
     legacy_fallback_allowed = str(os.getenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "")).strip() == "1"
     use_canonical = not (legacy_fallback_allowed and str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0")
+    emit_legacy_read_deprecation_warnings()
     if args.model_name:
         if use_canonical:
             from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context

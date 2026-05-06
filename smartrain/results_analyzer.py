@@ -84,6 +84,7 @@ from smartrain.services.analyze_leaderboard_service import (
     build_leaderboard_records,
     write_leaderboard_csv,
 )
+from smartrain.deprecation_policy import emit_legacy_read_deprecation_warnings
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
@@ -91,6 +92,7 @@ METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 def _canonical_read_enabled() -> bool:
     legacy_fallback_allowed = str(os.getenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "")).strip() == "1"
     canonical_read_requested_off = str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0"
+    emit_legacy_read_deprecation_warnings()
     return not (legacy_fallback_allowed and canonical_read_requested_off)
 
 

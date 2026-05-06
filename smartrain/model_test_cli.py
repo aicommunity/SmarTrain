@@ -46,6 +46,7 @@ from smartrain.device_selector import (
     resolve_device_request,
     validate_device_available,
 )
+from smartrain.deprecation_policy import emit_legacy_read_deprecation_warnings
 
 
 def build_model_test_arg_parser() -> argparse.ArgumentParser:
@@ -466,6 +467,7 @@ def _normalize_task_for_backend(task: str | None) -> str:
 def _infer_task_from_training_metadata(root_dir: str) -> str | None:
     legacy_fallback_allowed = str(os.getenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "")).strip() == "1"
     use_canonical = not (legacy_fallback_allowed and str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0")
+    emit_legacy_read_deprecation_warnings()
     if use_canonical:
         from smartrain.orchestrators.canonical_gateway import resolve_task_context
 
