@@ -212,9 +212,9 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
             raise FileNotFoundError(f"Unsupported canonical weights format: {p.suffix}")
         return p
 
-    # Wave 6 / PR 6.7 cutover policy:
-    # canonical read path is default; legacy path is emergency-only and must be
-    # explicitly allowed via SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK=1.
+    # Canonical-only behavior:
+    # legacy canonical-read env flags are deprecated/ignored for routing and only
+    # trigger deterministic [DEPRECATION] warnings via `deprecation_policy`.
     emit_legacy_read_deprecation_warnings()
     if args.model_name:
         from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
