@@ -1128,11 +1128,11 @@ def cmd_model_convert(ctx: typer.Context) -> None:
       smartrain model convert --input models/my_model.onnx --format tensorrt-trt
       smartrain model convert
     """
-    from smartrain.model_convert_cli import build_model_convert_arg_parser
+    from smartrain.workflows.models.model_convert_cli import build_model_convert_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.model_convert_cli",
+        module="smartrain.workflows.models.model_convert_cli",
         build_parser=build_model_convert_arg_parser,
         prog="smartrain model convert",
         empty_args_mode="invoke_if_tty_else_help",
@@ -1152,11 +1152,11 @@ def cmd_model_release(ctx: typer.Context) -> None:
       smartrain model release --run 1
       smartrain model release
     """
-    from smartrain.model_release_cli import build_model_release_arg_parser
+    from smartrain.workflows.models.model_release_cli import build_model_release_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.model_release_cli",
+        module="smartrain.workflows.models.model_release_cli",
         build_parser=build_model_release_arg_parser,
         prog="smartrain model release",
         empty_args_mode="invoke_if_tty_else_help",

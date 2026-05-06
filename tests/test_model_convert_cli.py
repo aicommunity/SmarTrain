@@ -4,7 +4,7 @@ import sys
 import types
 from pathlib import Path
 
-import smartrain.model_convert_cli as mcc
+import smartrain.workflows.models.model_convert_cli as mcc
 
 
 def test_discover_models_lists_only_pt(tmp_path: Path):

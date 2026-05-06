@@ -18,7 +18,7 @@
 - `smartrain/dataset_hash.py` — `hash`.
 - `smartrain/inference_cli.py` — `inference`.
 - `smartrain/dataset_report.py` — `report dataset`.
-- `smartrain/model_convert_cli.py` и `smartrain/model_release_cli.py` — `model`.
+- `smartrain/workflows/models/model_convert_cli.py` и `smartrain/workflows/models/model_release_cli.py` — `model`.
 - `smartrain/data_yaml_normalize.py` — `normalize-data-yaml`.
 - `smartrain/migrate_models_to_smartrain.py` — `migrate-models`.
 - `smartrain/clearml_upload.py` — `clearml-upload`.
@@ -44,7 +44,7 @@
 | `smartrain plot` | `smartrain/plot_creator.py` |
 | `smartrain queue` / `queue-run` | `smartrain/training_queue_cli.py` / `smartrain/training_queue.py` |
 | `smartrain registry` | `smartrain/registry_cli.py` |
-| `smartrain model convert` / `model release` | `smartrain/model_convert_cli.py` / `smartrain/model_release_cli.py` |
+| `smartrain model convert` / `model release` | `smartrain/workflows/models/model_convert_cli.py` / `smartrain/workflows/models/model_release_cli.py` |
 | `smartrain migrate-models` | `smartrain/migrate_models_to_smartrain.py` |
 | `smartrain clearml-upload` | `smartrain/clearml_upload.py` |
 | `smartrain cvat` | `smartrain/cvat_cli.py` |
@@ -67,7 +67,7 @@ flowchart LR
     cliRouter --> analyzeBlock["results_analyzer.py"]
     cliRouter --> queueBlock["training_queue_cli.py + training_queue.py"]
     cliRouter --> registryBlock["registry_cli.py"]
-    cliRouter --> modelBlock["model_convert_cli.py + model_release_cli.py"]
+    cliRouter --> modelBlock["workflows/models/model_convert_cli.py + workflows/models/model_release_cli.py"]
     cliRouter --> ioBlock["cvat_cli.py + sahi_cli.py + heatmap_cli.py"]
     cliRouter --> reportBlock["dataset_report.py"]
 ```
