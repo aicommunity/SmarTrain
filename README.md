@@ -29,6 +29,10 @@ smartrain train --data 2026-01-01_12-00-00-merged --device 0 -y
 - Single-workspace model: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `inference/`, `tmp/`.
 - Pipeline support: `scan -> fusion -> train -> analyze`.
 - Additional tools: `queue`, `registry`, `report`, `model`, `normalize-data-yaml`, `migrate-models`, `clearml-upload`, `plot`, `cvat`, `sahi`, `heatmap`, `orient`.
+- Internal package layout is being cleaned up from a flat root into domain folders:
+  - `smartrain/providers/*` for provider CLI/index/state internals
+  - `smartrain/core/runtime/*` for runtime environment profiling helpers
+  - `smartrain/workflows/*` for scenario-specific internals (`inference`, `testing`, etc.)
 
 ## How it works
 
