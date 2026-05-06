@@ -31,7 +31,7 @@ sequenceDiagram
   participant User
   participant CLI as cli.py
   participant Train as model_training_module.py
-  participant Profile as train_profile.py
+  participant Profile as core/training/train_profile.py
   participant YOLO as ultralytics.YOLO
   User->>CLI: smartrain train ...
   CLI->>Train: main(argv)

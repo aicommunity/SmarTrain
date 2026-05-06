@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
 from smartrain.cli_support.cli_contracts import emit_replay
-from smartrain.confidence_recommendation import write_not_available_recommendations
+from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.external_providers.runner import run_external_infer, run_external_train
 from smartrain.mpl_runtime import ensure_matplotlib_training_runtime
@@ -30,8 +30,8 @@ from smartrain.services.train_runtime_helpers import (
     resolve_external_eval_source,
     write_external_fallback_metrics,
 )
-from smartrain.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model
-from smartrain.train_profile import task_to_metadata_task_type
+from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model
+from smartrain.core.training.train_profile import task_to_metadata_task_type
 
 
 def _confidence_recommendation_params(args: argparse.Namespace) -> tuple[bool, float, float, float]:

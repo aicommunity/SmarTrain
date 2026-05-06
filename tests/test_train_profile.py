@@ -2,7 +2,7 @@
 import argparse
 
 from smartrain import model_training_module as mtm
-from smartrain.train_profile import (
+from smartrain.core.training.train_profile import (
     extract_smartrain_options,
     merge_cli_into_ultralytics_cfg,
     task_to_metadata_task_type,

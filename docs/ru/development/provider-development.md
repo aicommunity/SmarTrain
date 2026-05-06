@@ -46,7 +46,7 @@
 
 ## 4. Каталог моделей и строгая валидация
 
-Файл: `smartrain/train_model_catalog.py`
+Файл: `smartrain/core/training/train_model_catalog.py`
 
 Добавьте алиасы провайдера в `_EXTERNAL_PROVIDER_FALLBACK_ALIASES` и, при необходимости, динамическое обнаружение.
 

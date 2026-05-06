@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from smartrain.train_profile import task_to_metadata_task_type
+from smartrain.core.training.train_profile import task_to_metadata_task_type
 
 
 SCHEMA_V2 = "2.0.0"

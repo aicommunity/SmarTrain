@@ -27,7 +27,7 @@ from ultralytics import YOLO
 from ultralytics.utils import nms as ultralytics_nms
 from ultralytics.utils.metrics import ap_per_class
 
-from smartrain.confidence_recommendation import (
+from smartrain.core.training.confidence_recommendation import (
     compute_confidence_recommendations,
     write_not_available_recommendations,
     write_recommendation_file,

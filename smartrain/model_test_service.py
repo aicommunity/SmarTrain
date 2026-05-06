@@ -19,7 +19,7 @@ from smartrain.run_artifacts import (
 from smartrain.run_artifacts import model_sidecar_metadata_path
 
 import yaml
-from smartrain.confidence_recommendation import read_recommendation_file, recommendations_complete
+from smartrain.core.training.confidence_recommendation import read_recommendation_file, recommendations_complete
 
 TEST_ARTIFACTS_MANIFEST = "test_artifacts_manifest.json"
 PUBLIC_TEST_FORMATS = ("pt", "onnx", "engine", "trt")

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from smartrain.train_backend_registry import (
+from smartrain.core.training.train_backend_registry import (
     _aliases_from_yaml_names,
     default_train_provider,
     get_train_backend_spec,
     list_train_providers,
 )
-from smartrain.train_model_catalog import TrainModelCatalog
-from smartrain.train_model_resolver import TrainModelResolver
+from smartrain.core.training.train_model_catalog import TrainModelCatalog
+from smartrain.core.training.train_model_resolver import TrainModelResolver
 
 
 def test_train_model_catalog_contains_expected_aliases() -> None:

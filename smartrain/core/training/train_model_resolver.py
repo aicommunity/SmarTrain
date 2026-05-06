@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from smartrain.train_model_catalog import TrainModelCatalog
+from smartrain.core.training.train_model_catalog import TrainModelCatalog
 
 
 @dataclass(frozen=True)

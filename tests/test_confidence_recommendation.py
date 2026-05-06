@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from smartrain.confidence_recommendation import (
+from smartrain.core.training.confidence_recommendation import (
     compute_confidence_recommendations,
     recommendation_file_path,
     recommendations_complete,

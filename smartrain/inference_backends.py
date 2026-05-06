@@ -8,7 +8,7 @@ from typing import Any
 from smartrain.backends.contracts import BackendCapabilities
 from smartrain.backends.registry import CapabilityRegistry
 from smartrain.tasks.contracts import KNOWN_TASKS
-from smartrain.train_profile import task_to_metadata_task_type
+from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.ultralytics_ephemeral import ultralytics_sidecar_dir
 
 from smartrain.external_providers.runner import run_external_infer

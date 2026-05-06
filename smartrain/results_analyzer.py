@@ -60,7 +60,7 @@ from smartrain.metrics_reader import (
 from smartrain.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
 from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
-from smartrain.confidence_recommendation import recommendation_file_path, read_recommendation_file
+from smartrain.core.training.confidence_recommendation import recommendation_file_path, read_recommendation_file
 from smartrain.workflows.analyze.analyze_models import RunRecord
 from smartrain.services.analyze_artifacts import (
     default_relative_output,

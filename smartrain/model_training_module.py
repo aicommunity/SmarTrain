@@ -36,7 +36,7 @@ from smartrain.train_resume import (
     update_resume_test_metadata,
     update_resume_metadata,
 )
-from smartrain.train_profile import (
+from smartrain.core.training.train_profile import (
     apply_cli_smartrain_overrides,
     dataset_root_from_data_yaml,
     extract_smartrain_options,
@@ -52,18 +52,18 @@ from smartrain.device_selector import (
     resolve_device_request,
     validate_device_available,
 )
-from smartrain.train_model_catalog import (
+from smartrain.core.training.train_model_catalog import (
     TrainModelCatalog,
     is_supported_external_provider_model,
 )
-from smartrain.train_model_resolver import TrainModelResolver
+from smartrain.core.training.train_model_resolver import TrainModelResolver
 from smartrain.providers.core.global_index import (
     get_provider_location,
     list_provider_records,
     reconcile_stale_provider_paths,
 )
 from smartrain.external_providers.runner import run_external_infer, run_external_train
-from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
+from smartrain.core.training.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.external_providers.registry import list_provider_specs
 from smartrain.path_portable import relativize_if_under
 from smartrain.services.train_service import run_train_after_setup
@@ -78,7 +78,7 @@ from smartrain.services.train_runtime_helpers import (
     resolve_external_eval_source as _shared_resolve_external_eval_source,
     write_external_fallback_metrics as _shared_write_external_fallback_metrics,
 )
-from smartrain.confidence_recommendation import (
+from smartrain.core.training.confidence_recommendation import (
     compute_confidence_recommendations,
     recommendation_file_path,
     recommendations_complete,

@@ -37,7 +37,7 @@ def run_model_test_after_setup(
         run_non_pt_test_backend,
         run_pt_test_backend,
     )
-    from smartrain.train_profile import task_to_metadata_task_type
+    from smartrain.core.training.train_profile import task_to_metadata_task_type
 
     task_type = task_to_metadata_task_type(getattr(args, "task", None))
 
