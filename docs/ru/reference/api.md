@@ -16,7 +16,7 @@
 - `smartrain/results_analyzer.py` — `analyze`.
 - `smartrain/registry_cli.py` — `registry`.
 - `smartrain/dataset_hash.py` — `hash`.
-- `smartrain/inference_cli.py` — `inference`.
+- `smartrain/workflows/inference/inference_cli.py` — `inference`.
 - `smartrain/dataset_report.py` — `report dataset`.
 - `smartrain/workflows/models/model_convert_cli.py` и `smartrain/workflows/models/model_release_cli.py` — `model`.
 - `smartrain/data_yaml_normalize.py` — `normalize-data-yaml`.
@@ -38,7 +38,7 @@
 | `smartrain stats` | `smartrain/dataset_stats.py` |
 | `smartrain hash` | `smartrain/dataset_hash.py` |
 | `smartrain train` | `smartrain/model_training_module.py` |
-| `smartrain inference` | `smartrain/inference_cli.py` |
+| `smartrain inference` | `smartrain/workflows/inference/inference_cli.py` |
 | `smartrain report dataset` | `smartrain/dataset_report.py` |
 | `smartrain analyze` | `smartrain/results_analyzer.py` |
 | `smartrain plot` | `smartrain/workflows/analyze/plot_creator.py` |

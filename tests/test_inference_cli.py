@@ -9,9 +9,9 @@ from types import ModuleType
 import pytest
 from PIL import Image
 
-from smartrain.inference_backends import BackendPrediction
-from smartrain.inference_cli import main as inference_main
-from smartrain.inference_cli import _resolve_model
+from smartrain.workflows.inference.inference_backends import BackendPrediction
+from smartrain.workflows.inference.inference_cli import main as inference_main
+from smartrain.workflows.inference.inference_cli import _resolve_model
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
@@ -116,8 +116,8 @@ def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monke
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
     _install_fake_ultralytics(monkeypatch)
-    monkeypatch.setattr("smartrain.inference_cli.default_device_value", lambda: "0")
-    monkeypatch.setattr("smartrain.inference_cli._ensure_device_available_or_exit", lambda _d: None)
+    monkeypatch.setattr("smartrain.workflows.inference.inference_cli.default_device_value", lambda: "0")
+    monkeypatch.setattr("smartrain.workflows.inference.inference_cli._ensure_device_available_or_exit", lambda _d: None)
 
     model_dir = tmp_path / "models" / "demo_model"
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -507,8 +507,8 @@ def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
     src = tmp_path / "images"
     _write_image(src / "a.jpg")
 
-    monkeypatch.setattr("smartrain.inference_cli.print_replay_command", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("smartrain.inference_cli.sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("smartrain.workflows.inference.inference_cli.print_replay_command", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("smartrain.workflows.inference.inference_cli.sys.stdin.isatty", lambda: True)
 
     def _fake_interactive_fill(args, _layout):
         args.model_name = "demo_model"
@@ -524,7 +524,7 @@ def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
         args.non_interactive = True
         return True
 
-    monkeypatch.setattr("smartrain.inference_cli._interactive_fill", _fake_interactive_fill)
+    monkeypatch.setattr("smartrain.workflows.inference.inference_cli._interactive_fill", _fake_interactive_fill)
     inference_main([])
     report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
     assert report["summary"]["images_processed"] == 1
@@ -547,7 +547,7 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
         captured["model_path"] = kwargs.get("model_path")
         return 0
 
-    monkeypatch.setattr("smartrain.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -603,7 +603,7 @@ def test_inference_external_provider_accepts_task_outputs_payload(monkeypatch, t
             ],
         }
 
-    monkeypatch.setattr("smartrain.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -649,7 +649,7 @@ def test_inference_external_provider_classification_empty_payload_normalized(mon
             ],
         }
 
-    monkeypatch.setattr("smartrain.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -694,7 +694,7 @@ def test_inference_external_provider_segmentation_empty_payload_normalized(monke
             ],
         }
 
-    monkeypatch.setattr("smartrain.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.inference_cli import _resolve_model
+from smartrain.workflows.inference.inference_cli import _resolve_model
 from smartrain.workflows.testing.model_test_cli import _infer_task_from_training_metadata
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout, deploy_workspace
 

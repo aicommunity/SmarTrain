@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from smartrain import inference_cli
+from smartrain.workflows.inference import inference_cli
 
 
 def build_arg_parser():

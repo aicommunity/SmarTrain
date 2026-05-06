@@ -8,7 +8,7 @@
 
 - `smartrain train` -> `smartrain/model_training_module.py`
 - `smartrain test` -> `smartrain/workflows/testing/model_test_cli.py`
-- `smartrain inference` -> `smartrain/inference_cli.py`
+- `smartrain inference` -> `smartrain/workflows/inference/inference_cli.py`
 - `smartrain analyze` -> `smartrain/results_analyzer.py`
 - `smartrain balance` -> `smartrain/dataset_balance.py`
 - `smartrain augment` -> `smartrain/dataset_augment.py`

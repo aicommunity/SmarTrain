@@ -17,7 +17,7 @@ def wrap_inference_report_v2(payload: dict[str, Any]) -> dict[str, Any]:
     out["schema_version"] = SCHEMA_V2
     out["task_type"] = task_type
     out["backend_type"] = str(provider.get("id") or "ultralytics")
-    out["producer"] = "smartrain.inference_cli"
+    out["producer"] = "smartrain.workflows.inference.inference_cli"
     out["schema_created_at"] = datetime.now(timezone.utc).isoformat()
     out["v2"] = {
         "artifacts": {

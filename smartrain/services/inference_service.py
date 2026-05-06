@@ -311,7 +311,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
     on success (code 0) and only raise on error.
     """
     # Late import: helpers live in inference_cli; avoids import cycle with cli module.
-    from smartrain import inference_cli as ic
+    from smartrain.workflows.inference import inference_cli as ic
 
     known_provider_ids = {spec.id for spec in list_provider_specs()}
     external_ref_outcome = _apply_external_provider_inference_from_refs(
