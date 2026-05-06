@@ -12,7 +12,7 @@ from smartrain.workflows.datasets.dataset_balance import (
     _parse_class_weight_multiplier,
     main as balance_main,
 )
-from smartrain.datasets_json_former import main as scan_main
+from smartrain.workflows.datasets.datasets_json_former import main as scan_main
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 

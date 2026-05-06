@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from smartrain import results_analyzer
+from smartrain.workflows.analyze import results_analyzer
 
 
 def build_arg_parser():

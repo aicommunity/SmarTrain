@@ -70,7 +70,7 @@ def _parse_names_csv(raw: Optional[str]) -> list[str]:
 
 def _load_names_from_data_yaml(dataset_dir: Path) -> list[str]:
     # Lightweight: reuse existing datasets_json_former YAML loader to keep behavior consistent.
-    from smartrain.datasets_json_former import find_yaml_file, load_yaml
+    from smartrain.workflows.datasets.datasets_json_former import find_yaml_file, load_yaml
 
     y = find_yaml_file(str(dataset_dir))
     if not y:

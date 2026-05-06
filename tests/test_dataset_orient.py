@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from smartrain.workflows.datasets.dataset_orient import main as orient_main
-from smartrain.datasets_json_former import main as scan_main
+from smartrain.workflows.datasets.datasets_json_former import main as scan_main
 from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 

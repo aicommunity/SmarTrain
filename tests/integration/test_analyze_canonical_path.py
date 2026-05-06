@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import smartrain.results_analyzer as results_analyzer
+import smartrain.workflows.analyze.results_analyzer as results_analyzer
 from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 

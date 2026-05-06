@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from smartrain import model_training_module as mtm
+from smartrain.workflows.training import model_training_module as mtm
 
 
 def test_load_batch_from_training_metadata_reads_batch_size(tmp_path: Path) -> None:

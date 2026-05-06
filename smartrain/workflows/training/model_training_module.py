@@ -26,7 +26,7 @@ from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_tex
 from smartrain.cli_support.cli_contracts import emit_replay, make_command_request
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.interactive_contract import is_interactive_allowed
-from smartrain.train_resume import (
+from smartrain.workflows.training.train_resume import (
     RUN_STATUS_RESUMABLE_INCOMPLETE,
     RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
     RunDiagnosis,
@@ -804,7 +804,7 @@ def _run_resume_command(argv: list[str]) -> int:
             run_dir = os.path.join(WorkspaceLayout(workspace_root).runs, run_dir)
         chosen = next((d for d in candidates if os.path.abspath(run_dir) == d.run_dir), None)
         if chosen is None:
-            from smartrain.train_resume import diagnose_run
+            from smartrain.workflows.training.train_resume import diagnose_run
 
             chosen = diagnose_run(run_dir)
     else:
@@ -838,7 +838,7 @@ def _run_resume_command(argv: list[str]) -> int:
             print(f"[OK] Missing test stage completed: {chosen.run_dir}")
             return 0
         except Exception as e:
-            from smartrain.train_resume import diagnose_run
+            from smartrain.workflows.training.train_resume import diagnose_run
 
             update_resume_test_metadata(
                 chosen.run_dir,
@@ -851,7 +851,7 @@ def _run_resume_command(argv: list[str]) -> int:
             return 1
 
     try:
-        from smartrain.train_resume import diagnose_run
+        from smartrain.workflows.training.train_resume import diagnose_run
 
         resume_training_in_run(chosen.run_dir)
         _ensure_resume_confidence_recommendations(chosen.run_dir, workspace_root)
@@ -864,7 +864,7 @@ def _run_resume_command(argv: list[str]) -> int:
         print(f"[OK] Resume completed: {chosen.run_dir}")
         return 0
     except Exception as e:
-        from smartrain.train_resume import diagnose_run
+        from smartrain.workflows.training.train_resume import diagnose_run
 
         update_resume_metadata(
             chosen.run_dir,

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 
-from smartrain.results_analyzer import main as analyze_main
+from smartrain.workflows.analyze.results_analyzer import main as analyze_main
 
 
 def main(argv=None):

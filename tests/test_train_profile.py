@@ -1,7 +1,7 @@
 """YAML + CLI training profile merge tests."""
 import argparse
 
-from smartrain import model_training_module as mtm
+from smartrain.workflows.training import model_training_module as mtm
 from smartrain.core.training.train_profile import (
     extract_smartrain_options,
     merge_cli_into_ultralytics_cfg,

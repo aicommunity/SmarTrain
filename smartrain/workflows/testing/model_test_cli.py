@@ -29,7 +29,7 @@ from smartrain.workflows.testing.model_test_service import (
 )
 from smartrain.services.model_test_orchestrator import run_model_test_after_setup
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
-from smartrain.train_resume import resolve_dataset_path_for_resume
+from smartrain.workflows.training.train_resume import resolve_dataset_path_for_resume
 from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     ensure_run_layout,

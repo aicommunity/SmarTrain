@@ -669,7 +669,7 @@ def complete_missing_test_artifacts(
     pt_test_runner_kwargs: dict[str, Any] | None = None,
     update_metadata_cb: Callable[..., None] | None = None,
 ) -> bool:
-    from smartrain.train_resume import diagnose_run, resolve_dataset_path_for_resume
+    from smartrain.workflows.training.train_resume import diagnose_run, resolve_dataset_path_for_resume
 
     root_dir = os.path.abspath(run_dir)
     materialized = materialize_canonical_run_model(root_dir, ext=".pt", move=True, normalize_metadata=True)

@@ -154,7 +154,7 @@ def _collect_test_system_profile(
     runtime_device: str | None = None,
 ) -> dict[str, Any]:
     try:
-        from smartrain.model_training_module import collect_system_profile
+        from smartrain.workflows.training.model_training_module import collect_system_profile
 
         payload = collect_system_profile(root_dir)
     except Exception:

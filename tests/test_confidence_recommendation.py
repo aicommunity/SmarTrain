@@ -12,7 +12,7 @@ from smartrain.core.training.confidence_recommendation import (
     write_not_available_recommendations,
     write_recommendation_file,
 )
-from smartrain.results_analyzer import _collect_confidence_recommendation_tables
+from smartrain.workflows.analyze.results_analyzer import _collect_confidence_recommendation_tables
 
 
 class _FakeMetrics:

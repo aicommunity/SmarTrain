@@ -608,7 +608,7 @@ def run_train_after_setup(
     replay_cmd: str | None,
 ) -> int | None:
     """Runs training+test (local or external), writes metadata, returns exit code."""
-    from smartrain import model_training_module as mtm
+    from smartrain.workflows.training import model_training_module as mtm
     # Keep behavior identical while localizing mtm wiring in one composition root.
     runtime_ops = _MtmRuntimeOps(
         train_yolo_fn=mtm.train_yolo,

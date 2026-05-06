@@ -9,11 +9,11 @@
 
 ## Основные модули
 
-- `smartrain/datasets_json_former.py` — `scan`.
+- `smartrain/workflows/datasets/datasets_json_former.py` — `scan`.
 - `smartrain/dataset_former.py` — `fusion`.
-- `smartrain/model_training_module.py` — `train`.
+- `smartrain/workflows/training/model_training_module.py` — `train`.
 - `smartrain/training_queue.py` и `smartrain/training_queue_cli.py` — очередь.
-- `smartrain/results_analyzer.py` — `analyze`.
+- `smartrain/workflows/analyze/results_analyzer.py` — `analyze`.
 - `smartrain/registry_cli.py` — `registry`.
 - `smartrain/dataset_hash.py` — `hash`.
 - `smartrain/workflows/inference/inference_cli.py` — `inference`.
@@ -27,7 +27,7 @@
 
 | CLI команда | Модуль |
 |---|---|
-| `smartrain scan` | `smartrain/datasets_json_former.py` |
+| `smartrain scan` | `smartrain/workflows/datasets/datasets_json_former.py` |
 | `smartrain normalize-data-yaml` | `smartrain/data_yaml_normalize.py` |
 | `smartrain fusion` | `smartrain/dataset_former.py` |
 | `smartrain augment` | `smartrain/dataset_augment.py` |
@@ -37,10 +37,10 @@
 | `smartrain orient` | `smartrain/dataset_orient.py` |
 | `smartrain stats` | `smartrain/dataset_stats.py` |
 | `smartrain hash` | `smartrain/dataset_hash.py` |
-| `smartrain train` | `smartrain/model_training_module.py` |
+| `smartrain train` | `smartrain/workflows/training/model_training_module.py` |
 | `smartrain inference` | `smartrain/workflows/inference/inference_cli.py` |
 | `smartrain report dataset` | `smartrain/dataset_report.py` |
-| `smartrain analyze` | `smartrain/results_analyzer.py` |
+| `smartrain analyze` | `smartrain/workflows/analyze/results_analyzer.py` |
 | `smartrain plot` | `smartrain/workflows/analyze/plot_creator.py` |
 | `smartrain queue` / `queue-run` | `smartrain/training_queue_cli.py` / `smartrain/training_queue.py` |
 | `smartrain registry` | `smartrain/registry_cli.py` |

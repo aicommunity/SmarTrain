@@ -17,7 +17,7 @@ from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.core.runtime.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
 from smartrain.core.runtime.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
-from smartrain.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
+from smartrain.workflows.analyze.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
 
 
 MANIFEST_NAME = "model_manifest.json"

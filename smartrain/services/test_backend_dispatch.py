@@ -46,7 +46,7 @@ def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
         mtc.complete_missing_test_artifacts(
             ctx.root_dir,
             workspace_root=ctx.workspace_root,
-            pt_test_runner=__import__("smartrain.model_training_module", fromlist=["test_yolo"]).test_yolo,
+            pt_test_runner=__import__("smartrain.workflows.training.model_training_module", fromlist=["test_yolo"]).test_yolo,
             pt_test_runner_kwargs={
                 "val_imgsz": ctx.args.imgsz,
                 "val_conf": ctx.args.conf,

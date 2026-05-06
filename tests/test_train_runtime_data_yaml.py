@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from smartrain import model_training_module as mtm
+from smartrain.workflows.training import model_training_module as mtm
 
 
 def _touch_jpg(path: Path) -> None:

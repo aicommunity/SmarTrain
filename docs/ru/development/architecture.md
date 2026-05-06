@@ -4,7 +4,7 @@
 
 Документ фиксирует фактические потоки в коде и помогает быстро локализовать изменения.
 
-Источники правды для этого раздела: `smartrain/cli.py`, `smartrain/model_training_module.py`, `smartrain/results_analyzer.py`, `smartrain/training_queue.py`, `smartrain/core/runtime/workspace_paths.py`.
+Источники правды для этого раздела: `smartrain/cli.py`, `smartrain/workflows/training/model_training_module.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/training_queue.py`, `smartrain/core/runtime/workspace_paths.py`.
 
 ## 1) Верхнеуровневая архитектура
 

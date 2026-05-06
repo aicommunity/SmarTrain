@@ -4,7 +4,7 @@ from pathlib import Path
 
 from smartrain.workflows.inference.inference_cli import _resolve_model
 from smartrain.workflows.testing.model_test_cli import _infer_task_from_training_metadata
-from smartrain.results_analyzer import _canonical_read_enabled
+from smartrain.workflows.analyze.results_analyzer import _canonical_read_enabled
 from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout, deploy_workspace
 

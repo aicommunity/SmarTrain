@@ -8,8 +8,8 @@ import pandas as pd
 import numpy as np
 import pytest
 
-import smartrain.results_analyzer as results_analyzer
-from smartrain.results_analyzer import main as analyze_main
+import smartrain.workflows.analyze.results_analyzer as results_analyzer
+from smartrain.workflows.analyze.results_analyzer import main as analyze_main
 from smartrain.core.runtime.run_artifacts import run_test_backend_dir
 
 
@@ -699,9 +699,9 @@ def test_analyze_all_creates_session_manifest_and_report(
             str(tmp_path / "datasets" / "ds_a" / "data.yaml"),  # data yaml
         ]
     )
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
@@ -923,9 +923,9 @@ def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
             str(tmp_path / "datasets" / "ds_a" / "data.yaml"),  # data yaml
         ]
     )
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     analyze_main(
@@ -1254,9 +1254,9 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
         return default
 
     answers = iter(["1", "full"])
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", _fake_prompt_text)
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", _fake_prompt_text)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     analyze_main(
@@ -1886,7 +1886,7 @@ def test_auto_detect_multiple_candidates_prints_single_list(
     monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
     monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
     monkeypatch.setattr(
-        "smartrain.results_analyzer.prompt_choice",
+        "smartrain.workflows.analyze.results_analyzer.prompt_choice",
         lambda _label, options, default=None, **_kw: default or options[0],
     )
 
@@ -2044,9 +2044,9 @@ def test_inference_and_pr_respect_selected_run_scope_in_analyze_all(
     monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
 
     answers = iter(["1", "2", "full", str(tmp_path / "datasets" / "ds_a" / "data.yaml")])
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     analyze_main(

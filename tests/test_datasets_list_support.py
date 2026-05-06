@@ -4,7 +4,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from smartrain.datasets_json_former import main as datasets_json_main
+from smartrain.workflows.datasets.datasets_json_former import main as datasets_json_main
 from smartrain.core.runtime.workspace_paths import CLASS_NAMES_FILE, DATASETS_INFO_FILE, deploy_workspace
 
 
