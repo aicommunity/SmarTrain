@@ -90,7 +90,8 @@ METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
 def _canonical_read_enabled() -> bool:
     legacy_fallback_allowed = str(os.getenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "")).strip() == "1"
-    return not (legacy_fallback_allowed and str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0")
+    canonical_read_requested_off = str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0"
+    return not (legacy_fallback_allowed and canonical_read_requested_off)
 
 
 def _clear_gpu_memory() -> None:

@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
 from smartrain.cli_contracts import emit_replay, make_command_request
@@ -432,7 +434,7 @@ def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | 
     train_args = Path(root_dir) / "train" / "args.yaml"
     if train_args.is_file():
         try:
-            payload = json.loads(json.dumps(__import__("yaml").safe_load(train_args.read_text(encoding="utf-8")) or {}))
+            payload = json.loads(json.dumps(yaml.safe_load(train_args.read_text(encoding="utf-8")) or {}))
             if defaults["imgsz"] is None and payload.get("imgsz") is not None:
                 defaults["imgsz"] = payload.get("imgsz")
             if defaults["iou"] is None and payload.get("iou") is not None:

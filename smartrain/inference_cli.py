@@ -197,6 +197,14 @@ def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, 
 
 
 def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Path, str, str]:
+    def _resolve_and_validate_canonical_weights(model: Any) -> Path:
+        p = Path(str(model.weights_path)).expanduser().resolve()
+        if not p.is_file():
+            raise FileNotFoundError(f"Canonical weights not found: {p}")
+        if p.suffix.lower() not in SUPPORTED_INFERENCE_EXTS:
+            raise FileNotFoundError(f"Unsupported canonical weights format: {p.suffix}")
+        return p
+
     # Wave 6 / PR 6.7 cutover policy:
     # canonical read path is default; legacy path is emergency-only and must be
     # explicitly allowed via SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK=1.
@@ -212,11 +220,7 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
             if not payload.models:
                 raise FileNotFoundError(f"Canonical model payload has no models for: {mdir}")
             model = payload.models[0]
-            p = Path(str(model.weights_path)).expanduser().resolve()
-            if not p.is_file():
-                raise FileNotFoundError(f"Canonical weights not found: {p}")
-            if p.suffix.lower() not in SUPPORTED_INFERENCE_EXTS:
-                raise FileNotFoundError(f"Unsupported canonical weights format: {p.suffix}")
+            p = _resolve_and_validate_canonical_weights(model)
             return p, str(model.model_id or mdir.name), "models"
         p, model_key = _resolve_model_from_name(layout, str(args.model_name).strip())
         return p, model_key, "models"
@@ -230,11 +234,7 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
             if not payload.models:
                 raise FileNotFoundError(f"Canonical run payload has no models for: {run_dir}")
             model = payload.models[0]
-            p = Path(str(model.weights_path)).expanduser().resolve()
-            if not p.is_file():
-                raise FileNotFoundError(f"Canonical weights not found: {p}")
-            if p.suffix.lower() not in SUPPORTED_INFERENCE_EXTS:
-                raise FileNotFoundError(f"Unsupported canonical weights format: {p.suffix}")
+            p = _resolve_and_validate_canonical_weights(model)
             source_id = str(ctx.run_id or (payload.runs[0].run_id if payload.runs else run_dir.name))
             return p, source_id, "runs"
         canonical = canonical_target_from_run(run_dir)
