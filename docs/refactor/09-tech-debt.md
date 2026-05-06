@@ -25,6 +25,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - moved analyze utility modules to `smartrain/workflows/analyze/*` (`analyze_cache`, `analyze_models`, `compare_service`)
   - updated imports/tests and validated with full regression (`582 passed, 1 skipped`).
   Residual debt for this wave: `no residual debt`.
+- 2026-05-06: Additional canonical-structure wave complete:
+  - moved `smartrain/canonical_refs.py` -> `smartrain/canonical/refs.py`
+  - moved `smartrain/deprecation_policy.py` -> `smartrain/canonical/policy.py`
+  - moved `smartrain/artifact_schema_v2.py` -> `smartrain/canonical/schema.py`
+  - updated canonical-related imports and tests; full regression green (`582 passed, 1 skipped`).
+  Residual debt for this wave: `no residual debt`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.

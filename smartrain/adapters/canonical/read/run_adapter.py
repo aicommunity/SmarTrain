@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from smartrain.canonical_refs import canonical_target_from_run
+from smartrain.canonical.refs import canonical_target_from_run
 from smartrain.domain.canonical.models import CanonicalModelRef, CanonicalPayload, CanonicalRunRef
 
 from .normalizers import normalize_backend, normalize_path, normalize_task

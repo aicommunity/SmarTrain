@@ -36,11 +36,11 @@ from smartrain.device_selector import (
 )
 from smartrain.model_context import infer_img_size_from_model_context
 from smartrain.run_artifacts import is_internal_conversion_artifact
-from smartrain.artifact_schema_v2 import wrap_inference_report_v2
+from smartrain.canonical.schema import wrap_inference_report_v2
 from smartrain.train_profile import task_to_metadata_task_type
 from smartrain.services.inference_service import run_inference_job
-from smartrain.deprecation_policy import emit_legacy_read_deprecation_warnings
-from smartrain.canonical_refs import canonical_target_from_model_dir
+from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
+from smartrain.canonical.refs import canonical_target_from_model_dir
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"

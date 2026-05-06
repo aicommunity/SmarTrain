@@ -81,7 +81,7 @@ from smartrain.services.analyze_leaderboard_service import (
     build_leaderboard_records,
     write_leaderboard_csv,
 )
-from smartrain.deprecation_policy import emit_legacy_read_deprecation_warnings
+from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from smartrain.canonical_refs import canonical_target_from_model_dir
+from smartrain.canonical.refs import canonical_target_from_model_dir
 from smartrain.domain.canonical.models import CanonicalModelRef, CanonicalPayload
 
 from .normalizers import normalize_path

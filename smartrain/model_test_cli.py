@@ -46,7 +46,7 @@ from smartrain.device_selector import (
     resolve_device_request,
     validate_device_available,
 )
-from smartrain.deprecation_policy import emit_legacy_read_deprecation_warnings
+from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
 
 
 def build_model_test_arg_parser() -> argparse.ArgumentParser:
