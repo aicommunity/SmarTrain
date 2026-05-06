@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.cli_migration import run_migration
+from smartrain.workflows.migration.cli_migration import run_migration
 from smartrain.workspace_paths import deploy_workspace
 
 

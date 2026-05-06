@@ -1218,11 +1218,11 @@ def cmd_migrate(ctx: typer.Context) -> None:
       smartrain migrate canonical --mode apply --continue-on-error
       smartrain migrate canonical --source-kind run --report analytics/migration-reports/run-only.json
     """
-    from smartrain.cli_migration import build_migration_arg_parser
+    from smartrain.workflows.migration.cli_migration import build_migration_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.cli_migration",
+        module="smartrain.workflows.migration.cli_migration",
         build_parser=build_migration_arg_parser,
         prog="smartrain migrate",
     )
@@ -1241,11 +1241,11 @@ def cmd_migrate_models(ctx: typer.Context) -> None:
       smartrain migrate-models --workspace /data/MarsSmarTrain
       smartrain migrate-models --dry-run
     """
-    from smartrain.migrate_models_to_smartrain import build_migrate_models_arg_parser
+    from smartrain.workflows.migration.migrate_models_to_smartrain import build_migrate_models_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.migrate_models_to_smartrain",
+        module="smartrain.workflows.migration.migrate_models_to_smartrain",
         build_parser=build_migrate_models_arg_parser,
         prog="smartrain migrate-models",
     )

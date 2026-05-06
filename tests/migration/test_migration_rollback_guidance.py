@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.cli_migration import run_migration
+from smartrain.workflows.migration.cli_migration import run_migration
 from smartrain.workspace_paths import deploy_workspace
 
 
@@ -50,7 +50,7 @@ def test_report_contains_operator_guidance_and_rollback_hints(tmp_path: Path, mo
     def _raise(*args, **kwargs):
         raise RuntimeError("forced failure for guidance")
 
-    monkeypatch.setattr("smartrain.cli_migration.read_legacy_target", _raise)
+    monkeypatch.setattr("smartrain.workflows.migration.cli_migration.read_legacy_target", _raise)
     report = run_migration(
         workspace=str(tmp_path),
         source_kind="run",
