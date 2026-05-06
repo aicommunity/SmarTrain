@@ -56,7 +56,6 @@ def _resolve_split_image_paths(data_yaml_path: str, split_name: str) -> list[str
                 for name in sorted(filenames):
                     if Path(name).suffix.lower() in exts:
                         out.append(str(Path(dirpath, name).resolve()))
-    # Deduplicate while preserving order.
     return list(dict.fromkeys(out))
 
 
@@ -70,7 +69,6 @@ def collect_ultralytics_style_gt(
     gt_rows: list[UnifiedGtRow] = []
     issues: list[str] = []
     for im_file, lb_file in zip(image_paths, label_paths):
-        # verify_image_label returns normalized xywh labels after Ultralytics checks.
         checked = verify_image_label((im_file, lb_file, "", False, max(len(names), 1), 0, 0, False))
         msg = str(checked[9] or "")
         if msg:
@@ -101,3 +99,4 @@ def collect_ultralytics_style_gt(
                 )
             )
     return gt_rows, image_paths, issues
+

@@ -11,8 +11,8 @@ from pathlib import Path
 
 from smartrain.external_providers.probe import probe_provider_repo
 from smartrain.external_providers.registry import get_provider_spec
-from smartrain.provider_global_index import mark_provider_state, upsert_provider_record
-from smartrain.provider_install_state import write_provider_state
+from smartrain.providers.core.global_index import mark_provider_state, upsert_provider_record
+from smartrain.providers.core.provider_install_state import write_provider_state
 
 
 @dataclass(frozen=True)

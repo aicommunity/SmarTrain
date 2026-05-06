@@ -21,15 +21,15 @@ class InferenceJobOutcome(NamedTuple):
 from PIL import Image
 from tqdm import tqdm
 
-from smartrain.environment_profile import collect_environment_profile, write_environment_profile
+from smartrain.core.runtime.environment_profile import collect_environment_profile, write_environment_profile
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
 from smartrain.backends.ultralytics_adapter import UltralyticsAdapter
 from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.backends.train_test_registry import resolve_infer_backend
 from smartrain.external_providers.registry import list_provider_specs
-from smartrain.inference_perf import DualPerfProfiler
+from smartrain.workflows.inference.inference_perf import DualPerfProfiler
 from smartrain.path_portable import relativize_if_under
-from smartrain.provider_global_index import get_provider_location
+from smartrain.providers.core.global_index import get_provider_location
 from smartrain.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model
 from smartrain.train_profile import task_to_metadata_task_type
 from smartrain.ultralytics_ephemeral import ultralytics_sidecar_dir

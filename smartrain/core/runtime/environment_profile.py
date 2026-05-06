@@ -77,3 +77,4 @@ def write_environment_profile(output_path: str, payload: dict[str, Any]) -> str:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(out)
+

@@ -16,7 +16,7 @@ from smartrain.model_test_service import (
     has_matching_test_artifacts,
     test_artifacts_manifest_path as manifest_path_fn,
 )
-from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
+from smartrain.workflows.testing.unified_metrics_adapter import collect_ultralytics_style_gt
 
 
 def _stub_prepare_trt_runtime(_engine_path: str) -> dict:

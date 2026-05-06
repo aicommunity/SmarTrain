@@ -32,3 +32,4 @@ def normalize_eval_params(
         "conf": float(conf if conf is not None else default_conf),
         "iou": float(iou if iou is not None else default_iou),
     }
+

@@ -46,8 +46,8 @@ from smartrain.model_test_service import (
 from smartrain.run_artifacts import ensure_run_layout, read_model_sidecar_metadata
 from smartrain import tensorrt_checks as trt_checks
 from smartrain.ultralytics_ephemeral import best_effort_prune_runs_detect_near_run, ultralytics_sidecar_dir
-from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
-from smartrain.unified_validator_core import EvalProvenance, normalize_eval_params
+from smartrain.workflows.testing.unified_metrics_adapter import collect_ultralytics_style_gt
+from smartrain.workflows.testing.unified_validator_core import EvalProvenance, normalize_eval_params
 
 
 @dataclass

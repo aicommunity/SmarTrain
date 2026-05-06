@@ -84,3 +84,4 @@ class DualPerfProfiler:
             "stage_breakdown_ms": {k: _stats_ns(v) for k, v in self._stages_ns.items()},
             "methodology": methodology or {},
         }
+
