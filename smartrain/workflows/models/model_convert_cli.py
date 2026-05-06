@@ -23,7 +23,7 @@ from smartrain.cli_support.cli_prompts import (
 )
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.interactive_contract import is_interactive_allowed
-from smartrain.model_context import infer_img_size_with_source
+from smartrain.workflows.models.model_context import infer_img_size_with_source
 from smartrain.run_artifacts import (
     canonical_run_model_path,
     materialize_canonical_run_model,
@@ -31,7 +31,7 @@ from smartrain.run_artifacts import (
     run_tmp_dir,
     write_model_sidecar_metadata,
 )
-from smartrain import tensorrt_checks as trt_checks
+from smartrain.workflows.models import tensorrt_checks as trt_checks
 from smartrain.run_discovery import find_run_directories
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
 

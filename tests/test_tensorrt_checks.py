@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import types
 
-from smartrain import tensorrt_checks as tc
+from smartrain.workflows.models import tensorrt_checks as tc
 
 
 def test_check_python_cuda_runtime_ready_ok(monkeypatch):

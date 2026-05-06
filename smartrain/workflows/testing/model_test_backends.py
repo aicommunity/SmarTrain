@@ -44,7 +44,7 @@ from smartrain.workflows.testing.model_test_service import (
     persist_target_test_artifacts_state,
 )
 from smartrain.run_artifacts import ensure_run_layout, read_model_sidecar_metadata
-from smartrain import tensorrt_checks as trt_checks
+from smartrain.workflows.models import tensorrt_checks as trt_checks
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_runs_detect_near_run, ultralytics_sidecar_dir
 from smartrain.workflows.testing.unified_metrics_adapter import collect_ultralytics_style_gt
 from smartrain.workflows.testing.unified_validator_core import EvalProvenance, normalize_eval_params
