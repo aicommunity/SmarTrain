@@ -68,6 +68,14 @@ from smartrain.workflows.analyze.analyze_compare_session_service import (
     resolve_session_name,
     resolve_session_root,
 )
+from smartrain.workflows.analyze.analyze_benchmark_service import (
+    collect_split_images as _svc_collect_split_images,
+    resolve_inference_csv_path as _svc_resolve_inference_csv_path,
+    resolve_inference_plot_png as _svc_resolve_inference_plot_png,
+    resolve_selected_run_dirs as _svc_resolve_selected_run_dirs,
+    run_inference_benchmark as _svc_run_inference_benchmark,
+    run_inference_plot as _svc_run_inference_plot,
+)
 from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
 from smartrain.services.analyze_table_service import export_runs_table, scan_runs
 from smartrain.services.analyze_compare_service import run_compare_workflow
@@ -1277,29 +1285,7 @@ def _resolve_selected_run_dirs(
     runs_group_dir: str,
     selected_run_dirs: list[str] | tuple[str, ...] | None,
 ) -> list[str]:
-    all_run_dirs = sorted(
-        d for d in glob(os.path.join(runs_group_dir, "*"))
-        if os.path.isdir(d)
-    )
-    if not all_run_dirs:
-        return []
-    selected_ordered: list[str] = []
-    for p in (selected_run_dirs or []):
-        ps = str(p).strip()
-        if not ps:
-            continue
-        ap = os.path.abspath(os.path.expanduser(ps))
-        if ap not in selected_ordered:
-            selected_ordered.append(ap)
-    if not selected_ordered:
-        return all_run_dirs
-    # When explicit run dirs are provided (e.g. mixed datasets), honor them
-    # directly even if they live outside runs_group_dir.
-    explicit_existing = [d for d in selected_ordered if os.path.isdir(d)]
-    if explicit_existing:
-        return explicit_existing
-    selected_norm = set(selected_ordered)
-    return [d for d in all_run_dirs if os.path.abspath(d) in selected_norm]
+    return _svc_resolve_selected_run_dirs(runs_group_dir, selected_run_dirs)
 
 
 def cmd_pr_curves(args: argparse.Namespace) -> None:
@@ -1510,25 +1496,7 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
 
 
 def _collect_split_images(data_yaml_path: str, split_name: str, limit: int) -> list[str]:
-    with open(data_yaml_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"Invalid YAML: {data_yaml_path}")
-    split_rel = data.get(split_name)
-    if not split_rel or not isinstance(split_rel, str):
-        raise ValueError(f"data.yaml has no path for split={split_name!r}")
-
-    base_dir = os.path.dirname(os.path.abspath(data_yaml_path))
-    split_path = os.path.abspath(os.path.join(base_dir, split_rel))
-    if not os.path.isdir(split_path):
-        raise FileNotFoundError(f"Split directory not found: {split_path}")
-
-    exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-    images = sorted(
-        p for p in glob(os.path.join(split_path, "**", "*"), recursive=True)
-        if os.path.isfile(p) and p.lower().endswith(exts)
-    )
-    return images[:limit]
+    return _svc_collect_split_images(data_yaml_path, split_name, limit)
 
 
 def _resolve_inference_csv_path(
@@ -1536,208 +1504,30 @@ def _resolve_inference_csv_path(
     out_csv_cli: str | None,
     runs_group_dir: str,
 ) -> str:
-    if out_csv_cli:
-        return os.path.abspath(os.path.expanduser(out_csv_cli))
-    try:
-        ws = resolve_workspace_root(workspace_cli)
-        base = os.path.join(WorkspaceLayout(ws).analytics, "inference_tests")
-    except ValueError:
-        base = os.path.join(os.path.dirname(os.path.abspath(runs_group_dir)), "analytics", "inference_tests")
-    os.makedirs(base, exist_ok=True)
-    group_name = os.path.basename(os.path.normpath(runs_group_dir))
-    return os.path.join(base, f"{group_name}.csv")
+    return _svc_resolve_inference_csv_path(
+        workspace_cli,
+        out_csv_cli,
+        runs_group_dir,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
+    )
 
 
 def cmd_inference_benchmark(args: argparse.Namespace) -> None:
-    if (not getattr(args, "runs_group_dir", None) or not getattr(args, "data_yaml", None)) and sys.stdin.isatty():
-        args.runs_group_dir = prompt_text("Runs group dir", default=str(args.models_root)).strip() or str(args.models_root)
-        args.data_yaml = prompt_text("Path to data.yaml", default=str(getattr(args, "data_yaml", ""))).strip()
-    if not getattr(args, "runs_group_dir", None) or not getattr(args, "data_yaml", None):
-        print("[ERROR] Incomplete arguments: --runs-group-dir and --data-yaml are required.", file=sys.stderr)
-        sys.exit(2)
-    runs_group_dir = os.path.abspath(os.path.expanduser(args.runs_group_dir))
-    if not os.path.isdir(runs_group_dir):
-        print(f"[ERROR] Models directory not found: {runs_group_dir}", file=sys.stderr)
-        sys.exit(1)
-    data_yaml = os.path.abspath(os.path.expanduser(args.data_yaml))
-    if not os.path.isfile(data_yaml):
-        print(f"[ERROR] data.yaml not found: {data_yaml}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        from ultralytics import YOLO
-    except ImportError as e:
-        print(f"[ERROR] Failed to import ultralytics: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    requested_device = str(args.device).strip() if args.device is not None else "cpu"
-    effective_device = requested_device or "cpu"
-    effective_half = bool(args.half)
-    if effective_device.lower() != "cpu":
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                print(
-                    f"[WARN] CUDA is unavailable (torch.cuda.is_available()=False). "
-                    f"Switching device from {effective_device!r} to 'cpu'."
-                )
-                effective_device = "cpu"
-        except Exception as e:
-            print(f"[WARN] Could not validate CUDA via torch ({e}); using CPU.")
-            effective_device = "cpu"
-    if effective_device.lower() == "cpu" and effective_half:
-        print("[WARN] --half is not used on CPU; disabling half.")
-        effective_half = False
-
-    try:
-        images = _collect_split_images(data_yaml, args.split, args.frames)
-    except Exception as e:
-        print(f"[ERROR] Failed to load test frames: {e}", file=sys.stderr)
-        sys.exit(1)
-    if not images:
-        print("[ERROR] No images found for inference.", file=sys.stderr)
-        sys.exit(1)
-
-    run_dirs = _resolve_selected_run_dirs(
-        runs_group_dir,
-        getattr(args, "selected_run_dirs", None),
+    _svc_run_inference_benchmark(
+        args,
+        prompt_text_cb=prompt_text,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
+        canonical_run_model_path_cb=canonical_run_model_path,
+        run_cache_root_cb=run_cache_root,
+        compute_fingerprint_cb=compute_fingerprint,
+        data_yaml_hash_cb=data_yaml_hash,
+        weights_hash_cb=weights_hash,
+        append_cache_entry_cb=append_cache_entry,
+        ultralytics_sidecar_dir_cb=ultralytics_sidecar_dir,
+        clear_gpu_memory_cb=_clear_gpu_memory,
     )
-    if not run_dirs:
-        print(f"[ERROR] No run directories found for scope in: {runs_group_dir}", file=sys.stderr)
-        sys.exit(1)
-    print(f"[INFO] Benchmark scope: {len(run_dirs)} run(s) selected")
-
-    rows: list[dict[str, Any]] = []
-    cache_stats: list[dict[str, Any]] = []
-    for run_dir in run_dirs:
-        model_name = os.path.basename(run_dir.rstrip(os.sep))
-        best_pt = canonical_run_model_path(run_dir, ".pt")
-        if not os.path.isfile(best_pt):
-            print(f"[WARN] {model_name}: missing run model, skipping")
-            continue
-        cache_root = run_cache_root(run_dir)
-        fp = compute_fingerprint(
-            {
-                "tool": "analyze-v2",
-                "task": "inference_benchmark",
-                "split": args.split,
-                "frames": int(args.frames),
-                "device": effective_device,
-                "half": bool(effective_half),
-                "data_yaml_hash": data_yaml_hash(data_yaml),
-                "weights_hash": weights_hash(run_dir),
-            }
-        )
-        cache_csv = os.path.join(cache_root, "inference", f"bench_{fp}.csv")
-        os.makedirs(os.path.dirname(cache_csv), exist_ok=True)
-        if bool(getattr(args, "reuse_run_cache", True)) and os.path.isfile(cache_csv):
-            cdf = pd.read_csv(cache_csv)
-            if len(cdf) > 0:
-                row = cdf.iloc[0].to_dict()
-                rows.append(row)
-                cache_stats.append({"run_dir": run_dir, "artifact": "inference.benchmark", "status": "hit"})
-                print(f"[INFO] {model_name}: benchmark cache hit")
-                continue
-        print(f"[INFO] {model_name}: benchmarking on {len(images)} frames ...")
-        try:
-            _clear_gpu_memory()
-            model = YOLO(best_pt)
-            pred_proj = ultralytics_sidecar_dir(run_dir, ".ultralytics_predict_scratch")
-            pred_kw = dict(
-                verbose=False,
-                device=effective_device,
-                half=effective_half,
-                save=False,
-                project=pred_proj,
-                name="infer-bench",
-                exist_ok=True,
-            )
-            # Warm-up to reduce first-iteration skew.
-            model.predict(source=images[0], **pred_kw)
-            timings_ms: list[float] = []
-            prep_ms: list[float] = []
-            infer_ms: list[float] = []
-            post_ms: list[float] = []
-            for img_path in tqdm(
-                images,
-                desc=f"{model_name} frames",
-                unit="img",
-                leave=False,
-                disable=len(images) < 3,
-            ):
-                t0 = time.perf_counter()
-                results = model.predict(source=img_path, **pred_kw)
-                t1 = time.perf_counter()
-                timings_ms.append((t1 - t0) * 1000.0)
-                if results:
-                    speed = getattr(results[0], "speed", None)
-                    if isinstance(speed, dict):
-                        p = speed.get("preprocess")
-                        i = speed.get("inference")
-                        po = speed.get("postprocess")
-                        if p is not None:
-                            prep_ms.append(float(p))
-                        if i is not None:
-                            infer_ms.append(float(i))
-                        if po is not None:
-                            post_ms.append(float(po))
-            avg_ms = float(np.mean(timings_ms))
-            avg_prep = float(np.mean(prep_ms)) if prep_ms else None
-            avg_infer = float(np.mean(infer_ms)) if infer_ms else None
-            avg_post = float(np.mean(post_ms)) if post_ms else None
-            rows.append(
-                {
-                    "model": model_name,
-                    "run_dir": run_dir,
-                    "weights": best_pt,
-                    "frames_count": len(images),
-                    "device": effective_device,
-                    "half": effective_half,
-                    "avg_total_ms_per_frame": avg_ms,
-                    "avg_preprocess_ms_per_frame": avg_prep,
-                    "avg_inference_ms_per_frame": avg_infer,
-                    "avg_postprocess_ms_per_frame": avg_post,
-                    "avg_total_fps": (1000.0 / avg_ms) if avg_ms > 0 else None,
-                    "avg_inference_fps": (1000.0 / avg_infer) if avg_infer and avg_infer > 0 else None,
-                }
-            )
-            pd.DataFrame([rows[-1]]).to_csv(cache_csv, index=False, encoding="utf-8")
-            append_cache_entry(
-                run_dir,
-                {"artifact": "inference.benchmark", "fingerprint": fp, "path": os.path.relpath(cache_csv, run_dir)},
-            )
-            cache_stats.append({"run_dir": run_dir, "artifact": "inference.benchmark", "status": "miss"})
-            if avg_infer is not None:
-                print(
-                    f"[OK] {model_name}: total={avg_ms:.2f} ms/frame, "
-                    f"infer={avg_infer:.2f} ms/frame"
-                )
-            else:
-                print(f"[OK] {model_name}: total={avg_ms:.2f} ms/frame")
-            _clear_gpu_memory()
-        except Exception as e:
-            print(f"[WARN] {model_name}: benchmark error: {e}")
-            _clear_gpu_memory()
-
-    if not rows:
-        print("[ERROR] No benchmark results produced.", file=sys.stderr)
-        sys.exit(1)
-
-    out_csv = _resolve_inference_csv_path(args.workspace, args.out_csv, runs_group_dir)
-    os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
-    sort_col = "avg_inference_ms_per_frame" if any(
-        r.get("avg_inference_ms_per_frame") is not None for r in rows
-    ) else "avg_total_ms_per_frame"
-    pd.DataFrame(rows).sort_values(sort_col).to_csv(
-        out_csv, index=False, encoding="utf-8"
-    )
-    print(f"[OK] Results CSV: {out_csv}")
-    stats_out = str(getattr(args, "cache_stats_out", "") or "").strip()
-    if stats_out:
-        os.makedirs(os.path.dirname(stats_out) or ".", exist_ok=True)
-        with open(stats_out, "w", encoding="utf-8") as f:
-            json.dump({"cache": cache_stats}, f, ensure_ascii=False, indent=2)
 
 
 def _resolve_inference_plot_png(
@@ -1745,91 +1535,23 @@ def _resolve_inference_plot_png(
     out_png_cli: str | None,
     csv_path: str,
 ) -> str:
-    if out_png_cli:
-        return os.path.abspath(os.path.expanduser(out_png_cli))
-    csv_name = os.path.splitext(os.path.basename(csv_path))[0]
-    try:
-        ws = resolve_workspace_root(workspace_cli)
-        base = os.path.join(WorkspaceLayout(ws).analytics, "inference_tests")
-    except ValueError:
-        base = os.path.dirname(os.path.abspath(csv_path))
-    os.makedirs(base, exist_ok=True)
-    return os.path.join(base, f"{csv_name}_bars.png")
+    return _svc_resolve_inference_plot_png(
+        workspace_cli,
+        out_png_cli,
+        csv_path,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
+    )
 
 
 def cmd_inference_plot(args: argparse.Namespace) -> None:
-    if not getattr(args, "csv", None) and sys.stdin.isatty():
-        default_csv = _default_relative_output(
-            args.workspace, args.analytics_session, "inference", "benchmark.csv", None
-        )
-        args.csv = prompt_text("Path to benchmark CSV", default=default_csv).strip()
-    if not getattr(args, "csv", None):
-        print("[ERROR] Incomplete arguments: --csv is required.", file=sys.stderr)
-        sys.exit(2)
-    csv_path = os.path.abspath(os.path.expanduser(args.csv))
-    if not os.path.isfile(csv_path):
-        print(f"[ERROR] CSV not found: {csv_path}", file=sys.stderr)
-        sys.exit(1)
-
-    df = pd.read_csv(csv_path)
-    if len(df) == 0:
-        print(f"[ERROR] CSV is empty: {csv_path}", file=sys.stderr)
-        sys.exit(1)
-    if "model" not in df.columns:
-        print("[ERROR] CSV has no 'model' column.", file=sys.stderr)
-        sys.exit(1)
-    metric = args.metric
-    if metric not in df.columns:
-        print(
-            f"[ERROR] CSV has no column {metric!r}. "
-            f"Available: {', '.join(df.columns)}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    plot_df = df[["model", metric]].copy()
-    plot_df[metric] = pd.to_numeric(plot_df[metric], errors="coerce")
-    plot_df = plot_df.dropna(subset=[metric])
-    if len(plot_df) == 0:
-        print(f"[ERROR] No numeric values in column {metric!r}.", file=sys.stderr)
-        sys.exit(1)
-
-    # For ms lower is better, for fps higher is better.
-    ascending = "fps" not in metric.lower()
-    plot_df = plot_df.sort_values(metric, ascending=ascending)
-
-    out_png = _resolve_inference_plot_png(args.workspace, args.out_png, csv_path)
-    os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)
-
-    plt.figure(figsize=(10, 6))
-    x = range(len(plot_df))
-    vals = plot_df[metric].tolist()
-    bars = plt.bar(x, vals, tick_label=plot_df["model"].tolist())
-    plt.xticks(rotation=25, ha="right")
-    plt.ylabel(metric)
-    plt.title(f"Inference benchmark")
-    plt.grid(True, axis="y", linestyle="--", alpha=0.6)
-
-    # Numeric labels above bars.
-    ymax = max(vals) if vals else 0.0
-    y_pad = ymax * 0.015 if ymax > 0 else 0.01
-    for bar, v in zip(bars, vals):
-        x_text = bar.get_x() + bar.get_width() / 2.0
-        y_text = bar.get_height()
-        plt.text(
-            x_text,
-            y_text + y_pad,
-            f"{float(v):.2f}",
-            ha="center",
-            va="bottom",
-            fontsize=9,
-            rotation=0,
-        )
-
-    plt.tight_layout()
-    plt.savefig(out_png, dpi=220)
-    plt.close()
-    print(f"[OK] Bar chart: {out_png}")
+    _svc_run_inference_plot(
+        args,
+        prompt_text_cb=prompt_text,
+        default_relative_output_cb=_default_relative_output,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
+    )
 
 
 def _resolve_test_metrics_plot_png(

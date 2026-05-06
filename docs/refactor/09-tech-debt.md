@@ -152,6 +152,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - switched CLI dispatch and CLI apps to call entry modules instead of directly coupling to large orchestrator modules.
   - validated with targeted CLI/workflow regression (`163 passed, 1 skipped`).
   Residual debt for this slice: `no residual debt`.
+- 2026-05-06: Wave E-tail decomposition slice (analyze benchmark/plot service extraction) complete:
+  - extracted inference benchmark/plot pipeline from `results_analyzer` into `smartrain/workflows/analyze/analyze_benchmark_service.py`.
+  - moved run-scope/image-collection/path-resolver helpers (`resolve_selected_run_dirs`, `collect_split_images`, inference csv/png resolvers) into the same service module.
+  - kept `results_analyzer` compatibility wrappers and delegated execution through explicit callback injection to preserve monkeypatchable command surface.
+  - validated with targeted analyze/CLI regression (`134 passed`).
+  Residual debt for this slice: `no residual debt`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
