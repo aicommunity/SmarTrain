@@ -1269,11 +1269,11 @@ def cmd_cvat(ctx: typer.Context) -> None:
       - Subcommands: import, export.
       - Use --tmp-dir to control temporary workspace.
     """
-    from smartrain.cvat_cli import build_cvat_arg_parser
+    from smartrain.workflows.datasets.cvat_cli import build_cvat_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.cvat_cli",
+        module="smartrain.workflows.datasets.cvat_cli",
         build_parser=build_cvat_arg_parser,
         prog="smartrain cvat",
     )
@@ -1321,11 +1321,11 @@ def cmd_sahi(ctx: typer.Context) -> None:
     Notes:
       - Requires SAHI extras: pip install -e ".[sahi]".
     """
-    from smartrain.sahi_cli import build_sahi_arg_parser
+    from smartrain.workflows.inference.sahi_cli import build_sahi_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.sahi_cli",
+        module="smartrain.workflows.inference.sahi_cli",
         build_parser=build_sahi_arg_parser,
         prog="smartrain sahi",
     )
@@ -1344,11 +1344,11 @@ def cmd_heatmap(ctx: typer.Context) -> None:
       smartrain heatmap --model models/best.pt --source image.jpg --output heatmap.png
       smartrain heatmap --model models/best.pt --source image.jpg --colormap 12
     """
-    from smartrain.heatmap_cli import build_heatmap_arg_parser
+    from smartrain.workflows.inference.heatmap_cli import build_heatmap_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.heatmap_cli",
+        module="smartrain.workflows.inference.heatmap_cli",
         build_parser=build_heatmap_arg_parser,
         prog="smartrain heatmap",
     )

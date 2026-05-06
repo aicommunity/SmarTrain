@@ -31,7 +31,7 @@ def test_import_cli_modules() -> None:
         "smartrain.plot_creator",
         "smartrain.cli_support.cli_argparse",
         "smartrain.cvat11_converter",
-        "smartrain.cvat_cli",
+        "smartrain.workflows.datasets.cvat_cli",
         "smartrain.train_profile",
         "smartrain.train_backend_registry",
         "smartrain.train_model_catalog",
@@ -58,8 +58,8 @@ def test_import_cli_modules() -> None:
         "smartrain.providers.cli",
         "smartrain.weighted_yolo_dataset",
         "smartrain.clearml_upload",
-        "smartrain.sahi_cli",
-        "smartrain.heatmap_cli",
+        "smartrain.workflows.inference.sahi_cli",
+        "smartrain.workflows.inference.heatmap_cli",
         "smartrain.cli",
     ):
         __import__(mod)
