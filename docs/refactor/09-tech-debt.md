@@ -110,6 +110,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - moved `smartrain/weighted_yolo_dataset.py` -> `smartrain/workflows/datasets/weighted_yolo_dataset.py`
   - updated imports/tests references and validated with targeted (`40 passed`) + full regression (`582 passed, 1 skipped`).
   Residual debt for this wave: `no residual debt`.
+- 2026-05-06: Root-package migration wave B complete (run lifecycle relocation slice):
+  - moved `smartrain/run_discovery.py` -> `smartrain/core/runtime/run_discovery.py`
+  - moved `smartrain/run_artifacts.py` -> `smartrain/core/runtime/run_artifacts.py`
+  - moved `smartrain/run_bundle_copy.py` -> `smartrain/core/runtime/run_bundle_copy.py`
+  - updated imports/tests references and validated with targeted (`72 passed`) + full regression (`582 passed, 1 skipped`).
+  Residual debt for this wave: `no residual debt`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.

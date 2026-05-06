@@ -30,7 +30,7 @@ from smartrain.workflows.testing.model_test_service import (
 from smartrain.services.model_test_orchestrator import run_model_test_after_setup
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
 from smartrain.train_resume import resolve_dataset_path_for_resume
-from smartrain.run_artifacts import (
+from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     ensure_run_layout,
     is_internal_conversion_artifact,
@@ -347,7 +347,7 @@ def _pick_interactive_target(layout: WorkspaceLayout) -> tuple[str, str, str, st
     options = ["runs", "models", "weights"]
     selected = prompt_choice("Test source", options, default="runs")
     if selected == "runs":
-        from smartrain.run_discovery import find_run_directories
+        from smartrain.core.runtime.run_discovery import find_run_directories
 
         runs = find_run_directories(layout.runs)
         if not runs:

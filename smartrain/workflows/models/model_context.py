@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from smartrain.run_artifacts import run_tmp_dir
+from smartrain.core.runtime.run_artifacts import run_tmp_dir
 
 
 def _extract_img_size_from_obj(obj: Any) -> int | None:

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model, scan_run_models
+from smartrain.core.runtime.run_artifacts import canonical_run_model_path, materialize_canonical_run_model, scan_run_models
 
 SourceKind = Literal["runs", "models", "weights"]
 SUPPORTED_INFERENCE_EXTS = {".pt", ".onnx", ".engine", ".trt"}

@@ -33,7 +33,7 @@ from smartrain.workflows.analyze.compare_service import (
     generate_compare_insights,
 )
 from smartrain.workflows.analyze.analyze_report import write_analysis_report, write_manifest
-from smartrain.run_artifacts import (
+from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     materialize_canonical_run_model,
     run_test_backend_dir,
@@ -57,7 +57,7 @@ from smartrain.metrics_reader import (
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
-from smartrain.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
+from smartrain.core.runtime.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.training.confidence_recommendation import recommendation_file_path, read_recommendation_file

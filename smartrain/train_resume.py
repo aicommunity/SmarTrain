@@ -19,13 +19,13 @@ from ultralytics import YOLO
 
 from smartrain.metrics_reader import results_csv_path, training_args_yaml_path
 from smartrain.workflows.testing.model_test_service import has_complete_test_artifacts, missing_test_artifacts
-from smartrain.run_artifacts import (
+from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     ensure_run_layout,
     resolve_run_model_with_legacy_fallback,
     run_tmp_dir,
 )
-from smartrain.run_discovery import find_run_directories
+from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.workspace_paths import WorkspaceLayout
 
 RUN_STATUS_RESUMABLE_INCOMPLETE = "resumable_incomplete"

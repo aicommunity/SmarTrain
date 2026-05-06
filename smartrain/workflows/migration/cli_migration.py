@@ -13,7 +13,7 @@ from smartrain.adapters.canonical.legacy import map_legacy_payload, read_legacy_
 from smartrain.adapters.canonical.read.resolvers import infer_source_kind
 from smartrain.adapters.canonical.write.layout import canonical_snapshot_dir
 from smartrain.adapters.canonical.write.writer import write_canonical_snapshot
-from smartrain.run_discovery import find_run_directories
+from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
 Mode = Literal["dry-run", "apply", "report-only"]

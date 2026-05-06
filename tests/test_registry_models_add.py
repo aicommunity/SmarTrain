@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from smartrain.workflows.registry.registry_cli import RegistryCliContext, _cmd_models_add
-from smartrain.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
+from smartrain.core.runtime.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
 from smartrain.workspace_paths import WorkspaceLayout, deploy_workspace
 
 

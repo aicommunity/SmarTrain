@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 from smartrain.cli_support.cli_argparse import CliArgumentParser
-from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.core.runtime.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
 
 
 def build_clearml_upload_arg_parser() -> argparse.ArgumentParser:

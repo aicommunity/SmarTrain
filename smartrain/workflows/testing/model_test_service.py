@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from smartrain.run_artifacts import (
+from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     ensure_run_layout,
     materialize_canonical_run_model,
@@ -16,7 +16,7 @@ from smartrain.run_artifacts import (
     run_test_format_dir,
     run_tests_dir,
 )
-from smartrain.run_artifacts import model_sidecar_metadata_path
+from smartrain.core.runtime.run_artifacts import model_sidecar_metadata_path
 
 import yaml
 from smartrain.core.training.confidence_recommendation import read_recommendation_file, recommendations_complete

@@ -35,7 +35,7 @@ from smartrain.core.runtime.device_selector import (
     validate_device_available,
 )
 from smartrain.workflows.models.model_context import infer_img_size_from_model_context
-from smartrain.run_artifacts import is_internal_conversion_artifact
+from smartrain.core.runtime.run_artifacts import is_internal_conversion_artifact
 from smartrain.canonical.schema import wrap_inference_report_v2
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.services.inference_service import run_inference_job

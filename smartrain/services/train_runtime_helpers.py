@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from datetime import datetime
 
-from smartrain.run_artifacts import (
+from smartrain.core.runtime.run_artifacts import (
     materialize_canonical_run_model,
     resolve_run_model_with_legacy_fallback,
     run_test_backend_dir,

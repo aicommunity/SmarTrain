@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 import numpy as np
-from smartrain.run_artifacts import run_tests_dir
+from smartrain.core.runtime.run_artifacts import run_tests_dir
 
 
 DEFAULT_FALLBACK_CONFIDENCE = 0.25

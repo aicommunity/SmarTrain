@@ -10,7 +10,7 @@ import pytest
 
 from smartrain.cli_support import cli_prompts
 from smartrain import model_training_module as mtm
-from smartrain.run_artifacts import canonical_run_model_path
+from smartrain.core.runtime.run_artifacts import canonical_run_model_path
 from smartrain.workspace_paths import DATASETS_INFO_FILE, deploy_workspace
 
 

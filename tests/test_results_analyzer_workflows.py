@@ -10,7 +10,7 @@ import pytest
 
 import smartrain.results_analyzer as results_analyzer
 from smartrain.results_analyzer import main as analyze_main
-from smartrain.run_artifacts import run_test_backend_dir
+from smartrain.core.runtime.run_artifacts import run_test_backend_dir
 
 
 def _write_run(

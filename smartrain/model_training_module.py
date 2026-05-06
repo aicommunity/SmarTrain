@@ -93,7 +93,7 @@ from smartrain.workspace_paths import (
     resolve_dataset_root,
     DATASETS_INFO_FILE,
 )
-from smartrain.run_discovery import find_run_directories
+from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.workflows.testing.model_test_service import (
     complete_missing_test_artifacts,
     format_metrics_path,
@@ -101,7 +101,7 @@ from smartrain.workflows.testing.model_test_service import (
     persist_target_test_artifacts_state,
     sync_test_artifacts_manifest,
 )
-from smartrain.run_artifacts import (
+from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     materialize_canonical_run_model,
     resolve_run_model_with_legacy_fallback,

@@ -15,7 +15,7 @@ from smartrain.metrics_reader import (
     read_test_system_profile_by_format_artifacts,
 )
 from smartrain.workflows.testing.model_test_service import load_test_artifacts_manifest
-from smartrain.run_artifacts import resolve_run_model_with_legacy_fallback
+from smartrain.core.runtime.run_artifacts import resolve_run_model_with_legacy_fallback
 from smartrain.orchestrators.canonical_gateway import load_metrics as canonical_load_metrics
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
