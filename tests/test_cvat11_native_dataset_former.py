@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image
 
 from smartrain.datasets_json_former import main as datasets_json_main
-from smartrain.dataset_former import main as dataset_former_main
+from smartrain.workflows.datasets.dataset_former import main as dataset_former_main
 from smartrain.workspace_paths import deploy_workspace
 
 

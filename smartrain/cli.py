@@ -449,11 +449,11 @@ def cmd_fusion(ctx: typer.Context) -> None:
       - Requires datasets/datasets_info.json and datasets/class_names.json in the selected workspace.
       - Check output data.yaml before training.
     """
-    from smartrain.dataset_former import build_dataset_former_arg_parser
+    from smartrain.workflows.datasets.dataset_former import build_dataset_former_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_former",
+        module="smartrain.workflows.datasets.dataset_former",
         build_parser=build_dataset_former_arg_parser,
         prog="smartrain fusion",
         empty_args_mode="invoke_if_tty_else_help",
@@ -550,7 +550,7 @@ def cmd_prune(ctx: typer.Context) -> None:
       smartrain prune dedup --dataset my_dataset
       smartrain prune dedup --dataset my_dataset --allow-balanced-dedup
     """
-    from smartrain.dataset_prune import (
+    from smartrain.workflows.datasets.dataset_prune import (
         build_prune_arg_parser,
         build_prune_dedup_arg_parser,
         build_prune_empty_arg_parser,
@@ -567,7 +567,7 @@ def cmd_prune(ctx: typer.Context) -> None:
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_prune",
+        module="smartrain.workflows.datasets.dataset_prune",
         build_parser=parser,
         prog=prog,
         empty_args_mode="invoke_if_tty_else_help",
@@ -640,11 +640,11 @@ def cmd_roi(ctx: typer.Context) -> None:
       smartrain roi --dataset my_dataset --x1 0 --y1 100 --x2 1920 --y2 900
       smartrain roi --workspace /data/MarsSmarTrain --dataset my_dataset
     """
-    from smartrain.dataset_roi_yolo import build_roi_arg_parser
+    from smartrain.workflows.datasets.dataset_roi_yolo import build_roi_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_roi_yolo",
+        module="smartrain.workflows.datasets.dataset_roi_yolo",
         build_parser=build_roi_arg_parser,
         prog="smartrain roi",
         empty_args_mode="invoke_if_tty_else_help",
@@ -1367,11 +1367,11 @@ def cmd_orient(ctx: typer.Context) -> None:
       smartrain orient --dataset my_dataset --angles 0,90,180,270
       smartrain orient --workspace /data/MarsSmarTrain --dataset my_dataset
     """
-    from smartrain.dataset_orient import build_orient_arg_parser
+    from smartrain.workflows.datasets.dataset_orient import build_orient_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_orient",
+        module="smartrain.workflows.datasets.dataset_orient",
         build_parser=build_orient_arg_parser,
         prog="smartrain orient",
         empty_args_mode="invoke_if_tty_else_help",

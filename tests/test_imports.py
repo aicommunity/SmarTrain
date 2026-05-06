@@ -13,9 +13,9 @@ def test_import_cli_modules() -> None:
     for mod in (
         "smartrain.workspace_paths",
         "smartrain.datasets_json_former",
-        "smartrain.dataset_former",
+        "smartrain.workflows.datasets.dataset_former",
         "smartrain.workflows.datasets.dataset_hash",
-        "smartrain.dataset_roi_yolo",
+        "smartrain.workflows.datasets.dataset_roi_yolo",
         "smartrain.model_training_module",
         "smartrain.workflows.queue.training_queue",
         "smartrain.workflows.queue.training_queue_cli",
