@@ -5,7 +5,7 @@ import os
 import zipfile
 from pathlib import Path
 
-from smartrain.dataset_passport import write_dataset_passport
+from smartrain.workflows.datasets.dataset_passport import write_dataset_passport
 from smartrain.path_portable import relativize_abs_paths_in_obj, relativize_if_under, resolve_stored_path_under_workspace
 from smartrain.workspace_paths import extract_dataset_zip_to_cache
 

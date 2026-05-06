@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_argparse import CliArgumentParser
 
 
 def build_heatmap_arg_parser() -> argparse.ArgumentParser:

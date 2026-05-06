@@ -5,9 +5,9 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cvat11_converter import import_cvat11_zip_to_yolo, export_yolo_to_cvat11_zip
-from smartrain.dataset_passport import write_dataset_passport
+from smartrain.workflows.datasets.dataset_passport import write_dataset_passport
 
 
 def _workspace_root_if_inside(output_dir: str) -> str | None:

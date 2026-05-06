@@ -15,10 +15,10 @@ from typing import Any
 import yaml
 from PIL import Image
 
-from smartrain.cli_argparse import CliArgumentParser
-from smartrain.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
-from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
-from smartrain.cli_contracts import emit_replay, make_command_request
+from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
+from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_support.cli_contracts import emit_replay, make_command_request
 from smartrain.dataset_access import resolve_dataset_root_for_entry
 from smartrain.dataset_roi_yolo import ON_EMPTY_MODES, ROI_POLICIES, _clamp_crop, _full_image_crop, _select_roi_boxes
 from smartrain.datasets_json_former import find_yaml_file

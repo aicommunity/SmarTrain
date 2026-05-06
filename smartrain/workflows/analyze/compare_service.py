@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd
 
-from smartrain.analyze_models import RunRecord
+from smartrain.workflows.analyze.analyze_models import RunRecord
 
 
 def build_delta_rows(
@@ -53,7 +53,6 @@ def compute_composite_score(
     stable = 1.0 if rec.training_ok and rec.testing_ok else 0.0
     if q is None and s is None:
         return None
-    # Speed metric can be latency (ms) or fps. Normalize heuristically.
     speed_component = None
     if s is not None:
         speed_component = s if "fps" in speed_metric.lower() else (1.0 / s if s > 0 else 0.0)

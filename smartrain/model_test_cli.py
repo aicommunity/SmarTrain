@@ -12,9 +12,9 @@ from typing import Any
 
 import yaml
 
-from smartrain.cli_argparse import CliArgumentParser
-from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
-from smartrain.cli_contracts import emit_replay, make_command_request
+from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_support.cli_contracts import emit_replay, make_command_request
 from smartrain.inference_cli import _resolve_model_from_name, _resolve_run_ref
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain import tensorrt_checks as trt_checks

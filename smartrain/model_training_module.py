@@ -21,10 +21,10 @@ from smartrain.mpl_runtime import configure_matplotlib_before_ultralytics, ensur
 configure_matplotlib_before_ultralytics()
 from ultralytics import YOLO
 
-from smartrain.cli_argparse import CliArgumentParser
-from smartrain.cli_prompts import print_numbered_options, prompt_text
-from smartrain.cli_contracts import emit_replay, make_command_request
-from smartrain.dataset_hash import calculate_dataset_hash
+from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_text
+from smartrain.cli_support.cli_contracts import emit_replay, make_command_request
+from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.train_resume import (
     RUN_STATUS_RESUMABLE_INCOMPLETE,
@@ -1080,7 +1080,7 @@ def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
 
 
 def _prompt_dataset_name(available: list[str]) -> str:
-    from smartrain.cli_prompts import prompt_choice
+    from smartrain.cli_support.cli_prompts import prompt_choice
 
     return prompt_choice("Dataset", available, default=available[0])
 

@@ -3,7 +3,7 @@ import subprocess
 import time
 import argparse
 
-from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.workspace_paths import (
     resolve_workspace_root,
     workspace_queue_path,

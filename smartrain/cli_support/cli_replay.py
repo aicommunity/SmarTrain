@@ -38,8 +38,6 @@ def build_non_interactive_command(
                 parts.append(opt or "")
             continue
         if isinstance(action, argparse.BooleanOptionalAction):
-            # BooleanOptionalAction exposes both positive/negative options.
-            # Emit only the explicit flag form, never " --flag True/False ".
             if value is True:
                 if action.option_strings:
                     positive = next((o for o in action.option_strings if o.startswith("--no-") is False), None)
@@ -83,3 +81,4 @@ def print_replay_command(stage: str, command: str) -> None:
     _ = stage
     print("[INFO] Command for non-interactive retry:")
     print(command)
+

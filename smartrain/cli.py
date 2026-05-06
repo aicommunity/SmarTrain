@@ -413,13 +413,13 @@ def cmd_normalize_data_yaml(ctx: typer.Context) -> None:
       smartrain normalize-data-yaml --workspace /data/MarsSmarTrain
       smartrain normalize-data-yaml --datasets-dir /data/MarsSmarTrain/datasets --dry-run
     """
-    from smartrain.data_yaml_normalize import build_arg_parser
+    from smartrain.workflows.datasets.data_yaml_normalize import build_arg_parser
 
     parser = build_arg_parser()
     if getattr(ctx, "resilient_parsing", False):
         return
     args = parser.parse_args(list(ctx.args))
-    from smartrain.data_yaml_normalize import run_normalize
+    from smartrain.workflows.datasets.data_yaml_normalize import run_normalize
     from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
     if args.datasets_dir:
@@ -590,11 +590,11 @@ def cmd_hash(ctx: typer.Context) -> None:
     Notes:
       - validate exit codes: 0 match, 1 mismatch, 2 error.
     """
-    from smartrain.dataset_hash import build_hash_arg_parser
+    from smartrain.workflows.datasets.dataset_hash import build_hash_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_hash",
+        module="smartrain.workflows.datasets.dataset_hash",
         build_parser=build_hash_arg_parser,
         prog="smartrain hash",
     )

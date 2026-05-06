@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from smartrain.cli_argparse import CliArgumentParser
-from smartrain.cli_prompts import (
+from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_prompts import (
     print_numbered_options,
     prompt_choice,
     prompt_int,
@@ -21,7 +21,7 @@ from smartrain.cli_prompts import (
     prompt_text,
     prompt_yes_no,
 )
-from smartrain.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.model_context import infer_img_size_with_source
 from smartrain.run_artifacts import (

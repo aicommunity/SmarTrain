@@ -26,7 +26,7 @@ def run_model_test_after_setup(
 ) -> None:
     from smartrain import model_test_cli as mtc
     from smartrain.backends.train_test_registry import resolve_test_backend
-    from smartrain.cli_contracts import emit_replay
+    from smartrain.cli_support.cli_contracts import emit_replay
     from smartrain.model_test_service import (
         SUPPORTED_TEST_FORMATS,
         has_complete_test_artifacts,

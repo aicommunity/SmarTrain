@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from smartrain.cli_prompts import print_numbered_options, prompt_text
+from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_text
 
 
 @dataclass(frozen=True)

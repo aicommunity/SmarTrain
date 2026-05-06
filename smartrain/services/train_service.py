@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
-from smartrain.cli_contracts import emit_replay
+from smartrain.cli_support.cli_contracts import emit_replay
 from smartrain.confidence_recommendation import write_not_available_recommendations
-from smartrain.dataset_hash import calculate_dataset_hash
+from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.external_providers.runner import run_external_infer, run_external_train
 from smartrain.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.providers.core.global_index import get_provider_location, list_provider_records, reconcile_stale_provider_paths

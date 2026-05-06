@@ -10,15 +10,15 @@ from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
 
-from smartrain.cli_argparse import CliArgumentParser
-from smartrain.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.cvat11_converter import YOLO_IMAGE_EXTS
 from smartrain.dataset_access import (
     find_dataset_paths,
     iter_image_label_buckets,
     resolve_dataset_root_for_entry,
 )
-from smartrain.dataset_passport import write_dataset_passport
+from smartrain.workflows.datasets.dataset_passport import write_dataset_passport
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import (
     WORKSPACE_ENV_VAR,
@@ -255,7 +255,7 @@ def _parse_selected_datasets(args) -> list[str]:
 
 
 def _prompt_dataset_selection(available: list[str]) -> list[str]:
-    from smartrain.cli_prompts import prompt_multi_choice_csv
+    from smartrain.cli_support.cli_prompts import prompt_multi_choice_csv
 
     print("[INFO] --dataset/--datasets not specified: interactive selection of input datasets.")
     parsed = prompt_multi_choice_csv("Input datasets", available, default_values=[])
@@ -269,7 +269,7 @@ def _prompt_dataset_selection(available: list[str]) -> list[str]:
 
 
 def _prompt_yes_no(label: str, default: bool = False) -> bool:
-    from smartrain.cli_prompts import prompt_yes_no
+    from smartrain.cli_support.cli_prompts import prompt_yes_no
 
     return prompt_yes_no(label, default=default)
 
@@ -280,7 +280,7 @@ def _prompt_interactive_options(
     default_output_name: str,
     class_candidates: list[str],
 ) -> None:
-    from smartrain.cli_prompts import prompt_text
+    from smartrain.cli_support.cli_prompts import prompt_text
 
     print("[INFO] Interactively configure fusion parameters (Enter = default value).")
     if class_candidates:

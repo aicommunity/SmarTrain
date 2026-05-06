@@ -7,7 +7,7 @@ import argparse
 import os
 from pathlib import Path
 
-from smartrain.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
 
 

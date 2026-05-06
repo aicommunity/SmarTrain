@@ -10,7 +10,7 @@ import yaml
 from PIL import Image
 
 from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
-from smartrain.dataset_hash import main as hash_main
+from smartrain.workflows.datasets.dataset_hash import main as hash_main
 from smartrain.dataset_roi_yolo import _ensure_data_yaml_after_roi, main as roi_main
 from smartrain.datasets_json_former import main as datasets_json_main
 from smartrain.workspace_paths import DATASETS_INFO_FILE, deploy_workspace, resolve_path_under_workspace

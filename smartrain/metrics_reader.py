@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from smartrain.analyze_models import RunRecord
+from smartrain.workflows.analyze.analyze_models import RunRecord
 from smartrain.model_test_service import (
     INTERNAL_TEST_FORMATS,
     SUPPORTED_TEST_FORMATS,

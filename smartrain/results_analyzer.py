@@ -27,7 +27,7 @@ import pandas as pd
 import yaml
 from tqdm import tqdm
 
-from smartrain.compare_service import (
+from smartrain.workflows.analyze.compare_service import (
     build_delta_rows,
     compute_composite_score,
     generate_compare_insights,
@@ -38,15 +38,15 @@ from smartrain.run_artifacts import (
     materialize_canonical_run_model,
     run_test_backend_dir,
 )
-from smartrain.analyze_cache import (
+from smartrain.workflows.analyze.analyze_cache import (
     append_cache_entry,
     compute_fingerprint,
     data_yaml_hash,
     run_cache_root,
     weights_hash,
 )
-from smartrain.cli_argparse import CliArgumentParser
-from smartrain.cli_prompts import prompt_choice, prompt_int, prompt_text
+from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_prompts import prompt_choice, prompt_int, prompt_text
 from smartrain.metrics_reader import (
     DEFAULT_MAP_COL,
     latest_test_metrics_path,
@@ -61,7 +61,7 @@ from smartrain.run_discovery import find_run_directories, is_run_directory, reso
 from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.confidence_recommendation import recommendation_file_path, read_recommendation_file
-from smartrain.analyze_models import RunRecord
+from smartrain.workflows.analyze.analyze_models import RunRecord
 from smartrain.services.analyze_artifacts import (
     default_relative_output,
     session_artifacts_dir,

@@ -16,8 +16,8 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-from smartrain.cli_argparse import CliArgumentParser
-from smartrain.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
@@ -914,7 +914,7 @@ def _render_datasets_table(
 
 
 def _prompt_yes_no(label: str, default: bool = False) -> bool:
-    from smartrain.cli_prompts import prompt_yes_no
+    from smartrain.cli_support.cli_prompts import prompt_yes_no
 
     return prompt_yes_no(label, default=default)
 
@@ -922,7 +922,7 @@ def _prompt_yes_no(label: str, default: bool = False) -> bool:
 def _prompt_interactive_classes(
     args, available_names: list[str], available_classes: list[str]
 ) -> None:
-    from smartrain.cli_prompts import prompt_choice, prompt_multi_choice_csv, prompt_text
+    from smartrain.cli_support.cli_prompts import prompt_choice, prompt_multi_choice_csv, prompt_text
 
     selected_ds = prompt_multi_choice_csv("Datasets", available_names, default_values=[])
     args.dataset = selected_ds or None
@@ -935,7 +935,7 @@ def _prompt_interactive_classes(
 
 
 def _prompt_interactive_datasets(args, available_names: list[str]) -> None:
-    from smartrain.cli_prompts import prompt_choice, prompt_multi_choice_csv
+    from smartrain.cli_support.cli_prompts import prompt_choice, prompt_multi_choice_csv
     selected = prompt_multi_choice_csv("Datasets", available_names, default_values=[])
     args.dataset = selected or None
     args.sort = prompt_choice(
@@ -959,7 +959,7 @@ def _prompt_interactive_datasets(args, available_names: list[str]) -> None:
 
 
 def prompt_interactive_compare_args(args, available_names: list[str]) -> None:
-    from smartrain.cli_prompts import print_numbered_options, prompt_choice, prompt_text
+    from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_choice, prompt_text
 
     print_numbered_options("Datasets", available_names)
     if len(available_names) < 2:

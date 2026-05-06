@@ -25,7 +25,6 @@ def _echo_default_if_used(default_value: str | None, prompt_label: str) -> None:
         return
     if default_value == "":
         return
-    # We are trying to show default "in the input line" as if the user typed it.
     if is_interactive_tty():
         try:
             sys.stdout.write("\x1b[1A\r")
@@ -103,7 +102,6 @@ def prompt_optional_float(label: str, default: float | None = None) -> float | N
 
 
 def print_numbered_options(label: str, options: Sequence[str]) -> None:
-    """Print a numbered list (1-based). Used when options are shown once, then ``prompt_choice(..., show_options=False)``."""
     if not options:
         return
     print(f"[INFO] Options for {label}:")
@@ -192,3 +190,4 @@ def prompt_multi_choice_csv(
         if ok:
             return out
         print(f"[ERROR] Invalid list: {raw!r}")
+
