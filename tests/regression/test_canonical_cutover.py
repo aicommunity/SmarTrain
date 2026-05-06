@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from smartrain.inference_cli import _resolve_model
-from smartrain.model_test_cli import _infer_task_from_training_metadata
+from smartrain.workflows.testing.model_test_cli import _infer_task_from_training_metadata
 from smartrain.results_analyzer import _canonical_read_enabled
 from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
 from smartrain.workspace_paths import WorkspaceLayout, deploy_workspace

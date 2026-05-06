@@ -18,7 +18,7 @@ configure_matplotlib_before_ultralytics()
 from ultralytics import YOLO
 
 from smartrain.metrics_reader import results_csv_path, training_args_yaml_path
-from smartrain.model_test_service import has_complete_test_artifacts, missing_test_artifacts
+from smartrain.workflows.testing.model_test_service import has_complete_test_artifacts, missing_test_artifacts
 from smartrain.run_artifacts import (
     canonical_run_model_path,
     ensure_run_layout,

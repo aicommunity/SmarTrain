@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from smartrain.model_test_backends import run_native_format_backend
+from smartrain.workflows.testing.model_test_backends import run_native_format_backend
 
 
 def _build_parser() -> argparse.ArgumentParser:

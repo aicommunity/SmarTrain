@@ -7,7 +7,7 @@ from typing import Any
 
 from tqdm import tqdm
 
-from smartrain.model_test_backends import (
+from smartrain.workflows.testing.model_test_backends import (
     PerfCollector,
     _Pred,
     _infer_with_onnx_session,

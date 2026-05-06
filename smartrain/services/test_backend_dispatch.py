@@ -19,9 +19,9 @@ class TestBackendDispatchContext:
 
 
 def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain import model_test_cli as mtc
+    from smartrain.workflows.testing import model_test_cli as mtc
     from smartrain.backends.train_test_registry import resolve_test_backend
-    from smartrain.model_test_service import persist_target_test_artifacts_state
+    from smartrain.workflows.testing.model_test_service import persist_target_test_artifacts_state
 
     def _backend_for(local_fmt: str) -> str:
         return resolve_test_backend(task_type=ctx.task_type, model_format=local_fmt).backend
@@ -82,7 +82,7 @@ def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
 
 
 def _dispatch_pt_uni(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain import model_test_cli as mtc
+    from smartrain.workflows.testing import model_test_cli as mtc
 
     pt_uni_result = mtc.run_native_format_backend(
         root_dir=ctx.root_dir,
@@ -105,9 +105,9 @@ def _dispatch_pt_uni(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
 
 
 def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain import model_test_cli as mtc
+    from smartrain.workflows.testing import model_test_cli as mtc
     from smartrain.backends.train_test_registry import resolve_test_backend
-    from smartrain.model_test_service import persist_target_test_artifacts_state
+    from smartrain.workflows.testing.model_test_service import persist_target_test_artifacts_state
 
     def _backend_for(local_fmt: str) -> str:
         return resolve_test_backend(task_type=ctx.task_type, model_format=local_fmt).backend

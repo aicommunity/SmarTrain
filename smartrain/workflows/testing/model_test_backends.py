@@ -32,7 +32,7 @@ from smartrain.core.training.confidence_recommendation import (
     write_not_available_recommendations,
     write_recommendation_file,
 )
-from smartrain.model_test_service import (
+from smartrain.workflows.testing.model_test_service import (
     format_metrics_path,
     format_metrics_path_for_split,
     format_metrics_path_for_split_write,
@@ -1505,7 +1505,7 @@ def _run_onnx_split_in_subprocess(
         "collect_performance": bool(collect_performance),
         "perf_warmup_images": int(max(0, perf_warmup_images)),
     }
-    cmd = [sys.executable, "-m", "smartrain.model_test_onnx_worker"]
+    cmd = [sys.executable, "-m", "smartrain.workflows.testing.model_test_onnx_worker"]
     try:
         completed = subprocess.run(
             cmd,

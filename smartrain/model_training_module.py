@@ -94,7 +94,7 @@ from smartrain.workspace_paths import (
     DATASETS_INFO_FILE,
 )
 from smartrain.run_discovery import find_run_directories
-from smartrain.model_test_service import (
+from smartrain.workflows.testing.model_test_service import (
     complete_missing_test_artifacts,
     format_metrics_path,
     format_metrics_path_for_split,

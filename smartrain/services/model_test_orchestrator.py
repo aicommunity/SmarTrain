@@ -24,10 +24,10 @@ def run_model_test_after_setup(
     requested_conf: float | None,
     requested_iou: float | None,
 ) -> None:
-    from smartrain import model_test_cli as mtc
+    from smartrain.workflows.testing import model_test_cli as mtc
     from smartrain.backends.train_test_registry import resolve_test_backend
     from smartrain.cli_support.cli_contracts import emit_replay
-    from smartrain.model_test_service import (
+    from smartrain.workflows.testing.model_test_service import (
         SUPPORTED_TEST_FORMATS,
         has_complete_test_artifacts,
         persist_target_test_artifacts_state,

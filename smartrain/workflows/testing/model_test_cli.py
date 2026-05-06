@@ -18,8 +18,8 @@ from smartrain.cli_support.cli_contracts import emit_replay, make_command_reques
 from smartrain.inference_cli import _resolve_model_from_name, _resolve_run_ref
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain import tensorrt_checks as trt_checks
-from smartrain.model_test_backends import run_native_format_backend, run_ultralytics_backend
-from smartrain.model_test_service import (
+from smartrain.workflows.testing.model_test_backends import run_native_format_backend, run_ultralytics_backend
+from smartrain.workflows.testing.model_test_service import (
     SUPPORTED_TEST_FORMATS,
     complete_missing_test_artifacts,
     has_matching_test_artifacts,
@@ -559,7 +559,7 @@ def _run_native_backend_isolated(
         cmd = [
             sys.executable,
             "-m",
-            "smartrain.model_test_backend_runner",
+            "smartrain.workflows.testing.model_test_backend_runner",
             "--root-dir",
             root_dir,
             "--weights-path",

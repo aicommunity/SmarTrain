@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from smartrain import model_test_cli
+from smartrain.workflows.testing import model_test_cli
 
 
 def build_arg_parser():

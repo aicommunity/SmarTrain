@@ -14,8 +14,8 @@ import numpy as np
 import yaml
 from ultralytics.utils.metrics import ap_per_class
 
-from smartrain.model_test_backends import _Gt, _Pred, _build_ultralytics_style_stats
-from smartrain.model_test_service import format_test_dir
+from smartrain.workflows.testing.model_test_backends import _Gt, _Pred, _build_ultralytics_style_stats
+from smartrain.workflows.testing.model_test_service import format_test_dir
 
 
 def _load_names(data_yaml_path: str) -> list[str]:

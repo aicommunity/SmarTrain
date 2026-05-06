@@ -10,7 +10,7 @@ import pandas as pd
 import yaml
 
 from smartrain.workflows.analyze.analyze_models import RunRecord
-from smartrain.model_test_service import (
+from smartrain.workflows.testing.model_test_service import (
     INTERNAL_TEST_FORMATS,
     SUPPORTED_TEST_FORMATS,
     format_test_dir,
