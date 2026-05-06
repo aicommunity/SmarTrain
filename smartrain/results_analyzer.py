@@ -32,7 +32,7 @@ from smartrain.workflows.analyze.compare_service import (
     compute_composite_score,
     generate_compare_insights,
 )
-from smartrain.analyze_report import write_analysis_report, write_manifest
+from smartrain.workflows.analyze.analyze_report import write_analysis_report, write_manifest
 from smartrain.run_artifacts import (
     canonical_run_model_path,
     materialize_canonical_run_model,

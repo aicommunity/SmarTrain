@@ -14,7 +14,7 @@ from typing import Any
 import pandas as pd
 import numpy as np
 
-from smartrain.dataset_report import _export_odt_builtin_zip, _export_odt_odfpy, _export_pdf_fpdf2, _try_pandoc_odt, _try_pandoc_pdf
+from smartrain.workflows.datasets.dataset_report import _export_odt_builtin_zip, _export_odt_odfpy, _export_pdf_fpdf2, _try_pandoc_odt, _try_pandoc_pdf
 
 
 def _read_template(lang: str) -> dict[str, str]:

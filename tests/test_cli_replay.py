@@ -6,7 +6,7 @@ from smartrain.dataset_balance import build_balance_arg_parser
 from smartrain.dataset_former import build_dataset_former_arg_parser
 from smartrain.dataset_orient import build_orient_arg_parser
 from smartrain.dataset_roi_yolo import build_roi_arg_parser
-from smartrain.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
+from smartrain.workflows.datasets.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
 from smartrain.model_training_module import build_train_arg_parser
 
 

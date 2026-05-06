@@ -26,7 +26,7 @@ def test_import_cli_modules() -> None:
         "smartrain.run_discovery",
         "smartrain.metrics_reader",
         "smartrain.workflows.analyze.compare_service",
-        "smartrain.analyze_report",
+        "smartrain.workflows.analyze.analyze_report",
         "smartrain.workflows.analyze.analyze_cache",
         "smartrain.plot_creator",
         "smartrain.cli_support.cli_argparse",

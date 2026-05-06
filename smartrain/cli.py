@@ -614,13 +614,13 @@ def cmd_stats(ctx: typer.Context) -> None:
       smartrain stats compare --left ds_a --right ds_b
       smartrain stats --workspace /data/MarsSmarTrain
     """
-    from smartrain.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
+    from smartrain.workflows.datasets.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
 
     parser = build_stats_compare_arg_parser if (ctx.args and ctx.args[0] == "compare") else build_stats_arg_parser
     prog = "smartrain stats compare" if (ctx.args and ctx.args[0] == "compare") else "smartrain stats"
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_stats",
+        module="smartrain.workflows.datasets.dataset_stats",
         build_parser=parser,
         prog=prog,
         empty_args_mode="invoke_if_tty_else_help",
@@ -713,11 +713,11 @@ def cmd_report_dataset(ctx: typer.Context) -> None:
       smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
       smartrain report dataset --workspace /data/MarsSmarTrain --dataset my_dataset --no-pdf
     """
-    from smartrain.dataset_report import build_report_dataset_arg_parser
+    from smartrain.workflows.datasets.dataset_report import build_report_dataset_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_report",
+        module="smartrain.workflows.datasets.dataset_report",
         build_parser=build_report_dataset_arg_parser,
         prog="smartrain report dataset",
         empty_args_mode="invoke_if_tty_else_help",

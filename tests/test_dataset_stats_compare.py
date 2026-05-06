@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.dataset_stats import main as stats_main
+from smartrain.workflows.datasets.dataset_stats import main as stats_main
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
@@ -123,7 +123,7 @@ def test_stats_compare_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         args.export_json = False
         args.export_csv = False
 
-    monkeypatch.setattr("smartrain.dataset_stats.prompt_interactive_compare_args", _fake_prompt)
+    monkeypatch.setattr("smartrain.workflows.datasets.dataset_stats.prompt_interactive_compare_args", _fake_prompt)
     with pytest.raises(SystemExit) as e:
         stats_main(["compare"])
     assert e.value.code == 0
