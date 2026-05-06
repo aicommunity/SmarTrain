@@ -76,6 +76,10 @@ from smartrain.workflows.analyze.analyze_benchmark_service import (
     run_inference_benchmark as _svc_run_inference_benchmark,
     run_inference_plot as _svc_run_inference_plot,
 )
+from smartrain.workflows.analyze.analyze_pr_curves_service import (
+    resolve_pr_output_png as _svc_resolve_pr_output_png,
+    run_pr_curves as _svc_run_pr_curves,
+)
 from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
 from smartrain.services.analyze_table_service import export_runs_table, scan_runs
 from smartrain.services.analyze_compare_service import run_compare_workflow
@@ -1248,20 +1252,13 @@ def _resolve_pr_output_png(
     out_png_cli: str | None,
     runs_group_dir: str,
 ) -> str:
-    if out_png_cli:
-        return os.path.abspath(os.path.expanduser(out_png_cli))
-    try:
-        ws = resolve_workspace_root(workspace_cli)
-        analytics_dir = os.path.join(WorkspaceLayout(ws).analytics, "pr_curves")
-    except ValueError:
-        analytics_dir = os.path.join(
-            os.path.dirname(os.path.abspath(runs_group_dir)),
-            "analytics",
-            "pr_curves",
-        )
-    os.makedirs(analytics_dir, exist_ok=True)
-    ds_name = os.path.basename(os.path.normpath(runs_group_dir))
-    return os.path.join(analytics_dir, f"pr_all_classes_{ds_name}.png")
+    return _svc_resolve_pr_output_png(
+        workspace_cli,
+        out_png_cli,
+        runs_group_dir,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
+    )
 
 
 def _is_workers_pickle_error(exc: Exception) -> bool:
@@ -1289,210 +1286,27 @@ def _resolve_selected_run_dirs(
 
 
 def cmd_pr_curves(args: argparse.Namespace) -> None:
-    if (not getattr(args, "runs_group_dir", None) or not getattr(args, "data_yaml", None)) and sys.stdin.isatty():
-        args.runs_group_dir = prompt_text("Runs group dir", default=str(args.models_root)).strip() or str(args.models_root)
-        args.data_yaml = prompt_text("Path to data.yaml", default=str(getattr(args, "data_yaml", ""))).strip()
-    if not getattr(args, "runs_group_dir", None) or not getattr(args, "data_yaml", None):
-        print("[ERROR] Incomplete arguments: --runs-group-dir and --data-yaml are required.", file=sys.stderr)
-        sys.exit(2)
-    runs_group_dir = os.path.abspath(os.path.expanduser(args.runs_group_dir))
-    if not os.path.isdir(runs_group_dir):
-        print(f"[ERROR] Models directory not found: {runs_group_dir}", file=sys.stderr)
-        sys.exit(1)
-    if not args.data_yaml:
-        print("[ERROR] Please provide --data-yaml (path to data.yaml for split=test).", file=sys.stderr)
-        sys.exit(1)
-    data_yaml = os.path.abspath(os.path.expanduser(args.data_yaml))
-    if not os.path.isfile(data_yaml):
-        print(f"[ERROR] data.yaml not found: {data_yaml}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        from ultralytics import YOLO
-    except ImportError as e:
-        print(f"[ERROR] Failed to import ultralytics: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    run_dirs = _resolve_selected_run_dirs(
-        runs_group_dir,
-        getattr(args, "selected_run_dirs", None),
+    _svc_run_pr_curves(
+        args,
+        prompt_text_cb=prompt_text,
+        resolve_selected_run_dirs_cb=_resolve_selected_run_dirs,
+        load_dataset_class_names_cb=_load_dataset_class_names,
+        canonical_run_model_path_cb=canonical_run_model_path,
+        run_cache_root_cb=run_cache_root,
+        compute_fingerprint_cb=compute_fingerprint,
+        data_yaml_hash_cb=data_yaml_hash,
+        weights_hash_cb=weights_hash,
+        clear_gpu_memory_cb=_clear_gpu_memory,
+        resolve_run_val_profile_cb=_resolve_run_val_profile,
+        ultralytics_sidecar_dir_cb=ultralytics_sidecar_dir,
+        run_val_memory_safe_cb=_run_val_memory_safe,
+        extract_pr_curve_cb=_extract_pr_curve_from_metrics,
+        extract_pr_curve_per_class_cb=_extract_pr_curve_per_class_from_metrics,
+        append_cache_entry_cb=append_cache_entry,
+        safe_name_cb=_safe_name,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
     )
-    if not run_dirs:
-        print(f"[ERROR] No run directories found for scope in: {runs_group_dir}", file=sys.stderr)
-        sys.exit(1)
-    print(f"[INFO] PR scope: {len(run_dirs)} run(s) selected")
-
-    curves: list[tuple[str, np.ndarray, np.ndarray]] = []
-    per_class_rows: list[dict[str, Any]] = []
-    per_class_curves: dict[int, list[tuple[str, np.ndarray, np.ndarray, str]]] = {}
-    class_names = _load_dataset_class_names(data_yaml)
-    per_class_enabled = bool(getattr(args, "pr_per_class", True))
-    reuse_cache = bool(getattr(args, "reuse_run_cache", True))
-    tool_version = "analyze-v2"
-    cache_stats: list[dict[str, Any]] = []
-    for run_dir in run_dirs:
-        label = os.path.basename(run_dir.rstrip(os.sep))
-        best_pt = canonical_run_model_path(run_dir, ".pt")
-        if not os.path.isfile(best_pt):
-            print(f"[WARN] {label}: missing run model, skipping ({best_pt})")
-            continue
-        cache_root = run_cache_root(run_dir)
-        fp = compute_fingerprint(
-            {
-                "tool": tool_version,
-                "task": "pr_curves",
-                "data_yaml_hash": data_yaml_hash(data_yaml),
-                "split": "test",
-                "weights_hash": weights_hash(run_dir),
-                "per_class": per_class_enabled,
-            }
-        )
-        cache_agg = os.path.join(cache_root, "pr", "aggregate", f"pr_{fp}.csv")
-        cache_pc = os.path.join(cache_root, "pr", "per_class", f"pr_per_class_{fp}.csv")
-        os.makedirs(os.path.dirname(cache_agg), exist_ok=True)
-        os.makedirs(os.path.dirname(cache_pc), exist_ok=True)
-        recall: np.ndarray | None = None
-        precision: np.ndarray | None = None
-        if reuse_cache and os.path.isfile(cache_agg):
-            cdf = pd.read_csv(cache_agg)
-            if {"recall", "precision"}.issubset(set(cdf.columns)):
-                recall = cdf["recall"].to_numpy(dtype=float)
-                precision = cdf["precision"].to_numpy(dtype=float)
-                cache_stats.append({"run_dir": run_dir, "artifact": "pr.aggregate", "status": "hit"})
-        per_class_df: pd.DataFrame | None = None
-        if per_class_enabled and reuse_cache and os.path.isfile(cache_pc):
-            per_class_df = pd.read_csv(cache_pc)
-            if len(per_class_df) > 0:
-                cache_stats.append({"run_dir": run_dir, "artifact": "pr.per_class", "status": "hit"})
-            else:
-                per_class_df = None
-        if recall is None or precision is None or (per_class_enabled and per_class_df is None):
-            print(f"[INFO] {label}: val(split=test) ...")
-            _clear_gpu_memory()
-            model = YOLO(best_pt)
-            try:
-                rb, ri, rh = _resolve_run_val_profile(
-                    run_dir,
-                    default_batch=int(getattr(args, "val_batch", 1)),
-                    default_imgsz=int(getattr(args, "val_imgsz", 640)),
-                    default_half=bool(getattr(args, "val_half", True)),
-                )
-                ultra_proj = ultralytics_sidecar_dir(run_dir, ".ultralytics_scratch")
-                metrics = _run_val_memory_safe(
-                    model,
-                    data_yaml=data_yaml,
-                    split="test",
-                    val_batch=rb,
-                    val_imgsz=ri,
-                    val_half=rh,
-                    gpu_only=bool(getattr(args, "gpu_only_val", True)),
-                    ultra_project=ultra_proj,
-                    ultra_name="val-pr-curves",
-                )
-            except Exception as e:
-                print(f"[WARN] {label}: val() error: {e}")
-                _clear_gpu_memory()
-                continue
-            pr = _extract_pr_curve_from_metrics(metrics)
-            if pr is None:
-                print(f"[WARN] {label}: PR curve not available in metrics object, skipping")
-                continue
-            recall, precision = pr
-            pd.DataFrame({"recall": recall, "precision": precision}).to_csv(cache_agg, index=False, encoding="utf-8")
-            append_cache_entry(
-                run_dir,
-                {"artifact": "pr.aggregate", "fingerprint": fp, "path": os.path.relpath(cache_agg, run_dir)},
-            )
-            cache_stats.append({"run_dir": run_dir, "artifact": "pr.aggregate", "status": "miss"})
-            if per_class_enabled:
-                pc = _extract_pr_curve_per_class_from_metrics(metrics)
-                if pc is not None:
-                    rx, y2d = pc
-                    pc_rows: list[dict[str, Any]] = []
-                    for class_id in range(y2d.shape[0]):
-                        class_name = class_names.get(class_id, f"class_{class_id}")
-                        ap = float(np.trapz(y2d[class_id], rx))
-                        for i in range(len(rx)):
-                            pc_rows.append(
-                                {
-                                    "run_dir": run_dir,
-                                    "model": label,
-                                    "class_id": class_id,
-                                    "class_name": class_name,
-                                    "recall": float(rx[i]),
-                                    "precision": float(y2d[class_id][i]),
-                                    "ap": ap,
-                                }
-                            )
-                    per_class_df = pd.DataFrame(pc_rows)
-                    per_class_df.to_csv(cache_pc, index=False, encoding="utf-8")
-                    append_cache_entry(
-                        run_dir,
-                        {"artifact": "pr.per_class", "fingerprint": fp, "path": os.path.relpath(cache_pc, run_dir)},
-                    )
-                    cache_stats.append({"run_dir": run_dir, "artifact": "pr.per_class", "status": "miss"})
-            _clear_gpu_memory()
-
-        curves.append((label, recall, precision))
-        pr_dir = os.path.join(run_dir, "tests", "test-ultralytics")
-        if not os.path.isdir(pr_dir):
-            pr_dir = os.path.join(run_dir, "test")
-        os.makedirs(pr_dir, exist_ok=True)
-        pr_csv = os.path.join(pr_dir, "pr.csv")
-        pd.DataFrame({"recall": recall, "precision": precision}).to_csv(pr_csv, index=False, encoding="utf-8")
-        if per_class_df is not None and len(per_class_df) > 0:
-            pr_pc_csv = os.path.join(pr_dir, "pr_per_class.csv")
-            per_class_df.to_csv(pr_pc_csv, index=False, encoding="utf-8")
-            per_class_rows.extend(per_class_df.to_dict(orient="records"))
-        print(f"[OK] {label}: saved {pr_csv}")
-
-    if not curves:
-        print("[ERROR] Failed to obtain any PR curves.", file=sys.stderr)
-        sys.exit(1)
-
-    out_png = _resolve_pr_output_png(args.workspace, args.out_png, runs_group_dir)
-    os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)
-
-    plt.figure(figsize=(10, 7))
-    for label, recall, precision in curves:
-        plt.plot(recall, precision, linewidth=2, label=label)
-    plt.title("PR curves (all classes, test split)")
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.grid(True, linestyle="--", alpha=0.6)
-    plt.legend(title="Model", fontsize=9)
-    plt.tight_layout()
-    plt.savefig(out_png, dpi=220)
-    plt.close()
-    print(f"[OK] Combined PR plot: {out_png}")
-    if per_class_enabled and per_class_rows:
-        out_base_dir = os.path.join(os.path.dirname(out_png), "per_class")
-        os.makedirs(out_base_dir, exist_ok=True)
-        long_df = pd.DataFrame(per_class_rows)
-        long_csv = os.path.join(out_base_dir, "pr_per_class.csv")
-        long_df.to_csv(long_csv, index=False, encoding="utf-8")
-        grouped = long_df.groupby(["class_id", "class_name"], dropna=False)
-        for (class_id, class_name), cls_df in grouped:
-            plt.figure(figsize=(9, 6))
-            for model_name, mdf in cls_df.groupby("model"):
-                mdf = mdf.sort_values("recall")
-                plt.plot(mdf["recall"], mdf["precision"], linewidth=1.8, label=model_name)
-            plt.title(f"PR per class: {class_name} (id={class_id})")
-            plt.xlabel("Recall")
-            plt.ylabel("Precision")
-            plt.grid(True, linestyle="--", alpha=0.6)
-            plt.legend(fontsize=8)
-            plt.tight_layout()
-            cls_png = os.path.join(out_base_dir, f"pr_class_{int(class_id)}_{_safe_name(str(class_name))}.png")
-            plt.savefig(cls_png, dpi=220)
-            plt.close()
-            per_class_curves.setdefault(int(class_id), []).append((str(class_name), np.array([]), np.array([]), cls_png))
-        print(f"[OK] Per-class PR artifacts: {out_base_dir}")
-    stats_out = str(getattr(args, "cache_stats_out", "") or "").strip()
-    if stats_out:
-        os.makedirs(os.path.dirname(stats_out) or ".", exist_ok=True)
-        with open(stats_out, "w", encoding="utf-8") as f:
-            json.dump({"cache": cache_stats}, f, ensure_ascii=False, indent=2)
 
 
 def _collect_split_images(data_yaml_path: str, split_name: str, limit: int) -> list[str]:

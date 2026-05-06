@@ -158,6 +158,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - kept `results_analyzer` compatibility wrappers and delegated execution through explicit callback injection to preserve monkeypatchable command surface.
   - validated with targeted analyze/CLI regression (`134 passed`).
   Residual debt for this slice: `no residual debt`.
+- 2026-05-06: Wave E-tail decomposition slice (analyze PR-curves service extraction) complete:
+  - extracted PR-curves execution pipeline from `results_analyzer` into `smartrain/workflows/analyze/analyze_pr_curves_service.py`.
+  - moved PR output resolver into the same service and switched `results_analyzer` to wrapper-based delegation with callback injection.
+  - preserved command-level compatibility surface (`cmd_pr_curves`) used by workflow tests and monkeypatch-based orchestrator checks.
+  - validated with targeted analyze/CLI regression (`134 passed`).
+  Residual debt for this slice: `no residual debt`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
