@@ -19,7 +19,7 @@
 
 ## Interactive Paths
 
-- Interactive behavior depends on `smartrain/interactive_contract.py`.
+- Interactive behavior depends on `smartrain/core/runtime/interactive_contract.py`.
 - Most commands have `-y/--non-interactive` or equivalent.
 - Replay generation is handled by `smartrain/cli_replay.py`.
 

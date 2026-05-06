@@ -22,7 +22,7 @@ from smartrain.cli_support.cli_contracts import emit_replay, make_command_reques
 from smartrain.workflows.datasets.dataset_access import resolve_dataset_root_for_entry
 from smartrain.workflows.datasets.dataset_roi_yolo import ON_EMPTY_MODES, ROI_POLICIES, _clamp_crop, _full_image_crop, _select_roi_boxes
 from smartrain.workflows.datasets.datasets_json_former import find_yaml_file
-from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.workflows.analyze.results_analyzer import find_run_directories
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir

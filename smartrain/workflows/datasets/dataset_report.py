@@ -35,7 +35,7 @@ from smartrain.workflows.datasets.dataset_stats import (
     _imbalance_summary,
     _scan_one_dataset,
 )
-from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.workflows.datasets.yolo_labels import YoloBBox, YoloLabel, YoloSegment, read_yolo_labels
 

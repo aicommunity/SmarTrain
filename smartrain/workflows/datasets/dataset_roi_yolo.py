@@ -28,7 +28,7 @@ from smartrain.workflows.datasets.datasets_json_former import (
     find_yaml_file,
     load_yaml,
 )
-from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
 

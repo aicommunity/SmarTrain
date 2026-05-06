@@ -25,7 +25,7 @@ from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_text
 from smartrain.cli_support.cli_contracts import emit_replay, make_command_request
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
-from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.workflows.training.train_resume import (
     RUN_STATUS_RESUMABLE_INCOMPLETE,
     RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,

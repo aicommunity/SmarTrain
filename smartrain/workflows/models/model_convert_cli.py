@@ -22,7 +22,7 @@ from smartrain.cli_support.cli_prompts import (
     prompt_yes_no,
 )
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
-from smartrain.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.workflows.models.model_context import infer_img_size_with_source
 from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
