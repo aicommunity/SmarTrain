@@ -2043,7 +2043,7 @@ def train_yolo(
         train_kw = clearml_task.connect(train_kw)
 
     if smartrain_opts.get("weighted_sampling"):
-        from smartrain.weighted_yolo_dataset import setup_weighted_sampling_env
+        from smartrain.workflows.datasets.weighted_yolo_dataset import setup_weighted_sampling_env
 
         setup_weighted_sampling_env()
 
@@ -2082,7 +2082,7 @@ def train_yolo(
             print("Please enter 'y' or 'n' only.\n")
 
     if smartrain_opts.get("weighted_sampling"):
-        from smartrain.weighted_yolo_dataset import register_weighted_sampling_callback
+        from smartrain.workflows.datasets.weighted_yolo_dataset import register_weighted_sampling_callback
 
         register_weighted_sampling_callback(model)
 

@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
-from smartrain.cvat11_converter import YOLO_IMAGE_EXTS
+from smartrain.workflows.datasets.cvat11_converter import YOLO_IMAGE_EXTS
 from smartrain.workflows.datasets.dataset_access import (
     find_dataset_paths,
     iter_image_label_buckets,

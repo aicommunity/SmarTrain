@@ -22,7 +22,7 @@ from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.workflows.datasets.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
-from smartrain.yolo_labels import read_yolo_labels, rotate_yolo_labels_90cw_k, write_yolo_labels
+from smartrain.workflows.datasets.yolo_labels import read_yolo_labels, rotate_yolo_labels_90cw_k, write_yolo_labels
 
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
