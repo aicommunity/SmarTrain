@@ -465,30 +465,11 @@ def _normalize_task_for_backend(task: str | None) -> str:
 
 
 def _infer_task_from_training_metadata(root_dir: str) -> str | None:
-    legacy_fallback_allowed = str(os.getenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "")).strip() == "1"
-    use_canonical = not (legacy_fallback_allowed and str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0")
     emit_legacy_read_deprecation_warnings()
-    if use_canonical:
-        from smartrain.orchestrators.canonical_gateway import resolve_task_context
+    from smartrain.orchestrators.canonical_gateway import resolve_task_context
 
-        ctx = resolve_task_context(root_dir)
-        return _normalize_task_for_backend(ctx.task_type)
-    path = Path(root_dir) / "training_metadata.json"
-    if not path.is_file():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    ti = payload.get("training_info")
-    if not isinstance(ti, dict):
-        return None
-    task_type = ti.get("task_type")
-    if not isinstance(task_type, str):
-        return None
-    return _normalize_task_for_backend(task_type)
+    ctx = resolve_task_context(root_dir)
+    return _normalize_task_for_backend(ctx.task_type)
 
 
 def _has_deep_diagnostics_artifacts(root_dir: str, format_name: str) -> bool:

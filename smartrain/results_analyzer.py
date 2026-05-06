@@ -49,12 +49,9 @@ from smartrain.cli_argparse import CliArgumentParser
 from smartrain.cli_prompts import prompt_choice, prompt_int, prompt_text
 from smartrain.metrics_reader import (
     DEFAULT_MAP_COL,
-    build_run_record,
-    flatten_metadata,
     latest_test_metrics_path,
-    load_metadata,
     pick_map_column,
-    read_test_metrics_row,
+    load_metadata,
     results_csv_path,
     read_test_metrics_by_format,
     read_test_performance_by_format_artifacts,
@@ -90,10 +87,8 @@ METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
 
 def _canonical_read_enabled() -> bool:
-    legacy_fallback_allowed = str(os.getenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "")).strip() == "1"
-    canonical_read_requested_off = str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0"
     emit_legacy_read_deprecation_warnings()
-    return not (legacy_fallback_allowed and canonical_read_requested_off)
+    return True
 
 
 def _clear_gpu_memory() -> None:
@@ -731,16 +726,14 @@ def _build_run_record_canonical(run_dir: str) -> RunRecord:
 
 
 def _read_test_metrics_for_run(run_dir: str, *, format_name: str = "pt") -> dict[str, Any]:
-    if _canonical_read_enabled():
-        from smartrain.orchestrators.canonical_gateway import load_metrics
+    from smartrain.orchestrators.canonical_gateway import load_metrics
 
-        metric_refs = load_metrics(run_dir, source_kind="run", format_name=format_name)
-        if metric_refs:
-            out = dict(metric_refs[0].primary_metrics or {})
-            out.update(dict(metric_refs[0].secondary_metrics or {}))
-            return out
-        return {}
-    return read_test_metrics_row(run_dir, format_name) or {}
+    metric_refs = load_metrics(run_dir, source_kind="run", format_name=format_name)
+    if metric_refs:
+        out = dict(metric_refs[0].primary_metrics or {})
+        out.update(dict(metric_refs[0].secondary_metrics or {}))
+        return out
+    return {}
 
 
 def _flat_row_canonical(run_dir: str) -> dict[str, Any]:
@@ -752,29 +745,20 @@ def _flat_row_canonical(run_dir: str) -> dict[str, Any]:
         "dataset_name": rec.dataset_name,
     }
 
-
-def _flat_row_legacy(run_dir: str) -> dict[str, Any]:
-    md = load_metadata(run_dir)
-    return flatten_metadata(md, run_dir)
-
-
 def _flat_row_for_run(run_dir: str) -> dict[str, Any]:
-    if _canonical_read_enabled():
-        return _flat_row_canonical(run_dir)
-    return _flat_row_legacy(run_dir)
+    return _flat_row_canonical(run_dir)
 
 
 def _filtered_run_records(args: argparse.Namespace) -> list[tuple[str, Any]]:
     runs = find_run_directories(args.models_root)
     recs: list[tuple[str, Any]] = []
-    use_canonical = _canonical_read_enabled()
     filter_dataset = getattr(args, "filter_dataset", None)
     filter_model = getattr(args, "filter_model", None)
     filter_training_ok = getattr(args, "filter_training_ok", None)
     filter_testing_ok = getattr(args, "filter_testing_ok", None)
     for run_dir in runs:
         try:
-            rec = _build_run_record_canonical(run_dir) if use_canonical else build_run_record(run_dir)
+            rec = _build_run_record_canonical(run_dir)
         except Exception as e:
             print(f"[WARN] {run_dir}: failed to index run ({e})")
             continue
@@ -824,7 +808,6 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
     if selected_norm:
         runs = [r for r in runs if os.path.abspath(r) in selected_norm]
         print(f"[INFO] Leaderboard scope: {len(runs)} run(s) selected")
-    use_canonical = _canonical_read_enabled()
     records = build_leaderboard_records(
         runs=runs,
         speed_metric=str(args.speed_metric or ""),
@@ -832,7 +815,7 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
         weight_quality=float(args.weight_quality),
         weight_speed=float(args.weight_speed),
         weight_stability=float(args.weight_stability),
-        load_run_record=(lambda rd: _build_run_record_canonical(rd) if use_canonical else build_run_record(rd)),
+        load_run_record=_build_run_record_canonical,
         read_test_performance_by_format_artifacts=read_test_performance_by_format_artifacts,
         compute_composite_score=compute_composite_score,
     )
@@ -1139,13 +1122,12 @@ def _build_abbreviations_for_report(run_dirs: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     dataset_to_idx: dict[str, int] = {}
     dataset_counter = 1
-    use_canonical = _canonical_read_enabled()
     for idx, rd in enumerate(run_dirs, start=1):
         run_name = os.path.basename(rd.rstrip(os.sep))
         if len(run_name) > 22:
             out[run_name] = f"R{idx}"
         try:
-            rec = _build_run_record_canonical(rd) if use_canonical else build_run_record(rd)
+            rec = _build_run_record_canonical(rd)
             model = str((rec.model or "")).strip()
             dataset_name = str((rec.dataset_name or "")).strip()
         except Exception:
@@ -1169,7 +1151,6 @@ def _collect_ultralytics_test_artifacts(
     rows: list[dict[str, Any]] = []
     artifacts: list[dict[str, str]] = []
     out_root = os.path.join(session_root, "artifacts", "ultralytics-test")
-    use_canonical = _canonical_read_enabled()
     for rd in run_dirs:
         run_name = os.path.basename(rd.rstrip(os.sep))
         run_code = abbreviations.get(run_name, run_name)
@@ -1178,43 +1159,16 @@ def _collect_ultralytics_test_artifacts(
         test_dir = preferred_test_dir if os.path.isdir(preferred_test_dir) else legacy_test_dir
         run_info: dict[str, Any] = {}
         machine_info: dict[str, Any] = {}
-        if use_canonical:
-            rec = _build_run_record_canonical(rd)
-            run_info = {
-                "model": rec.model,
-                "dataset_name": rec.dataset_name,
-                "epochs": None,
-                "batch_size": None,
-                "train_image_size": None,
-                "val_imgsz": None,
-            }
-            machine_info = {}
-        else:
-            flat: dict[str, Any] = {}
-            try:
-                flat = _flat_row_legacy(rd)
-                run_info = {
-                    "model": flat.get("model"),
-                    "dataset_name": flat.get("dataset_name"),
-                    "epochs": flat.get("epochs"),
-                    "batch_size": flat.get("batch_size"),
-                    "train_image_size": flat.get("train_image_size"),
-                    "val_imgsz": flat.get("val_imgsz"),
-                }
-            except Exception:
-                run_info = {}
-            try:
-                machine_info = {
-                    "sys_cpu_model": flat.get("sys_cpu_model"),
-                    "sys_cpu_logical_cores": flat.get("sys_cpu_logical_cores"),
-                    "sys_ram_total_gb": flat.get("sys_ram_total_gb"),
-                    "sys_gpu_0_name": flat.get("sys_gpu_0_name"),
-                    "sys_gpu_0_vram_gb": flat.get("sys_gpu_0_vram_gb"),
-                    "sys_os": flat.get("sys_os"),
-                    "sys_os_release": flat.get("sys_os_release"),
-                }
-            except Exception:
-                machine_info = {}
+        rec = _build_run_record_canonical(rd)
+        run_info = {
+            "model": rec.model,
+            "dataset_name": rec.dataset_name,
+            "epochs": None,
+            "batch_size": None,
+            "train_image_size": None,
+            "val_imgsz": None,
+        }
+        machine_info = {}
         row: dict[str, Any] = {
             "run_dir": rd,
             "run_name": run_name,

@@ -27,7 +27,6 @@ from smartrain.path_portable import relativize_if_under
 from smartrain.results_analyzer import find_run_directories
 from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
-from smartrain.canonical_refs import canonical_target_from_model_dir, canonical_target_from_run
 from smartrain.device_selector import (
     default_device_value,
     device_display_name,
@@ -41,6 +40,7 @@ from smartrain.artifact_schema_v2 import wrap_inference_report_v2
 from smartrain.train_profile import task_to_metadata_task_type
 from smartrain.services.inference_service import run_inference_job
 from smartrain.deprecation_policy import emit_legacy_read_deprecation_warnings
+from smartrain.canonical_refs import canonical_target_from_model_dir
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
@@ -172,7 +172,11 @@ def _pick_preferred_model_path(candidates: list[Path], *, prefer_onnx_variant: b
 
 
 def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, str]:
-    # Support direct file selection under models/ (used by interactive "models" mode).
+    """
+    Resolve promoted model directory name into a resolved weights path.
+
+    This helper is intentionally canonical-only (no env-driven legacy fallback).
+    """
     models_root = Path(layout.models).resolve()
     candidate_rel = Path(name)
     if candidate_rel.suffix.lower() in SUPPORTED_INFERENCE_EXTS and not candidate_rel.is_absolute():
@@ -185,6 +189,7 @@ def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, 
     mdir = (Path(layout.models) / name).resolve()
     if not mdir.is_dir():
         raise FileNotFoundError(f"Model directory not found: {mdir}")
+
     manifest = mdir / MANIFEST_NAME
     if manifest.is_file():
         payload = json.loads(manifest.read_text(encoding="utf-8"))
@@ -193,6 +198,7 @@ def _resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, 
             p = (mdir / wf).resolve()
             if p.is_file():
                 return p, name
+
     canonical = canonical_target_from_model_dir(mdir)
     return canonical.model_path.resolve(), name
 
@@ -209,38 +215,30 @@ def _resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[P
     # Wave 6 / PR 6.7 cutover policy:
     # canonical read path is default; legacy path is emergency-only and must be
     # explicitly allowed via SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK=1.
-    legacy_fallback_allowed = str(os.getenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "")).strip() == "1"
-    use_canonical = not (legacy_fallback_allowed and str(os.getenv("SMARTTRAIN_CANONICAL_READ", "")).strip() == "0")
     emit_legacy_read_deprecation_warnings()
     if args.model_name:
-        if use_canonical:
-            from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
+        from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
 
-            mdir = (Path(layout.models) / str(args.model_name).strip()).resolve()
-            _ = resolve_task_context(str(mdir), source_kind="model")
-            payload = load_target(str(mdir), source_kind="model")
-            if not payload.models:
-                raise FileNotFoundError(f"Canonical model payload has no models for: {mdir}")
-            model = payload.models[0]
-            p = _resolve_and_validate_canonical_weights(model)
-            return p, str(model.model_id or mdir.name), "models"
-        p, model_key = _resolve_model_from_name(layout, str(args.model_name).strip())
-        return p, model_key, "models"
+        mdir = (Path(layout.models) / str(args.model_name).strip()).resolve()
+        _ = resolve_task_context(str(mdir), source_kind="model")
+        payload = load_target(str(mdir), source_kind="model")
+        if not payload.models:
+            raise FileNotFoundError(f"Canonical model payload has no models for: {mdir}")
+        model = payload.models[0]
+        p = _resolve_and_validate_canonical_weights(model)
+        return p, str(model.model_id or mdir.name), "models"
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
-        if use_canonical:
-            from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
+        from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
 
-            ctx = resolve_task_context(str(run_dir), source_kind="run")
-            payload = load_target(str(run_dir), source_kind="run")
-            if not payload.models:
-                raise FileNotFoundError(f"Canonical run payload has no models for: {run_dir}")
-            model = payload.models[0]
-            p = _resolve_and_validate_canonical_weights(model)
-            source_id = str(ctx.run_id or (payload.runs[0].run_id if payload.runs else run_dir.name))
-            return p, source_id, "runs"
-        canonical = canonical_target_from_run(run_dir)
-        return canonical.model_path.resolve(), canonical.source_id, canonical.source_kind
+        ctx = resolve_task_context(str(run_dir), source_kind="run")
+        payload = load_target(str(run_dir), source_kind="run")
+        if not payload.models:
+            raise FileNotFoundError(f"Canonical run payload has no models for: {run_dir}")
+        model = payload.models[0]
+        p = _resolve_and_validate_canonical_weights(model)
+        source_id = str(ctx.run_id or (payload.runs[0].run_id if payload.runs else run_dir.name))
+        return p, source_id, "runs"
     if args.weights:
         w = Path(str(args.weights)).expanduser()
         if not w.is_absolute():

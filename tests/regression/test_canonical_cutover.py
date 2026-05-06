@@ -23,13 +23,14 @@ def test_cutover_allows_emergency_legacy_fallback_only_when_explicit(monkeypatch
     monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "0")
     emit_legacy_read_deprecation_warnings.cache_clear()
 
-    assert _canonical_read_enabled() is False
+    assert _canonical_read_enabled() is True
 
     class _Ctx:
         task_type = "segmentation"
+        run_id = "r1"
 
     monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.resolve_task_context", lambda *_a, **_k: _Ctx())
-    assert _infer_task_from_training_metadata(str(tmp_path)) is None
+    assert _infer_task_from_training_metadata(str(tmp_path)) == "segment"
 
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     model_dir = run_dir / "models"

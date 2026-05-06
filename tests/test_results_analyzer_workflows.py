@@ -181,11 +181,6 @@ def test_read_test_metrics_for_run_uses_gateway_in_canonical_mode(tmp_path: Path
         secondary_metrics = {"Box-F1": 0.66}
 
     monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
-    monkeypatch.setattr(
-        results_analyzer,
-        "read_test_metrics_row",
-        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("legacy metrics reader should not be called")),
-    )
     row = results_analyzer._read_test_metrics_for_run(str(run_dir))
     assert row.get("mAP50-95") == 0.55
     assert row.get("Box-F1") == 0.66

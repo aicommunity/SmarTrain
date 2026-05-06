@@ -34,10 +34,6 @@ def test_inference_run_path_uses_canonical_branch_by_default(monkeypatch, tmp_pa
 
     monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
     monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.resolve_task_context", lambda *_a, **_k: _C())
-    monkeypatch.setattr(
-        "smartrain.inference_cli.canonical_target_from_run",
-        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("legacy run resolver should not be used")),
-    )
 
     import argparse
 
@@ -61,10 +57,6 @@ def test_results_metrics_reader_does_not_call_legacy_by_default(monkeypatch, tmp
         secondary_metrics = {"Box-F1": 0.72}
 
     monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
-    monkeypatch.setattr(
-        "smartrain.results_analyzer.read_test_metrics_row",
-        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("legacy metrics reader should not be used")),
-    )
 
     row = _read_test_metrics_for_run(str(run_dir))
     assert row.get("mAP50-95") == 0.61
