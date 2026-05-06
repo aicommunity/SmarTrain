@@ -1199,7 +1199,7 @@ def cmd_plot(ctx: typer.Context) -> None:
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.plot_creator",
+        module="smartrain.workflows.analyze.plot_creator",
         build_parser=build_analyze_arg_parser,
         prog="smartrain plot",
     )
@@ -1295,11 +1295,11 @@ def cmd_clearml_upload(ctx: typer.Context) -> None:
     Notes:
       - Requires ClearML extras: pip install -e ".[clearml]".
     """
-    from smartrain.clearml_upload import build_clearml_upload_arg_parser
+    from smartrain.workflows.analyze.clearml_upload import build_clearml_upload_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.clearml_upload",
+        module="smartrain.workflows.analyze.clearml_upload",
         build_parser=build_clearml_upload_arg_parser,
         prog="smartrain clearml-upload",
     )

@@ -68,6 +68,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - updated CLI dispatch/imports/tests and API docs references to new module paths.
   - validated with targeted migration+CLI tests and full regression (`582 passed, 1 skipped`).
   Residual debt for this wave: `no residual debt`.
+- 2026-05-06: Root-package migration next wave complete (analyze utility relocation slice):
+  - moved `smartrain/plot_creator.py` -> `smartrain/workflows/analyze/plot_creator.py`
+  - moved `smartrain/clearml_upload.py` -> `smartrain/workflows/analyze/clearml_upload.py`
+  - updated CLI dispatch/imports/tests and API docs references to new module paths.
+  - validated with targeted (`test_imports` + `test_cli_subprocess`) and full regression (`582 passed, 1 skipped`).
+  Residual debt for this wave: `no residual debt`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.

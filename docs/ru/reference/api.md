@@ -21,7 +21,7 @@
 - `smartrain/workflows/models/model_convert_cli.py` и `smartrain/workflows/models/model_release_cli.py` — `model`.
 - `smartrain/data_yaml_normalize.py` — `normalize-data-yaml`.
 - `smartrain/workflows/migration/migrate_models_to_smartrain.py` — `migrate-models`.
-- `smartrain/clearml_upload.py` — `clearml-upload`.
+- `smartrain/workflows/analyze/clearml_upload.py` — `clearml-upload`.
 
 ## Соответствие CLI -> модуль
 
@@ -41,12 +41,12 @@
 | `smartrain inference` | `smartrain/inference_cli.py` |
 | `smartrain report dataset` | `smartrain/dataset_report.py` |
 | `smartrain analyze` | `smartrain/results_analyzer.py` |
-| `smartrain plot` | `smartrain/plot_creator.py` |
+| `smartrain plot` | `smartrain/workflows/analyze/plot_creator.py` |
 | `smartrain queue` / `queue-run` | `smartrain/training_queue_cli.py` / `smartrain/training_queue.py` |
 | `smartrain registry` | `smartrain/registry_cli.py` |
 | `smartrain model convert` / `model release` | `smartrain/workflows/models/model_convert_cli.py` / `smartrain/workflows/models/model_release_cli.py` |
 | `smartrain migrate-models` | `smartrain/workflows/migration/migrate_models_to_smartrain.py` |
-| `smartrain clearml-upload` | `smartrain/clearml_upload.py` |
+| `smartrain clearml-upload` | `smartrain/workflows/analyze/clearml_upload.py` |
 | `smartrain cvat` | `smartrain/cvat_cli.py` |
 | `smartrain sahi` | `smartrain/sahi_cli.py` |
 | `smartrain heatmap` | `smartrain/heatmap_cli.py` |
