@@ -13,7 +13,7 @@ from smartrain.workflows.datasets.dataset_balance import (
     main as balance_main,
 )
 from smartrain.datasets_json_former import main as scan_main
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
 def _write_jpg(path: Path) -> None:

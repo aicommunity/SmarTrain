@@ -11,7 +11,7 @@ from typing import Any
 
 from smartrain.workflows.datasets.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
 from smartrain.datasets_json_former import yolo_flat_image_label_buckets
-from smartrain.workspace_paths import resolve_or_extract_dataset_root
+from smartrain.core.runtime.workspace_paths import resolve_or_extract_dataset_root
 
 
 def resolve_dataset_root_for_entry(

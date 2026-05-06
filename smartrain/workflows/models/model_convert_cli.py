@@ -33,7 +33,7 @@ from smartrain.core.runtime.run_artifacts import (
 )
 from smartrain.workflows.models import tensorrt_checks as trt_checks
 from smartrain.core.runtime.run_discovery import find_run_directories
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
 
 
 @dataclass

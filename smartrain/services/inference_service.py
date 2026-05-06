@@ -33,7 +33,7 @@ from smartrain.providers.core.global_index import get_provider_location
 from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
-from smartrain.workspace_paths import WorkspaceLayout
+from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
 
 def _backend_name_matches_capability(runtime_name: str | None, capability_backend: str) -> bool:

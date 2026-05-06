@@ -7,7 +7,7 @@ from pathlib import Path
 
 from smartrain.workflows.registry.registry_cli import RegistryCliContext, _cmd_models_add
 from smartrain.core.runtime.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
-from smartrain.workspace_paths import WorkspaceLayout, deploy_workspace
+from smartrain.core.runtime.workspace_paths import WorkspaceLayout, deploy_workspace
 
 
 def test_normalize_training_metadata_paths_for_bundle_updates_paths(tmp_path: Path) -> None:

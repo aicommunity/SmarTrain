@@ -4,7 +4,7 @@ from pathlib import Path
 
 from smartrain.inference_cli import _resolve_model
 from smartrain.results_analyzer import _read_test_metrics_for_run
-from smartrain.workspace_paths import WorkspaceLayout, deploy_workspace
+from smartrain.core.runtime.workspace_paths import WorkspaceLayout, deploy_workspace
 
 
 def test_inference_run_path_uses_canonical_branch_by_default(monkeypatch, tmp_path: Path) -> None:

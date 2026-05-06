@@ -52,7 +52,7 @@ def prune_ultralytics_default_detect_under_runs(runs_root: str) -> None:
 
 
 def best_effort_prune_workspace_runs_detect(workspace_root: str) -> None:
-    from smartrain.workspace_paths import WorkspaceLayout
+    from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
     prune_ultralytics_default_detect_under_runs(WorkspaceLayout(workspace_root).runs)
 

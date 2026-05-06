@@ -28,7 +28,7 @@ from smartrain.workflows.testing.model_test_service import (
     format_test_dir,
     test_artifacts_manifest_path as manifest_path_fn,
 )
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 class _FakeInput:

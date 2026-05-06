@@ -16,7 +16,7 @@ from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.workflows.datasets.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.workflows.datasets.dataset_passport import write_dataset_passport
-from smartrain.workspace_paths import (
+from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,

@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw
 
 from smartrain.workflows.datasets.dataset_orient import main as orient_main
 from smartrain.datasets_json_former import main as scan_main
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 def _make_ref_image(path: Path) -> None:

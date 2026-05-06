@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from smartrain.metrics_reader import (
+from smartrain.workflows.analyze.metrics_reader import (
     read_metrics_by_format_for_split,
     read_metrics_by_format_for_split_artifacts,
     read_test_performance_by_format_artifacts,

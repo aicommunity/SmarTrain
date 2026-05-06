@@ -13,7 +13,7 @@ from smartrain.workflows.datasets.dataset_access import iter_image_label_buckets
 from smartrain.workflows.datasets.dataset_hash import main as hash_main
 from smartrain.workflows.datasets.dataset_roi_yolo import _ensure_data_yaml_after_roi, main as roi_main
 from smartrain.datasets_json_former import main as datasets_json_main
-from smartrain.workspace_paths import DATASETS_INFO_FILE, deploy_workspace, resolve_path_under_workspace
+from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, deploy_workspace, resolve_path_under_workspace
 
 
 def _write_minimal_data_yaml(images_dir: Path) -> None:
@@ -342,7 +342,7 @@ def test_roi_workspace_external_path_via_datasets_list(tmp_path: Path) -> None:
 def test_roi_partial_args_do_not_trigger_interactive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from smartrain.workspace_paths import DATASETS_INFO_FILE
+    from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE
 
     root = str(tmp_path)
     ds_dir = tmp_path / "datasets" / "roi_ds"

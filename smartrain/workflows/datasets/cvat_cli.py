@@ -12,7 +12,7 @@ from smartrain.workflows.datasets.dataset_passport import write_dataset_passport
 
 def _workspace_root_if_inside(output_dir: str) -> str | None:
     try:
-        from smartrain.workspace_paths import resolve_workspace_root
+        from smartrain.core.runtime.workspace_paths import resolve_workspace_root
     except Exception:
         return None
     try:

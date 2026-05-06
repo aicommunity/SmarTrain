@@ -10,7 +10,7 @@ from smartrain import model_training_module as mtm
 from smartrain.core.runtime import run_discovery as rd
 from smartrain import train_resume as tr
 from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 def _write_resumable_last_pt(path: Path) -> None:

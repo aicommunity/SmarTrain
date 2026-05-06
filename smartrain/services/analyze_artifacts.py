@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
+from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
 
 def session_name(raw: str | None) -> str:

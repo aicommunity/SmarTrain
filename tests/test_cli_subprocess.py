@@ -13,7 +13,7 @@ import pytest
 
 from smartrain.cli import app
 from smartrain.results_analyzer import build_analyze_arg_parser
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 CLI_HELP_CASES: list[tuple[str, list[str]]] = [
     ("info", []),

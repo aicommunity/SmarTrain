@@ -13,7 +13,7 @@ from smartrain.domain.canonical.context import TaskContext
 from smartrain.domain.canonical.models import CanonicalMetricsRef, CanonicalPayload, CanonicalPredictionRef
 from smartrain.domain.canonical.types import TaskType
 from smartrain.domain.canonical.validators import validate_payload
-from smartrain.metrics_reader import METRIC_AGG_COLUMNS, read_metrics_by_format_for_split
+from smartrain.workflows.analyze.metrics_reader import METRIC_AGG_COLUMNS, read_metrics_by_format_for_split
 from smartrain.tasks.context import TaskExecutionContext
 from smartrain.tasks.metrics import resolve_task_metrics_adapter
 
@@ -157,7 +157,7 @@ def _collect_test_metrics(
                 primary_metrics=primary,
                 secondary_metrics=secondary,
                 raw_path=os.path.abspath(csv_path),
-                producer="smartrain.metrics_reader",
+                producer="smartrain.workflows.analyze.metrics_reader",
                 task_type=task_type,
             )
         )

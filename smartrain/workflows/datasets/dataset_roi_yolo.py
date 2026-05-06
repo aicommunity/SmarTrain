@@ -30,7 +30,7 @@ from smartrain.datasets_json_former import (
 )
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
 
 sys.stdout.reconfigure(encoding="utf-8")
 

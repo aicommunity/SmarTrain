@@ -38,7 +38,7 @@ from smartrain.core.runtime.run_artifacts import (
     scan_run_models,
     run_models_dir,
 )
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.runtime.device_selector import (
     default_device_value,
     device_display_name,

@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 from smartrain.workflows.datasets.dataset_stats import _scan_one_dataset, main as stats_main
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
 def _write_jpg(path: Path) -> None:

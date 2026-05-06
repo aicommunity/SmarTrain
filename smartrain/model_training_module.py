@@ -86,7 +86,7 @@ from smartrain.core.training.confidence_recommendation import (
     write_not_available_recommendations,
     write_recommendation_file,
 )
-from smartrain.workspace_paths import (
+from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,

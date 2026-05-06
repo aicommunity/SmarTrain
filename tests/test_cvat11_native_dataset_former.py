@@ -6,7 +6,7 @@ from PIL import Image
 
 from smartrain.datasets_json_former import main as datasets_json_main
 from smartrain.workflows.datasets.dataset_former import main as dataset_former_main
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 def _write_jpg(path: Path, *, size: tuple[int, int] = (64, 48)) -> None:

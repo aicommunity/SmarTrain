@@ -6,7 +6,7 @@ from typing import Any, Callable
 import yaml
 
 from smartrain.core.runtime.run_artifacts import run_tmp_dir
-from smartrain.workspace_paths import resolve_workspace_root
+from smartrain.core.runtime.workspace_paths import resolve_workspace_root
 
 
 def collect_data_yaml_candidates_for_run(

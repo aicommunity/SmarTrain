@@ -5,7 +5,7 @@ from pathlib import Path
 
 from smartrain.inference_cli import _resolve_model
 from smartrain.workflows.testing.model_test_cli import _infer_task_from_training_metadata
-from smartrain.workspace_paths import WorkspaceLayout, deploy_workspace
+from smartrain.core.runtime.workspace_paths import WorkspaceLayout, deploy_workspace
 
 
 def test_canonical_consumers_infer_task_and_model_from_run(tmp_path: Path, monkeypatch) -> None:

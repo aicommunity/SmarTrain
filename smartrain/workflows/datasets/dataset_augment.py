@@ -35,7 +35,7 @@ from smartrain.workflows.datasets.dataset_cli_common import (
 )
 from smartrain.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 SPLIT_ALIASES = {"train": "train", "val": "val", "valid": "valid", "test": "test"}

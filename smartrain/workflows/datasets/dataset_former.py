@@ -20,7 +20,7 @@ from smartrain.workflows.datasets.dataset_access import (
 )
 from smartrain.workflows.datasets.dataset_passport import write_dataset_passport
 from smartrain.interactive_contract import is_interactive_allowed
-from smartrain.workspace_paths import (
+from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     resolve_workspace_root,

@@ -19,7 +19,7 @@ from rich.table import Table
 from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.interactive_contract import is_interactive_allowed
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 SPLITS = ("train", "val", "test")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
+from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
 
 def _looks_like_run_dir(path: str, filenames: set[str]) -> bool:

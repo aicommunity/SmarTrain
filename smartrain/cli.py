@@ -20,7 +20,7 @@ from smartrain.interactive_contract import INTERACTIVE_ALLOWED_ENV
 from smartrain.core.training.train_backend_registry import default_train_provider
 from smartrain.core.training.train_model_catalog import TrainModelCatalog
 from smartrain.providers.core.global_index import list_provider_records
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 app = typer.Typer(
     name="smartrain",
@@ -420,7 +420,7 @@ def cmd_normalize_data_yaml(ctx: typer.Context) -> None:
         return
     args = parser.parse_args(list(ctx.args))
     from smartrain.workflows.datasets.data_yaml_normalize import run_normalize
-    from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
+    from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
     if args.datasets_dir:
         ddir = os.path.abspath(os.path.expanduser(args.datasets_dir))

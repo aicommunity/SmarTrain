@@ -4,7 +4,7 @@
 
 This document captures real code flows and helps you quickly locate where to make changes.
 
-Sources of truth for this section: `smartrain/cli.py`, `smartrain/model_training_module.py`, `smartrain/results_analyzer.py`, `smartrain/training_queue.py`, `smartrain/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
+Sources of truth for this section: `smartrain/cli.py`, `smartrain/model_training_module.py`, `smartrain/results_analyzer.py`, `smartrain/training_queue.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
 
 ## 1) Top-level architecture
 

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from smartrain.cli_support.cli_replay import build_non_interactive_command
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
 def _run(args: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:

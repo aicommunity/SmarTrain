@@ -8,7 +8,7 @@ import pytest
 from PIL import Image
 
 from smartrain.workflows.datasets.dataset_former import _collect_label_image_pairs, main as fusion_main, prune_output_empty_label_pairs
-from smartrain.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, WORKSPACE_ENV_VAR, deploy_workspace
 
 
 def _write_jpg(path: Path, color: tuple[int, int, int] = (10, 20, 30)) -> None:

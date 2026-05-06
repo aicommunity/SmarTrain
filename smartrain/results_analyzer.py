@@ -47,7 +47,7 @@ from smartrain.workflows.analyze.analyze_cache import (
 )
 from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_prompts import prompt_choice, prompt_int, prompt_text
-from smartrain.metrics_reader import (
+from smartrain.workflows.analyze.metrics_reader import (
     DEFAULT_MAP_COL,
     latest_test_metrics_path,
     pick_map_column,
@@ -59,7 +59,7 @@ from smartrain.metrics_reader import (
 )
 from smartrain.core.runtime.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.training.confidence_recommendation import recommendation_file_path, read_recommendation_file
 from smartrain.workflows.analyze.analyze_models import RunRecord
 from smartrain.services.analyze_artifacts import (

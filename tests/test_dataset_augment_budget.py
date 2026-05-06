@@ -14,7 +14,7 @@ from smartrain.workflows.datasets.dataset_augment import (
     sum_train_bbox_disk,
 )
 from smartrain.datasets_json_former import main as scan_main
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 def test_effective_flip_prob_geo_prefers_higher_image_weight() -> None:

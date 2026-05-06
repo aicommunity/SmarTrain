@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from smartrain.workflows.migration.cli_migration import run_migration
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 def test_dry_run_does_not_write_canonical_snapshot(tmp_path: Path) -> None:

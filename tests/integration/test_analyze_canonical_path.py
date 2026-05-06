@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import smartrain.results_analyzer as results_analyzer
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 def test_analyze_canonical_path_uses_gateway_metrics_and_predictions(tmp_path: Path, monkeypatch) -> None:

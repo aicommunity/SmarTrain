@@ -11,7 +11,7 @@ def test_import_package() -> None:
 
 def test_import_cli_modules() -> None:
     for mod in (
-        "smartrain.workspace_paths",
+        "smartrain.core.runtime.workspace_paths",
         "smartrain.datasets_json_former",
         "smartrain.workflows.datasets.dataset_former",
         "smartrain.workflows.datasets.dataset_hash",
@@ -24,7 +24,7 @@ def test_import_cli_modules() -> None:
         "smartrain.results_analyzer",
         "smartrain.workflows.analyze.analyze_models",
         "smartrain.core.runtime.run_discovery",
-        "smartrain.metrics_reader",
+        "smartrain.workflows.analyze.metrics_reader",
         "smartrain.workflows.analyze.compare_service",
         "smartrain.workflows.analyze.analyze_report",
         "smartrain.workflows.analyze.analyze_cache",

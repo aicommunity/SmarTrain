@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from smartrain.workflows.migration.cli_migration import run_migration
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 def _mk_run(root: Path, dataset: str, run_name: str) -> Path:
