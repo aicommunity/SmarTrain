@@ -10,7 +10,7 @@ import shutil
 import zipfile
 from typing import Any
 
-from smartrain.path_portable import relativize_if_under, resolve_stored_path_under_workspace
+from smartrain.core.runtime.path_portable import relativize_if_under, resolve_stored_path_under_workspace
 
 WORKSPACE_ENV_VAR = "SMART_TRAIN_WORKSPACE"
 

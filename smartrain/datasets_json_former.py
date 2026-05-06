@@ -1486,7 +1486,7 @@ def main(argv=None):
         getattr(args, "repair_relative_paths", False)
         or getattr(args, "repair_relative_paths_dry_run", False)
     ):
-        from smartrain.workspace_path_repair import print_repair_report, repair_workspace_paths
+        from smartrain.core.runtime.workspace_path_repair import print_repair_report, repair_workspace_paths
 
         dry = bool(getattr(args, "repair_relative_paths_dry_run", False))
         rep = repair_workspace_paths(

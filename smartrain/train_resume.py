@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from smartrain.mpl_runtime import configure_matplotlib_before_ultralytics, ensure_matplotlib_training_runtime
+from smartrain.core.runtime.mpl_runtime import configure_matplotlib_before_ultralytics, ensure_matplotlib_training_runtime
 
 configure_matplotlib_before_ultralytics()
 from ultralytics import YOLO

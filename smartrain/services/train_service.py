@@ -16,7 +16,7 @@ from smartrain.cli_support.cli_contracts import emit_replay
 from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.external_providers.runner import run_external_infer, run_external_train
-from smartrain.mpl_runtime import ensure_matplotlib_training_runtime
+from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.providers.core.global_index import get_provider_location, list_provider_records, reconcile_stale_provider_paths
 from smartrain.run_artifacts import run_test_backend_dir, run_tests_dir
 from smartrain.services.train_runtime_helpers import (

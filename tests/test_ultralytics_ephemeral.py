@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from smartrain.ultralytics_ephemeral import (
+from smartrain.core.runtime.ultralytics_ephemeral import (
     best_effort_prune_runs_detect_near_run,
     prune_ultralytics_default_detect_under_runs,
     ultralytics_sidecar_dir,

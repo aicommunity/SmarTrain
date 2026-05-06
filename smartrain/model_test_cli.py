@@ -28,7 +28,7 @@ from smartrain.model_test_service import (
     resolve_root_dir_for_target,
 )
 from smartrain.services.model_test_orchestrator import run_model_test_after_setup
-from smartrain.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
+from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
 from smartrain.train_resume import resolve_dataset_path_for_resume
 from smartrain.run_artifacts import (
     canonical_run_model_path,
@@ -39,7 +39,7 @@ from smartrain.run_artifacts import (
     run_models_dir,
 )
 from smartrain.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
-from smartrain.device_selector import (
+from smartrain.core.runtime.device_selector import (
     default_device_value,
     device_display_name,
     prompt_device_selection,

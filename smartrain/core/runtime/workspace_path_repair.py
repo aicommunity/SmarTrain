@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from smartrain.workflows.datasets.data_yaml_normalize import iter_dataset_roots_with_data_yaml, normalize_data_yaml_file
-from smartrain.path_portable import relativize_abs_paths_in_obj, relativize_if_under
+from smartrain.core.runtime.path_portable import relativize_abs_paths_in_obj, relativize_if_under
 from smartrain.workspace_paths import WorkspaceLayout
 
 

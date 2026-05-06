@@ -83,6 +83,14 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - moved `smartrain/confidence_recommendation.py` -> `smartrain/core/training/confidence_recommendation.py`
   - updated imports/tests/docs references and validated with targeted (`89 passed`) + full regression (`582 passed, 1 skipped`).
   Residual debt for this wave: `no residual debt`.
+- 2026-05-06: Root-package migration next wave complete (runtime utility relocation slice):
+  - moved `smartrain/device_selector.py` -> `smartrain/core/runtime/device_selector.py`
+  - moved `smartrain/mpl_runtime.py` -> `smartrain/core/runtime/mpl_runtime.py`
+  - moved `smartrain/path_portable.py` -> `smartrain/core/runtime/path_portable.py`
+  - moved `smartrain/workspace_path_repair.py` -> `smartrain/core/runtime/workspace_path_repair.py`
+  - moved `smartrain/ultralytics_ephemeral.py` -> `smartrain/core/runtime/ultralytics_ephemeral.py`
+  - updated imports/tests references and validated with targeted (`68 passed`) + full regression (`582 passed, 1 skipped`).
+  Residual debt for this wave: `no residual debt`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.

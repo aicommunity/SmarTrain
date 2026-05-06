@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from smartrain.mpl_runtime import configure_matplotlib_before_ultralytics, ensure_matplotlib_training_runtime
+from smartrain.core.runtime.mpl_runtime import configure_matplotlib_before_ultralytics, ensure_matplotlib_training_runtime
 
 configure_matplotlib_before_ultralytics()
 from ultralytics import YOLO
@@ -45,7 +45,7 @@ from smartrain.core.training.train_profile import (
     resolve_profile_data_path,
     task_to_metadata_task_type,
 )
-from smartrain.device_selector import (
+from smartrain.core.runtime.device_selector import (
     default_device_value,
     device_display_name,
     prompt_device_selection,
@@ -65,7 +65,7 @@ from smartrain.providers.core.global_index import (
 from smartrain.external_providers.runner import run_external_infer, run_external_train
 from smartrain.core.training.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.external_providers.registry import list_provider_specs
-from smartrain.path_portable import relativize_if_under
+from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.services.train_service import run_train_after_setup
 from smartrain.services.train_runtime_helpers import (
     build_run_name as _shared_build_run_name,

@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 from smartrain.cli_support.cli_argparse import CliArgumentParser
-from smartrain.path_portable import relativize_if_under
+from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.run_artifacts import canonical_run_model_path
 
 

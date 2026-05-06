@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from smartrain import device_selector as ds
+from smartrain.core.runtime import device_selector as ds
 
 
 def test_default_device_value_prefers_gpu0(monkeypatch):

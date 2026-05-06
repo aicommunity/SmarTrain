@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.workspace_path_repair import repair_workspace_paths
+from smartrain.core.runtime.workspace_path_repair import repair_workspace_paths
 
 
 def test_repair_rewrites_absolute_data_path_in_datasets_info(tmp_path: Path) -> None:
