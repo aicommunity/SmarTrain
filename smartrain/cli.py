@@ -502,11 +502,11 @@ def cmd_augment(ctx: typer.Context) -> None:
       smartrain augment --dataset my_dataset --count 2
       smartrain augment --workspace /data/MarsSmarTrain --dataset my_dataset
     """
-    from smartrain.dataset_augment import build_augment_arg_parser
+    from smartrain.workflows.datasets.dataset_augment import build_augment_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_augment",
+        module="smartrain.workflows.datasets.dataset_augment",
         build_parser=build_augment_arg_parser,
         prog="smartrain augment",
         empty_args_mode="invoke_if_tty_else_help",
@@ -526,11 +526,11 @@ def cmd_balance(ctx: typer.Context) -> None:
       smartrain balance --dataset my_dataset --target-per-class 1000
       smartrain balance --workspace /data/MarsSmarTrain --dataset my_dataset
     """
-    from smartrain.dataset_balance import build_balance_arg_parser
+    from smartrain.workflows.datasets.dataset_balance import build_balance_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_balance",
+        module="smartrain.workflows.datasets.dataset_balance",
         build_parser=build_balance_arg_parser,
         prog="smartrain balance",
         empty_args_mode="invoke_if_tty_else_help",

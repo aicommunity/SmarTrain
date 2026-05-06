@@ -17,7 +17,7 @@ from prompt_toolkit.completion import WordCompleter
 from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_prompts import prompt_choice, prompt_multi_choice_csv, prompt_text, prompt_yes_no
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
-from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
+from smartrain.workflows.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.workflows.datasets.dataset_cli_common import (
     detect_split_from_path,
     load_dataset_catalog,
@@ -1671,7 +1671,7 @@ def main(argv=None):
     bbox_before_augment: int | None = None
     bbox_after_augment: int | None = None
     if is_hybrid_aug:
-        from smartrain.dataset_augment import main as augment_main, sum_train_bbox_disk
+        from smartrain.workflows.datasets.dataset_augment import main as augment_main, sum_train_bbox_disk
 
         saved_intermediate_name = out_name
         final_base = args.output_name or f"{args.dataset}_balanced_aug"

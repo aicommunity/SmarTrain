@@ -13,7 +13,7 @@ from typing import Any
 from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_prompts import prompt_choice, prompt_text
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
-from smartrain.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
+from smartrain.workflows.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.dataset_former import _image_content_hash
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.workflows.datasets.dataset_passport import next_dataset_name, write_dataset_passport

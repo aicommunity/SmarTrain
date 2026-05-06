@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from smartrain.dataset_augment import (
+from smartrain.workflows.datasets.dataset_augment import (
     _effective_flip_prob_geo,
     _geo_photo_trigger,
     _image_tail_priority_score,

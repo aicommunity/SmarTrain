@@ -37,6 +37,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - moved `smartrain/registry_cli.py` -> `smartrain/workflows/registry/registry_cli.py`
   - updated CLI dispatch/imports/tests to new module paths and preserved queue default file location under package root.
   Residual debt for this wave: `no residual debt`.
+- 2026-05-06: Root-package migration next wave complete (datasets access/augment/balance slice):
+  - moved `smartrain/dataset_access.py` -> `smartrain/workflows/datasets/dataset_access.py`
+  - moved `smartrain/dataset_augment.py` -> `smartrain/workflows/datasets/dataset_augment.py`
+  - moved `smartrain/dataset_balance.py` -> `smartrain/workflows/datasets/dataset_balance.py`
+  - updated CLI dispatch/imports/monkeypatch paths and validated with targeted (`57 passed`) + full regression (`582 passed, 1 skipped`).
+  Residual debt for this wave: `no residual debt`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
