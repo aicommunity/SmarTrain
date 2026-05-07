@@ -200,6 +200,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - preserved prompt and auto-selection compatibility by injecting `_build_run_data_yaml_map`, `_auto_select_data_yaml`, `prompt_choice`, `prompt_text` callbacks.
   - validated targeted analyze/CLI/import regression (`133 passed, 1 skipped`).
   Residual debt for this slice: `no residual debt (cmd_all data.yaml stage)`.
+- 2026-05-07: Wave E-tail decomposition slice (results_analyzer cmd_all - baseline artifacts stage extraction) complete:
+  - introduced `smartrain/workflows/analyze/analyze_all_baseline_artifacts_service.py`.
+  - moved cross-run baseline artifact generation (`compare`, `runs_summary`, `system_profile_compare`, `test_system_profile_compare`, `leaderboard`) from `cmd_all` into the service.
+  - preserved behavior/compatibility by injecting `cmd_compare`, `cmd_export_table`, `_write_system_profile_compare_csv`, `_write_test_system_profile_compare_csv`, `cmd_leaderboard`.
+  - validated targeted analyze/CLI/import regression (`133 passed, 1 skipped`).
+  Residual debt for this slice: `no residual debt (cmd_all baseline artifacts stage)`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.

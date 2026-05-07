@@ -90,6 +90,9 @@ from smartrain.workflows.analyze.analyze_all_selection_service import (
 from smartrain.workflows.analyze.analyze_all_data_yaml_service import (
     resolve_all_data_yaml_context as _svc_resolve_all_data_yaml_context,
 )
+from smartrain.workflows.analyze.analyze_all_baseline_artifacts_service import (
+    run_all_baseline_artifacts as _svc_run_all_baseline_artifacts,
+)
 from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
 from smartrain.services.analyze_table_service import export_runs_table, scan_runs
 from smartrain.services.analyze_compare_service import run_compare_workflow
@@ -1466,69 +1469,22 @@ def cmd_all(args: argparse.Namespace) -> None:
         role = "baseline" if idx == 1 else "other"
         print(f"[INFO]  - {role}: {label} ({run_dir})")
 
-    if others:
-        compare_csv = os.path.join(session_root, "artifacts", "compare", "compare_delta.csv")
-        compare_png = os.path.join(session_root, "artifacts", "compare", "compare_curves.png")
-        compare_insights = os.path.join(session_root, "artifacts", "compare", "compare_insights.txt")
-        cmp_ns = argparse.Namespace(
-            baseline=baseline,
-            others=others,
-            out_csv=compare_csv,
-            out_png=compare_png,
-            out_insights=compare_insights,
-            metric_column=DEFAULT_MAP_COL,
-            workspace=args.workspace,
-            analytics_session=args.analytics_session,
-            models_root=args.models_root,
-        )
-        cmd_compare(cmp_ns)
-        artifacts.extend(
-            [
-                {"role": "compare_csv", "path": os.path.relpath(compare_csv, session_root)},
-                {"role": "compare_png", "path": os.path.relpath(compare_png, session_root)},
-                {"role": "compare_insights", "path": os.path.relpath(compare_insights, session_root)},
-            ]
-        )
-    else:
-        print("[INFO] No candidate runs selected: compare artifacts are skipped (single-run report mode).")
-
-    exp_csv = os.path.join(session_root, "artifacts", "table", "runs_summary.csv")
-    exp_ns = argparse.Namespace(
-        output=exp_csv,
-        workspace=args.workspace,
-        models_root=args.models_root,
-        analytics_session=None,
-    )
-    cmd_export_table(exp_ns)
-    artifacts.append({"role": "summary_csv", "path": os.path.relpath(exp_csv, session_root)})
-    sys_profile_csv = os.path.join(session_root, "artifacts", "table", "system_profile_compare.csv")
-    written_sys_profile = _write_system_profile_compare_csv([baseline] + others, sys_profile_csv)
-    if written_sys_profile:
-        artifacts.append(
-            {"role": "system_profile_compare_csv", "path": os.path.relpath(sys_profile_csv, session_root)}
-        )
-    test_sys_profile_csv = os.path.join(session_root, "artifacts", "table", "test_system_profile_compare.csv")
-    written_test_sys_profile = _write_test_system_profile_compare_csv([baseline] + others, test_sys_profile_csv)
-    if written_test_sys_profile:
-        artifacts.append(
-            {"role": "test_system_profile_compare_csv", "path": os.path.relpath(test_sys_profile_csv, session_root)}
-        )
-
-    lb_csv = os.path.join(session_root, "artifacts", "leaderboard", "leaderboard.csv")
-    lb_ns = argparse.Namespace(
-        out_csv=lb_csv,
+    baseline_artifacts, lb_csv = _svc_run_all_baseline_artifacts(
+        baseline=baseline,
+        others=others,
         selected_run_dirs=selected_run_dirs,
-        quality_metric="mAP50-95",
-        speed_metric="avg_inference_fps",
-        weight_quality=0.6,
-        weight_speed=0.25,
-        weight_stability=0.15,
+        session_root=session_root,
         workspace=args.workspace,
-        models_root=args.models_root,
         analytics_session=args.analytics_session,
+        models_root=args.models_root,
+        default_map_col=DEFAULT_MAP_COL,
+        cmd_compare_cb=cmd_compare,
+        cmd_export_table_cb=cmd_export_table,
+        write_system_profile_compare_csv_cb=_write_system_profile_compare_csv,
+        write_test_system_profile_compare_csv_cb=_write_test_system_profile_compare_csv,
+        cmd_leaderboard_cb=cmd_leaderboard,
     )
-    cmd_leaderboard(lb_ns)
-    artifacts.append({"role": "leaderboard_csv", "path": os.path.relpath(lb_csv, session_root)})
+    artifacts.extend(baseline_artifacts)
 
     runs_group_dir = os.path.dirname(baseline)
     metric_sources_payload: dict[str, Any] | None = None
