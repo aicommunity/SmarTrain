@@ -110,6 +110,11 @@ from smartrain.workflows.analyze.analyze_system_profile_service import (
 from smartrain.workflows.analyze.analyze_ultralytics_test_service import (
     collect_ultralytics_test_artifacts as _svc_collect_ultralytics_test_artifacts,
 )
+from smartrain.workflows.analyze.analyze_compare_finalize_service import (
+    finalize_compare_analytics_session as _svc_finalize_compare_analytics_session,
+    resolve_compare_artifact_path as _svc_resolve_compare_artifact_path,
+    resolve_compare_png_path as _svc_resolve_compare_png_path,
+)
 from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
 from smartrain.services.analyze_table_service import export_runs_table, scan_runs
 from smartrain.services.analyze_compare_service import run_compare_workflow
@@ -526,45 +531,18 @@ def _finalize_compare_analytics_session(
     bar_path: str | None,
     insights_path: str | None,
 ) -> None:
-    session_name = (getattr(args, "analytics_session", None) or "").strip()
-    if not session_name:
-        return
-    try:
-        ws = resolve_workspace_root(args.workspace)
-    except ValueError:
-        print(
-            f"[ERROR] --analytics-session requires --workspace or {WORKSPACE_ENV_VAR}.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    layout = WorkspaceLayout(ws)
-    dest_root = os.path.join(layout.analytics, session_name)
-    os.makedirs(dest_root, exist_ok=True)
-    artifacts: list[dict[str, str]] = []
-    for role, p in (
-        ("delta_csv", out_csv),
-        ("curves_png", out_png),
-        ("bars_png", bar_path),
-        ("insights_txt", insights_path),
-    ):
-        if not p:
-            continue
-        ap = os.path.abspath(p)
-        if os.path.isfile(ap):
-            bn = os.path.basename(ap)
-            shutil.copy2(ap, os.path.join(dest_root, bn))
-            artifacts.append({"role": role, "file": bn})
-    manifest: dict[str, Any] = {
-        "kind": "compare",
-        "baseline": baseline,
-        "others": others,
-        "scan_root_at_generation": getattr(args, "models_root", None),
-        "artifacts": artifacts,
-    }
-    sj = os.path.join(dest_root, "session.json")
-    with open(sj, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, ensure_ascii=False, indent=2)
-    print(f"[OK] Compare session manifest: {sj}")
+    _svc_finalize_compare_analytics_session(
+        args=args,
+        baseline=baseline,
+        others=others,
+        out_csv=out_csv,
+        out_png=out_png,
+        bar_path=bar_path,
+        insights_path=insights_path,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
+        workspace_env_var=WORKSPACE_ENV_VAR,
+    )
 
 
 def _resolve_compare_png_path(
@@ -572,8 +550,13 @@ def _resolve_compare_png_path(
     analytics_session: str | None,
     out_png_cli: str,
 ) -> str:
-    return _default_relative_output(
-        workspace_cli, analytics_session, "compare", "compare_curves.png", out_png_cli
+    return _svc_resolve_compare_png_path(
+        out_png_cli,
+        out_csv="compare_delta.csv",
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
+        workspace_cli=workspace_cli,
+        session_name=analytics_session,
     )
 
 
@@ -584,8 +567,12 @@ def _resolve_compare_artifact_path(
     raw_path: str,
     default_file_name: str,
 ) -> str:
-    return _default_relative_output(
-        workspace_cli, analytics_session, category, default_file_name, raw_path
+    _ = category
+    return _svc_resolve_compare_artifact_path(
+        _default_relative_output(
+            workspace_cli, analytics_session, category, default_file_name, raw_path
+        ),
+        _session_root(workspace_cli, analytics_session),
     )
 
 
