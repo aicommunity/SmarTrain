@@ -9,12 +9,10 @@ import gc
 import json
 import os
 import re
-import shlex
 import shutil
 import sys
 import time
 from datetime import datetime
-from glob import glob
 from io import StringIO
 from typing import Any
 
@@ -101,6 +99,9 @@ from smartrain.workflows.analyze.analyze_all_speed_stage_service import (
 )
 from smartrain.workflows.analyze.analyze_all_pr_stage_service import (
     run_all_pr_stage as _svc_run_all_pr_stage,
+)
+from smartrain.workflows.analyze.analyze_all_finalize_service import (
+    finalize_all_session as _svc_finalize_all_session,
 )
 from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
 from smartrain.services.analyze_table_service import export_runs_table, scan_runs
@@ -1545,189 +1546,29 @@ def cmd_all(args: argparse.Namespace) -> None:
     artifacts.extend(pr_artifacts)
     cache_events.extend(pr_cache_events)
 
-    abbreviations = _build_abbreviations_for_report([baseline] + others)
-    ultralytics_test_rows, ultralytics_test_artifacts = _collect_ultralytics_test_artifacts(
-        session_root,
-        [baseline] + others,
-        abbreviations,
+    _svc_finalize_all_session(
+        args=args,
+        session_root=session_root,
+        profile=profile,
+        baseline=baseline,
+        others=others,
+        data_yaml=data_yaml,
+        report_languages=report_languages,
+        run_data_yaml_map=run_data_yaml_map,
+        unresolved_data_yaml_runs=unresolved_data_yaml_runs,
+        artifacts=artifacts,
+        cache_events=cache_events,
+        artifact_failures=artifact_failures,
+        metric_sources_payload=metric_sources_payload,
+        recompute_missing_metrics=recompute_missing_metrics,
+        build_abbreviations_for_report_cb=_build_abbreviations_for_report,
+        collect_ultralytics_test_artifacts_cb=_collect_ultralytics_test_artifacts,
+        write_format_compare_artifacts_cb=_write_format_compare_artifacts,
+        collect_confidence_recommendation_tables_cb=_collect_confidence_recommendation_tables,
+        write_manifest_cb=write_manifest,
+        write_analysis_report_cb=write_analysis_report,
+        record_failure_cb=_record_failure,
     )
-    artifacts.extend(ultralytics_test_artifacts)
-    format_compare = _write_format_compare_artifacts(session_root, [baseline] + others)
-    if format_compare and format_compare.get("csv"):
-        artifacts.append({"role": "format_compare_csv", "path": str(format_compare["csv"])})
-        perf_rel = str(format_compare.get("perf_test_csv") or "")
-        if perf_rel:
-            perf_abs = os.path.join(session_root, perf_rel)
-            if os.path.isfile(perf_abs):
-                try:
-                    perf_df = pd.read_csv(perf_abs)
-                    if "performance_status" in perf_df.columns:
-                        bad = perf_df[perf_df["performance_status"].astype(str).str.lower() != "ok"].copy()
-                        for _, row in bad.iterrows():
-                            _record_failure(
-                                stage="format_performance",
-                                status="missing",
-                                reason_code=str(row.get("performance_reason") or "performance_not_collected"),
-                                reason_detail="format performance row is incomplete",
-                                run_dir=str(row.get("run_dir") or ""),
-                                format_name=str(row.get("format") or ""),
-                                split=str(row.get("split") or "test"),
-                            )
-                except Exception as e:
-                    _record_failure(
-                        stage="format_performance",
-                        status="failed",
-                        reason_code="format_perf_read_failed",
-                        reason_detail=str(e),
-                        split="test",
-                    )
-    conf_tables = _collect_confidence_recommendation_tables(
-        [baseline] + others,
-        os.path.join(session_root, "artifacts", "confidence"),
-    )
-    for objective in ("A", "B", "C"):
-        p = conf_tables.get(objective)
-        if p and os.path.isfile(p):
-            artifacts.append(
-                {
-                    "role": f"confidence_recommendations_{objective.lower()}_csv",
-                    "path": os.path.relpath(p, session_root),
-                }
-            )
-
-    manifest = {
-        "session_name": os.path.basename(session_root),
-        "profile": profile,
-        "baseline": baseline,
-        "others": others,
-        "artifacts": artifacts,
-        "images": [a["path"] for a in artifacts if a["path"].endswith(".png")],
-        "tables": [a["path"] for a in artifacts if a["path"].endswith(".csv")],
-        "artifact_scope": {
-            "single_run": ["test_metrics_recomputed.csv", "pr aggregate/per_class", "inference benchmark profile"],
-            "cross_run": ["compare", "leaderboard", "speed_quality", "reports", "session manifest"],
-        },
-        "sections": [
-            "executive_summary",
-            "comparison_context",
-            "quality_analysis",
-            "speed_analysis",
-            "format_compare",
-            "per_class_analysis",
-            "conclusion",
-        ],
-        "abbreviations": abbreviations,
-        "run_data_yaml_map": run_data_yaml_map,
-        "runs_with_unresolved_data_yaml": unresolved_data_yaml_runs,
-    }
-    if ultralytics_test_rows:
-        manifest["ultralytics_test"] = ultralytics_test_rows
-    if conf_tables:
-        manifest["confidence_recommendations"] = {
-            key: os.path.relpath(path, session_root) for key, path in conf_tables.items()
-        }
-    if metric_sources_payload is not None:
-        manifest["metric_sources"] = metric_sources_payload
-    else:
-        _record_failure(
-            stage="metrics",
-            status="missing",
-            reason_code="metric_sources_missing",
-            reason_detail="metric_sources.json missing or unreadable",
-            split="test",
-        )
-    if artifact_failures:
-        manifest["artifact_failures"] = artifact_failures
-        by_reason: dict[str, int] = {}
-        for item in artifact_failures:
-            reason = str(item.get("reason_code") or "unknown")
-            by_reason[reason] = by_reason.get(reason, 0) + 1
-        manifest["artifact_failures_summary"] = {
-            "total": len(artifact_failures),
-            "by_reason_code": by_reason,
-        }
-    if cache_events:
-        manifest["cache"] = {
-            "events": cache_events,
-            "hits": sum(1 for e in cache_events if e.get("status") == "hit"),
-            "misses": sum(1 for e in cache_events if e.get("status") == "miss"),
-        }
-    if profile == "full":
-        manifest["pr_per_class"] = {
-            "csv": "artifacts/pr/per_class/pr_per_class.csv",
-            "dir": "artifacts/pr/per_class",
-        }
-    if profile in ("speed", "full"):
-        manifest["speed_quality"] = {
-            "csv": "artifacts/speed_quality/speed_quality.csv",
-            "png": "artifacts/speed_quality/speed_vs_map.png",
-            "scatter_x": str(getattr(args, "scatter_x", "avg_inference_ms_per_frame")),
-            "scatter_y": str(getattr(args, "scatter_y", "mAP50-95")),
-        }
-    if format_compare:
-        manifest["format_comparison"] = format_compare
-        for key in ("test_csv", "val_csv", "pt_uni_csv", "eval_csv", "csv"):
-            rel = str(format_compare.get(key) or "")
-            if rel and rel not in manifest["tables"]:
-                manifest["tables"].append(rel)
-    manifest_path = os.path.join(session_root, "session.json")
-    write_manifest(manifest_path, manifest)
-    strict_diag = bool(getattr(args, "strict_diagnostics", False))
-    if strict_diag:
-        critical_missing = []
-        if profile in ("quality", "full") and "metric_sources" not in manifest:
-            critical_missing.append("metric_sources")
-        if profile == "full":
-            pr_meta = manifest.get("pr_per_class") if isinstance(manifest.get("pr_per_class"), dict) else {}
-            pr_csv_rel = str((pr_meta or {}).get("csv") or "")
-            if not pr_csv_rel:
-                critical_missing.append("pr_per_class_csv")
-            elif not os.path.isfile(os.path.join(session_root, pr_csv_rel)):
-                critical_missing.append("pr_per_class_csv")
-        if critical_missing:
-            print(
-                "[ERROR] Strict diagnostics failed: missing critical artifacts: "
-                + ", ".join(critical_missing),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-    report_files = write_analysis_report(
-        session_root,
-        manifest,
-        no_pdf=bool(args.no_pdf),
-        no_odt=bool(args.no_odt),
-        languages=report_languages,
-    )
-    print(f"[OK] Analyze session: {session_root}")
-    print(f"[OK] Manifest: {manifest_path}")
-    for key, path in report_files.items():
-        print(f"[OK] Report {key}: {path}")
-    replay_parts = [
-        "smartrain", "analyze", "all",
-        "--baseline", baseline,
-        "--profile", profile,
-        "--report-languages", ",".join(report_languages),
-        "--scatter-x", str(getattr(args, "scatter_x", "avg_inference_ms_per_frame")),
-        "--scatter-y", str(getattr(args, "scatter_y", "mAP50-95")),
-        "--val-batch", str(int(getattr(args, "val_batch", 1))),
-        "--val-imgsz", str(int(getattr(args, "val_imgsz", 640))),
-        "--recompute-missing-metrics", ("yes" if recompute_missing_metrics else "no"),
-    ]
-    workspace_val = getattr(args, "workspace", None)
-    if workspace_val is not None and str(workspace_val).strip().lower() not in {"", "none"}:
-        replay_parts.extend(["--workspace", str(workspace_val)])
-    for item in others:
-        replay_parts.extend(["--others", item])
-    if data_yaml:
-        replay_parts.extend(["--data-yaml", data_yaml])
-    if bool(getattr(args, "no_pdf", False)):
-        replay_parts.append("--no-pdf")
-    if bool(getattr(args, "no_odt", False)):
-        replay_parts.append("--no-odt")
-    replay_parts.append("--val-half" if bool(getattr(args, "val_half", True)) else "--no-val-half")
-    replay_parts.append("--gpu-only-val" if bool(getattr(args, "gpu_only_val", True)) else "--allow-cpu-fallback")
-    print("[INFO] Command for non-interactive retry:")
-    print(" ".join(shlex.quote(p) for p in replay_parts if p))
 
 def build_analyze_arg_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)

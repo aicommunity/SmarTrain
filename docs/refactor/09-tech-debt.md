@@ -224,6 +224,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - preserved compatibility via callback injection for `_group_runs_by_data_yaml`, `cmd_pr_curves`, `_safe_name`, and `_record_failure`.
   - validated targeted analyze/CLI/import regression (`133 passed, 1 skipped`).
   Residual debt for this slice: `no residual debt (cmd_all PR stage)`.
+- 2026-05-07: Wave E-tail decomposition slice (results_analyzer cmd_all - finalize stage extraction) complete:
+  - introduced `smartrain/workflows/analyze/analyze_all_finalize_service.py`.
+  - moved post-artifacts tail from `cmd_all`: ultralytics test artifacts append, format compare/perf diagnostics, confidence tables append, manifest build+write, strict diagnostics gate, report export, replay command print.
+  - preserved compatibility through callback injection (`_build_abbreviations_for_report`, `_collect_ultralytics_test_artifacts`, `_write_format_compare_artifacts`, `_collect_confidence_recommendation_tables`, `write_manifest`, `write_analysis_report`, `_record_failure`).
+  - validated targeted analyze/CLI/import regression (`133 passed, 1 skipped`).
+  Residual debt for this slice: `no residual debt (cmd_all finalize stage)`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
