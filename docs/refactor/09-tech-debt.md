@@ -170,6 +170,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - preserved recompute/monkeypatch compatibility by delegating through callbacks for `latest_test_metrics_path` and `_recompute_run_test_metrics`.
   - validated with targeted analyze/CLI regression (`134 passed`).
   Residual debt for this slice: `no residual debt`.
+- 2026-05-07: Wave E-tail decomposition slice (datasets_json_former report/io & normalize extraction) complete:
+  - extracted scan summary writer + scan report printer + preserved-field merge logic into `smartrain/workflows/datasets/datasets_json_report_io.py`.
+  - extracted `_normalize_path_for_data_path` into `smartrain/workflows/datasets/datasets_json_normalize_service.py`.
+  - rewired `datasets_json_former.py` to delegate these boundaries via imports, keeping CLI behavior stable.
+  - validated with targeted dataset former regression (`1 passed`) + import sanity (`test_imports`).
+  Residual debt for this slice: `no residual debt`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
