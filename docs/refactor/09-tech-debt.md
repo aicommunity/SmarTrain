@@ -238,6 +238,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - kept `results_analyzer` wrappers and delegated via callback injection (`_flat_row_for_run`, `read_test_system_profile_by_format_artifacts`) to preserve monkeypatch compatibility.
   - validated targeted analyze/CLI/import regression (`133 passed, 1 skipped`).
   Residual debt for this slice: `no residual debt (system profile utility cleanup)`.
+- 2026-05-07: Wave E-tail decomposition slice (results_analyzer utility cleanup - ultralytics test artifacts) complete:
+  - introduced `smartrain/workflows/analyze/analyze_ultralytics_test_service.py`.
+  - moved `_collect_ultralytics_test_artifacts` implementation from `results_analyzer` into the service.
+  - kept wrapper delegation in `results_analyzer` with callback injection (`run_test_backend_dir`, `_build_run_record_canonical`) to preserve compatibility/monkeypatch behavior.
+  - validated targeted analyze/CLI/import regression (`133 passed, 1 skipped`).
+  Residual debt for this slice: `no residual debt (ultralytics test utility cleanup)`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
