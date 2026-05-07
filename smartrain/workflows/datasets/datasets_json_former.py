@@ -54,6 +54,9 @@ from smartrain.workflows.datasets.datasets_json_convert_purge_service import (
     _dataset_content_hash as _svc_dataset_content_hash,
     _purge_raw_sources as _svc_purge_raw_sources,
 )
+from smartrain.workflows.datasets.datasets_json_cvat11_normalize_service import (
+    _ensure_training_ready_after_copy as _svc_ensure_training_ready_after_copy,
+)
 
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -575,48 +578,13 @@ def _ensure_training_ready_after_copy(dataset_root: str) -> bool:
     Normalizes the copied dataset to a form suitable for training.
     Now the critical case: cvat11 (annotations.xml + images/) -> YOLO labels + data.yaml.
     """
-    structure = detect_structure(dataset_root)
-    if structure != "cvat11":
-        return False
-
-    xml_path = _find_cvat_annotations_xml(dataset_root)
-    if not xml_path:
-        return False
-    names = _load_cvat11_label_names(xml_path)
-    if not names:
-        print(f"[WARNING] CVAT 1.1: could not determine class list for {dataset_root}")
-        return False
-
-    labels_dir = os.path.join(dataset_root, "labels")
-    # Always rebuild labels from annotations.xml so stale flat labels (older scan layout)
-    # cannot coexist with nested image paths.
-    if os.path.isdir(labels_dir):
-        shutil.rmtree(labels_dir, ignore_errors=True)
-    os.makedirs(labels_dir, exist_ok=True)
-    class_name_to_id = {name: idx for idx, name in enumerate(names)}
-    try:
-        _images_dir, _images_found, _labels_written = generate_temp_yolo_labels_from_cvat11_extracted(
-            dataset_root=Path(dataset_root),
-            labels_out_dir=Path(labels_dir),
-            class_name_to_id=class_name_to_id,
-        )
-    except Exception as e:
-        print(f"[WARNING] CVAT 1.1: failed to generate YOLO labels for {dataset_root}: {e}")
-        return False
-
-    data_yaml = os.path.join(dataset_root, "data.yaml")
-    with open(data_yaml, "w", encoding="utf-8") as f:
-        f.write(
-            "# smartrain (CVAT 1.1 scan): images/ may contain nested subfolders; "
-            "labels/ mirrors the same relative paths (YOLO pairing).\n"
-            "# No path: key — Ultralytics uses this file's directory as dataset root.\n"
-        )
-        f.write("train: images\n")
-        f.write("val: images\n")
-        f.write("test: images\n\n")
-        f.write(f"nc: {len(names)}\n")
-        f.write(f"names: {names}\n")
-    return True
+    return _svc_ensure_training_ready_after_copy(
+        dataset_root,
+        detect_structure_cb=detect_structure,
+        find_cvat_annotations_xml_cb=_find_cvat_annotations_xml,
+        load_cvat11_label_names_cb=_load_cvat11_label_names,
+        generate_temp_yolo_labels_cb=generate_temp_yolo_labels_from_cvat11_extracted,
+    )
 
 
 def _dataset_content_hash(path: str) -> Optional[str]:
