@@ -188,6 +188,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - delegated the CVAT11-heavy part of `_ensure_training_ready_after_copy` into `datasets_json_cvat11_normalize_service.py` via callback injection.
   - validated targeted dataset former regression (`test_cvat11_native_dataset_former`) and import sanity (`test_imports`).
   Residual debt for this slice: `no residual debt (convert/normalize helpers)`.
+- 2026-05-07: Wave E-tail decomposition slice (results_analyzer cmd_all - selection stage extraction) complete:
+  - introduced `smartrain/workflows/analyze/analyze_all_selection_service.py`.
+  - moved baseline/others/profile selection and interactive run picker from `cmd_all` into the service.
+  - preserved test monkeypatch surface by injecting `_filtered_run_records`, `prompt_int`, `prompt_text`, `prompt_choice` callbacks from `results_analyzer`.
+  - validated targeted analyze/CLI/import regression (`133 passed, 1 skipped`).
+  Residual debt for this slice: `no residual debt (cmd_all selection stage)`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
