@@ -48,6 +48,12 @@ from smartrain.workflows.datasets.datasets_json_scan_index_service import (
     _unique_dataset_key as _svc_unique_dataset_key,
     _zip_extract_path as _svc_zip_extract_path,
 )
+from smartrain.workflows.datasets.datasets_json_convert_purge_service import (
+    _confirm_purge_processed_raw as _svc_confirm_purge_processed_raw,
+    _copy_source_to_training as _svc_copy_source_to_training,
+    _dataset_content_hash as _svc_dataset_content_hash,
+    _purge_raw_sources as _svc_purge_raw_sources,
+)
 
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -557,11 +563,11 @@ def _compute_source_signature(path: str) -> str:
 
 
 def _copy_source_to_training(src_root: str, dst_root: str) -> None:
-    if os.path.isdir(dst_root):
-        shutil.rmtree(dst_root, ignore_errors=True)
-    os.makedirs(os.path.dirname(dst_root), exist_ok=True)
-    shutil.copytree(src_root, dst_root)
-    _ensure_training_ready_after_copy(dst_root)
+    _svc_copy_source_to_training(
+        src_root,
+        dst_root,
+        ensure_training_ready_after_copy_cb=_ensure_training_ready_after_copy,
+    )
 
 
 def _ensure_training_ready_after_copy(dataset_root: str) -> bool:
@@ -614,11 +620,7 @@ def _ensure_training_ready_after_copy(dataset_root: str) -> bool:
 
 
 def _dataset_content_hash(path: str) -> Optional[str]:
-    try:
-        return str(calculate_dataset_hash(path))
-    except Exception as e:
-        print(f"[WARNING] Failed to calculate dataset_hash for {path!r}: {e}")
-        return None
+    return _svc_dataset_content_hash(path)
 
 
 def _ensure_prev_entry(previous_info: dict, key: str) -> dict:
@@ -647,34 +649,11 @@ def _append_to_datasets_list(list_path: str, value: str) -> None:
 
 
 def _confirm_purge_processed_raw(paths: list[str]) -> bool:
-    if not paths:
-        return False
-    print("[WARNING] Requested to remove processed sources from raw_data.")
-    print("[WARNING] Will be removed:")
-    for p in paths:
-        print(f"  - {p}")
-    if not sys.stdin.isatty():
-        print("[WARNING] No interactive TTY: deletion cancelled.")
-        return False
-    ans = input("Continue deletion? [Y/n]: ").strip().lower()
-    return ans in ("", "y", "yes", "1", "true", "yes", "d")
+    return _svc_confirm_purge_processed_raw(paths)
 
 
 def _purge_raw_sources(paths: list[str]) -> tuple[int, int]:
-    removed = 0
-    failed = 0
-    for p in paths:
-        try:
-            if os.path.isdir(p):
-                shutil.rmtree(p)
-                removed += 1
-            elif os.path.isfile(p):
-                os.remove(p)
-                removed += 1
-        except Exception as e:
-            failed += 1
-            print(f"[WARNING] Failed to delete {p}: {e}")
-    return removed, failed
+    return _svc_purge_raw_sources(paths)
 
 
 def _ensure_scan_initial_passport(

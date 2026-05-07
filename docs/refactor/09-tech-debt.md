@@ -181,6 +181,11 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - changed `datasets_json_former.py` scan/index helpers (`_sorted_diff`, `_run_scan_folder_roots`, `_load_datasets_list_file`, zip extraction, source signature, etc.) into thin delegating wrappers.
   - validated targeted dataset former regression (`1 passed`) + `test_imports` (`2 passed`).
   Residual debt for this slice: `no residual debt (scan/index helpers)`.
+- 2026-05-07: Wave E-tail decomposition slice (datasets_json_former convert/purge extraction) complete for non-CVAT heavy helpers:
+  - introduced `smartrain/workflows/datasets/datasets_json_convert_purge_service.py`.
+  - delegated `_copy_source_to_training`, `_dataset_content_hash`, `_confirm_purge_processed_raw`, `_purge_raw_sources` to the service; kept `_ensure_training_ready_after_copy` in-place for the next extract step (CVAT11 normalization).
+  - validated targeted dataset former regression (`test_cvat11_native_dataset_former`) and import sanity (`test_imports`).
+  Residual debt for this slice: `no residual debt (convert/purge helpers)`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
