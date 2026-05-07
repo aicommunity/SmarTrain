@@ -80,6 +80,10 @@ from smartrain.workflows.analyze.analyze_pr_curves_service import (
     resolve_pr_output_png as _svc_resolve_pr_output_png,
     run_pr_curves as _svc_run_pr_curves,
 )
+from smartrain.workflows.analyze.analyze_test_metrics_service import (
+    resolve_test_metrics_plot_png as _svc_resolve_test_metrics_plot_png,
+    run_test_metrics_plot as _svc_run_test_metrics_plot,
+)
 from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
 from smartrain.services.analyze_table_service import export_runs_table, scan_runs
 from smartrain.services.analyze_compare_service import run_compare_workflow
@@ -1374,319 +1378,33 @@ def _resolve_test_metrics_plot_png(
     runs_group_dir: str,
     metric: str,
 ) -> str:
-    if out_dir_cli:
-        base = os.path.abspath(os.path.expanduser(out_dir_cli))
-    else:
-        try:
-            ws = resolve_workspace_root(workspace_cli)
-            base = os.path.join(WorkspaceLayout(ws).analytics, "metrics_comparison")
-        except ValueError:
-            base = os.path.join(
-                os.path.dirname(os.path.abspath(runs_group_dir)),
-                "analytics",
-                "metrics_comparison",
-            )
-    os.makedirs(base, exist_ok=True)
-    ds_name = os.path.basename(os.path.normpath(runs_group_dir))
-    safe_metric = re.sub(r"[^\w.\-+]+", "_", metric, flags=re.UNICODE).strip("._")
-    if not safe_metric:
-        safe_metric = "metric"
-    return os.path.join(base, f"test_metrics_{ds_name}_{safe_metric}.png")
+    return _svc_resolve_test_metrics_plot_png(
+        workspace_cli,
+        out_dir_cli,
+        runs_group_dir,
+        metric,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
+    )
 
 
 def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
-    if (not getattr(args, "runs_group_dir", None) or not getattr(args, "metrics", None)) and sys.stdin.isatty():
-        args.runs_group_dir = prompt_text("Runs group dir", default=str(args.models_root)).strip() or str(args.models_root)
-        raw_metrics = prompt_text("Metrics (comma separated)", default="mAP50-95,Box-F1").strip()
-        args.metrics = [m.strip() for m in raw_metrics.split(",") if m.strip()]
-    if not getattr(args, "runs_group_dir", None) or not getattr(args, "metrics", None):
-        print("[ERROR] Incomplete arguments: --runs-group-dir and --metrics are required.", file=sys.stderr)
-        sys.exit(2)
-    runs_group_dir = os.path.abspath(os.path.expanduser(args.runs_group_dir))
-    if not os.path.isdir(runs_group_dir):
-        print(f"[ERROR] Models directory not found: {runs_group_dir}", file=sys.stderr)
-        sys.exit(1)
-
-    run_dirs = _resolve_selected_run_dirs(
-        runs_group_dir,
-        getattr(args, "selected_run_dirs", None),
+    _svc_run_test_metrics_plot(
+        args,
+        prompt_text_cb=prompt_text,
+        resolve_selected_run_dirs_cb=_resolve_selected_run_dirs,
+        latest_test_metrics_path_cb=latest_test_metrics_path,
+        load_recompute_status_cb=_load_recompute_status,
+        save_recompute_status_cb=_save_recompute_status,
+        resolve_data_yaml_for_run_cb=_resolve_data_yaml_for_run,
+        recompute_run_test_metrics_cb=_recompute_run_test_metrics,
+        compute_fingerprint_cb=compute_fingerprint,
+        run_cache_root_cb=run_cache_root,
+        data_yaml_hash_cb=data_yaml_hash,
+        append_cache_entry_cb=append_cache_entry,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cls=WorkspaceLayout,
     )
-    if not run_dirs:
-        print(f"[ERROR] No run directories found for scope in: {runs_group_dir}", file=sys.stderr)
-        sys.exit(1)
-    print(f"[INFO] Test-metrics scope: {len(run_dirs)} run(s) selected")
-
-    recompute_enabled = bool(getattr(args, "recompute_missing_metrics", False))
-    run_data_yaml_map = getattr(args, "run_data_yaml_map", None)
-    if not isinstance(run_data_yaml_map, dict):
-        run_data_yaml_map = {}
-    rows: list[dict[str, Any]] = []
-    run_rows: dict[str, dict[str, Any]] = {}
-    metric_sources: dict[str, dict[str, str]] = {}
-    recompute_status_by_run: dict[str, str] = {}
-    for run_dir in run_dirs:
-        model_name = os.path.basename(run_dir.rstrip(os.sep))
-        tm = latest_test_metrics_path(run_dir)
-        row = {"model": model_name, "run_dir": run_dir}
-        if tm:
-            try:
-                df = pd.read_csv(tm)
-                df.columns = [str(c).strip() for c in df.columns]
-                if len(df) > 0:
-                    row.update(df.iloc[0].to_dict())
-                else:
-                    print(f"[WARN] {model_name}: empty CSV {tm}")
-            except Exception as e:
-                print(f"[WARN] {model_name}: failed to read {tm}: {e}")
-        elif not recompute_enabled:
-            print(f"[WARN] {model_name}: missing test_metrics*.csv")
-        rows.append(row)
-        run_rows[run_dir] = row
-        metric_sources[run_dir] = {}
-
-    if not rows:
-        print("[ERROR] No test_metrics data available for plotting.", file=sys.stderr)
-        sys.exit(1)
-
-    requested_metrics = [m.strip() for m in args.metrics if m.strip()]
-    if not requested_metrics:
-        print("[ERROR] --metrics list is empty.", file=sys.stderr)
-        sys.exit(1)
-
-    if recompute_enabled:
-        split = str(getattr(args, "recompute_split", "test") or "test")
-        for run_dir in run_dirs:
-            row = run_rows.get(run_dir)
-            if row is None:
-                continue
-            missing_for_run = [
-                m for m in requested_metrics
-                if m not in row or pd.isna(pd.to_numeric(row.get(m), errors="coerce"))
-            ]
-            if not missing_for_run:
-                for m in requested_metrics:
-                    metric_sources.setdefault(run_dir, {})[m] = "original"
-                continue
-            data_yaml = str(run_data_yaml_map.get(run_dir) or "").strip() or _resolve_data_yaml_for_run(run_dir, args.workspace)[0]
-            if not data_yaml:
-                print(f"[WARN] {os.path.basename(run_dir)}: no data.yaml detected, cannot recompute {missing_for_run}")
-                for m in missing_for_run:
-                    metric_sources.setdefault(run_dir, {})[m] = "missing"
-                recompute_status_by_run[run_dir] = "skipped_no_data_yaml"
-                _save_recompute_status(
-                    run_dir,
-                    data_yaml=os.path.join(run_dir, "_missing_data_yaml_"),
-                    split=split,
-                    requested_metrics=requested_metrics,
-                    resolved=[],
-                    unresolved=missing_for_run,
-                    status="missing_data_yaml",
-                )
-                continue
-            cached_status = _load_recompute_status(run_dir, data_yaml, split, requested_metrics)
-            if cached_status and isinstance(cached_status, dict):
-                unresolved_prev = set(cached_status.get("unresolved_metrics") or [])
-                if unresolved_prev and set(missing_for_run).issubset(unresolved_prev):
-                    for m in missing_for_run:
-                        metric_sources.setdefault(run_dir, {})[m] = "missing"
-                    recompute_status_by_run[run_dir] = "skipped_known_unresolved"
-                    continue
-            try:
-                recomputed_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
-                if os.path.isfile(recomputed_csv):
-                    rdf = pd.read_csv(recomputed_csv)
-                    recomputed = rdf.iloc[0].to_dict() if len(rdf) > 0 else {}
-                    fp_metrics = compute_fingerprint(
-                        {
-                            "tool": "analyze-v2",
-                            "task": "metrics_recompute",
-                            "split": split,
-                            "data_yaml_hash": data_yaml_hash(data_yaml),
-                            "weights_hash": weights_hash(run_dir),
-                        }
-                    )
-                    cache_metrics_csv = os.path.join(run_cache_root(run_dir), "metrics", f"recomputed_{fp_metrics}.csv")
-                    os.makedirs(os.path.dirname(cache_metrics_csv), exist_ok=True)
-                    if len(rdf) > 0 and not os.path.isfile(cache_metrics_csv):
-                        rdf.to_csv(cache_metrics_csv, index=False, encoding="utf-8")
-                    append_cache_entry(
-                        run_dir,
-                        {
-                            "artifact": "metrics.recomputed",
-                            "fingerprint": fp_metrics,
-                            "path": os.path.relpath(cache_metrics_csv, run_dir),
-                            "status": "hit",
-                        },
-                    )
-                else:
-                    recomputed = _recompute_run_test_metrics(
-                        run_dir,
-                        data_yaml,
-                        split,
-                        val_batch=int(getattr(args, "val_batch", 1)),
-                        val_imgsz=int(getattr(args, "val_imgsz", 640)),
-                        val_half=bool(getattr(args, "val_half", True)),
-                        gpu_only=bool(getattr(args, "gpu_only_val", True)),
-                    )
-                    fp_metrics = compute_fingerprint(
-                        {
-                            "tool": "analyze-v2",
-                            "task": "metrics_recompute",
-                            "split": split,
-                            "data_yaml_hash": data_yaml_hash(data_yaml),
-                            "weights_hash": weights_hash(run_dir),
-                        }
-                    )
-                    cache_metrics_csv = os.path.join(run_cache_root(run_dir), "metrics", f"recomputed_{fp_metrics}.csv")
-                    os.makedirs(os.path.dirname(cache_metrics_csv), exist_ok=True)
-                    if recomputed:
-                        pd.DataFrame([recomputed]).to_csv(cache_metrics_csv, index=False, encoding="utf-8")
-                    append_cache_entry(
-                        run_dir,
-                        {
-                            "artifact": "metrics.recomputed",
-                            "fingerprint": fp_metrics,
-                            "path": os.path.relpath(cache_metrics_csv, run_dir),
-                            "status": "miss",
-                        },
-                    )
-            except Exception as e:
-                print(f"[WARN] {os.path.basename(run_dir)}: recompute failed: {e}")
-                for m in missing_for_run:
-                    metric_sources.setdefault(run_dir, {})[m] = "missing"
-                recompute_status_by_run[run_dir] = "error"
-                _save_recompute_status(
-                    run_dir,
-                    data_yaml=data_yaml,
-                    split=split,
-                    requested_metrics=requested_metrics,
-                    resolved=[],
-                    unresolved=missing_for_run,
-                    status="error",
-                )
-                continue
-            if not recomputed:
-                print(f"[WARN] {os.path.basename(run_dir)}: recompute produced no metrics")
-                for m in missing_for_run:
-                    metric_sources.setdefault(run_dir, {})[m] = "missing"
-                recompute_status_by_run[run_dir] = "no_metrics"
-                _save_recompute_status(
-                    run_dir,
-                    data_yaml=data_yaml,
-                    split=split,
-                    requested_metrics=requested_metrics,
-                    resolved=[],
-                    unresolved=missing_for_run,
-                    status="no_metrics",
-                )
-                continue
-            resolved_now: list[str] = []
-            unresolved_now: list[str] = []
-            for m in missing_for_run:
-                if m in recomputed and pd.notna(pd.to_numeric(recomputed.get(m), errors="coerce")):
-                    row[m] = recomputed[m]
-                    metric_sources.setdefault(run_dir, {})[m] = "recomputed"
-                    resolved_now.append(m)
-                else:
-                    metric_sources.setdefault(run_dir, {})[m] = "missing"
-                    unresolved_now.append(m)
-            for m in requested_metrics:
-                metric_sources.setdefault(run_dir, {}).setdefault(m, "original")
-            row["metrics_source"] = "recomputed"
-            recompute_status_by_run[run_dir] = "recomputed"
-            print(f"[INFO] {os.path.basename(run_dir)}: recomputed missing metrics from {data_yaml}")
-            _save_recompute_status(
-                run_dir,
-                data_yaml=data_yaml,
-                split=split,
-                requested_metrics=requested_metrics,
-                resolved=resolved_now,
-                unresolved=unresolved_now,
-                status="ok" if not unresolved_now else "partial",
-            )
-        all_df = pd.DataFrame(list(run_rows.values()))
-    else:
-        for run_dir, row in run_rows.items():
-            for m in requested_metrics:
-                val = row.get(m)
-                metric_sources.setdefault(run_dir, {})[m] = (
-                    "original" if pd.notna(pd.to_numeric(val, errors="coerce")) else "missing"
-                )
-
-    all_df = pd.DataFrame(list(run_rows.values()))
-    for metric in requested_metrics:
-        if metric not in all_df.columns:
-            all_df[metric] = np.nan
-        plot_df = all_df[["model", metric]].copy()
-        plot_df[metric] = pd.to_numeric(plot_df[metric], errors="coerce")
-        plot_df = plot_df.dropna(subset=[metric])
-        if len(plot_df) == 0:
-            print(f"[WARN] Metric {metric!r}: no numeric values, skipping")
-            continue
-        if len(plot_df) < 2:
-            print(f"[WARN] Metric {metric!r}: only one run with numeric value, skipping comparison chart")
-            continue
-
-        plot_df = plot_df.sort_values(metric, ascending=False)
-        vals = plot_df[metric].tolist()
-        out_png = _resolve_test_metrics_plot_png(
-            args.workspace, args.out_dir, runs_group_dir, metric
-        )
-
-        plt.figure(figsize=(10, 6))
-        x = range(len(plot_df))
-        bars = plt.bar(x, vals, tick_label=plot_df["model"].tolist())
-        plt.xticks(rotation=25, ha="right")
-        plt.ylabel(metric)
-        plt.title(f"Test Metrics Comparison")
-        plt.grid(True, axis="y", linestyle="--", alpha=0.6)
-
-        ymax = max(vals) if vals else 0.0
-        y_pad = ymax * 0.015 if ymax > 0 else 0.01
-        for bar, v in zip(bars, vals):
-            x_text = bar.get_x() + bar.get_width() / 2.0
-            y_text = bar.get_height()
-            plt.text(
-                x_text,
-                y_text + y_pad,
-                f"{float(v):.4f}",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-            )
-
-        plt.tight_layout()
-        plt.savefig(out_png, dpi=220)
-        plt.close()
-        print(f"[OK] Test-metrics chart ({metric}): {out_png}")
-
-    sources_out = str(getattr(args, "metric_sources_out", "") or "").strip()
-    if sources_out:
-        out_path = os.path.abspath(os.path.expanduser(sources_out))
-        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-        selected_scope = [os.path.abspath(d) for d in run_dirs]
-        recomputed_runs = sorted(
-            [
-                run_dir
-                for run_dir, by_metric in metric_sources.items()
-                if any(str(v) == "recomputed" for v in (by_metric or {}).values())
-            ]
-        )
-        payload = {
-            "requested_metrics": requested_metrics,
-            "scope": {
-                "mode": "selected_runs" if bool(getattr(args, "selected_run_dirs", None)) else "runs_group",
-                "runs_group_dir": runs_group_dir,
-                "selected_run_dirs": selected_scope,
-            },
-            "recomputed_runs": recomputed_runs,
-            "sources": metric_sources,
-            "recompute_status_by_run": recompute_status_by_run,
-            "run_data_yaml_map": {k: v for k, v in run_data_yaml_map.items() if isinstance(v, str) and v.strip()},
-        }
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        print(f"[OK] Metric sources: {out_path}")
 
 
 def cmd_all(args: argparse.Namespace) -> None:
