@@ -447,6 +447,20 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-08: Step 2 summary:
   - PR 6.4 write-path closeout (manifest/provenance/hash + production dual-write hook) реализован.
   Residual debt for this step: `no residual debt`.
+- 2026-05-08: Step 3 / substep `pr66-migration-matrix` выполнен:
+  - изменено: расширена migration test matrix для historical/edge-case сценариев:
+    - `continue_on_error=True` с частичным успехом;
+    - `source_kind=model` discovery + apply;
+    - `report-only` planned + rollback_hint;
+    - `dry-run` с `runs_root` scope;
+    - recovery после corrupted existing snapshot;
+    - stop-on-first-error при `continue_on_error=False`.
+  - файлы: `tests/migration/test_legacy_to_canonical.py`, `tests/migration/test_migration_dry_run.py`, `tests/migration/test_migration_rollback_guidance.py`.
+  - тесты: `pytest -q tests/migration/test_legacy_to_canonical.py tests/migration/test_migration_dry_run.py tests/migration/test_migration_rollback_guidance.py tests/test_imports.py` (`12 passed`).
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 3 summary:
+  - PR 6.6 migration depth расширен по historical fixture matrix и execution modes.
+  Residual debt for this step: `no residual debt`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 
