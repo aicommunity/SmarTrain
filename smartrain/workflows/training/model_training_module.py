@@ -112,6 +112,18 @@ from smartrain.workflows.training.train_base_runs_service import (
     print_available_base_runs as _svc_print_available_base_runs,
     prompt_base_run_args_yaml as _svc_prompt_base_run_args_yaml,
 )
+from smartrain.workflows.training.train_interactive_helpers_service import (
+    apply_external_provider_defaults as _svc_apply_external_provider_defaults,
+    format_numbered_columns as _svc_format_numbered_columns,
+    get_installed_external_provider_record as _svc_get_installed_external_provider_record,
+    installed_external_provider_ids as _svc_installed_external_provider_ids,
+    installed_external_provider_records as _svc_installed_external_provider_records,
+    load_available_datasets as _svc_load_available_datasets,
+    model_matches_task as _svc_model_matches_task,
+    pick_model_interactive as _svc_pick_model_interactive,
+    prompt_dataset_name as _svc_prompt_dataset_name,
+    train_model_picker_options as _svc_train_model_picker_options,
+)
 from smartrain.services.train_runtime_helpers import (
     build_run_name as _shared_build_run_name,
     ensure_external_best_checkpoint_layout as _shared_ensure_external_best_checkpoint_layout,
@@ -873,163 +885,60 @@ def _prompt_train_device(default: str | None = None) -> str:
 
 
 def _load_available_datasets(layout: WorkspaceLayout) -> list[str]:
-    info_path = layout.work_datasets_info_path()
-    if not os.path.isfile(info_path):
-        return []
-    try:
-        with open(info_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return []
-    if not isinstance(data, dict):
-        return []
-    return sorted(str(k) for k in data.keys())
+    return _svc_load_available_datasets(layout)
 
 
 def _prompt_dataset_name(available: list[str]) -> str:
     from smartrain.cli_support.cli_prompts import prompt_choice
 
-    return prompt_choice("Dataset", available, default=available[0])
+    return _svc_prompt_dataset_name(available, prompt_choice_cb=prompt_choice)
 
 
 def _train_model_picker_options(default_model: str) -> list[str]:
-    catalog = TrainModelCatalog()
-    options = list(catalog.supported_aliases())
-    external_records = _installed_external_provider_records()
-    if external_records:
-        # Copy-paste friendly aliases for external providers.
-        for rec in external_records:
-            pid = str(rec.get("provider_id", "")).strip().lower()
-            if not pid:
-                continue
-            repo_path = str(rec.get("repo_path", "")).strip() or None
-            ext_catalog = TrainModelCatalog(provider=pid, provider_repo_path=repo_path)
-            options.extend(f"{pid}:{alias}" for alias in ext_catalog.supported_aliases())
-    if default_model and default_model not in options:
-        options.append(default_model)
-    options.append(_MANUAL_MODEL_ENTRY)
-    dedup: list[str] = []
-    seen: set[str] = set()
-    for item in options:
-        if item in seen:
-            continue
-        seen.add(item)
-        dedup.append(item)
-    return dedup
+    return _svc_train_model_picker_options(
+        default_model,
+        installed_records_cb=_installed_external_provider_records,
+        manual_model_entry=_MANUAL_MODEL_ENTRY,
+    )
 
 
 def _installed_external_provider_ids() -> list[str]:
-    return [str(r.get("provider_id", "")).strip().lower() for r in _installed_external_provider_records()]
+    return _svc_installed_external_provider_ids(installed_records_cb=_installed_external_provider_records)
 
 
 def _installed_external_provider_records() -> list[dict[str, Any]]:
-    reconcile_stale_provider_paths()
-    recs: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for rec in list_provider_records():
-        if str(rec.get("install_state", "")).strip().lower() != "installed":
-            continue
-        pid = str(rec.get("provider_id", "")).strip().lower()
-        if not pid or pid in seen:
-            continue
-        repo_path = Path(str(rec.get("repo_path", "")).strip()).expanduser()
-        venv_path = Path(str(rec.get("venv_path", "")).strip()).expanduser()
-        if not repo_path.is_dir() or not venv_path.is_dir():
-            continue
-        seen.add(pid)
-        recs.append(rec)
-    recs.sort(key=lambda x: str(x.get("provider_id", "")).strip().lower())
-    return recs
+    return _svc_installed_external_provider_records(
+        reconcile_paths_cb=reconcile_stale_provider_paths,
+        list_records_cb=list_provider_records,
+    )
 
 
 def _get_installed_external_provider_record(provider_id: str) -> dict[str, Any] | None:
-    key = str(provider_id or "").strip().lower()
-    if not key:
-        return None
-    for rec in _installed_external_provider_records():
-        pid = str(rec.get("provider_id", "")).strip().lower()
-        if pid == key:
-            return rec
-    return None
+    return _svc_get_installed_external_provider_record(
+        provider_id,
+        installed_records_cb=_installed_external_provider_records,
+    )
 
 
 def _apply_external_provider_defaults(args) -> None:
-    provider = str(getattr(args, "external_provider", "") or "").strip().lower()
-    if not provider:
-        return
-    if getattr(args, "model", None) is None:
-        rec = _get_installed_external_provider_record(provider)
-        repo_path = str(rec.get("repo_path", "")).strip() if isinstance(rec, dict) else None
-        aliases = TrainModelCatalog(provider=provider, provider_repo_path=repo_path or None).supported_aliases()
-        if aliases:
-            args.model = aliases[0]
-    if getattr(args, "epochs", None) is None:
-        args.epochs = 70
-    if getattr(args, "batch", None) is None:
-        args.batch = 8
-    if getattr(args, "img_size", None) is None:
-        args.img_size = 640
+    _svc_apply_external_provider_defaults(args, get_installed_record_cb=_get_installed_external_provider_record)
 
 
 def _model_matches_task(alias: str, task: str) -> bool:
-    low = alias.lower()
-    if ":" in low:
-        _, low = low.split(":", 1)
-    task_low = (task or "").strip().lower()
-    if task_low == "segment":
-        return "-seg" in low
-    if task_low == "classify":
-        return "-cls" in low
-    if task_low == "pose":
-        return "-pose" in low
-    if task_low == "obb":
-        return "-obb" in low
-    # detect by default: hide non-detection heads
-    return all(marker not in low for marker in ("-seg", "-cls", "-pose", "-obb"))
+    return _svc_model_matches_task(alias, task)
 
 
 def _format_numbered_columns(items: list[str], *, columns: int = 4) -> list[str]:
-    if not items:
-        return []
-    indexed = [f"{idx + 1}) {name}" for idx, name in enumerate(items)]
-    term_w = shutil.get_terminal_size(fallback=(120, 20)).columns
-    col_width = max(len(x) for x in indexed) + 2
-    cols = max(1, min(columns, max(1, term_w // col_width)))
-    rows = (len(indexed) + cols - 1) // cols
-    lines: list[str] = []
-    for row in range(rows):
-        parts: list[str] = []
-        for col in range(cols):
-            pos = col * rows + row
-            if pos >= len(indexed):
-                continue
-            cell = indexed[pos]
-            if col < cols - 1:
-                parts.append(cell.ljust(col_width))
-            else:
-                parts.append(cell)
-        lines.append("".join(parts).rstrip())
-    return lines
+    return _svc_format_numbered_columns(items, columns=columns)
 
 
 def _pick_model_interactive(options: list[str], default_alias: str) -> str:
-    print("[INFO] Model options:")
-    for line in _format_numbered_columns(options, columns=4):
-        print(f"  {line}")
-    while True:
-        raw = _prompt_input(
-            "Model (--model, number/value): ",
-            default=default_alias,
-        ).strip()
-        if not raw:
-            return default_alias
-        if raw in options:
-            return raw
-        if raw.isdigit():
-            idx = int(raw)
-            if 1 <= idx <= len(options):
-                return options[idx - 1]
-        print(f"[ERROR] Incorrect selection: {raw!r}")
+    return _svc_pick_model_interactive(
+        options,
+        default_alias,
+        format_columns_cb=_format_numbered_columns,
+        prompt_input_cb=_prompt_input,
+    )
 
 
 def _extract_run_timestamp(run_name: str, run_dir: Path) -> datetime:
