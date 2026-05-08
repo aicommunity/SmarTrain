@@ -94,6 +94,10 @@ pytest
   - `--preset hybrid-default` as a general default
   - `--preset hybrid-aug-tail-budget` for constrained-growth hybrid-aug with tail-first budgeting and head trim
 - `smartrain balance` eval splits: `--eval-coverage` is on by default (keeps `val`/`test` non-empty when possible and improves class coverage there); use `--no-eval-coverage` to disable. The interactive wizard asks for this option.
+- External provider inference capability gaps for non-detection tasks are explicit in report contract:
+  - `summary.capability_gap_images` shows how many images fell back to degraded payload
+  - classification degraded payload: `images[].task_outputs.classification = {}`
+  - segmentation degraded payload: `images[].task_outputs.segments = []`
 - For `hash --validate`: `0` for a match, `1` for a mismatch, `2` for an error.
 - By default, the workspace queue uses `queue.txt` and `tmp/status.txt`.
 - Device selection in `train`, `test`, and `inference`:

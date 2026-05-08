@@ -470,6 +470,16 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-08: Step 4 summary:
   - analyze read paths ужаты к gateway-first модели с compatibility fallback, без скрытого обязательного metadata bypass.
   Residual debt for this step: `no residual debt`.
+- 2026-05-08: Step 5 / substep `external-provider-operational-limit` выполнен:
+  - изменено: в external inference path добавлена явная диагностика capability-gap для cls/seg (`summary.capability_gap_images`, `images[].capability_gap`, warning в runtime).
+  - изменено: structured external result diagnostics пробрасываются в `external_execution.diagnostics`.
+  - изменено: обновлена документация degraded-contract для cls/seg в `README.md` и `docs/cli/analyze.md`.
+  - файлы: `smartrain/services/inference_service.py`, `smartrain/external_providers/runner.py`, `README.md`, `docs/cli/analyze.md`, `tests/test_inference_cli.py`.
+  - тесты: `pytest -q tests/test_inference_cli.py tests/test_imports.py`.
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 5 summary:
+  - operational-limit external providers для cls/seg формализован и диагностируется в runtime/report contract.
+  Residual debt for this step: `no residual debt`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 

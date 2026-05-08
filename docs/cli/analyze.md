@@ -61,6 +61,10 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
   - captions for tables/figures and optional abbreviations glossary for wide tables
 - `session.json` now contains sections: `metric_sources`, `pr_per_class`, `speed_quality`, `tables`, `images`, `cache`, `artifact_scope`.
 - Format comparison reads per-format artifacts from test manifests and supports entries with multiple artifacts per format (`formats.<fmt>.artifacts`), selecting available metrics sources with legacy fallback.
+- For runs produced by external inference in cls/seg modes, degraded-contract payloads are expected when provider runtime lacks `probs/masks`:
+  - classification rows may contain `task_outputs.classification = {}`
+  - segmentation rows may contain `task_outputs.segments = []`
+  - aggregate visibility comes from `summary.task_outputs_total` and `summary.capability_gap_images`
 - `analyze all` supports:
   - `--report-languages` (default `ru,en`)
   - `--scatter-x` / `--scatter-y` for speed-quality scatter axes

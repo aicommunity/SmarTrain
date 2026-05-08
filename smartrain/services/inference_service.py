@@ -190,6 +190,11 @@ def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -
         if not task_outputs and detections:
             task_outputs = {"detections": detections}
         normalized_task = _normalize_task_outputs_for_task(task_type, task_outputs, detections)
+        capability_gap = False
+        if task_type == "classification":
+            capability_gap = not bool(normalized_task.get("classification"))
+        elif task_type == "segmentation":
+            capability_gap = len(normalized_task.get("segments", [])) == 0
         normalized.append(
             {
                 "image_path_absolute": row.get("image_path_absolute"),
@@ -199,6 +204,7 @@ def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -
                 "task_type": task_to_metadata_task_type(row.get("task_type", task_type)),
                 "detections": detections,
                 "task_outputs": normalized_task,
+                "capability_gap": capability_gap,
             }
         )
     return normalized
@@ -390,12 +396,19 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             task_type=task_type,
         )
         rc, ext_images = _normalize_external_batch_result(raw_result)
+        ext_result_diagnostics = raw_result.get("diagnostics") if isinstance(raw_result, dict) else None
         ext_image_rows = _normalize_external_image_rows(task_type, ext_images)
         detections_total = sum(len(x.get("detections", [])) for x in ext_image_rows)
         task_outputs_total = sum(
             _task_outputs_count(task_type, x.get("task_outputs") if isinstance(x.get("task_outputs"), dict) else {})
             for x in ext_image_rows
         )
+        capability_gap_images = sum(1 for x in ext_image_rows if bool(x.get("capability_gap")))
+        if capability_gap_images > 0 and task_type in {"classification", "segmentation"}:
+            print(
+                "[WARN] External provider did not expose full task-specific outputs "
+                + f"for {capability_gap_images} images (task={task_type}); degraded contract applied."
+            )
         external_report = {
             "created_at": datetime.utcnow().isoformat() + "Z",
             "task_type": task_type,
@@ -424,6 +437,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 "repo_path": repo_path,
                 "venv_path": venv_path,
                 "return_code": int(rc),
+                "diagnostics": ext_result_diagnostics if isinstance(ext_result_diagnostics, dict) else {},
             },
             "summary": {
                 "images_input": len(ext_image_rows),
@@ -431,6 +445,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 "images_skipped": 0,
                 "detections_total": detections_total,
                 "task_outputs_total": task_outputs_total,
+                "capability_gap_images": capability_gap_images,
             },
             "performance": {
                 "end_to_end": None,

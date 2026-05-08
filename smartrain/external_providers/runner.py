@@ -96,9 +96,17 @@ def _try_load_structured_infer_result(path: str, *, return_code: int) -> dict[st
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
-        return {"return_code": int(return_code), "images": []}
+        return {
+            "return_code": int(return_code),
+            "images": [],
+            "diagnostics": {"structured_result_status": "invalid_json"},
+        }
     if not isinstance(raw, dict):
-        return {"return_code": int(return_code), "images": []}
+        return {
+            "return_code": int(return_code),
+            "images": [],
+            "diagnostics": {"structured_result_status": "invalid_payload_type"},
+        }
     images = raw.get("images")
     normalized_images = images if isinstance(images, list) else []
     rc_raw = raw.get("return_code", return_code)
@@ -106,5 +114,9 @@ def _try_load_structured_infer_result(path: str, *, return_code: int) -> dict[st
         rc = int(rc_raw)
     except Exception:
         rc = int(return_code)
-    return {"return_code": rc, "images": normalized_images}
+    out: dict[str, object] = {"return_code": rc, "images": normalized_images}
+    diagnostics = raw.get("diagnostics")
+    if isinstance(diagnostics, dict):
+        out["diagnostics"] = diagnostics
+    return out
 
