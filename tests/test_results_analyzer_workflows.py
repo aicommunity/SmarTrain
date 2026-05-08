@@ -346,12 +346,6 @@ def test_collect_data_yaml_candidates_uses_canonical_dataset_name_when_enabled(
     dataset_yaml.write_text("path: .\ntrain: images/train\nval: images/val\n", encoding="utf-8")
 
     monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
-    monkeypatch.setattr(
-        results_analyzer,
-        "load_metadata",
-        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("load_metadata should not be used in canonical mode")),
-    )
-
     out = results_analyzer._collect_data_yaml_candidates_for_run(str(run_dir), str(tmp_path))
     assert any(src == "training_metadata.dataset.name -> workspace/datasets" and Path(path) == dataset_yaml for path, src in out)
 

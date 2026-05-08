@@ -49,7 +49,7 @@ from smartrain.workflows.analyze.metrics_reader import (
     DEFAULT_MAP_COL,
     latest_test_metrics_path,
     pick_map_column,
-    load_metadata,
+    load_metadata,  # compatibility re-export for registry_cli imports
     results_csv_path,
     read_test_metrics_by_format,
     read_test_performance_by_format_artifacts,
@@ -294,7 +294,6 @@ def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | Non
         workspace_cli,
         canonical_read_enabled=_canonical_read_enabled(),
         dataset_name_resolver=lambda rd: _build_run_record_canonical(rd).dataset_name or None,
-        metadata_loader=load_metadata,
     )
 
 

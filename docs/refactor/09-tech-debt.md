@@ -461,6 +461,15 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-08: Step 3 summary:
   - PR 6.6 migration depth расширен по historical fixture matrix и execution modes.
   Residual debt for this step: `no residual debt`.
+- 2026-05-08: Step 4 / substep `gateway-first-analyze` выполнен:
+  - изменено: удален обязательный metadata-loader bypass из data-yaml candidate flow в canonical-enabled analyze path (`collect_data_yaml_candidates_for_run` теперь не требует metadata loader в canonical mode).
+  - изменено: `format_compare` переведен на canonical-first метрики по split/format (форматная группировка и source resolution стартуют от `canonical_gateway.load_metrics`, ad-hoc readers используются как fallback).
+  - файлы: `smartrain/services/analyze_data_yaml.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/services/analyze_format_compare_service.py`, `tests/test_results_analyzer_workflows.py`.
+  - тесты: `pytest -q tests/test_results_analyzer_workflows.py tests/test_imports.py` (`64 passed`).
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 4 summary:
+  - analyze read paths ужаты к gateway-first модели с compatibility fallback, без скрытого обязательного metadata bypass.
+  Residual debt for this step: `no residual debt`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 

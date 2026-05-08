@@ -15,7 +15,7 @@ def collect_data_yaml_candidates_for_run(
     *,
     canonical_read_enabled: bool,
     dataset_name_resolver: Callable[[str], str | None],
-    metadata_loader: Callable[[str], dict[str, Any]],
+    metadata_loader: Callable[[str], dict[str, Any]] | None = None,
 ) -> list[tuple[str, str]]:
     rd = os.path.abspath(run_dir)
     out: list[tuple[str, str]] = []
@@ -69,6 +69,8 @@ def collect_data_yaml_candidates_for_run(
         if resolved_name:
             dataset_payload["name"] = resolved_name
     else:
+        if metadata_loader is None:
+            return out
         try:
             metadata = metadata_loader(rd)
         except Exception:

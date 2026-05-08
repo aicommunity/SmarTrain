@@ -193,6 +193,18 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         variants.sort(key=lambda v: (0 if str(v.get("metrics_path") or "").strip() else 1, str(v.get("target_path") or "")))
         return variants
 
+    def _format_from_metrics_path(metrics_path: str) -> str:
+        base = os.path.basename(str(metrics_path or "")).lower()
+        if "pt_uni" in base:
+            return "pt_uni"
+        if "_onnx" in base:
+            return "onnx"
+        if "_engine" in base:
+            return "engine"
+        if "_trt" in base:
+            return "trt"
+        return "pt"
+
     def _read_eval_args(run_dir: str, fmt: str) -> dict[str, Any]:
         if fmt == "pt":
             args_yaml = os.path.join(run_dir, "tests", "test-ultralytics", "args.yaml")
@@ -466,10 +478,16 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
             # canonical_gateway.load_metrics can trigger legacy-to-canonical
             # migration with file moves; recompute legacy paths after migration.
             metrics_ref_by_raw_path: dict[str, dict[str, Any]] = {}
+            canonical_metrics_by_format: dict[str, list[dict[str, str]]] = {}
             for ref in canonical_load_metrics(run_dir, source_kind="run", split=split_name):
                 merged = dict(ref.primary_metrics or {})
                 merged.update(dict(ref.secondary_metrics or {}))
-                metrics_ref_by_raw_path[str(ref.raw_path)] = merged
+                raw_abs = os.path.abspath(str(ref.raw_path))
+                metrics_ref_by_raw_path[raw_abs] = merged
+                fmt = _format_from_metrics_path(raw_abs)
+                canonical_metrics_by_format.setdefault(fmt, []).append(
+                    {"metrics_path": raw_abs, "target_path": ""}
+                )
 
             manifest = load_test_artifacts_manifest(run_dir)
             formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
@@ -479,9 +497,11 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                 entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
                 if not isinstance(entry, dict):
                     entry = {}
-                fmt_metrics = list(metrics_artifacts.get(fmt) or [])
+                fmt_metrics = list(canonical_metrics_by_format.get(fmt) or [])
+                if not fmt_metrics:
+                    fmt_metrics = list(metrics_artifacts.get(fmt) or [])
                 if not fmt_metrics and metrics_paths.get(fmt):
-                    fmt_metrics = [{"metrics_path": str(metrics_paths[fmt]), "target_path": ""}]
+                    fmt_metrics = [{"metrics_path": os.path.abspath(str(metrics_paths[fmt])), "target_path": ""}]
                 variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics, split_name)
                 if len(variants) > 1:
                     with_metrics = [v for v in variants if str(v.get("metrics_path") or "").strip()]
@@ -623,10 +643,16 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
             for run_dir in run_dirs:
                 run_name = os.path.basename(run_dir.rstrip(os.sep))
                 metrics_ref_by_raw_path: dict[str, dict[str, Any]] = {}
+                canonical_metrics_by_format: dict[str, list[dict[str, str]]] = {}
                 for ref in canonical_load_metrics(run_dir, source_kind="run", split=split_name):
                     merged = dict(ref.primary_metrics or {})
                     merged.update(dict(ref.secondary_metrics or {}))
-                    metrics_ref_by_raw_path[str(ref.raw_path)] = merged
+                    raw_abs = os.path.abspath(str(ref.raw_path))
+                    metrics_ref_by_raw_path[raw_abs] = merged
+                    fmt = _format_from_metrics_path(raw_abs)
+                    canonical_metrics_by_format.setdefault(fmt, []).append(
+                        {"metrics_path": raw_abs, "target_path": ""}
+                    )
 
                 manifest = load_test_artifacts_manifest(run_dir)
                 formats_meta = manifest.get("formats") if isinstance(manifest, dict) else {}
@@ -636,9 +662,11 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                     entry = formats_meta.get(fmt, {}) if isinstance(formats_meta, dict) else {}
                     if not isinstance(entry, dict):
                         entry = {}
-                    fmt_metrics = list(metrics_artifacts.get(fmt) or [])
+                    fmt_metrics = list(canonical_metrics_by_format.get(fmt) or [])
+                    if not fmt_metrics:
+                        fmt_metrics = list(metrics_artifacts.get(fmt) or [])
                     if not fmt_metrics and metrics_paths.get(fmt):
-                        fmt_metrics = [{"metrics_path": str(metrics_paths[fmt]), "target_path": ""}]
+                        fmt_metrics = [{"metrics_path": os.path.abspath(str(metrics_paths[fmt])), "target_path": ""}]
                     variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics, split_name)
                     if len(variants) > 1:
                         with_metrics = [v for v in variants if str(v.get("metrics_path") or "").strip()]
