@@ -259,6 +259,15 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - kept wrappers in `results_analyzer` and delegated through callback injection (`resolve_workspace_root`, `WorkspaceLayout`) to preserve compatibility.
   - validated targeted analyze/CLI/import regression (`133 passed, 1 skipped`).
   Residual debt for this slice: `no residual debt (compare finalize/path utility cleanup)`.
+- 2026-05-08: Wave E-tail decomposition slice (model_training_module utility cleanup - system profile block) complete:
+  - introduced `smartrain/workflows/training/train_system_profile_service.py`.
+  - moved system profile helpers and collector out of `model_training_module`:
+    - `_bytes_to_gb` / `_linux_cpu_model_name` / `_linux_physical_core_count`
+    - `_linux_mem_total_bytes` / `_resolve_mount_point` / `_linux_fs_type_for_mount`
+    - `collect_system_profile`
+  - kept compatibility wrappers in `model_training_module` and delegated to service-level functions.
+  - validated targeted training/import regression (`22 passed`).
+  Residual debt for this slice: `no residual debt (model_training_module system profile block)`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
