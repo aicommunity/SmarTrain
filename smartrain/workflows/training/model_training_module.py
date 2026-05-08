@@ -1,4 +1,3 @@
-import copy
 import json
 import os
 import argparse
@@ -95,6 +94,13 @@ from smartrain.workflows.training.train_resume_backoff_service import (
     default_resume_test_batch as _svc_default_resume_test_batch,
     is_cuda_oom_error as _svc_is_cuda_oom_error,
     next_backoff_batch as _svc_next_backoff_batch,
+)
+from smartrain.workflows.training.train_cli_paths_service import (
+    resolve_cli_paths_with_profile as _svc_resolve_cli_paths_with_profile,
+)
+from smartrain.workflows.training.train_config_kwargs_service import (
+    finalize_train_kwargs as _svc_finalize_train_kwargs,
+    load_ultralytics_yaml as _svc_load_ultralytics_yaml,
 )
 from smartrain.services.train_runtime_helpers import (
     build_run_name as _shared_build_run_name,
@@ -1424,49 +1430,16 @@ def _build_runtime_data_yaml(dataset_path: str, run_dir: str, *, stage: str) -> 
 
 
 def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str, str]:
-    """
-    workspace, dataset_root (directory with data.yaml), target_base.
-    """
-    try:
-        ws = resolve_workspace_root(args.workspace)
-    except ValueError:
-        ws = None
-
-    if ws is not None:
-        layout = WorkspaceLayout(ws)
-        os.makedirs(layout.runs, exist_ok=True)
-        if args.data is not None:
-            dataset_path = resolve_training_data_path(layout, args.data)
-        elif u_cfg.get("data"):
-            yp = resolve_profile_data_path(str(u_cfg["data"]))
-            dataset_path = dataset_root_from_data_yaml(yp)
-        else:
-            raise ValueError(
-                "When using workspace, specify --data or the data: field in the --config profile."
-            )
-        if args.target_path is not None:
-            target_base = os.path.abspath(os.path.expanduser(args.target_path))
-        else:
-            target_base = layout.runs
-        return ws, dataset_path, target_base
-
-    if args.data is not None:
-        dataset_path = os.path.abspath(os.path.expanduser(args.data))
-    elif u_cfg.get("data"):
-        yp = resolve_profile_data_path(str(u_cfg["data"]))
-        dataset_path = dataset_root_from_data_yaml(yp)
-    else:
-        raise ValueError(
-            f"Specify --workspace (or {WORKSPACE_ENV_VAR}) and --data (or data in YAML), "
-            "or without workspace - --data and --target-path."
-        )
-
-    if args.target_path is None:
-        raise ValueError(
-            f"Without workspace, specify --target-path (base run directory) or specify {WORKSPACE_ENV_VAR}."
-        )
-    target_base = os.path.abspath(os.path.expanduser(args.target_path))
-    return None, dataset_path, target_base
+    return _svc_resolve_cli_paths_with_profile(
+        args,
+        u_cfg,
+        workspace_env_var=WORKSPACE_ENV_VAR,
+        resolve_workspace_root_cb=resolve_workspace_root,
+        workspace_layout_cb=WorkspaceLayout,
+        resolve_training_data_path_cb=resolve_training_data_path,
+        resolve_profile_data_path_cb=resolve_profile_data_path,
+        dataset_root_from_data_yaml_cb=dataset_root_from_data_yaml,
+    )
 
 
 def _finalize_train_kwargs(ultralytics_cfg: dict[str, Any], data_yaml: str, model_dir: str) -> dict[str, Any]:
@@ -1477,37 +1450,11 @@ def _finalize_train_kwargs(ultralytics_cfg: dict[str, Any], data_yaml: str, mode
     the first — Ultralytics avoids clobbering artifacts. Unusual absolute paths under the run
     (e.g. segments like ``*.tar.gz``) usually come from workspace/dataset layout, not from this call.
     """
-    k = copy.deepcopy(ultralytics_cfg)
-    overwritten: list[str] = []
-    if "data" in k:
-        overwritten.append("data")
-    if "project" in k:
-        overwritten.append("project")
-    if "name" in k:
-        overwritten.append("name")
-    if "exist_ok" in k:
-        overwritten.append("exist_ok")
-    k.pop("data", None)
-    k["data"] = data_yaml
-    k["project"] = model_dir
-    k["name"] = "train-ultralytics"
-    k["exist_ok"] = False
-    k.setdefault("mode", "train")
-    if overwritten:
-        print(
-            "[WARNING] Train service keys have been forced to be overridden: "
-            + ", ".join(sorted(set(overwritten)))
-        )
-    return k
+    return _svc_finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
 
 
 def _load_ultralytics_yaml(path: str | None) -> dict[str, Any]:
-    if not path:
-        return {}
-    raw = load_train_profile(path)
-    if not isinstance(raw, dict):
-        return {}
-    return raw
+    return _svc_load_ultralytics_yaml(path, load_train_profile_cb=load_train_profile)
 
 
 def _normalize_model_spec(spec: Any, *, add_pt_when_missing: bool = False) -> str:
