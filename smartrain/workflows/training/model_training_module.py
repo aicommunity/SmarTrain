@@ -90,6 +90,12 @@ from smartrain.workflows.training.train_metadata_io_service import (
     relative_to_workspace as _svc_relative_to_workspace,
     write_json_atomic as _svc_write_json_atomic,
 )
+from smartrain.workflows.training.train_resume_backoff_service import (
+    complete_missing_test_with_backoff as _svc_complete_missing_test_with_backoff,
+    default_resume_test_batch as _svc_default_resume_test_batch,
+    is_cuda_oom_error as _svc_is_cuda_oom_error,
+    next_backoff_batch as _svc_next_backoff_batch,
+)
 from smartrain.services.train_runtime_helpers import (
     build_run_name as _shared_build_run_name,
     ensure_external_best_checkpoint_layout as _shared_ensure_external_best_checkpoint_layout,
@@ -728,51 +734,15 @@ def _run_resume_command(argv: list[str]) -> int:
 
 
 def _is_cuda_oom_error(err: Exception) -> bool:
-    msg = str(err).lower()
-    return "out of memory" in msg and "cuda" in msg
+    return _svc_is_cuda_oom_error(err)
 
 
 def _default_resume_test_batch(run_dir: str) -> int:
-    metadata_path = os.path.join(run_dir, "training_metadata.json")
-    meta: dict[str, Any] | None = None
-    if os.path.isfile(metadata_path):
-        try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-            if isinstance(payload, dict):
-                meta = payload
-        except Exception:
-            meta = None
-    if isinstance(meta, dict):
-        inf = meta.get("inference")
-        if isinstance(inf, dict) and inf.get("batch") is not None:
-            try:
-                val = int(inf.get("batch"))
-                if val > 0:
-                    return val
-            except Exception:
-                pass
-
-    for p in (os.path.join(run_dir, "train-ultralytics", "args.yaml"), os.path.join(run_dir, "train", "args.yaml")):
-        if not os.path.isfile(p):
-            continue
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                payload = yaml.safe_load(f) or {}
-            if isinstance(payload, dict) and payload.get("batch") is not None:
-                val = int(payload.get("batch"))
-                if val > 0:
-                    return val
-        except Exception:
-            continue
-    return 4
+    return _svc_default_resume_test_batch(run_dir)
 
 
 def _next_backoff_batch(current: int, min_batch: int, backoff: int) -> int:
-    if current <= min_batch:
-        return current
-    nxt = (current + backoff - 1) // backoff
-    return max(min_batch, nxt)
+    return _svc_next_backoff_batch(current, min_batch, backoff)
 
 
 def _complete_missing_test_with_backoff(
@@ -783,35 +753,17 @@ def _complete_missing_test_with_backoff(
     min_batch: int,
     backoff: int,
 ) -> None:
-    batch = int(initial_batch) if initial_batch is not None else _default_resume_test_batch(run_dir)
-    batch = max(min_batch, batch)
-    attempt = 0
-    while True:
-        attempt += 1
-        print(f"[INFO] Resume test attempt {attempt}: batch={batch}")
-        try:
-            complete_missing_test_artifacts(
-                run_dir,
-                workspace_root=workspace_root,
-                pt_test_runner=test_yolo,
-                pt_test_runner_kwargs={"non_interactive": True, "val_batch": batch},
-                update_metadata_cb=update_resume_test_metadata,
-            )
-            return
-        except Exception as e:
-            if not _is_cuda_oom_error(e):
-                raise
-            next_batch = _next_backoff_batch(batch, min_batch, backoff)
-            if next_batch == batch:
-                raise RuntimeError(
-                    f"CUDA OOM at minimal test batch={batch}; backoff exhausted."
-                ) from e
-            print(
-                f"[WARN] CUDA OOM during resume test at batch={batch}. "
-                f"Retrying with batch={next_batch}."
-            )
-            _maybe_free_cuda_memory()
-            batch = next_batch
+    _svc_complete_missing_test_with_backoff(
+        run_dir,
+        workspace_root=workspace_root,
+        initial_batch=initial_batch,
+        min_batch=min_batch,
+        backoff=backoff,
+        complete_missing_test_artifacts_cb=complete_missing_test_artifacts,
+        pt_test_runner_cb=test_yolo,
+        update_metadata_cb=update_resume_test_metadata,
+        maybe_free_cuda_memory_cb=_maybe_free_cuda_memory,
+    )
 
 
 def _ensure_resume_confidence_recommendations(
