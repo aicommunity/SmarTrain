@@ -54,7 +54,6 @@ from smartrain.core.training.train_model_catalog import (
     TrainModelCatalog,
     is_supported_external_provider_model,
 )
-from smartrain.core.training.train_model_resolver import TrainModelResolver
 from smartrain.providers.core.global_index import (
     get_provider_location,
     list_provider_records,
@@ -101,6 +100,11 @@ from smartrain.workflows.training.train_cli_paths_service import (
 from smartrain.workflows.training.train_config_kwargs_service import (
     finalize_train_kwargs as _svc_finalize_train_kwargs,
     load_ultralytics_yaml as _svc_load_ultralytics_yaml,
+)
+from smartrain.workflows.training.train_model_resolution_service import (
+    extract_effective_loaded_model as _svc_extract_effective_loaded_model,
+    extract_model_family_scale as _svc_extract_model_family_scale,
+    normalize_model_spec as _svc_normalize_model_spec,
 )
 from smartrain.services.train_runtime_helpers import (
     build_run_name as _shared_build_run_name,
@@ -1458,37 +1462,19 @@ def _load_ultralytics_yaml(path: str | None) -> dict[str, Any]:
 
 
 def _normalize_model_spec(spec: Any, *, add_pt_when_missing: bool = False) -> str:
-    resolver = TrainModelResolver()
-    return resolver.resolve(
-        None if spec is None else str(spec),
+    return _svc_normalize_model_spec(
+        spec,
         default_model=MODEL_VERSION,
         add_pt_when_missing=add_pt_when_missing,
-    ).normalized
+    )
 
 
 def _extract_effective_loaded_model(model: Any, fallback: str) -> str:
-    for candidate in (
-        getattr(model, "ckpt_path", None),
-        getattr(model, "model_name", None),
-        (getattr(model, "overrides", {}) or {}).get("model"),
-    ):
-        if candidate:
-            return str(candidate)
-    return str(fallback)
+    return _svc_extract_effective_loaded_model(model, fallback)
 
 
 def _extract_model_family_scale(spec: str) -> tuple[str, str] | None:
-    token = Path(str(spec)).name.lower()
-    if token.endswith(".pt"):
-        token = token[:-3]
-    for suffix in ("-seg", "-cls", "-pose", "-obb"):
-        if token.endswith(suffix):
-            token = token[: -len(suffix)]
-            break
-    m = re.match(r"^(yolo(?:v)?\d+)([nslmx])$", token)
-    if not m:
-        return None
-    return m.group(1), m.group(2)
+    return _svc_extract_model_family_scale(spec)
 
 
 def _build_run_name(
