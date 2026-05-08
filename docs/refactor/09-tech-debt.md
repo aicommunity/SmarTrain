@@ -492,6 +492,16 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - файлы: `smartrain/services/inference_service.py`, `smartrain/services/inference_runtime_helpers.py`.
   - тесты: `pytest -q tests/test_inference_cli.py`, `pytest -q tests/regression/test_canonical_cutover.py tests/regression/test_no_legacy_branch_usage.py`, `pytest -q tests/test_imports.py`.
   Residual debt for this substep: `partial (остаются transitional services->workflows импорты до завершения Step 1.3 и финального сужения allowlist).`
+- 2026-05-08: Step 1 / substep `step1-boundary-hardening` (1.3) выполнен:
+  - изменено: введен публичный planning/dispatch API `smartrain/workflows/testing/model_test_runtime_api.py` как adapter-слой для orchestration runtime.
+  - изменено: `model_test_orchestrator` и `test_backend_dispatch` переведены с `model_test_cli._*` вызовов на публичные функции runtime API.
+  - файлы: `smartrain/workflows/testing/model_test_runtime_api.py`, `smartrain/services/model_test_orchestrator.py`, `smartrain/services/test_backend_dispatch.py`.
+  - тесты: `pytest -q tests/services/test_test_backend_dispatch.py`, `pytest -q tests/test_model_test_cli.py`, `pytest -q tests/test_cli_subprocess.py tests/test_cli_replay.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `partial (transitional services->workflows imports еще присутствуют и должны быть сокращены в следующем P0 срезе boundary-cleanup).`
+- 2026-05-08: Step 1 summary:
+  - private workflow helper dependencies из `services` на `train/inference/model-test` pathways удалены; введены публичные runtime API слои.
+  - guardrails для boundary зафиксированы (private getattr ban + transitional allowlist check).
+  Residual debt for this step: `transitional allowlist still active; next action — убрать remaining services->workflows imports или изолировать их в dedicated adapters за пределами services слоя.`
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 

@@ -19,16 +19,15 @@ class TestBackendDispatchContext:
 
 
 def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain.workflows.testing import model_test_cli as mtc
+    from smartrain.workflows.testing import model_test_runtime_api as mtr
     from smartrain.backends.train_test_registry import resolve_test_backend
-    from smartrain.workflows.testing.model_test_service import persist_target_test_artifacts_state
 
     def _backend_for(local_fmt: str) -> str:
         return resolve_test_backend(task_type=ctx.task_type, model_format=local_fmt).backend
 
     if ctx.target_kind == "runs":
         if bool(ctx.args.deep_diagnostics) or bool(ctx.args.perf):
-            pt_result = mtc.run_ultralytics_backend(
+            pt_result = mtr.run_ultralytics_backend(
                 root_dir=ctx.root_dir,
                 weights_path=ctx.primary_path,
                 dataset_yaml_path=ctx.data_yaml,
@@ -43,7 +42,7 @@ def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
                 runtime_device=ctx.args.device,
             )
             return pt_result.success, pt_result.error
-        mtc.complete_missing_test_artifacts(
+        mtr.complete_missing_test_artifacts(
             ctx.root_dir,
             workspace_root=ctx.workspace_root,
             pt_test_runner=__import__("smartrain.workflows.training.model_training_module", fromlist=["test_yolo"]).test_yolo,
@@ -54,7 +53,7 @@ def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
                 "val_batch": ctx.args.batch,
             },
         )
-        persist_target_test_artifacts_state(
+        mtr.persist_target_test_artifacts_state(
             ctx.root_dir,
             format_name="pt",
             target_path=ctx.primary_path,
@@ -64,7 +63,7 @@ def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
         )
         return True, None
 
-    pt_result = mtc.run_ultralytics_backend(
+    pt_result = mtr.run_ultralytics_backend(
         root_dir=ctx.root_dir,
         weights_path=ctx.primary_path,
         dataset_yaml_path=ctx.data_yaml,
@@ -82,9 +81,9 @@ def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
 
 
 def _dispatch_pt_uni(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain.workflows.testing import model_test_cli as mtc
+    from smartrain.workflows.testing import model_test_runtime_api as mtr
 
-    pt_uni_result = mtc.run_native_format_backend(
+    pt_uni_result = mtr.run_native_format_backend(
         root_dir=ctx.root_dir,
         weights_path=ctx.primary_path,
         dataset_yaml_path=ctx.data_yaml,
@@ -105,17 +104,16 @@ def _dispatch_pt_uni(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
 
 
 def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain.workflows.testing import model_test_cli as mtc
+    from smartrain.workflows.testing import model_test_runtime_api as mtr
     from smartrain.backends.train_test_registry import resolve_test_backend
-    from smartrain.workflows.testing.model_test_service import persist_target_test_artifacts_state
 
     def _backend_for(local_fmt: str) -> str:
         return resolve_test_backend(task_type=ctx.task_type, model_format=local_fmt).backend
 
     if ctx.fmt in {"engine", "trt"}:
-        preflight_ok, preflight_reason = mtc._check_native_format_preflight(ctx.fmt)
+        preflight_ok, preflight_reason = mtr.check_native_format_preflight(ctx.fmt)
         if not preflight_ok:
-            persist_target_test_artifacts_state(
+            mtr.persist_target_test_artifacts_state(
                 ctx.root_dir,
                 format_name=ctx.fmt,
                 target_path=ctx.artifact_path,
@@ -125,7 +123,7 @@ def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
                 error=preflight_reason,
             )
             return False, preflight_reason
-        ok, err = mtc._run_native_backend_isolated(
+        ok, err = mtr.run_native_backend_isolated(
             root_dir=ctx.root_dir,
             weights_path=ctx.artifact_path,
             dataset_yaml_path=ctx.data_yaml,
@@ -139,7 +137,7 @@ def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
             runtime_device=ctx.args.device,
         )
         if not ok:
-            persist_target_test_artifacts_state(
+            mtr.persist_target_test_artifacts_state(
                 ctx.root_dir,
                 format_name=ctx.fmt,
                 target_path=ctx.artifact_path,
@@ -151,9 +149,9 @@ def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
         return ok, err
 
     if ctx.fmt == "onnx":
-        onnx_ok, onnx_reason = mtc._check_onnx_format_preflight(ctx.onnx_provider_policy)
+        onnx_ok, onnx_reason = mtr.check_onnx_format_preflight(ctx.onnx_provider_policy)
         if not onnx_ok:
-            persist_target_test_artifacts_state(
+            mtr.persist_target_test_artifacts_state(
                 ctx.root_dir,
                 format_name=ctx.fmt,
                 target_path=ctx.artifact_path,
@@ -166,7 +164,7 @@ def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
         if onnx_reason:
             print(f"[WARN] onnx preflight: {onnx_reason}")
 
-    result = mtc.run_native_format_backend(
+    result = mtr.run_native_format_backend(
         root_dir=ctx.root_dir,
         weights_path=ctx.artifact_path,
         dataset_yaml_path=ctx.data_yaml,
