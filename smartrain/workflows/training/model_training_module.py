@@ -85,6 +85,11 @@ from smartrain.workflows.training.train_runtime_data_yaml_service import (
     resolve_training_data_path as _svc_resolve_training_data_path,
     split_dir_from_dataset_yaml as _svc_split_dir_from_dataset_yaml,
 )
+from smartrain.workflows.training.train_metadata_io_service import (
+    get_relative_path as _svc_get_relative_path,
+    relative_to_workspace as _svc_relative_to_workspace,
+    write_json_atomic as _svc_write_json_atomic,
+)
 from smartrain.services.train_runtime_helpers import (
     build_run_name as _shared_build_run_name,
     ensure_external_best_checkpoint_layout as _shared_ensure_external_best_checkpoint_layout,
@@ -2115,30 +2120,11 @@ def save_metrics_csv(test_result, model_dir):
 
 
 def _relative_to_workspace(path: str, workspace_root: str) -> str:
-    ap = os.path.abspath(path)
-    wr = os.path.abspath(workspace_root)
-    try:
-        return os.path.relpath(ap, wr)
-    except ValueError:
-        return ap
+    return _svc_relative_to_workspace(path, workspace_root)
 
 
 def _write_json_atomic(path: str, payload: dict[str, Any]) -> None:
-    out_dir = os.path.dirname(path) or "."
-    os.makedirs(out_dir, exist_ok=True)
-    tmp_path = path + ".tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    finally:
-        try:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-        except OSError:
-            pass
+    _svc_write_json_atomic(path, payload)
 
 
 def _ensure_initial_training_metadata(
@@ -2382,17 +2368,7 @@ def save_training_metadata(
 
 
 def _get_relative_path(target_path, base_path):
-    try:
-        target = Path(os.path.abspath(target_path))
-        base = Path(os.path.abspath(base_path))
-
-        try:
-            relative = os.path.relpath(target, base)
-            return relative
-        except ValueError:
-            return target.as_posix()
-    except Exception:
-        return os.path.abspath(target_path)
+    return _svc_get_relative_path(str(target_path), str(base_path))
 
 
 def _json_safe_train_summary(train_kw: dict[str, Any] | None) -> dict[str, Any] | None:
