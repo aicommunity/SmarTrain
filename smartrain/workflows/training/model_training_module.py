@@ -1108,6 +1108,26 @@ def _build_run_name(
     )
 
 
+def build_run_name(
+    provider_id: str,
+    model_version: str,
+    epochs: int,
+    batch: int,
+    dataset_hash: str | None,
+    *,
+    timestamp: datetime | None = None,
+) -> str:
+    """Public helper for train-service composition without private symbol access."""
+    return _build_run_name(
+        provider_id,
+        model_version,
+        epochs,
+        batch,
+        dataset_hash,
+        timestamp=timestamp,
+    )
+
+
 def _normalize_external_run_layout(run_dir: str) -> None:
     _shared_normalize_external_run_layout(run_dir)
 
@@ -1134,6 +1154,11 @@ def _ensure_external_best_checkpoint_layout(run_dir: str) -> str | None:
 
 def _resolve_external_eval_source(dataset_path: str) -> str:
     return _shared_resolve_external_eval_source(dataset_path)
+
+
+def resolve_external_eval_source(dataset_path: str) -> str:
+    """Public helper for external eval source resolution."""
+    return _resolve_external_eval_source(dataset_path)
 
 
 def _write_external_fallback_metrics(model_dir: str, *, provider_id: str, rc: int) -> str:
@@ -1872,12 +1897,22 @@ def _json_safe_train_summary(train_kw: dict[str, Any] | None) -> dict[str, Any] 
     return _shared_json_safe_train_summary(train_kw)
 
 
+def json_safe_train_summary(train_kw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Public helper for serializing train kwargs into metadata-safe payload."""
+    return _json_safe_train_summary(train_kw)
+
+
 def _load_batch_from_training_metadata(model_dir: str) -> int | None:
     """
     In --test-only mode we want to test with the same batch that was used during training.
     We take it from training_metadata.json if the file exists and the format is expected.
     """
     return _shared_load_batch_from_training_metadata(model_dir)
+
+
+def load_batch_from_training_metadata(model_dir: str) -> int | None:
+    """Public helper for retrieving saved batch in test-only flow."""
+    return _load_batch_from_training_metadata(model_dir)
 
 
 def _maybe_free_cuda_memory() -> None:

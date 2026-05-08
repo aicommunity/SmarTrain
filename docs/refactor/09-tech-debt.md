@@ -480,6 +480,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-08: Step 5 summary:
   - operational-limit external providers для cls/seg формализован и диагностируется в runtime/report contract.
   Residual debt for this step: `no residual debt`.
+- 2026-05-08: Step 1 / substep `step1-boundary-hardening` (1.1 + 1.4) выполнен:
+  - изменено: в `train_service` удалены private `mtm` fallback-ветки через `getattr(mtm, "_...")`; composition root больше не опирается на private helper symbols.
+  - изменено: добавлен regression guardrail на запрет private `mtm` getattr fallback и введен transitional allowlist-check для `services -> workflows` import boundary.
+  - файлы: `smartrain/services/train_service.py`, `tests/regression/test_train_service_guardrails.py`.
+  - тесты: `pytest -q tests/regression/test_train_service_guardrails.py`, `pytest -q tests/test_train_val_batch_defaults.py tests/test_training_metadata_provider.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `partial (transitional allowlist сохранен до закрытия Step 1.2/1.3, затем должен быть сужен).`
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 
