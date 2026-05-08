@@ -268,6 +268,16 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - kept compatibility wrappers in `model_training_module` and delegated to service-level functions.
   - validated targeted training/import regression (`22 passed`).
   Residual debt for this slice: `no residual debt (model_training_module system profile block)`.
+- 2026-05-08: Wave E-tail decomposition slice (model_training_module utility cleanup - runtime data.yaml path block) complete:
+  - introduced `smartrain/workflows/training/train_runtime_data_yaml_service.py`.
+  - moved runtime data-path/data.yaml helpers out of `model_training_module`:
+    - `resolve_training_data_path`
+    - `_split_dir_from_dataset_yaml`
+    - `_pick_split_relative_dir`
+    - `_build_runtime_data_yaml`
+  - kept delegating wrappers in `model_training_module` and injected callbacks (`resolve_dataset_root`, `ensure_run_layout`, `run_tmp_dir`) for compatibility.
+  - validated targeted training/import regression (`22 passed`).
+  Residual debt for this slice: `no residual debt (model_training_module runtime data.yaml block)`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.

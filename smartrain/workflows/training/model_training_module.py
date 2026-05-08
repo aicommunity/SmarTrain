@@ -79,6 +79,12 @@ from smartrain.workflows.training.train_system_profile_service import (
     linux_physical_core_count as _svc_linux_physical_core_count,
     resolve_mount_point as _svc_resolve_mount_point,
 )
+from smartrain.workflows.training.train_runtime_data_yaml_service import (
+    build_runtime_data_yaml as _svc_build_runtime_data_yaml,
+    pick_split_relative_dir as _svc_pick_split_relative_dir,
+    resolve_training_data_path as _svc_resolve_training_data_path,
+    split_dir_from_dataset_yaml as _svc_split_dir_from_dataset_yaml,
+)
 from smartrain.services.train_runtime_helpers import (
     build_run_name as _shared_build_run_name,
     ensure_external_best_checkpoint_layout as _shared_ensure_external_best_checkpoint_layout,
@@ -1426,29 +1432,12 @@ def _run_interactive_train_setup(args) -> bool:
 
 
 def resolve_training_data_path(layout: WorkspaceLayout, data_arg: str) -> str:
-    expanded = os.path.abspath(os.path.expanduser(data_arg))
-    yaml_here = os.path.join(expanded, "data.yaml")
-    if os.path.isdir(expanded) and os.path.isfile(yaml_here):
-        return expanded
-    info_path = layout.work_datasets_info_path()
-    if not os.path.isfile(info_path):
-        raise FileNotFoundError(
-            f"The directory with data.yaml for {data_arg!r} was not found and {info_path} is missing."
-        )
-    with open(info_path, "r", encoding="utf-8") as f:
-        catalog = json.load(f)
-    if not isinstance(catalog, dict):
-        raise ValueError(f"{info_path}: JSON object expected.")
-    if data_arg not in catalog:
-        names = ", ".join(sorted(catalog.keys()))
-        hint = f" Known names: {names}." if names else ""
-        raise ValueError(
-            f"Dataset name {data_arg!r} is missing from datasets/{DATASETS_INFO_FILE}.{hint}"
-        )
-    entry = catalog[data_arg]
-    if not isinstance(entry, dict):
-        raise ValueError(f"The {data_arg!r} entry must be a JSON object.")
-    return resolve_dataset_root(layout.root, data_arg, entry, layout.work_datasets)
+    return _svc_resolve_training_data_path(
+        layout,
+        data_arg,
+        datasets_info_file=DATASETS_INFO_FILE,
+        resolve_dataset_root_cb=resolve_dataset_root,
+    )
 
 
 def _validate_dataset_dir(dataset_path: str) -> None:
@@ -1460,77 +1449,21 @@ def _validate_dataset_dir(dataset_path: str) -> None:
 
 
 def _split_dir_from_dataset_yaml(dataset_path: str, raw: dict, split_key: str) -> str | None:
-    """
-    Uses train/val/test from data.yaml when they point at an existing directory under dataset_path.
-    Needed for CVAT-style layouts (single shared images/ bucket) where split subfolders are absent.
-    """
-    v = raw.get(split_key)
-    if not isinstance(v, str) or not v.strip():
-        return None
-    rel = v.strip().replace("\\", "/").lstrip("./")
-    if not rel:
-        return None
-    abs_p = os.path.normpath(os.path.join(dataset_path, rel))
-    if os.path.isdir(abs_p):
-        return rel
-    return None
+    return _svc_split_dir_from_dataset_yaml(dataset_path, raw, split_key)
 
 
 def _pick_split_relative_dir(dataset_path: str, split_aliases: tuple[str, ...]) -> str | None:
-    """
-    Searches for the split directory within the selected dataset_path.
-    Returns a relative path (preferably with images/) or None.
-    """
-    candidates: list[str] = []
-    for split in split_aliases:
-        candidates.extend([f"{split}/images", f"images/{split}", split])
-    for rel in candidates:
-        abs_p = os.path.join(dataset_path, rel)
-        if os.path.isdir(abs_p):
-            return rel
-    return None
+    return _svc_pick_split_relative_dir(dataset_path, split_aliases)
 
 
 def _build_runtime_data_yaml(dataset_path: str, run_dir: str, *, stage: str) -> str:
-    """
-    Creates a service data.yaml for Ultralytics with a link to the current dataset_path.
-    This protects against old absolute paths in the original data.yaml (different machine).
-    """
-    src_yaml = os.path.join(dataset_path, "data.yaml")
-    with open(src_yaml, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"Incorrect YAML format data.yaml: {src_yaml}")
-
-    train_rel = _pick_split_relative_dir(dataset_path, ("train",)) or _split_dir_from_dataset_yaml(
-        dataset_path, raw, "train"
+    return _svc_build_runtime_data_yaml(
+        dataset_path,
+        run_dir,
+        stage=stage,
+        ensure_run_layout_cb=ensure_run_layout,
+        run_tmp_dir_cb=run_tmp_dir,
     )
-    val_rel = _pick_split_relative_dir(dataset_path, ("val", "valid")) or _split_dir_from_dataset_yaml(
-        dataset_path, raw, "val"
-    )
-    test_rel = _pick_split_relative_dir(dataset_path, ("test",)) or _split_dir_from_dataset_yaml(
-        dataset_path, raw, "test"
-    )
-    if train_rel is None or val_rel is None:
-        raise FileNotFoundError(
-            f"Required train/val split folders not found inside {dataset_path}."
-        )
-
-    runtime_cfg = dict(raw)
-    runtime_cfg["path"] = dataset_path
-    runtime_cfg["train"] = train_rel
-    runtime_cfg["val"] = val_rel
-    if test_rel is not None:
-        runtime_cfg["test"] = test_rel
-
-    ensure_run_layout(run_dir)
-    out_yaml = os.path.join(str(run_tmp_dir(run_dir)), f"_runtime_data_{stage}.yaml")
-    with open(out_yaml, "w", encoding="utf-8") as f:
-        yaml.safe_dump(runtime_cfg, f, allow_unicode=True, sort_keys=False)
-    print(
-        f"[INFO] Runtime data.yaml ({stage}) generated for the selected dataset: {out_yaml}"
-    )
-    return out_yaml
 
 
 def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str, str]:
