@@ -517,6 +517,19 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-08: Step 2 summary:
   - runtime routing для canonical model mapping и local inference backend instantiation приведен к capability-driven contract с явной диагностикой fallback.
   Residual debt for this step: `no residual debt`.
+- 2026-05-08: Step 3 / substep `analyze-gateway-first` (3.1 + 3.3) выполнен:
+  - изменено: в `format_compare` добавлена явная диагностика policy path (`metrics_read_policy`) для каждого результата (`canonical_gateway` vs `legacy_*_fallback`), чтобы fallback был прозрачным в артефактах.
+  - файлы: `smartrain/services/analyze_format_compare_service.py`.
+  - тесты: `pytest -q tests/test_results_analyzer_workflows.py`, `pytest -q tests/integration/test_analyze_canonical_path.py tests/integration/test_canonical_consumers.py`, `pytest -q tests/regression/test_canonical_cutover.py tests/regression/test_no_legacy_branch_usage.py`.
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 3 / substep `analyze-gateway-first` (3.2) выполнен:
+  - изменено: task-aware metric contract подтвержден regression/extension матрицей (`canonical gateway extensions` + workflow parity tests).
+  - файлы: `smartrain/services/analyze_format_compare_service.py` (использование task-aware canonical refs сохранено как primary source).
+  - тесты: `pytest -q tests/orchestrators/test_canonical_gateway_extensions.py`, `pytest -q tests/test_results_analyzer_workflows.py`.
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 3 summary:
+  - canonical gateway-first analyze path зафиксирован; fallback к legacy остаётся только прозрачным policy-gated путем с диагностикой в выходных артефактах.
+  Residual debt for this step: `no residual debt`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 

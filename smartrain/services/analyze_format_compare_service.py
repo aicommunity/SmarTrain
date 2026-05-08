@@ -498,10 +498,14 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                 if not isinstance(entry, dict):
                     entry = {}
                 fmt_metrics = list(canonical_metrics_by_format.get(fmt) or [])
+                metrics_read_policy = "canonical_gateway"
                 if not fmt_metrics:
                     fmt_metrics = list(metrics_artifacts.get(fmt) or [])
+                    if fmt_metrics:
+                        metrics_read_policy = "legacy_artifacts_fallback"
                 if not fmt_metrics and metrics_paths.get(fmt):
                     fmt_metrics = [{"metrics_path": os.path.abspath(str(metrics_paths[fmt])), "target_path": ""}]
+                    metrics_read_policy = "legacy_path_fallback"
                 variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics, split_name)
                 if len(variants) > 1:
                     with_metrics = [v for v in variants if str(v.get("metrics_path") or "").strip()]
@@ -551,6 +555,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                         "inference_source": eval_args.get("inference_source"),
                         "gt_source": eval_args.get("gt_source"),
                         "nms_profile": eval_args.get("nms_profile"),
+                        "metrics_read_policy": metrics_read_policy,
                         "mAP50-95": None if invalid_zero_metrics else metric_row.get("mAP50-95"),
                         "mAP50": None if invalid_zero_metrics else metric_row.get("mAP50"),
                         "Box-F1": None if invalid_zero_metrics else metric_row.get("Box-F1"),
@@ -630,6 +635,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                             "inference_source": row.get("inference_source"),
                             "gt_source": row.get("gt_source"),
                             "nms_profile": row.get("nms_profile"),
+                            "metrics_read_policy": row.get("metrics_read_policy"),
                         }
                     )
         return rows, sources, eval_rows, issues
@@ -663,10 +669,14 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                     if not isinstance(entry, dict):
                         entry = {}
                     fmt_metrics = list(canonical_metrics_by_format.get(fmt) or [])
+                    metrics_read_policy = "canonical_gateway"
                     if not fmt_metrics:
                         fmt_metrics = list(metrics_artifacts.get(fmt) or [])
+                        if fmt_metrics:
+                            metrics_read_policy = "legacy_artifacts_fallback"
                     if not fmt_metrics and metrics_paths.get(fmt):
                         fmt_metrics = [{"metrics_path": os.path.abspath(str(metrics_paths[fmt])), "target_path": ""}]
+                        metrics_read_policy = "legacy_path_fallback"
                     variants = _iter_entry_variants(run_dir, fmt, entry, fmt_metrics, split_name)
                     if len(variants) > 1:
                         with_metrics = [v for v in variants if str(v.get("metrics_path") or "").strip()]
@@ -717,6 +727,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                             "inference_source": eval_args.get("inference_source"),
                             "gt_source": eval_args.get("gt_source"),
                             "nms_profile": eval_args.get("nms_profile"),
+                            "metrics_read_policy": metrics_read_policy,
                             "mAP50-95": metric_row.get("mAP50-95"),
                             "mAP50": metric_row.get("mAP50"),
                             "Box-F1": metric_row.get("Box-F1"),
@@ -784,6 +795,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                                 "inference_source": row.get("inference_source"),
                                 "gt_source": row.get("gt_source"),
                                 "nms_profile": row.get("nms_profile"),
+                                "metrics_read_policy": row.get("metrics_read_policy"),
                             }
                         )
         return rows, sources, eval_rows, issues
