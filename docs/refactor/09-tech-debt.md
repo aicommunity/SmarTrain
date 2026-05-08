@@ -397,14 +397,43 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 
 ## Open Items
 
-- [x] **P0 / Wave 8 (8-F1):** системный anti-pattern pass по правилам из `docs/refactor/07-clean-code-rules.md` (runtime-critical модули: `services/inference_service.py`, `services/train_service.py`, external launchers). Notes: закрыто коммитом `8ed547c`.
-- [x] **P1 / Wave 8 (8-F3):** удалить legacy-ветки/мосты по deprecation-policy (`docs/refactor/06-deprecation-and-alias-policy.md`) только после явных gate-условий и регрессий. Notes: закрыто коммитами `2f6f19d` + `8e9455a` (и релиз-ноты/депрекейшн подготовлены коммитом `9d605dc`).
+- [ ] **P0 / PR 6.4 write-path closeout:** canonical write manifest/provenance и per-artifact hash coverage не доведены до полного операционного уровня; dual-write legacy hook пока требует production-grade wiring в общем пути записи.  
+  - status: `actual`  
+  - impact: консистентность и аудитируемость canonical artifacts/dual-write  
+  - criticality: `high`  
+  - owner-scope: `adapters/canonical/write/*`, `workflows/testing/model_test_service.py`
+- [ ] **P1 / PR 6.6 migration depth:** требуется расширенная матрица historical fixtures и edge-cases для CLI migration (`dry-run/apply/report-only`) поверх текущего baseline.  
+  - status: `actual`  
+  - impact: снижение риска сбоев на архивных раннах  
+  - criticality: `medium`  
+  - owner-scope: `tests/migration/*`, `workflows/migration/cli_migration.py`
+- [ ] **P2 / analyze gateway-first closure:** в части analyze-потоков остается неоднородность источников чтения (gateway-first vs ad-hoc helpers), нужна унификация.  
+  - status: `actual`  
+  - impact: единый source-of-truth для canonical mode  
+  - criticality: `medium`  
+  - owner-scope: `workflows/analyze/results_analyzer.py`, `services/analyze_format_compare_service.py`, `orchestrators/canonical_gateway.py`
+- [ ] **P3 / external provider operational limit (cls/seg):** не все provider forks отдают `probs/masks`; degraded payload уже корректен, но требуется явная диагностика и документация ограничений.  
+  - status: `operational-limit`  
+  - impact: прозрачность качества данных inference для cls/seg  
+  - criticality: `medium`  
+  - owner-scope: `services/inference_service.py`, `external_providers/runner.py`, docs inference
 
-## Next Execution Backlog (ready-to-start)
+## Operational Limits (known constraints)
 
-1. Wave 8 bootstrap PR: добавить guardrails/checklists + минимальный CI quality gate.
-2. Anti-pattern PR #1: runtime-critical cleanup (`inference_service` + external launchers), без функциональных изменений.
-3. Legacy-removal PR (8-F3): удалить готовые мосты только после прохождения новых guardrails и explicit deprecation gates.
+- External providers могут легитимно возвращать неполные task-specific payloads для `classification/segmentation` (отсутствие `probs/masks` в runtime fork). Контракт деградации (`classification: {}`, `segments: []`) считается валидным до rollout расширенной provider-поддержки.
+
+## Historical Log (closed/stale backlog)
+
+- 2026-05-08: Backlog Wave 8 (`8-F1`, `8-F2`, `8-F3`) переведен в historical status (`stale-by-code-audit`): пункты фактически закрыты в коде/CI и не являются активным техдолгом.
+- 2026-05-08: Исторический блок `Next Execution Backlog` (Wave 8 bootstrap / anti-pattern PR #1 / legacy-removal PR) снят из actionable-раздела и сохранен как закрытый контекст исполнения.
+- 2026-05-08: Step 1 / substep `debt-registry-cleanup` выполнен:
+  - изменено: структура `Open Items` (actual vs operational-limit), введены секции `Operational Limits` и `Historical Log`, синхронизирован companion checklist.
+  - файлы: `docs/refactor/09-tech-debt.md`, `docs/refactor/10-implementation-checklist.md`.
+  - тесты: не применимо (документационные изменения).
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 1 summary:
+  - actionable debt registry нормализован; закрытые/устаревшие Phase 8 пункты выведены из активного исполнения.
+  Residual debt for this step: `no residual debt`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 

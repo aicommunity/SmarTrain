@@ -141,3 +141,6 @@ Notes:
 
 1. При закрытии подпункта — `[x]`, дата, PR/коммит, при отклонении от плана — запись в `09-tech-debt.md`.
 2. Раз в спринт/волну — сверка с YAML-todo в файле плана (если используется) и с gate-критериями из плана.
+
+Sync note:
+- 2026-05-08: `09-tech-debt.md` приведен к actionable-формату (`Open Items` + `Operational Limits` + `Historical Log`); legacy Wave 8 backlog помечен как `stale-by-code-audit` и исключен из активного исполнения.
