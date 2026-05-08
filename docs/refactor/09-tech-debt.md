@@ -502,6 +502,21 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - private workflow helper dependencies из `services` на `train/inference/model-test` pathways удалены; введены публичные runtime API слои.
   - guardrails для boundary зафиксированы (private getattr ban + transitional allowlist check).
   Residual debt for this step: `transitional allowlist still active; next action — убрать remaining services->workflows imports или изолировать их в dedicated adapters за пределами services слоя.`
+- 2026-05-08: Step 2 / substep `runtime-neutrality-cleanup` (2.1) выполнен:
+  - изменено: `model_adapter` больше не хардкодит безусловные `task_type=detection` и `backend_type=ultralytics`; добавлены metadata/name/format-driven resolution paths и provenance diagnostics (`task_resolution`, `backend_resolution`).
+  - изменено: расширены тесты canonical model adapter на metadata-priority и hint-based resolution.
+  - файлы: `smartrain/adapters/canonical/read/model_adapter.py`, `tests/adapters/canonical/read/test_model_adapter.py`.
+  - тесты: `pytest -q tests/adapters/canonical/read/test_model_adapter.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 2 / substep `runtime-neutrality-cleanup` (2.2) выполнен:
+  - изменено: `inference_backends.InferenceBackendRegistry` переключен на capability-driven backend dispatch (resolve -> backend_id -> factory branch), без format-locked implicit выбора.
+  - изменено: `inference_service` создает runtime adapter от `expected_caps.backend` и проверяет соответствие runtime backend capability resolver результату.
+  - файлы: `smartrain/workflows/inference/inference_backends.py`, `smartrain/services/inference_service.py`.
+  - тесты: `pytest -q tests/test_train_test_registry.py tests/test_backend_registry_capabilities.py tests/test_ultralytics_adapter.py`, `pytest -q tests/test_inference_cli.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 2 summary:
+  - runtime routing для canonical model mapping и local inference backend instantiation приведен к capability-driven contract с явной диагностикой fallback.
+  Residual debt for this step: `no residual debt`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 

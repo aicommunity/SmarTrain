@@ -131,10 +131,14 @@ class InferenceBackendRegistry:
     def create_local_backend(self, *, model_format: str, model_path: str, task_type: str | None = None) -> InferenceBackend:
         fmt = str(model_format or "").strip().lower()
         resolved_task_type = task_to_metadata_task_type(task_type)
-        self._capabilities.resolve(task_type=resolved_task_type, model_format=fmt, require="infer")
-        if fmt in {"pt", "onnx", "engine", "trt"}:
+        caps = self._capabilities.resolve(task_type=resolved_task_type, model_format=fmt, require="infer")
+        backend_id = str(caps.backend or "").strip().lower()
+        if backend_id == "ultralytics":
             return UltralyticsBackend(model_path, backend_name=f"ultralytics:{fmt}")
-        raise ValueError(f"Unsupported model format for local inference backend: {model_format}")
+        raise ValueError(
+            "Unsupported local inference backend capability "
+            f"{caps.backend!r} for model format {model_format!r}"
+        )
 
 
 def _extract_detections(model: Any, preds: Any) -> list[dict[str, Any]]:

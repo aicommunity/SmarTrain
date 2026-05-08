@@ -65,6 +65,14 @@ def _backend_name_matches_capability(runtime_name: str | None, capability_backen
     return any(actual == token or actual.startswith(f"{token}:") for token in alias_accept.get(expected, ()))
 
 
+def _create_runtime_adapter_for_capability(capability_backend: str):
+    backend_id = str(capability_backend or "").strip().lower()
+    if backend_id in {"ultralytics", "onnxruntime", "tensorrt"}:
+        # onnxruntime/tensorrt currently execute through Ultralytics runtime wrappers.
+        return UltralyticsAdapter()
+    raise ValueError(f"Unsupported runtime backend capability: {capability_backend!r}")
+
+
 def _offset_bbox(bbox_roi_xyxy: list[Any], roi_box: tuple[int, int, int, int] | None) -> tuple[list[float], list[float]]:
     x1, y1, x2, y2 = [float(v) for v in (bbox_roi_xyxy[:4] + [0.0, 0.0, 0.0, 0.0])[:4]]
     if roi_box is None:
@@ -486,9 +494,13 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
     except Exception as e:
         print(f"[ERROR] No registered inference backend capability for format {model_format!r}: {e}", file=sys.stderr)
         return 1, False
-    adapter = UltralyticsAdapter()
     try:
-        backend = adapter.create_inference_backend(model_format=model_format, model_path=str(model_path), task_type=task_type)
+        adapter = _create_runtime_adapter_for_capability(expected_caps.backend)
+        backend = adapter.create_inference_backend(
+            model_format=model_format,
+            model_path=str(model_path),
+            task_type=task_type,
+        )
     except Exception as e:
         print(f"[ERROR] Failed to initialize inference backend: {e}", file=sys.stderr)
         return 1, False
