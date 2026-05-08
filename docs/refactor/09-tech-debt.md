@@ -181,6 +181,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - changed `datasets_json_former.py` scan/index helpers (`_sorted_diff`, `_run_scan_folder_roots`, `_load_datasets_list_file`, zip extraction, source signature, etc.) into thin delegating wrappers.
   - validated targeted dataset former regression (`1 passed`) + `test_imports` (`2 passed`).
   Residual debt for this slice: `no residual debt (scan/index helpers)`.
+- 2026-05-08: Wave E-tail decomposition slice (datasets_json_former scan core extraction) complete:
+  - introduced `smartrain/workflows/datasets/datasets_json_scan_core_service.py`.
+  - moved scan core functions into the service: CVAT11 detection/parsing (`_find_cvat_annotations_xml`, `_is_cvat11_images_xml`, `_load_cvat11_label_names`), structure detection (`detect_structure`, `yolo_flat_image_label_buckets`), and element counting (`count_elements`, `process_dataset`).
+  - rewired `datasets_json_former.py` to delegate these core functions via wrappers, keeping CLI behavior unchanged.
+  - validated with targeted regression (`26 passed`) for scan summary + CVAT11 conversions + import sanity.
+  Residual debt for this slice: `no residual debt (scan core functions)`.
 - 2026-05-07: Wave E-tail decomposition slice (datasets_json_former convert/normalize extraction) complete:
   - introduced `smartrain/workflows/datasets/datasets_json_convert_purge_service.py`.
   - introduced `smartrain/workflows/datasets/datasets_json_cvat11_normalize_service.py`.

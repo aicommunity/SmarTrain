@@ -57,6 +57,18 @@ from smartrain.workflows.datasets.datasets_json_convert_purge_service import (
 from smartrain.workflows.datasets.datasets_json_cvat11_normalize_service import (
     _ensure_training_ready_after_copy as _svc_ensure_training_ready_after_copy,
 )
+from smartrain.workflows.datasets.datasets_json_scan_core_service import (
+    _find_cvat_annotations_xml as _svc_find_cvat_annotations_xml,
+    _cvat_has_images_dir_near_xml as _svc_cvat_has_images_dir_near_xml,
+    _is_cvat11_images_xml as _svc_is_cvat11_images_xml,
+    _load_cvat11_label_names as _svc_load_cvat11_label_names,
+    _is_split_name as _svc_is_split_name,
+    yolo_flat_image_label_buckets as _svc_yolo_flat_image_label_buckets,
+    detect_structure as _svc_detect_structure,
+    load_yaml as _svc_load_yaml,
+    count_elements as _svc_count_elements,
+    process_dataset as _svc_process_dataset,
+)
 
 
 sys.stdout.reconfigure(encoding='utf-8')
@@ -72,369 +84,47 @@ MODIFIED_KEY = "modified"
 
 
 def _find_cvat_annotations_xml(folder_path: str) -> Optional[str]:
-    for root, _, files in os.walk(folder_path):
-        for f in files:
-            if f.lower() == "annotations.xml":
-                return os.path.join(root, f)
-    return None
+    return _svc_find_cvat_annotations_xml(folder_path)
 
 
 def _cvat_has_images_dir_near_xml(xml_path: str) -> bool:
-    try:
-        p = os.path.dirname(xml_path)
-        return os.path.isdir(os.path.join(p, "images"))
-    except Exception:
-        return False
+    return _svc_cvat_has_images_dir_near_xml(xml_path)
 
 
 def _is_cvat11_images_xml(xml_path: str) -> bool:
-    """
-    Minimal validation that annotations.xml is similar to CVAT for images 1.1:
-    - root == <annotations>
-    - there is at least one <image>
-    - for images-task there is usually a <box> inside an <image> (but empty markup is allowed)
-    - if there is a <version>, then it must be 1.1 (otherwise we consider it inappropriate)
-    """
-    try:
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
-    except Exception:
-        return False
-
-    if (root.tag or "").strip().lower() != "annotations":
-        return False
-
-    ver_el = root.find("./version")
-    if ver_el is not None and ver_el.text and ver_el.text.strip():
-        if ver_el.text.strip() != "1.1":
-            return False
-
-    images = root.findall("./image")
-    if not images:
-        return False
-
-    # If there is no box at all, it may be empty markup; We consider it valid.
-    # But if there is a box, let's check for the presence of required attributes.
-    boxes = root.findall("./image/box")
-    if boxes:
-        for b in boxes[:5]:
-            if not b.attrib.get("label"):
-                return False
-            for k in ("xtl", "ytl", "xbr", "ybr"):
-                if k not in b.attrib:
-                    return False
-    return True
+    return _svc_is_cvat11_images_xml(xml_path)
 
 
 def _load_cvat11_label_names(xml_path: str) -> list[str]:
-    """
-    CVAT 1.1 (Images task) labels.
-    Prefer meta/task/labels/label/name; fallback to unique box/@label values.
-    """
-    try:
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
-    except Exception:
-        return []
-
-    meta_names: list[str] = []
-    try:
-        for lb in root.findall("./meta/task/labels/label/name"):
-            if lb is not None and lb.text and lb.text.strip():
-                meta_names.append(lb.text.strip())
-    except Exception:
-        meta_names = []
-
-    if meta_names:
-        # unique preserve order
-        out: list[str] = []
-        seen = set()
-        for n in meta_names:
-            if n not in seen:
-                seen.add(n)
-                out.append(n)
-        return out
-
-    seen = set()
-    out = []
-    for box in root.findall("./image/box"):
-        label = box.attrib.get("label", "")
-        if label and label not in seen:
-            seen.add(label)
-            out.append(label)
-    return sorted(out)
+    return _svc_load_cvat11_label_names(xml_path)
 
 
 IMAGE_EXTS_FLAT = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 
 def _is_split_name(dir_name):
-    return dir_name.lower() in ("train", "val", "test")
+    return _svc_is_split_name(dir_name)
 
 
 def yolo_flat_image_label_buckets(folder_path):
-    """
-    Pairs of directories (images..., labels...) for flat YOLO datasets:
-    — classic flat: one pair (images, labels), if there are files in the root;
-    — CVAT export “Ultralytics YOLO Detection 1.0”: images/<subfolder>/ and labels/<same subfolder>/
-      (subfolder name is arbitrary, not just train/val/test).
-    If both root files and shared subfolders are found, both options are returned.
-    For nested split (images/train/…) returns an empty list - use nested_split.
-    """
-    images_path = os.path.join(folder_path, "images")
-    labels_path = os.path.join(folder_path, "labels")
-    if not os.path.isdir(images_path) or not os.path.isdir(labels_path):
-        return []
-
-    subdirs_img = [
-        d for d in os.listdir(images_path)
-        if os.path.isdir(os.path.join(images_path, d))
-    ]
-    if any(_is_split_name(d) for d in subdirs_img):
-        return []
-
-    lbl_dirnames = {
-        d for d in os.listdir(labels_path)
-        if os.path.isdir(os.path.join(labels_path, d))
-    }
-    paired = sorted(set(subdirs_img) & lbl_dirnames)
-
-    has_root_imgs = any(
-        os.path.isfile(os.path.join(images_path, f))
-        and f.lower().endswith(IMAGE_EXTS_FLAT)
-        for f in os.listdir(images_path)
-    )
-    has_root_lbls = any(
-        os.path.isfile(os.path.join(labels_path, f)) and f.lower().endswith(".txt")
-        for f in os.listdir(labels_path)
-    )
-
-    buckets = []
-    if has_root_imgs or has_root_lbls:
-        buckets.append((images_path, labels_path))
-    for d in paired:
-        buckets.append((
-            os.path.join(images_path, d),
-            os.path.join(labels_path, d),
-        ))
-    return buckets
+    return _svc_yolo_flat_image_label_buckets(folder_path)
 
 
 def detect_structure(folder_path):
-    subfolders = [d.lower() for d in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, d))]
-
-    # Darknet YOLO format checker
-    obj_train_data_path = os.path.join(folder_path, "obj_train_data")
-    obj_names_path = find_obj_names_file(folder_path)
-    obj_data_path = find_obj_data_file(folder_path)
-    
-    if os.path.exists(obj_train_data_path) and (obj_names_path or obj_data_path):
-        return "darknet"
-
-    # CVAT 1.1 extracted folder: annotations.xml + images/
-    cvat_xml = _find_cvat_annotations_xml(folder_path)
-    if cvat_xml and _cvat_has_images_dir_near_xml(cvat_xml) and _is_cvat11_images_xml(cvat_xml):
-        return "cvat11"
-
-    if any(x in subfolders for x in ["train", "val", "test"]):
-        return "split"
-
-    elif all(os.path.exists(os.path.join(folder_path, subdir)) for subdir in ["images", "labels"]):
-        images_path = os.path.join(folder_path, "images")
-        images_entries = os.listdir(images_path)
-        if any(
-            os.path.isdir(os.path.join(images_path, d)) and _is_split_name(d)
-            for d in images_entries
-        ):
-            return "nested_split"
-        buckets = yolo_flat_image_label_buckets(folder_path)
-        if not buckets:
-            return "unknown"
-        images_root = os.path.join(folder_path, "images")
-        has_subset = any(img != images_root for img, _ in buckets)
-        if has_subset:
-            return "subset_flat"
-        return "flat"
-
-    else:
-        return "unknown"
+    return _svc_detect_structure(folder_path)
 
 
 def load_yaml(file_path):
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"[ERROR] Failed to read {file_path}: {e}")
-        return None
+    return _svc_load_yaml(file_path)
 
 
 def count_elements(folder_path, structure):
-    labels_count = 0
-    images_count = 0
-    IMAGE_EXTS = list(IMAGE_EXTS_FLAT)
-
-    if structure == "cvat11":
-        xml_path = _find_cvat_annotations_xml(folder_path)
-        if not xml_path:
-            return None
-        try:
-            tree = ET.parse(xml_path)
-            root = tree.getroot()
-            xml_images = root.findall("./image")
-            labels_count = len(xml_images)
-        except Exception:
-            return None
-        img_dir = os.path.join(os.path.dirname(xml_path), "images")
-        if os.path.isdir(img_dir):
-            images_count = len(
-                [
-                    f
-                    for f in os.listdir(img_dir)
-                    if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
-                ]
-            )
-        else:
-            images_count = 0
-
-    if structure == "split":
-        for dir_name in os.listdir(folder_path):
-            dir_path = os.path.join(folder_path, dir_name)
-            if not os.path.isdir(dir_path):
-                continue
-
-            img_dir = os.path.join(folder_path, dir_name, "images")
-            lbl_dir = os.path.join(folder_path, dir_name, "labels")
-
-            if os.path.exists(img_dir):
-                images_count += len([
-                    f for f in os.listdir(img_dir)
-                    if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
-                ])
-
-            if os.path.exists(lbl_dir):
-                labels_count += len([
-                    f for f in os.listdir(lbl_dir)
-                    if f.lower().endswith(".txt")
-                ])
-
-    elif structure in ("flat", "subset_flat"):
-        buckets = yolo_flat_image_label_buckets(folder_path)
-        if not buckets:
-            img_dir = os.path.join(folder_path, "images")
-            lbl_dir = os.path.join(folder_path, "labels")
-            buckets = [(img_dir, lbl_dir)]
-        for img_dir, lbl_dir in buckets:
-            if os.path.exists(img_dir):
-                images_count += len([
-                    f for f in os.listdir(img_dir)
-                    if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
-                ])
-            if os.path.exists(lbl_dir):
-                labels_count += len([
-                    f for f in os.listdir(lbl_dir)
-                    if f.lower().endswith(".txt")
-                ])
-
-    elif structure == "nested_split":
-        for split in ["train", "val", "test"]:
-            img_dir = os.path.join(folder_path, "images", split)
-            lbl_dir = os.path.join(folder_path, "labels", split)
-
-            if os.path.exists(img_dir):
-                images_count += len([
-                    f for f in os.listdir(img_dir)
-                    if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
-                ])
-
-            if os.path.exists(lbl_dir):
-                labels_count += len([
-                    f for f in os.listdir(lbl_dir)
-                    if f.lower().endswith(".txt")
-                ])
-
-    elif structure == "darknet":
-        obj_train_data_path = os.path.join(folder_path, "obj_train_data")
-        if os.path.exists(obj_train_data_path):
-            files = os.listdir(obj_train_data_path)
-            images_count = len([
-                f for f in files
-                if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
-            ])
-            labels_count = len([
-                f for f in files
-                if f.lower().endswith(".txt")
-            ])
-        else:
-            return None
-
-    else:
-        return None
-
-    if images_count == labels_count:
-        return images_count
-    else:
-        print(f"[WARNING] The folder {folder_path} contains the number of images ({images_count})"
-              f"does not match the number of annotations ({labels_count})")
-        return images_count, labels_count
+    return _svc_count_elements(folder_path, structure)
 
 
 
 def process_dataset(folder_path, folder_name):
-    yaml_path = find_yaml_file(folder_path)
-    
-    names = None
-    structure = detect_structure(folder_path)
-
-    # Trying to load from YAML (YOLOv8 format)
-    if yaml_path:
-        data = load_yaml(yaml_path)
-        if data and "names" in data:
-            names = data["names"]
-            if isinstance(names, list):
-                pass
-            elif isinstance(names, dict):
-                names = [v for k, v in sorted(names.items())]
-            else:
-                print(f"[ERROR] The 'names' field in {yaml_path} is not in the correct format")
-                return None
-
-    # If you don't find YAML, try the Darknet format
-    if not names and structure == "darknet":
-        obj_names_path = find_obj_names_file(folder_path)
-        if obj_names_path:
-            names = load_obj_names(obj_names_path)
-            if not names:
-                print(f"[WARNING] Failed to load classes from {obj_names_path} - skipping")
-                return None
-        else:
-            print(f"[WARNING] obj.names not found in folder {folder_name} - skip")
-            return None
-
-    # If CVAT 1.1 extracted dataset
-    if not names and structure == "cvat11":
-        xml_path = _find_cvat_annotations_xml(folder_path)
-        if xml_path:
-            names = _load_cvat11_label_names(xml_path)
-            if not names:
-                print(f"[WARNING] CVAT 1.1: failed to extract labels from {xml_path} - skipping")
-                return None
-        else:
-            print(f"[WARNING] CVAT 1.1: annotations.xml not found - skipping")
-            return None
-
-    # If nothing is found
-    if not names:
-        print(f"[WARNING] Data.yaml or obj.names not found in folder {folder_name} - skip")
-        return None
-
-    elements_count = count_elements(folder_path, structure)
-
-    return {
-        "classes": {name: idx for idx, name in enumerate(names)},
-        "structure": structure,
-        "elements_count": elements_count
-    }
+    return _svc_process_dataset(folder_path, folder_name)
 
 
 def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
