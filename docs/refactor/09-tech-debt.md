@@ -341,6 +341,11 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - preserved compatibility wrappers in `model_training_module` via delegated service call and callback injection for prompts, workspace/layout, model/dataset helpers, and defaults.
   - validated targeted training/import regression (`30 passed`).
   Residual debt for this slice: `no residual debt (model_training_module interactive setup flow)`.
+- 2026-05-08: Plan-vs-code final audit checkpoint (Wave E-tail.1 closeout):
+  - confirmed root package completion criterion from `final-root-package-decomposition`: only `smartrain/__init__.py`, `smartrain/__main__.py`, `smartrain/cli.py` remain at package root.
+  - confirmed no stale code imports to old root paths for migrated Wave A-F and Wave E modules (`model_training_module`, `train_resume`, `results_analyzer`, `datasets_json_former`, `inference_cli`, `workspace_paths`, `interactive_contract`, `run_artifacts`, etc.).
+  - confirmed Wave E-tail decomposition entries for `results_analyzer`, `datasets_json_former`, and `model_training_module` are recorded with explicit residual-debt outcomes.
+  Residual debt for this audit slice: `no residual debt (Wave E-tail.1 closeout and root-package plan criteria)`.
 
 - 2026-05-05: Plan-vs-code audit sync (post 7-E4 close). Historical entries below remain as change log, but continuation scope is now concentrated in: (a) final 5-E2 parity for provider-specific cls/seg outputs in real external forks, (b) Phase F / Wave 8 guardrails and anti-pattern hardening, (c) train-service decoupling from `model_training_module` (`mtm.*` coupling).
 - 2026-05-05: Continuation preparation checkpoint: Wave 7 (`7-E4`) is closed in current scope; `format-compare` metrics path is canonical/unified (`canonical_gateway.load_metrics` with split support). Next execution priority should switch to Wave 8 while keeping 5-E2 residual parity items explicitly tracked.
