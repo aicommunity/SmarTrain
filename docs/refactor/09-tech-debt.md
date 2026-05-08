@@ -434,6 +434,19 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-08: Step 1 summary:
   - actionable debt registry нормализован; закрытые/устаревшие Phase 8 пункты выведены из активного исполнения.
   Residual debt for this step: `no residual debt`.
+- 2026-05-08: Step 2 / substep `pr64-write-path-close` (manifest/provenance/hash) выполнен:
+  - изменено: `canonical write` manifest расширен полями provenance (`created_at`, `source_run_ref`, `policy_mode`) и per-artifact hash coverage для `snapshot.json` + aggregate hash.
+  - файлы: `smartrain/adapters/canonical/write/manifest.py`, `smartrain/adapters/canonical/write/writer.py`, `tests/adapters/canonical/write/test_writer_layout.py`.
+  - тесты: `pytest -q tests/adapters/canonical/write/test_writer_layout.py tests/adapters/canonical/write/test_dual_write.py tests/test_imports.py` (`5 passed`).
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 2 / substep `pr64-write-path-close` (production dual-write hook) выполнен:
+  - изменено: `model_test_service.persist_target_test_artifacts_state(...)` переведен на `run_dual_write(...)` с runtime mode `SMARTTRAIN_CANONICAL_DUAL_WRITE_MODE` (`canonical_only|dual_write_strict|dual_write_best_effort`) и явным legacy writer hook.
+  - файлы: `smartrain/workflows/testing/model_test_service.py`.
+  - тесты: `pytest -q tests/adapters/canonical/write/test_writer_layout.py tests/adapters/canonical/write/test_dual_write.py tests/test_imports.py` (`5 passed`).
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-08: Step 2 summary:
+  - PR 6.4 write-path closeout (manifest/provenance/hash + production dual-write hook) реализован.
+  Residual debt for this step: `no residual debt`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 

@@ -515,9 +515,27 @@ def persist_target_test_artifacts_state(
     if str(os.getenv("SMARTTRAIN_CANONICAL_WRITE", "")).strip() == "1" and (status or "").strip().lower() == "ok":
         try:
             from smartrain.adapters.canonical.read.resolvers import infer_source_kind
-            from smartrain.orchestrators.canonical_gateway import persist_canonical_snapshot
+            from smartrain.adapters.canonical.write.dual_write import run_dual_write
+            from smartrain.orchestrators.canonical_gateway import CanonicalGatewayOptions, load_target
 
-            persist_canonical_snapshot(root_dir, source_kind=infer_source_kind(root_dir))
+            dual_mode = str(os.getenv("SMARTTRAIN_CANONICAL_DUAL_WRITE_MODE", "canonical_only")).strip().lower()
+            if dual_mode not in {"canonical_only", "dual_write_strict", "dual_write_best_effort"}:
+                dual_mode = "canonical_only"
+            source_kind = infer_source_kind(root_dir)
+            payload = load_target(root_dir, source_kind=source_kind, options=CanonicalGatewayOptions(validate=True))
+            # Re-run legacy metadata synchronization via explicit hook in dual-write modes.
+            # This keeps dual-write behavior observable in production path without changing main artifacts contract.
+            legacy_writer = (
+                (lambda: (_update_run_metadata_after_test(root_dir), _update_model_manifest_after_test(root_dir)))
+                if dual_mode != "canonical_only"
+                else None
+            )
+            run_dual_write(
+                payload=payload,
+                target_root=root_dir,
+                mode=dual_mode,  # type: ignore[arg-type]
+                legacy_writer=legacy_writer,
+            )
         except Exception as exc:
             print(f"[WARN] canonical snapshot not written: {exc}")
 

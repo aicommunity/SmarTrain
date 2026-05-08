@@ -24,3 +24,8 @@ def test_write_canonical_snapshot_creates_layout_and_manifest(tmp_path: Path) ->
     man = json.loads(Path(rep.manifest_path).read_text(encoding="utf-8"))
     assert man["payload_hash_sha256"] == rep.payload_hash_sha256
     assert man["schema_version"] == payload.schema_version
+    assert man["hash_algorithm"] == "sha256"
+    assert man["aggregate_artifacts_hash_sha256"] == rep.aggregate_artifacts_hash_sha256
+    assert man["artifacts"]["snapshot.json"]["sha256"] == rep.payload_hash_sha256
+    assert man["source_run_ref"] == str(run_dir.resolve())
+    assert rep.manifest_hash_sha256
