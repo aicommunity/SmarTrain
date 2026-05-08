@@ -486,6 +486,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - файлы: `smartrain/services/train_service.py`, `tests/regression/test_train_service_guardrails.py`.
   - тесты: `pytest -q tests/regression/test_train_service_guardrails.py`, `pytest -q tests/test_train_val_batch_defaults.py tests/test_training_metadata_provider.py`, `pytest -q tests/test_imports.py`.
   Residual debt for this substep: `partial (transitional allowlist сохранен до закрытия Step 1.2/1.3, затем должен быть сужен).`
+- 2026-05-08: Step 1 / substep `step1-boundary-hardening` (1.2) выполнен:
+  - изменено: добавлен service-safe helper слой `smartrain/services/inference_runtime_helpers.py` для model/source resolve, report write и dataset image collection.
+  - изменено: `inference_service` отвязан от `inference_cli._*` вызовов и использует только публичный helper API.
+  - файлы: `smartrain/services/inference_service.py`, `smartrain/services/inference_runtime_helpers.py`.
+  - тесты: `pytest -q tests/test_inference_cli.py`, `pytest -q tests/regression/test_canonical_cutover.py tests/regression/test_no_legacy_branch_usage.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `partial (остаются transitional services->workflows импорты до завершения Step 1.3 и финального сужения allowlist).`
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 

@@ -34,6 +34,19 @@ from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_su
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+from smartrain.services.inference_runtime_helpers import (
+    build_report,
+    collect_folder_images,
+    collect_split_images_for_dataset,
+    infer_img_size_from_model_context_safe,
+    predict_roi_crop,
+    resolve_external_source,
+    resolve_model,
+    resolve_output_root,
+    sanitize_segment,
+    source_descriptor,
+    write_report,
+)
 
 
 def _backend_name_matches_capability(runtime_name: str | None, capability_backend: str) -> bool:
@@ -212,7 +225,6 @@ def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -
 
 def _write_local_inference_report(
     *,
-    ic_module: Any,
     report_path: str,
     args: argparse.Namespace,
     layout: WorkspaceLayout,
@@ -228,9 +240,9 @@ def _write_local_inference_report(
     performance_payload: dict[str, Any],
     environment_artifact_path: str,
 ) -> None:
-    ic_module._write_report(
+    write_report(
         report_path,
-        ic_module._build_report(
+        build_report(
             args=args,
             layout=layout,
             model_source=model_source,
@@ -316,9 +328,6 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
     those. Local Ultralytics/backend runs use ``(code, False)`` so the CLI can return normally
     on success (code 0) and only raise on error.
     """
-    # Late import: helpers live in inference_cli; avoids import cycle with cli module.
-    from smartrain.workflows.inference import inference_cli as ic
-
     known_provider_ids = {spec.id for spec in list_provider_specs()}
     external_ref_outcome = _apply_external_provider_inference_from_refs(
         args, known_provider_ids=known_provider_ids
@@ -337,16 +346,16 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             model_source = "weights"
         else:
             model_path = Path(raw_weight)
-            model_name = ic._sanitize_segment(model_path.name or raw_weight)
+            model_name = sanitize_segment(model_path.name or raw_weight)
             model_source = "external-model"
     else:
         try:
-            model_path, model_name, model_source = ic._resolve_model(args, layout)
+            model_path, model_name, model_source = resolve_model(args, layout)
         except Exception as e:
             print(f"[ERROR] Failed to resolve model: {e}", file=sys.stderr)
             return 1, False
     if args.img_size is None:
-        inferred = ic._infer_img_size_from_model_context(model_path) if isinstance(model_path, Path) else None
+        inferred = infer_img_size_from_model_context_safe(model_path) if isinstance(model_path, Path) else None
         args.img_size = int(inferred) if inferred is not None else 640
 
     if ext_provider:
@@ -371,13 +380,13 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         )
         if model_validation_outcome is not None:
             return model_validation_outcome
-        source_for_external = ic._resolve_external_source(args, layout)
+        source_for_external = resolve_external_source(args, layout)
         source_short = (
             os.path.basename(os.path.abspath(os.path.expanduser(str(args.source_dir))).rstrip(os.sep)) or "folder"
             if args.data_mode == "folder"
             else f"{args.dataset}-{args.split}"
         )
-        out_root = ic._resolve_output_root(layout, model_name, source_short)
+        out_root = resolve_output_root(layout, model_name, source_short)
         report_path = os.path.join(out_root, "inference_results.json")
         env_profile = collect_environment_profile()
         env_path = os.path.join(out_root, "environment_profile.json")
@@ -425,7 +434,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 "device": args.device,
                 "data_mode": args.data_mode,
             },
-            "source": ic._source_descriptor(args, source_for_external, source_short, layout),
+            "source": source_descriptor(args, source_for_external, source_short, layout),
             "output": {
                 "dir_absolute": out_root,
                 "dir_relative": relativize_if_under(layout.root, out_root) or out_root,
@@ -464,7 +473,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             },
             "images": ext_image_rows,
         }
-        ic._write_report(report_path, external_report)
+        write_report(report_path, external_report)
         print(f"[OK] External inference report: {report_path}")
         return int(rc), True
 
@@ -505,11 +514,11 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
 
     try:
         if args.data_mode == "folder":
-            images = ic._collect_folder_images(str(args.source_dir), int(args.limit))
+            images = collect_folder_images(str(args.source_dir), int(args.limit))
             source_abs = os.path.abspath(os.path.expanduser(str(args.source_dir)))
             source_short = os.path.basename(source_abs.rstrip(os.sep)) or "folder"
         else:
-            images, split_dir = ic._collect_split_images_for_dataset(
+            images, split_dir = collect_split_images_for_dataset(
                 layout,
                 str(args.dataset),
                 str(args.split),
@@ -524,7 +533,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         print("[ERROR] No images found for inference.", file=sys.stderr)
         return 1, False
 
-    out_root = ic._resolve_output_root(layout, model_name, source_short)
+    out_root = resolve_output_root(layout, model_name, source_short)
     report_path = os.path.join(out_root, "inference_results.json")
     env_profile = collect_environment_profile()
     env_path = os.path.join(out_root, "environment_profile.json")
@@ -542,7 +551,6 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         "model_format": model_format,
     }
     _write_local_inference_report(
-        ic_module=ic,
         report_path=report_path,
         args=args,
         layout=layout,
@@ -568,11 +576,10 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             roi_box: tuple[int, int, int, int] | None = None
             src_for_predict: Any = image_path_abs
             if roi_model is not None:
-                rb = ic._predict_roi_crop(roi_model, image_path_abs, args)
+                rb = predict_roi_crop(roi_model, image_path_abs, args)
                 if rb[0] < 0:
                     skipped += 1
                     _write_local_inference_report(
-                        ic_module=ic,
                         report_path=report_path,
                         args=args,
                         layout=layout,
@@ -626,7 +633,6 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         )
         perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
         _write_local_inference_report(
-            ic_module=ic,
             report_path=report_path,
             args=args,
             layout=layout,
