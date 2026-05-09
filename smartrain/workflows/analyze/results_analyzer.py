@@ -113,6 +113,15 @@ from smartrain.workflows.analyze.analyze_run_query_service import (
     matches_optional_bool as _svc_matches_optional_bool,
     read_test_metrics_for_run as _svc_read_test_metrics_for_run,
 )
+from smartrain.workflows.analyze.analyze_recompute_cache_service import (
+    collect_missing_metrics_recompute_plan as _svc_collect_missing_metrics_recompute_plan,
+    load_recompute_status as _svc_load_recompute_status,
+    recompute_run_test_metrics as _svc_recompute_run_test_metrics,
+    recompute_status_fingerprint as _svc_recompute_status_fingerprint,
+    recompute_status_path as _svc_recompute_status_path,
+    runs_with_missing_metrics as _svc_runs_with_missing_metrics,
+    save_recompute_status as _svc_save_recompute_status,
+)
 from smartrain.workflows.analyze.analyze_system_profile_service import (
     write_system_profile_compare_csv as _svc_write_system_profile_compare_csv,
     write_test_system_profile_compare_csv as _svc_write_test_system_profile_compare_csv,
@@ -402,44 +411,21 @@ def _recompute_run_test_metrics(
     val_half: bool = True,
     gpu_only: bool = False,
 ) -> dict[str, Any]:
-    from ultralytics import YOLO
-
-    best_pt = canonical_run_model_path(run_dir, ".pt")
-    if not os.path.isfile(best_pt):
-        materialized = materialize_canonical_run_model(run_dir, ext=".pt", move=True, normalize_metadata=True)
-        if materialized is not None:
-            best_pt = str(materialized)
-    if not os.path.isfile(best_pt):
-        raise FileNotFoundError(f"run model not found: {best_pt}")
-    model = YOLO(best_pt)
-    _clear_gpu_memory()
-    rb, ri, rh = _resolve_run_val_profile(
+    return _svc_recompute_run_test_metrics(
         run_dir,
-        default_batch=val_batch,
-        default_imgsz=val_imgsz,
-        default_half=val_half,
-    )
-    ultra_proj = ultralytics_sidecar_dir(run_dir, ".ultralytics_scratch")
-    result = _run_val_memory_safe(
-        model,
-        data_yaml=data_yaml,
-        split=split,
-        val_batch=rb,
-        val_imgsz=ri,
-        val_half=rh,
+        data_yaml,
+        split,
+        val_batch=val_batch,
+        val_imgsz=val_imgsz,
+        val_half=val_half,
         gpu_only=gpu_only,
-        ultra_project=ultra_proj,
-        ultra_name="val-recompute",
+        canonical_run_model_path_cb=canonical_run_model_path,
+        materialize_canonical_run_model_cb=materialize_canonical_run_model,
+        clear_gpu_memory_cb=_clear_gpu_memory,
+        resolve_run_val_profile_cb=_resolve_run_val_profile,
+        ultralytics_sidecar_dir_cb=ultralytics_sidecar_dir,
+        run_val_memory_safe_cb=_run_val_memory_safe,
     )
-    _clear_gpu_memory()
-    csv_text = result.to_csv()
-    rdf = pd.read_csv(StringIO(csv_text))
-    if len(rdf) == 0:
-        return {}
-    row = rdf.iloc[0].to_dict()
-    out_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
-    rdf.to_csv(out_csv, index=False, encoding="utf-8")
-    return row
 
 
 def _load_dataset_class_names(data_yaml: str) -> dict[int, str]:
@@ -856,15 +842,14 @@ def _runs_with_missing_metrics(
     workspace: str | None = None,
     split: str = "test",
 ) -> list[str]:
-    plan = _collect_missing_metrics_recompute_plan(
+    return _svc_runs_with_missing_metrics(
         run_dirs,
         requested_metrics,
         data_yaml=data_yaml,
-        run_data_yaml_map=None,
         workspace=workspace,
         split=split,
+        collect_missing_metrics_recompute_plan_cb=_collect_missing_metrics_recompute_plan,
     )
-    return [str(x.get("run_dir")) for x in plan.get("recompute", []) if x.get("run_dir")]
 
 
 def _collect_missing_metrics_recompute_plan(
@@ -876,101 +861,33 @@ def _collect_missing_metrics_recompute_plan(
     workspace: str | None = None,
     split: str = "test",
 ) -> dict[str, list[dict[str, Any]]]:
-    recompute: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
-    for run_dir in run_dirs:
-        row = _read_test_metrics_for_run(run_dir)
-        recomputed_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
-        if os.path.isfile(recomputed_csv):
-            try:
-                rdf = pd.read_csv(recomputed_csv)
-                if len(rdf) > 0:
-                    row.update(rdf.iloc[0].to_dict())
-            except Exception:
-                pass
-        if not row:
-            missing_metrics = list(requested_metrics)
-        else:
-            missing_metrics = [m for m in requested_metrics if pd.isna(pd.to_numeric(row.get(m), errors="coerce"))]
-        if missing_metrics:
-            # Keep pre-check aligned with actual recompute path in cmd_test_metrics_plot:
-            # per-run resolved data.yaml has priority over shared session choice.
-            resolved_yaml = str((run_data_yaml_map or {}).get(run_dir) or "").strip() or _resolve_data_yaml_for_run(run_dir, workspace)[0]
-            if not resolved_yaml:
-                resolved_yaml = data_yaml
-            best_pt = canonical_run_model_path(run_dir, ".pt")
-            if not resolved_yaml:
-                print(
-                    "[INFO] "
-                    + os.path.basename(run_dir.rstrip(os.sep))
-                    + ": skip recompute prompt (no resolved data.yaml for run)."
-                )
-                skipped.append(
-                    {
-                        "run_dir": run_dir,
-                        "missing_metrics": missing_metrics,
-                        "reason": "no_data_yaml",
-                    }
-                )
-                continue
-            if not os.path.isfile(best_pt):
-                print(
-                    "[INFO] "
-                    + os.path.basename(run_dir.rstrip(os.sep))
-                    + ": skip recompute prompt (run model not found)."
-                )
-                skipped.append(
-                    {
-                        "run_dir": run_dir,
-                        "missing_metrics": missing_metrics,
-                        "reason": "missing_best_pt",
-                    }
-                )
-                continue
-            status_yaml = resolved_yaml or os.path.join(run_dir, "_missing_data_yaml_")
-            st = _load_recompute_status(run_dir, status_yaml, split, requested_metrics)
-            if st and isinstance(st, dict):
-                unresolved = set(st.get("unresolved_metrics") or [])
-                if unresolved and set(missing_metrics).issubset(unresolved):
-                    # Already attempted for this fingerprint; asking again is usually noise.
-                    print(
-                        "[INFO] "
-                        + os.path.basename(run_dir.rstrip(os.sep))
-                        + ": skip recompute prompt for known unresolved metrics "
-                        + f"{sorted(missing_metrics)} (fingerprint match)."
-                    )
-                    skipped.append(
-                        {
-                            "run_dir": run_dir,
-                            "missing_metrics": missing_metrics,
-                            "reason": "known_unresolved",
-                        }
-                    )
-                    continue
-            recompute.append(
-                {
-                    "run_dir": run_dir,
-                    "missing_metrics": missing_metrics,
-                    "data_yaml": resolved_yaml,
-                }
-            )
-    return {"recompute": recompute, "skipped": skipped}
+    return _svc_collect_missing_metrics_recompute_plan(
+        run_dirs,
+        requested_metrics,
+        data_yaml=data_yaml,
+        run_data_yaml_map=run_data_yaml_map,
+        workspace=workspace,
+        split=split,
+        read_test_metrics_for_run_cb=_read_test_metrics_for_run,
+        canonical_run_model_path_cb=canonical_run_model_path,
+        resolve_data_yaml_for_run_cb=_resolve_data_yaml_for_run,
+        load_recompute_status_cb=_load_recompute_status,
+    )
 
 
 def _recompute_status_path(run_dir: str, fingerprint: str) -> str:
-    return os.path.join(run_cache_root(run_dir), "metrics", f"recompute_status_{fingerprint}.json")
+    return _svc_recompute_status_path(run_dir, fingerprint, run_cache_root_cb=run_cache_root)
 
 
 def _recompute_status_fingerprint(run_dir: str, data_yaml: str, split: str, requested_metrics: list[str]) -> str:
-    return compute_fingerprint(
-        {
-            "tool": "analyze-v2",
-            "task": "metrics_recompute_status",
-            "split": split,
-            "data_yaml_hash": data_yaml_hash(data_yaml),
-            "weights_hash": weights_hash(run_dir),
-            "requested_metrics": sorted([m.strip() for m in requested_metrics if m.strip()]),
-        }
+    return _svc_recompute_status_fingerprint(
+        run_dir,
+        data_yaml,
+        split,
+        requested_metrics,
+        compute_fingerprint_cb=compute_fingerprint,
+        data_yaml_hash_cb=data_yaml_hash,
+        weights_hash_cb=weights_hash,
     )
 
 
@@ -980,18 +897,14 @@ def _load_recompute_status(
     split: str,
     requested_metrics: list[str],
 ) -> dict[str, Any] | None:
-    fp = _recompute_status_fingerprint(run_dir, data_yaml, split, requested_metrics)
-    p = _recompute_status_path(run_dir, fp)
-    if not os.path.isfile(p):
-        return None
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            payload = json.load(f) or {}
-        if isinstance(payload, dict):
-            return payload
-    except Exception:
-        return None
-    return None
+    return _svc_load_recompute_status(
+        run_dir,
+        data_yaml,
+        split,
+        requested_metrics,
+        recompute_status_fingerprint_cb=_recompute_status_fingerprint,
+        recompute_status_path_cb=_recompute_status_path,
+    )
 
 
 def _save_recompute_status(
@@ -1004,25 +917,17 @@ def _save_recompute_status(
     unresolved: list[str],
     status: str,
 ) -> None:
-    fp = _recompute_status_fingerprint(run_dir, data_yaml, split, requested_metrics)
-    p = _recompute_status_path(run_dir, fp)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    payload = {
-        "status": status,
-        "resolved_metrics": sorted(set(resolved)),
-        "unresolved_metrics": sorted(set(unresolved)),
-        "requested_metrics": sorted(set(requested_metrics)),
-    }
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    append_cache_entry(
+    _svc_save_recompute_status(
         run_dir,
-        {
-            "artifact": "metrics.recompute_status",
-            "fingerprint": fp,
-            "path": os.path.relpath(p, run_dir),
-            "status": status,
-        },
+        data_yaml,
+        split,
+        requested_metrics,
+        resolved=resolved,
+        unresolved=unresolved,
+        status=status,
+        recompute_status_fingerprint_cb=_recompute_status_fingerprint,
+        recompute_status_path_cb=_recompute_status_path,
+        append_cache_entry_cb=append_cache_entry,
     )
 
 
