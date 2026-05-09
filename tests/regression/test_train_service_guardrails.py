@@ -58,26 +58,10 @@ def test_train_service_does_not_use_private_mtm_getattr_fallbacks() -> None:
 
 
 def test_service_to_workflows_imports_are_limited_by_transitional_allowlist() -> None:
-    allowlist: dict[str, set[str]] = {
-        "smartrain/services/train_service.py": {
-            "smartrain.workflows.datasets.dataset_hash",
-            "smartrain.workflows.training",
-        },
-        "smartrain/services/inference_service.py": {
-            "smartrain.workflows.inference.inference_perf",
-            "smartrain.workflows.inference",
-        },
-        "smartrain/services/test_backend_dispatch.py": {
-            "smartrain.workflows.testing",
-            "smartrain.workflows.testing.model_test_service",
-        },
-        "smartrain/services/model_test_orchestrator.py": {
-            "smartrain.workflows.testing",
-            "smartrain.workflows.testing.model_test_service",
-        },
-    }
     violations: list[str] = []
-    for rel_path, allowed in allowlist.items():
+    service_files = sorted(Path("smartrain/services").glob("*.py"))
+    for path in service_files:
+        rel_path = str(path).replace("\\", "/")
         source = Path(rel_path).read_text(encoding="utf-8")
         tree = ast.parse(source)
         seen: set[str] = set()
@@ -85,10 +69,9 @@ def test_service_to_workflows_imports_are_limited_by_transitional_allowlist() ->
             if isinstance(node, ast.ImportFrom) and isinstance(node.module, str):
                 if node.module.startswith("smartrain.workflows"):
                     seen.add(node.module)
-        unexpected = sorted(seen - allowed)
-        if unexpected:
-            violations.append(f"{rel_path}: {', '.join(unexpected)}")
+        if seen:
+            violations.append(f"{rel_path}: {', '.join(sorted(seen))}")
     assert not violations, (
-        "Unexpected services->workflows imports detected (update code or "
-        f"transitional allowlist): {'; '.join(violations)}"
+        "Direct services->workflows imports are forbidden; route through stable "
+        f"adapter/facade modules instead: {'; '.join(violations)}"
     )

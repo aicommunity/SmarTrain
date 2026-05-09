@@ -557,6 +557,21 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-09: Step 4 summary:
   - targeted orchestrator thinning завершен: `results_analyzer` и `model_training_module` приведены к facade-oriented orchestration с вынесенными service boundaries для `cmd_all`, run-query/canonical-read, recompute/cache и train CLI pipeline.
   Residual debt for this step: `no residual debt in P1 Step 4 scope`.
+- 2026-05-09: Tail plan / substep `a1-a4-p0-tail` (A1/A2) выполнен:
+  - изменено: проведена инвентаризация и устранены прямые `services -> workflows` импорты через `core/workflow_adapters/*` facade-слой (`training`, `testing`, `inference`, `analyze` runtime adapters).
+  - изменено: `services/*` переведены на стабильные adapter imports без прямой зависимости от `smartrain.workflows.*`.
+  - файлы: `smartrain/core/workflow_adapters/*.py`, `smartrain/services/train_service.py`, `smartrain/services/inference_service.py`, `smartrain/services/inference_runtime_helpers.py`, `smartrain/services/model_test_orchestrator.py`, `smartrain/services/test_backend_dispatch.py`, `smartrain/services/analyze_format_compare_service.py`.
+  - тесты: `pytest -q tests/regression/test_train_service_guardrails.py tests/test_inference_cli.py tests/services/test_test_backend_dispatch.py tests/test_model_test_cli.py tests/test_imports.py`.
+  Residual debt for this substep: `pending A3/A4 (strict guardrails + final debt sync).`
+- 2026-05-09: Tail plan / substep `a1-a4-p0-tail` (A3/A4) выполнен:
+  - изменено: guardrails переведен в strict mode — прямые `services -> workflows` импорты запрещены fail-by-default для всех `smartrain/services/*.py` файлов.
+  - изменено: закрыта документация P0-tail в debt registry (step summary + residual sync).
+  - файлы: `tests/regression/test_train_service_guardrails.py`, `docs/refactor/09-tech-debt.md`.
+  - тесты: `pytest -q tests/regression/test_train_service_guardrails.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-09: Tail plan summary (P0-tail):
+  - transitional allowlist для `services -> workflows` снят; boundary rule зафиксирован автоматически через strict guardrails.
+  Residual debt for this step: `no residual debt`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 
