@@ -536,6 +536,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - файлы: `smartrain/workflows/analyze/analyze_all_command_service.py`, `smartrain/workflows/analyze/results_analyzer.py`.
   - тесты: `pytest -q tests/test_results_analyzer_workflows.py`, `pytest -q tests/integration/test_analyze_canonical_path.py`, `pytest -q tests/test_imports.py`.
   Residual debt for this substep: `pending Step 4.2/4.3/4.4 (run-query/recompute/training orchestration thinning).`
+- 2026-05-09: Step 4 / substep `orchestrator-thinning` (4.2) выполнен:
+  - изменено: run-query/canonical-read helpers вынесены в `analyze_run_query_service` (`build_run_record_canonical`, `read_test_metrics_for_run`, `flat_row_canonical`, `filtered_run_records`).
+  - изменено: `results_analyzer` оставляет фасадные wrapper-функции и делегирует run-query service-layer модулю.
+  - файлы: `smartrain/workflows/analyze/analyze_run_query_service.py`, `smartrain/workflows/analyze/results_analyzer.py`.
+  - тесты: `pytest -q tests/test_results_analyzer_workflows.py`, `pytest -q tests/integration/test_analyze_canonical_path.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `pending Step 4.3/4.4 (recompute/cache + training module thinning).`
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 
