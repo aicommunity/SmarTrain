@@ -572,6 +572,22 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-09: Tail plan summary (P0-tail):
   - transitional allowlist для `services -> workflows` снят; boundary rule зафиксирован автоматически через strict guardrails.
   Residual debt for this step: `no residual debt`.
+- 2026-05-09: Tail plan / substep `b1-b4-p2-schema` (B1/B2) выполнен:
+  - изменено: введен модуль schema governance `analyze_schema_contracts` с контрактами/валидацией для analyze session manifest и format-compare index.
+  - изменено: write-path в `analyze_report.write_manifest(...)` валидирует payload перед записью (policy `schema_version`, `schema_type`), compare-finalize path также валидируется.
+  - изменено: format-compare index нормализуется/валидируется через schema contract перед возвратом в analyze pipeline.
+  - файлы: `smartrain/workflows/analyze/analyze_schema_contracts.py`, `smartrain/workflows/analyze/analyze_report.py`, `smartrain/workflows/analyze/analyze_compare_finalize_service.py`, `smartrain/services/analyze_format_compare_service.py`, `smartrain/core/workflow_adapters/analyze_runtime_api.py`.
+  - тесты: `pytest -q tests/workflows/analyze/test_schema_contracts.py`, `pytest -q tests/test_results_analyzer_workflows.py`.
+  Residual debt for this substep: `pending B3/B4 (full matrix sync + debt closeout).`
+- 2026-05-09: Tail plan / substep `b1-b4-p2-schema` (B3/B4) выполнен:
+  - изменено: добавлена тест-матрица schema governance (valid/missing/unsupported/type mismatch) и integration regression для analyze workflow path.
+  - изменено: debt registry синхронизирован и P2 хвост переведен в закрытый статус для текущего объема.
+  - файлы: `tests/workflows/analyze/test_schema_contracts.py`, `docs/refactor/09-tech-debt.md`.
+  - тесты: `pytest -q tests/workflows/analyze/test_schema_contracts.py`, `pytest -q tests/test_results_analyzer_workflows.py`, `pytest -q tests/integration/test_analyze_canonical_path.py tests/integration/test_canonical_consumers.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-09: Tail plan summary (P2 schema governance):
+  - analyze/report артефакты получили явный schema contract (`schema_version` + contract validation в write-path) с regression покрытием.
+  Residual debt for this step: `no residual debt`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 
