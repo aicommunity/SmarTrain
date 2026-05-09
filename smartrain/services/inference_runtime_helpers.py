@@ -22,14 +22,14 @@ from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.core.training.train_profile import task_to_metadata_task_type
-from smartrain.workflows.datasets.dataset_access import resolve_dataset_root_for_entry
-from smartrain.workflows.datasets.dataset_roi_yolo import (
+from smartrain.core.workflow_adapters.inference_runtime_api import (
+    find_yaml_file,
+    infer_img_size_from_model_context,
+    resolve_dataset_root_for_entry,
     _clamp_crop,
     _full_image_crop,
     _select_roi_boxes,
 )
-from smartrain.workflows.datasets.datasets_json_former import find_yaml_file
-from smartrain.workflows.models.model_context import infer_img_size_from_model_context
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"

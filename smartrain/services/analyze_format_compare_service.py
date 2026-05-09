@@ -8,13 +8,13 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from smartrain.workflows.analyze.metrics_reader import (
+from smartrain.core.workflow_adapters.analyze_runtime_api import (
+    load_test_artifacts_manifest,
     read_metrics_by_format_for_split,
     read_metrics_by_format_for_split_artifacts,
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
-from smartrain.workflows.testing.model_test_service import load_test_artifacts_manifest
 from smartrain.core.runtime.run_artifacts import resolve_run_model_with_legacy_fallback
 from smartrain.orchestrators.canonical_gateway import load_metrics as canonical_load_metrics
 

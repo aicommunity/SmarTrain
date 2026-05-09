@@ -27,7 +27,7 @@ from smartrain.backends.ultralytics_adapter import UltralyticsAdapter
 from smartrain.core.training.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.backends.train_test_registry import resolve_infer_backend
 from smartrain.external_providers.registry import list_provider_specs
-from smartrain.workflows.inference.inference_perf import DualPerfProfiler
+from smartrain.core.workflow_adapters.inference_runtime_api import DualPerfProfiler
 from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.providers.core.global_index import get_provider_location
 from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model

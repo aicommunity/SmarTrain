@@ -19,7 +19,7 @@ class TestBackendDispatchContext:
 
 
 def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain.workflows.testing import model_test_runtime_api as mtr
+    from smartrain.core.workflow_adapters import testing_runtime_api as mtr
     from smartrain.backends.train_test_registry import resolve_test_backend
 
     def _backend_for(local_fmt: str) -> str:
@@ -81,7 +81,7 @@ def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
 
 
 def _dispatch_pt_uni(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain.workflows.testing import model_test_runtime_api as mtr
+    from smartrain.core.workflow_adapters import testing_runtime_api as mtr
 
     pt_uni_result = mtr.run_native_format_backend(
         root_dir=ctx.root_dir,
@@ -104,7 +104,7 @@ def _dispatch_pt_uni(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
 
 
 def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain.workflows.testing import model_test_runtime_api as mtr
+    from smartrain.core.workflow_adapters import testing_runtime_api as mtr
     from smartrain.backends.train_test_registry import resolve_test_backend
 
     def _backend_for(local_fmt: str) -> str:

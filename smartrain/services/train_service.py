@@ -14,7 +14,10 @@ from typing import Any, Callable
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
 from smartrain.cli_support.cli_contracts import emit_replay
 from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
-from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
+from smartrain.core.workflow_adapters.training_runtime_api import (
+    calculate_dataset_hash,
+    get_training_module_api,
+)
 from smartrain.external_providers.runner import run_external_infer, run_external_train
 from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.providers.core.global_index import get_provider_location, list_provider_records, reconcile_stale_provider_paths
@@ -608,7 +611,7 @@ def run_train_after_setup(
     replay_cmd: str | None,
 ) -> int | None:
     """Runs training+test (local or external), writes metadata, returns exit code."""
-    from smartrain.workflows.training import model_training_module as mtm
+    mtm = get_training_module_api()
     # Keep behavior identical while localizing mtm wiring in one composition root.
     runtime_ops = _MtmRuntimeOps(
         train_yolo_fn=mtm.train_yolo,

@@ -26,7 +26,7 @@ def run_model_test_after_setup(
 ) -> None:
     from smartrain.backends.train_test_registry import resolve_test_backend
     from smartrain.cli_support.cli_contracts import emit_replay
-    from smartrain.workflows.testing import model_test_runtime_api as mtr
+    from smartrain.core.workflow_adapters import testing_runtime_api as mtr
     from smartrain.services.test_backend_dispatch import (
         run_internal_pt_uni_backend,
         run_non_pt_test_backend,
