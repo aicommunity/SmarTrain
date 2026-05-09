@@ -103,6 +103,9 @@ from smartrain.workflows.analyze.analyze_all_pr_stage_service import (
 from smartrain.workflows.analyze.analyze_all_finalize_service import (
     finalize_all_session as _svc_finalize_all_session,
 )
+from smartrain.workflows.analyze.analyze_all_command_service import (
+    run_all_command as _svc_run_all_command,
+)
 from smartrain.workflows.analyze.analyze_system_profile_service import (
     write_system_profile_compare_csv as _svc_write_system_profile_compare_csv,
     write_test_system_profile_compare_csv as _svc_write_test_system_profile_compare_csv,
@@ -1268,147 +1271,42 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
 
 
 def cmd_all(args: argparse.Namespace) -> None:
-    baseline, others, profile, interactive_mode = _svc_prepare_all_selection(
-        args,
+    _svc_run_all_command(
+        args=args,
+        prepare_all_selection_cb=_svc_prepare_all_selection,
+        resolve_all_data_yaml_context_cb=_svc_resolve_all_data_yaml_context,
+        session_root_cb=_session_root,
         filtered_run_records_cb=_filtered_run_records,
         prompt_int_cb=prompt_int,
         prompt_text_cb=prompt_text,
         prompt_choice_cb=prompt_choice,
-    )
-    report_languages, data_yaml, selected_run_dirs, run_data_yaml_map, unresolved_data_yaml_runs = (
-        _svc_resolve_all_data_yaml_context(
-            args=args,
-            baseline=baseline,
-            others=others,
-            profile=profile,
-            interactive_mode=interactive_mode,
-            build_run_data_yaml_map_cb=_build_run_data_yaml_map,
-            auto_select_data_yaml_cb=_auto_select_data_yaml,
-            prompt_choice_cb=prompt_choice,
-            prompt_text_cb=prompt_text,
-        )
-    )
-    session_root = _session_root(args.workspace, args.analytics_session)
-    artifacts: list[dict[str, str]] = []
-    cache_events: list[dict[str, Any]] = []
-    artifact_failures: list[dict[str, Any]] = []
-
-    def _record_failure(
-        *,
-        stage: str,
-        status: str,
-        reason_code: str,
-        reason_detail: str = "",
-        run_dir: str | None = None,
-        format_name: str | None = None,
-        split: str | None = None,
-    ) -> None:
-        artifact_failures.append(
-            {
-                "stage": stage,
-                "status": status,
-                "reason_code": reason_code,
-                "reason_detail": reason_detail,
-                "run_dir": run_dir or "",
-                "format": format_name or "",
-                "split": split or "",
-            }
-        )
-    selected_labels = [os.path.basename(x.rstrip(os.sep)) for x in selected_run_dirs]
-    print("[INFO] Selected compare runs:")
-    for idx, (run_dir, label) in enumerate(zip(selected_run_dirs, selected_labels), start=1):
-        role = "baseline" if idx == 1 else "other"
-        print(f"[INFO]  - {role}: {label} ({run_dir})")
-
-    baseline_artifacts, lb_csv = _svc_run_all_baseline_artifacts(
-        baseline=baseline,
-        others=others,
-        selected_run_dirs=selected_run_dirs,
-        session_root=session_root,
-        workspace=args.workspace,
-        analytics_session=args.analytics_session,
-        models_root=args.models_root,
+        build_run_data_yaml_map_cb=_build_run_data_yaml_map,
+        auto_select_data_yaml_cb=_auto_select_data_yaml,
+        run_all_baseline_artifacts_cb=_svc_run_all_baseline_artifacts,
+        run_all_quality_stage_cb=_svc_run_all_quality_stage,
+        run_all_speed_stage_cb=_svc_run_all_speed_stage,
+        run_all_pr_stage_cb=_svc_run_all_pr_stage,
+        finalize_all_session_cb=_svc_finalize_all_session,
         default_map_col=DEFAULT_MAP_COL,
         cmd_compare_cb=cmd_compare,
         cmd_export_table_cb=cmd_export_table,
         write_system_profile_compare_csv_cb=_write_system_profile_compare_csv,
         write_test_system_profile_compare_csv_cb=_write_test_system_profile_compare_csv,
         cmd_leaderboard_cb=cmd_leaderboard,
-    )
-    artifacts.extend(baseline_artifacts)
-
-    runs_group_dir = os.path.dirname(baseline)
-    quality_artifacts, metric_sources_payload, recompute_missing_metrics = _svc_run_all_quality_stage(
-        args=args,
-        profile=profile,
-        baseline=baseline,
-        others=others,
-        selected_run_dirs=selected_run_dirs,
-        session_root=session_root,
-        runs_group_dir=runs_group_dir,
-        data_yaml=data_yaml,
-        run_data_yaml_map=run_data_yaml_map,
         collect_missing_metrics_recompute_plan_cb=_collect_missing_metrics_recompute_plan,
         cmd_test_metrics_plot_cb=cmd_test_metrics_plot,
-    )
-    artifacts.extend(quality_artifacts)
-
-    speed_artifacts, speed_cache_events = _svc_run_all_speed_stage(
-        args=args,
-        profile=profile,
-        baseline=baseline,
-        others=others,
-        selected_run_dirs=selected_run_dirs,
-        session_root=session_root,
-        runs_group_dir=runs_group_dir,
-        run_data_yaml_map=run_data_yaml_map,
-        metric_sources_payload=metric_sources_payload,
-        record_failure_cb=_record_failure,
         group_runs_by_data_yaml_cb=_group_runs_by_data_yaml,
         cmd_inference_benchmark_cb=cmd_inference_benchmark,
         cmd_inference_plot_cb=cmd_inference_plot,
         write_speed_quality_artifacts_cb=_write_speed_quality_artifacts,
-    )
-    artifacts.extend(speed_artifacts)
-    cache_events.extend(speed_cache_events)
-
-    pr_artifacts, pr_cache_events = _svc_run_all_pr_stage(
-        args=args,
-        profile=profile,
-        selected_run_dirs=selected_run_dirs,
-        session_root=session_root,
-        runs_group_dir=runs_group_dir,
-        run_data_yaml_map=run_data_yaml_map,
-        record_failure_cb=_record_failure,
-        group_runs_by_data_yaml_cb=_group_runs_by_data_yaml,
         cmd_pr_curves_cb=cmd_pr_curves,
         safe_name_cb=_safe_name,
-    )
-    artifacts.extend(pr_artifacts)
-    cache_events.extend(pr_cache_events)
-
-    _svc_finalize_all_session(
-        args=args,
-        session_root=session_root,
-        profile=profile,
-        baseline=baseline,
-        others=others,
-        data_yaml=data_yaml,
-        report_languages=report_languages,
-        run_data_yaml_map=run_data_yaml_map,
-        unresolved_data_yaml_runs=unresolved_data_yaml_runs,
-        artifacts=artifacts,
-        cache_events=cache_events,
-        artifact_failures=artifact_failures,
-        metric_sources_payload=metric_sources_payload,
-        recompute_missing_metrics=recompute_missing_metrics,
         build_abbreviations_for_report_cb=_build_abbreviations_for_report,
         collect_ultralytics_test_artifacts_cb=_collect_ultralytics_test_artifacts,
         write_format_compare_artifacts_cb=_write_format_compare_artifacts,
         collect_confidence_recommendation_tables_cb=_collect_confidence_recommendation_tables,
         write_manifest_cb=write_manifest,
         write_analysis_report_cb=write_analysis_report,
-        record_failure_cb=_record_failure,
     )
 
 def build_analyze_arg_parser() -> argparse.ArgumentParser:

@@ -530,6 +530,12 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - 2026-05-08: Step 3 summary:
   - canonical gateway-first analyze path зафиксирован; fallback к legacy остаётся только прозрачным policy-gated путем с диагностикой в выходных артефактах.
   Residual debt for this step: `no residual debt`.
+- 2026-05-09: Step 4 / substep `orchestrator-thinning` (4.1) выполнен:
+  - изменено: orchestration pipeline `cmd_all` вынесен из `results_analyzer` в отдельный сервис `analyze_all_command_service`.
+  - изменено: `results_analyzer.cmd_all` сведен к фасадному вызову service-layer orchestration entrypoint.
+  - файлы: `smartrain/workflows/analyze/analyze_all_command_service.py`, `smartrain/workflows/analyze/results_analyzer.py`.
+  - тесты: `pytest -q tests/test_results_analyzer_workflows.py`, `pytest -q tests/integration/test_analyze_canonical_path.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `pending Step 4.2/4.3/4.4 (run-query/recompute/training orchestration thinning).`
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 
