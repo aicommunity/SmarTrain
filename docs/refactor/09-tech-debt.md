@@ -548,6 +548,15 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
   - файлы: `smartrain/workflows/analyze/analyze_recompute_cache_service.py`, `smartrain/workflows/analyze/results_analyzer.py`.
   - тесты: `pytest -q tests/test_results_analyzer_workflows.py`, `pytest -q tests/integration/test_analyze_canonical_path.py`, `pytest -q tests/test_imports.py`.
   Residual debt for this substep: `pending Step 4.4 (training module orchestration thinning).`
+- 2026-05-09: Step 4 / substep `orchestrator-thinning` (4.4) выполнен:
+  - изменено: CLI orchestration routing (`main` dispatch + train pipeline wiring) вынесен из `model_training_module` в `training_cli_orchestration_service`.
+  - изменено: `model_training_module.main(...)` оставлен фасадом, делегирующим aux-команды (`resume` / `calc-confidence`) и основной train pipeline в service-layer entrypoints.
+  - файлы: `smartrain/workflows/training/training_cli_orchestration_service.py`, `smartrain/workflows/training/model_training_module.py`.
+  - тесты: `pytest -q tests/test_train_resume.py tests/test_train_interactive.py tests/test_train_profile.py`, `pytest -q tests/test_imports.py`.
+  Residual debt for this substep: `no residual debt`.
+- 2026-05-09: Step 4 summary:
+  - targeted orchestrator thinning завершен: `results_analyzer` и `model_training_module` приведены к facade-oriented orchestration с вынесенными service boundaries для `cmd_all`, run-query/canonical-read, recompute/cache и train CLI pipeline.
+  Residual debt for this step: `no residual debt in P1 Step 4 scope`.
 
 - 2026-05-05: Closed 5-E2 residual debt in current scope: external inference now enforces stable degraded task contract for provider capability gaps (`classification: {}`, `segments: []`, detection fallback list), with regression coverage for empty-but-valid cls/seg payloads in `tests/test_inference_cli.py`.
 
