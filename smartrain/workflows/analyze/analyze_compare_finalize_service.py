@@ -6,6 +6,8 @@ import shutil
 import sys
 from typing import Callable
 
+from smartrain.workflows.analyze.analyze_schema_contracts import ensure_analyze_session_manifest
+
 
 def resolve_compare_artifact_path(path: str, session_dir: str) -> str:
     if os.path.isabs(path):
@@ -83,13 +85,16 @@ def finalize_compare_analytics_session(
             artifacts.append({"role": role, "path": os.path.join(rel_dir, os.path.basename(src))})
         except Exception:
             pass
-    manifest = {
-        "session_name": session_name,
-        "type": "compare",
-        "baseline": baseline,
-        "others": others,
-        "artifacts": artifacts,
-    }
+    manifest = ensure_analyze_session_manifest(
+        {
+            "session_name": session_name,
+            "type": "compare",
+            "baseline": baseline,
+            "others": others,
+            "artifacts": artifacts,
+        },
+        session_type="compare",
+    )
     with open(os.path.join(dest_root, "session.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
     print(f"[OK] Session manifest: {os.path.join(dest_root, 'session.json')}")

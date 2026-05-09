@@ -9,6 +9,7 @@ import pandas as pd
 import yaml
 
 from smartrain.core.workflow_adapters.analyze_runtime_api import (
+    ensure_format_compare_index,
     load_test_artifacts_manifest,
     read_metrics_by_format_for_split,
     read_metrics_by_format_for_split_artifacts,
@@ -899,4 +900,6 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
     out_sources = os.path.join(out_dir, "format_metrics_sources.json")
     with open(out_sources, "w", encoding="utf-8") as f:
         json.dump(test_sources + val_sources + pt_uni_sources, f, ensure_ascii=False, indent=2)
-    return out
+    if "csv" not in out:
+        out["csv"] = str(out.get("test_csv") or out.get("val_csv") or out.get("pt_uni_csv") or "")
+    return ensure_format_compare_index(out)

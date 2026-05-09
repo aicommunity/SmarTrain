@@ -6,6 +6,7 @@ from smartrain.workflows.analyze.metrics_reader import (
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
+from smartrain.workflows.analyze.analyze_schema_contracts import ensure_format_compare_index
 from smartrain.workflows.testing.model_test_service import load_test_artifacts_manifest
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "read_test_performance_by_format_artifacts",
     "read_test_system_profile_by_format_artifacts",
     "load_test_artifacts_manifest",
+    "ensure_format_compare_index",
 ]

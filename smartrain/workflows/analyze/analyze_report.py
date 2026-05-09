@@ -14,6 +14,7 @@ from typing import Any
 import pandas as pd
 import numpy as np
 
+from smartrain.workflows.analyze.analyze_schema_contracts import ensure_analyze_session_manifest
 from smartrain.workflows.datasets.dataset_report import _export_odt_builtin_zip, _export_odt_odfpy, _export_pdf_fpdf2, _try_pandoc_odt, _try_pandoc_pdf
 
 
@@ -2393,8 +2394,12 @@ def write_analysis_report(
     return out
 
 
-def write_manifest(path: str, payload: dict[str, Any]) -> None:
+def write_manifest(path: str, payload: dict[str, Any], *, session_type: str = "analyze_all") -> None:
+    normalized = ensure_analyze_session_manifest(
+        payload,
+        session_type="compare" if str(session_type).strip().lower() == "compare" else "analyze_all",
+    )
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+        json.dump(normalized, f, ensure_ascii=False, indent=2)
 
