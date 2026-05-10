@@ -420,7 +420,13 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 
 ## Operational Limits (known constraints)
 
-- External providers могут легитимно возвращать неполные task-specific payloads для `classification/segmentation` (отсутствие `probs/masks` в runtime fork). Контракт деградации (`classification: {}`, `segments: []`) считается валидным до rollout расширенной provider-поддержки.
+- External providers могут легитимно возвращать неполные task-specific payloads для `classification/segmentation` (отсутствие `probs/masks` в runtime fork). Контракт деградации (`classification: {}`, `segments: []`) считается валидным до rollout расширенной provider-поддержки. Диагностика в отчётах и пользовательский контекст: `README.md`, [`docs/cli/inference.md`](../cli/inference.md), [`services/inference_service.py`](../../smartrain/services/inference_service.py) (`capability_gap` / счётчики при необходимости).
+
+- **Model test / internal `pt_uni` compare:** ветка внутреннего сравнения артефактов `pt_uni` рассчитана на задачу **detection**. Для `classification` и `segmentation` выполнение этой ветки **пропускается** с информационным сообщением в консоль (см. [`smartrain/services/model_test_orchestrator.py`](../../smartrain/services/model_test_orchestrator.py)). Это не отменяет остальные форматы теста и не блокирует task-aware inference.
+
+- **Canonical model read (`ModelAdapter`):** порядок вывода `task_type` — поля `manifest` / `training_metadata` (если заданы) → эвристика по имени файла весов (`-cls`/`-seg` и т.д.) → **последний резерв `detection`**. Порядок `backend_type` — metadata/provider → эвристика по расширению веса (`onnx` → onnxruntime, `engine`/`trt` → tensorrt, иначе ultralytics). При «немых» артефактах без метаданных и без подсказок в имени возможна неверная интерпретация задачи до явного исправления provenance.
+
+- Резюме архитектуры и ограничений для онбординга: [`13-project-current-state.md`](./13-project-current-state.md).
 
 ## Historical Log (closed/stale backlog)
 

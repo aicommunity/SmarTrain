@@ -59,7 +59,7 @@ Inference highlights:
 - Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
 - Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
 - Full inference JSON/artifact contract: [`inference.md`](inference.md).
-- `pt_uni` is internal-only and used for PT vs PT-uni comparison table generation (test/val), not as a user-facing inference format.
+- `pt_uni` is internal-only and used for PT vs PT-uni comparison table generation (test/val), not as a user-facing inference format. The model-test path that builds this internal compare is **detection-only**; for `classification` / `segmentation` that branch is skipped with an informational message (see `docs/refactor/09-tech-debt.md`, Operational Limits).
 
 Model release highlights:
 
