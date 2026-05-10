@@ -15,7 +15,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Register: `registry`
 - Models: `model convert`, `model release`
 - Format tools: `cvat`, `sahi`, `heatmap`
-- Migration: `migrate-models`
+- Migration: `migrate`, `migrate-models`
 
 ## Reference
 
@@ -59,13 +59,18 @@ Inference highlights:
 - Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
 - Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
 - Full inference JSON/artifact contract: [`inference.md`](inference.md).
-- `pt_uni` is internal-only and used for PT vs PT-uni comparison table generation (test/val), not as a user-facing inference format. The model-test path that builds this internal compare is **detection-only**; for `classification` / `segmentation` that branch is skipped with an informational message (see `docs/refactor/09-tech-debt.md`, Operational Limits).
+- `pt_uni` is internal-only and used for PT vs PT-uni comparison table generation (test/val), not as a user-facing inference format. The model-test internal compare path supports detection/classification/segmentation task-aware routing.
 
 Model release highlights:
 
 - `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
 - A sidecar JSON with the same basename is created next to the model file and includes source/training/metrics/classes/io specification.
 - Re-running for the same run with the same source hash performs a no-op skip.
+
+Migration highlights:
+
+- `smartrain migrate canonical --mode dry-run` previews canonical migration without writing files.
+- `smartrain migrate canonical --mode apply` writes canonical snapshots and reports.
 
 Balance and stats additions:
 
