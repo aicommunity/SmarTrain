@@ -28,3 +28,17 @@
 
 - Reader supports legacy payloads via adapters.
 - Writer defaults to v2.
+
+## Prediction bundle (normative relative paths)
+
+Paths are relative to a **run root** or **model export root** unless noted:
+
+| Relative path | Role |
+|---------------|------|
+| `predictions.jsonl` | Line-delimited prediction records (optional). |
+| `predictions.json` | JSON array or object payload (optional). |
+| `deep_diagnostics/debug_test.jsonl` | Test-split deep-diagnostics dump (optional). |
+| `deep_diagnostics/debug_val.jsonl` | Val-split deep-diagnostics dump (optional). |
+
+[`canonical_gateway.load_predictions`](../../smartrain/orchestrators/canonical_gateway.py) in **`predictions_strict=True`** mode discovers **only** these templates (recursive under the root). Heuristic `*pred*` globs are used only when strict mode is off.
+

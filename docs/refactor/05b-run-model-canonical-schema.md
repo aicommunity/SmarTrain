@@ -32,5 +32,19 @@ Unify data access for entities that currently come from either `runs` or `models
 
 Notes:
 
-- `load_predictions` currently uses conservative file discovery (`debug_*` jsonl and `*pred*.json[l]`) until a strict prediction bundle is formalized.
+- `load_predictions` uses file discovery under the run/model root; **strict mode** (`CanonicalGatewayOptions(predictions_strict=True)`) limits templates to normative paths only (no `*pred*` globs). Default remains backward-compatible. See also [`05-artifact-schema-v2.md`](./05-artifact-schema-v2.md) (prediction bundle paths).
 - `load_metrics` namespaces follow `{task_type}/test_{format}` and must pass canonical validators.
+
+### Opt-in canonical snapshot write (G1 hooks)
+
+When `SMARTTRAIN_CANONICAL_WRITE=1`, a shared helper [`maybe_dual_write_canonical_snapshot`](../../smartrain/adapters/canonical/write/snapshot_hook.py) may run after successful steps:
+
+| Pipeline | Trigger |
+|----------|---------|
+| Model test | After `persist_target_test_artifacts_state(..., status="ok")` (existing); dual-write mode: `SMARTTRAIN_CANONICAL_DUAL_WRITE_MODE`. |
+| Train (builtin) | After successful train + test and `save_training_metadata`. |
+| Train (test-only) | After successful test-only run and metadata save. |
+| Train (external provider) | When external train returns `rc==0` and test phase succeeded. |
+| Inference (local / external) | After `inference_results.json` is written for the job. |
+
+Legacy writer hooks for model test remain unchanged (`dual_write_*` modes with non–`canonical_only`).

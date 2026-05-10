@@ -20,7 +20,10 @@ from smartrain.tasks.metrics import resolve_task_metrics_adapter
 
 @dataclass(frozen=True)
 class CanonicalGatewayOptions:
+    """Gateway options; ``predictions_strict`` restricts ``load_predictions`` to normative templates (no ``*pred*`` globs)."""
+
     validate: bool = True
+    predictions_strict: bool = False
 
 
 def load_target(ref: str, *, source_kind: str | None = None, options: CanonicalGatewayOptions | None = None) -> CanonicalPayload:
@@ -198,7 +201,8 @@ def load_predictions(
     Discovery is file-based and intentionally conservative until a strict
     prediction bundle contract is finalized.
     """
-    base = load_target(ref, source_kind=source_kind, options=options)
+    opts = options or CanonicalGatewayOptions()
+    base = load_target(ref, source_kind=source_kind, options=opts)
     if not base.models:
         return []
     task_type = getattr(base.models[0], "task_type", "detection")
@@ -209,9 +213,14 @@ def load_predictions(
         "**/deep_diagnostics/debug_val.jsonl",
         "**/predictions.jsonl",
         "**/predictions.json",
-        "**/*pred*.jsonl",
-        "**/*pred*.json",
     ]
+    if not opts.predictions_strict:
+        patterns.extend(
+            [
+                "**/*pred*.jsonl",
+                "**/*pred*.json",
+            ]
+        )
     split_filter = str(split or "").strip().lower()
     fmt_filter = str(format_name or "").strip().lower()
     out: list[CanonicalPredictionRef] = []

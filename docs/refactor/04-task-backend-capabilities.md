@@ -1,5 +1,7 @@
 # Task/Backend Capability Matrix
 
+См. также контракт внутреннего сравнения **`pt_uni`**: [`14-pt-uni-compare-contract.md`](./14-pt-uni-compare-contract.md).
+
 ## Task Types
 
 - `detection`

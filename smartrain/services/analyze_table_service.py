@@ -7,6 +7,16 @@ from typing import Any, Callable
 import pandas as pd
 
 
+def run_scan_command(
+    *,
+    models_root: str,
+    find_run_directories_fn: Callable[[str], list[str]],
+    flat_row_for_run: Callable[[str], dict[str, Any]],
+) -> None:
+    runs = find_run_directories_fn(models_root)
+    scan_runs(runs=runs, flat_row_for_run=flat_row_for_run)
+
+
 def scan_runs(
     *,
     runs: list[str],

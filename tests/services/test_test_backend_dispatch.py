@@ -29,6 +29,7 @@ def test_wrapper_pt_uni_uses_registry(monkeypatch) -> None:
     def _fake(ctx: dispatch.TestBackendDispatchContext):
         called["n"] += 1
         assert ctx.fmt == "pt_uni"
+        assert ctx.task_type == "segmentation"
         return True, None
 
     monkeypatch.setitem(dispatch._DISPATCH_STRATEGIES, "pt_uni", _fake)
@@ -38,6 +39,7 @@ def test_wrapper_pt_uni_uses_registry(monkeypatch) -> None:
         data_yaml="/tmp/data.yaml",
         args=Namespace(imgsz=640, conf=0.25, iou=0.7, batch=1, deep_diagnostics=False, perf=False, perf_warmup_images=0, device="cpu"),
         onnx_provider_policy="gpu_preferred",
+        task_type="segmentation",
     )
     assert ok is True
     assert err is None

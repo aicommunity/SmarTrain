@@ -397,38 +397,27 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 
 ## Open Items
 
-- [ ] **P0 / PR 6.4 write-path closeout:** canonical write manifest/provenance и per-artifact hash coverage не доведены до полного операционного уровня; dual-write legacy hook пока требует production-grade wiring в общем пути записи.  
-  - status: `actual`  
-  - impact: консистентность и аудитируемость canonical artifacts/dual-write  
-  - criticality: `high`  
-  - owner-scope: `adapters/canonical/write/*`, `workflows/testing/model_test_service.py`
-- [ ] **P1 / PR 6.6 migration depth:** требуется расширенная матрица historical fixtures и edge-cases для CLI migration (`dry-run/apply/report-only`) поверх текущего baseline.  
-  - status: `actual`  
-  - impact: снижение риска сбоев на архивных раннах  
-  - criticality: `medium`  
-  - owner-scope: `tests/migration/*`, `workflows/migration/cli_migration.py`
-- [ ] **P2 / analyze gateway-first closure:** в части analyze-потоков остается неоднородность источников чтения (gateway-first vs ad-hoc helpers), нужна унификация.  
-  - status: `actual`  
-  - impact: единый source-of-truth для canonical mode  
-  - criticality: `medium`  
-  - owner-scope: `workflows/analyze/results_analyzer.py`, `services/analyze_format_compare_service.py`, `orchestrators/canonical_gateway.py`
-- [ ] **P3 / external provider operational limit (cls/seg):** не все provider forks отдают `probs/masks`; degraded payload уже корректен, но требуется явная диагностика и документация ограничений.  
-  - status: `operational-limit`  
-  - impact: прозрачность качества данных inference для cls/seg  
-  - criticality: `medium`  
-  - owner-scope: `services/inference_service.py`, `external_providers/runner.py`, docs inference
+(Активных блокеров нет: волны **G0–G8** пост-снимка закрыты в коде и отражены в [`10-implementation-checklist.md`](./10-implementation-checklist.md).)
 
 ## Operational Limits (known constraints)
 
 - External providers могут легитимно возвращать неполные task-specific payloads для `classification/segmentation` (отсутствие `probs/masks` в runtime fork). Контракт деградации (`classification: {}`, `segments: []`) считается валидным до rollout расширенной provider-поддержки. Диагностика в отчётах и пользовательский контекст: `README.md`, [`docs/cli/inference.md`](../cli/inference.md), [`services/inference_service.py`](../../smartrain/services/inference_service.py) (`capability_gap` / счётчики при необходимости).
 
-- **Model test / internal `pt_uni` compare:** ветка внутреннего сравнения артефактов `pt_uni` рассчитана на задачу **detection**. Для `classification` и `segmentation` выполнение этой ветки **пропускается** с информационным сообщением в консоль (см. [`smartrain/services/model_test_orchestrator.py`](../../smartrain/services/model_test_orchestrator.py)). Это не отменяет остальные форматы теста и не блокирует task-aware inference.
+- **Model test / internal `pt_uni` compare:** для **`detection`**, **`classification`** и **`segmentation`** запускается внутренний проход `pt_uni` с пробросом `task_type` в Ultralytics `val` (см. [`14-pt-uni-compare-contract.md`](./14-pt-uni-compare-contract.md)). Иные задачи по-прежнему пропускаются с информационным сообщением.
 
-- **Canonical model read (`ModelAdapter`):** порядок вывода `task_type` — поля `manifest` / `training_metadata` (если заданы) → эвристика по имени файла весов (`-cls`/`-seg` и т.д.) → **последний резерв `detection`**. Порядок `backend_type` — metadata/provider → эвристика по расширению веса (`onnx` → onnxruntime, `engine`/`trt` → tensorrt, иначе ultralytics). При «немых» артефактах без метаданных и без подсказок в имени возможна неверная интерпретация задачи до явного исправления provenance.
+- **Canonical model read (`ModelAdapter`):** порядок вывода `task_type` — поля `manifest` / `training_metadata.training_info.task_type` / `training_info.ultralytics_train.task` (если заданы) → эвристика по имени файла весов (`-cls`/`-seg` и т.д.) → **последний резерв `detection`**. Порядок `backend_type` — metadata/provider → эвристика по расширению веса (`onnx` → onnxruntime, `engine`/`trt` → tensorrt, иначе ultralytics). При «немых» артефактах без метаданных и без подсказок в имени возможна неверная интерпретация задачи до явного исправления provenance.
 
 - Резюме архитектуры и ограничений для онбординга: [`13-project-current-state.md`](./13-project-current-state.md).
 
+- **`registry_cli` и `load_metadata`:** команда registry читает `training_metadata.json` через [`metrics_reader.load_metadata`](../../smartrain/workflows/analyze/metrics_reader.py) — это **отдельный CLI-контур**, не analyze consumer; canonical analyze run-rows идут через [`analyze_run_query_service.build_run_record_canonical`](../../smartrain/workflows/analyze/analyze_run_query_service.py). Перевод registry на gateway — опционально (волна G3).
+
 ## Historical Log (closed/stale backlog)
+
+- 2026-05-10: **Post-snapshot waves G1–G8:** общий hook `maybe_dual_write_canonical_snapshot` (`adapters/canonical/write/snapshot_hook.py`) для train/inference и рефактор model_test; расширены migration edge-case тесты; удалён неиспользуемый `build_run_record` из `metrics_reader`, `registry_cli` импортирует `load_metadata` напрямую; `pt_uni` task-aware (cls/seg) + документ `14-pt-uni-compare-contract.md`; provenance backfill в `model_test_service` / `ModelAdapter`; тонкий срез `results_analyzer.cmd_scan` → `analyze_table_service.run_scan_command`; `CanonicalGatewayOptions.predictions_strict` + контрактные тесты `load_predictions`; таблица capability gaps и `capability_gap_reason(s)` в external inference report + `docs/cli/inference.md`.
+- 2026-05-10: **G0 debt sync (post-`13` snapshot):** сняты устаревшие Open Items, расходившиеся с кодом:
+  - **P0 PR 6.4:** baseline закрыт в коде: provenance/per-artifact hash в [`adapters/canonical/write`](../../smartrain/adapters/canonical/write/), dual-write + `legacy_writer` в [`model_test_service.persist_target_test_artifacts_state`](../../smartrain/workflows/testing/model_test_service.py). Дальнейшее расширение write-hooks (train/inference) — волна **G1**.
+  - **P2 analyze gateway-first:** продуктовый analyze-поток для run records использует gateway; остаточный legacy — `registry_cli` + внутренние helper-ы `metrics_reader` (см. Operational Limits).
+  - **P3 external provider cls/seg:** диагностика `capability_gap` в inference report и docs ([`docs/cli/inference.md`](../cli/inference.md)); расширенная матрица провайдеров — **G8**.
 
 - 2026-05-08: Backlog Wave 8 (`8-F1`, `8-F2`, `8-F3`) переведен в historical status (`stale-by-code-audit`): пункты фактически закрыты в коде/CI и не являются активным техдолгом.
 - 2026-05-08: Исторический блок `Next Execution Backlog` (Wave 8 bootstrap / anti-pattern PR #1 / legacy-removal PR) снят из actionable-раздела и сохранен как закрытый контекст исполнения.

@@ -1931,6 +1931,17 @@ def _ensure_confidence_recommendations_for_explicit_artifact(
         )
 
 
+def _ultralytics_val_task_kw(task_type: str | None) -> dict[str, str]:
+    t = str(task_type or "").strip().lower()
+    if t in {"classification", "classify", "cls"}:
+        return {"task": "classify"}
+    if t in {"segmentation", "segment", "seg"}:
+        return {"task": "segment"}
+    if t in {"detection", "detect", ""}:
+        return {}
+    return {}
+
+
 def run_ultralytics_backend(
     *,
     root_dir: str,
@@ -1949,6 +1960,7 @@ def run_ultralytics_backend(
     collect_performance: bool = False,
     perf_warmup_images: int = 5,
     runtime_device: str | None = None,
+    task_type: str | None = None,
 ) -> BackendRunResult:
     def _ultralytics_perf_payload_from_result(
         val_result: Any, *, duration_s: float, warmup_images: int, images_count: int | None = None
@@ -2054,6 +2066,7 @@ def run_ultralytics_backend(
         val_kwargs["batch"] = int(val_batch)
     if runtime_device is not None and str(runtime_device).strip():
         val_kwargs["device"] = str(runtime_device).strip()
+    val_kwargs.update(_ultralytics_val_task_kw(task_type))
     try:
         test_image_count = len(_split_images_from_yaml(dataset_yaml_path, "test", 0))
         result = model.val(**val_kwargs)
@@ -2305,6 +2318,7 @@ def run_native_format_backend(
     perf_warmup_images: int = 5,
     onnx_provider_policy: str | None = None,
     runtime_device: str | None = None,
+    task_type: str | None = None,
 ) -> BackendRunResult:
     backend_name = "onnxruntime" if format_name == "onnx" else ("unified_pt" if format_name == "pt_uni" else "tensorrt")
     provider_by_format = {
@@ -2328,6 +2342,7 @@ def run_native_format_backend(
                 deep_diagnostics=deep_diagnostics,
                 collect_performance=collect_performance,
                 perf_warmup_images=perf_warmup_images,
+                task_type=task_type,
             )
             if result.success:
                 test_dir = format_test_dir_for_write(root_dir, "pt_uni")

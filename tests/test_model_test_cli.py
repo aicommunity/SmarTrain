@@ -265,7 +265,7 @@ def test_model_test_cli_interactive_pt_not_queued_for_native_backend(monkeypatch
     assert "pt" not in native_formats
 
 
-def test_model_test_cli_classification_skips_internal_pt_uni_compare(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_model_test_cli_classification_runs_internal_pt_uni_compare(monkeypatch, tmp_path: Path, capsys) -> None:
     deploy_workspace(str(tmp_path))
     run_dir = tmp_path / "runs" / "ds_a" / "run_cls"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
@@ -283,9 +283,11 @@ def test_model_test_cli_classification_skips_internal_pt_uni_compare(monkeypatch
         error = None
 
     seen_formats: list[str] = []
+    pt_uni_tasks: list[str | None] = []
 
     def _fake_native(**kwargs):
         seen_formats.append(str(kwargs.get("format_name", "")))
+        pt_uni_tasks.append(kwargs.get("task_type"))
         return _FakeResult()
 
     monkeypatch.setattr("smartrain.workflows.testing.model_test_cli.run_ultralytics_backend", lambda **_kwargs: _FakeResult())
@@ -297,8 +299,9 @@ def test_model_test_cli_classification_skips_internal_pt_uni_compare(monkeypatch
         ["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "pt", "--task", "classify", "-y"]
     )
     out = capsys.readouterr().out
-    assert "Skipping internal pt_uni compare for task='classification'" in out
-    assert "pt_uni" not in seen_formats
+    assert "Generating internal PT-vs-PT-uni comparison artifacts." in out
+    assert "pt_uni" in seen_formats
+    assert "classification" in pt_uni_tasks
 
 
 def test_prompt_export_backends_lists_all_formats_and_skips_missing(monkeypatch, tmp_path: Path) -> None:

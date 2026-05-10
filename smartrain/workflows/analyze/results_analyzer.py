@@ -49,7 +49,7 @@ from smartrain.workflows.analyze.metrics_reader import (
     DEFAULT_MAP_COL,
     latest_test_metrics_path,
     pick_map_column,
-    load_metadata,  # compatibility re-export for registry_cli imports
+    load_metadata,
     results_csv_path,
     read_test_metrics_by_format,
     read_test_performance_by_format_artifacts,
@@ -135,7 +135,7 @@ from smartrain.workflows.analyze.analyze_compare_finalize_service import (
     resolve_compare_png_path as _svc_resolve_compare_png_path,
 )
 from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
-from smartrain.services.analyze_table_service import export_runs_table, scan_runs
+from smartrain.services.analyze_table_service import export_runs_table, run_scan_command
 from smartrain.services.analyze_compare_service import run_compare_workflow
 from smartrain.services.analyze_artifact_builders import (
     collect_confidence_recommendation_tables,
@@ -451,8 +451,11 @@ def _load_dataset_class_names(data_yaml: str) -> dict[int, str]:
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
-    runs = find_run_directories(args.models_root)
-    scan_runs(runs=runs, flat_row_for_run=_flat_row_for_run)
+    run_scan_command(
+        models_root=args.models_root,
+        find_run_directories_fn=find_run_directories,
+        flat_row_for_run=_flat_row_for_run,
+    )
 
 
 def cmd_export_table(args: argparse.Namespace) -> None:

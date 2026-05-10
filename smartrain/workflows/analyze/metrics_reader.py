@@ -9,7 +9,6 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from smartrain.workflows.analyze.analyze_models import RunRecord
 from smartrain.workflows.testing.model_test_service import (
     INTERNAL_TEST_FORMATS,
     SUPPORTED_TEST_FORMATS,
@@ -478,19 +477,4 @@ def read_train_last_row(run_dir: str, metric_column: str | None = None) -> dict[
         return {}
     last = df.iloc[-1]
     return {"epoch": last.get("epoch"), mcol: last.get(mcol)}
-
-
-def build_run_record(run_dir: str) -> RunRecord:
-    md = load_metadata(run_dir)
-    flat = flatten_metadata(md, run_dir)
-    return RunRecord(
-        run_dir=run_dir,
-        model=flat.get("model"),
-        dataset_name=flat.get("dataset_name"),
-        training_ok=flat.get("training_ok"),
-        testing_ok=flat.get("testing_ok"),
-        training_duration_s=flat.get("training_duration_s"),
-        test_metrics=read_test_metrics_row(run_dir),
-        train_last_metrics=read_train_last_row(run_dir),
-    )
 

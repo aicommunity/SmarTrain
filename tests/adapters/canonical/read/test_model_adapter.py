@@ -36,6 +36,19 @@ def test_model_adapter_prefers_metadata_task_and_backend_when_available(tmp_path
     assert model.provenance.get("backend_resolution") == "metadata"
 
 
+def test_model_adapter_reads_task_from_ultralytics_train_block(tmp_path: Path) -> None:
+    model_dir = tmp_path / "models" / "plain_export"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "weights.pt").write_bytes(b"fake")
+    (model_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"ultralytics_train": {"task": "segment"}}}),
+        encoding="utf-8",
+    )
+    payload = ModelAdapter().read(str(model_dir))
+    assert payload.models[0].task_type == "segmentation"
+    assert payload.models[0].provenance.get("task_resolution") == "metadata"
+
+
 def test_model_adapter_uses_name_and_format_hints_without_metadata(tmp_path: Path) -> None:
     model_dir = tmp_path / "models" / "my-cls"
     model_dir.mkdir(parents=True, exist_ok=True)

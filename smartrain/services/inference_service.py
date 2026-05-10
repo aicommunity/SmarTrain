@@ -18,6 +18,8 @@ class InferenceJobOutcome(NamedTuple):
 
     exit_code: int
     exit_via_sysexit_always: bool
+
+
 from PIL import Image
 from tqdm import tqdm
 
@@ -34,6 +36,7 @@ from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_su
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+from smartrain.adapters.canonical.write.snapshot_hook import maybe_dual_write_canonical_snapshot
 from smartrain.services.inference_runtime_helpers import (
     build_report,
     collect_folder_images,
@@ -198,6 +201,16 @@ def _normalize_task_outputs_for_task(task_type: str, task_outputs: dict[str, Any
     return {"detections": detections}
 
 
+def _capability_gap_reason(task_type: str, normalized_task: dict[str, Any]) -> str | None:
+    if task_type == "classification":
+        if not bool(normalized_task.get("classification")):
+            return "missing_task_outputs.classification"
+    if task_type == "segmentation":
+        if len(normalized_task.get("segments", [])) == 0:
+            return "missing_task_outputs.segments"
+    return None
+
+
 def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for row in rows:
@@ -226,6 +239,7 @@ def _normalize_external_image_rows(task_type: str, rows: list[dict[str, Any]]) -
                 "detections": detections,
                 "task_outputs": normalized_task,
                 "capability_gap": capability_gap,
+                "capability_gap_reason": _capability_gap_reason(task_type, normalized_task),
             }
         )
     return normalized
@@ -421,6 +435,9 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             for x in ext_image_rows
         )
         capability_gap_images = sum(1 for x in ext_image_rows if bool(x.get("capability_gap")))
+        capability_gap_reasons = sorted(
+            {str(x.get("capability_gap_reason")) for x in ext_image_rows if x.get("capability_gap_reason")}
+        )
         if capability_gap_images > 0 and task_type in {"classification", "segmentation"}:
             print(
                 "[WARN] External provider did not expose full task-specific outputs "
@@ -463,6 +480,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 "detections_total": detections_total,
                 "task_outputs_total": task_outputs_total,
                 "capability_gap_images": capability_gap_images,
+                "capability_gap_reasons": capability_gap_reasons,
             },
             "performance": {
                 "end_to_end": None,
@@ -483,6 +501,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         }
         write_report(report_path, external_report)
         print(f"[OK] External inference report: {report_path}")
+        maybe_dual_write_canonical_snapshot(out_root, status_ok=True)
         return int(rc), True
 
     model_format = str(model_path.suffix).lower().lstrip(".")
@@ -663,4 +682,5 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
 
     print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")
     print(f"[OK] Report: {report_path}")
+    maybe_dual_write_canonical_snapshot(out_root, status_ok=True)
     return 0, False

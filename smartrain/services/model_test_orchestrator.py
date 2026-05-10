@@ -138,9 +138,9 @@ def run_model_test_after_setup(
                 )
                 results.append(("pt", ok, err))
 
-    # Internal-only unified PT evaluation for PT vs PT-uni compare table.
-    # Keep this path detection-only until dedicated cls/seg compare contract exists.
-    if "pt" in formats and task_type == "detection":
+    # Internal-only unified PT evaluation for PT vs PT-uni compare table (detection + cls/seg).
+    _pt_uni_tasks = {"detection", "classification", "segmentation"}
+    if "pt" in formats and task_type in _pt_uni_tasks:
         run_internal_pt_uni = bool(args.force) or (not args.missing_only) or (
             not mtr.has_complete_test_artifacts(root_dir, "pt_uni")
         )
@@ -165,11 +165,12 @@ def run_model_test_after_setup(
                     data_yaml=data_yaml,
                     args=args,
                     onnx_provider_policy=onnx_provider_policy,
+                    task_type=task_type,
                 )
                 if not _ok:
                     print(f"[WARN] Internal pt_uni compare artifacts failed: {err}")
     elif "pt" in formats:
-        print(f"[INFO] Skipping internal pt_uni compare for task={task_type!r}; detection-only path.")
+        print(f"[INFO] Skipping internal pt_uni compare for unsupported task={task_type!r}.")
 
     queued: list[tuple[str, str]] = []
     if selected_artifacts:

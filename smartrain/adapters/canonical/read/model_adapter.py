@@ -54,6 +54,9 @@ class ModelAdapter:
         )
         provider = training_info.get("provider", {}) if isinstance(training_info, dict) else {}
         raw_task = manifest.get("task_type") or training_info.get("task_type")
+        utrain = training_info.get("ultralytics_train") if isinstance(training_info, dict) else None
+        if not str(raw_task or "").strip() and isinstance(utrain, dict) and utrain.get("task"):
+            raw_task = utrain.get("task")
         raw_backend = manifest.get("backend_type") or (
             provider.get("id") if isinstance(provider, dict) else None
         )

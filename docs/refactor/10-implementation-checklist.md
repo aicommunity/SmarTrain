@@ -28,7 +28,7 @@ Convention: `[ ]` не начато / не закрыто по критерия�
 
 ### PR 6.5 (частично — только read-path consumers)
 
-- [x] **6.5-p1** `canonical_gateway.load_target` + валидация payload. Notes: `load_metrics` / `load_predictions` / `resolve_task_context` из шаблона PR 6.5 — **ещё не реализованы** (Phase B).
+- [x] **6.5-p1** `canonical_gateway.load_target` + валидация payload. Notes: расширения PR 6.5 (в т.ч. `load_metrics`, `resolve_task_context`, `load_predictions`) закрыты в Phase B — см. **6.5-B1a–d** ниже.
 - [x] **6.5-p2** Частичная миграция consumers под флаг `SMARTTRAIN_CANONICAL_READ` (`model_test_cli`, `inference_cli`, `results_analyzer`) с политикой no-fallback там, где включено.
 - [x] **6.5-p3** Полное удаление source-specific веток в business-логике и расширение gateway — Phase B. Notes: синхронизировано со статусом закрытых пунктов 6.5-B1..B3 и текущими canonical-only consumer regression.
 
@@ -145,3 +145,19 @@ Notes:
 
 Sync note:
 - 2026-05-08: `09-tech-debt.md` приведен к actionable-формату (`Open Items` + `Operational Limits` + `Historical Log`); legacy Wave 8 backlog помечен как `stale-by-code-audit` и исключен из активного исполнения.
+
+---
+
+## Post-snapshot waves (после `13-project-current-state.md`, 2026-05)
+
+См. детальный runbook: `.cursor/plans/дальнейший_рефакторинг_7ba3857f.plan.md` (не редактировать как SoT для Phase A–F).
+
+- [x] **G0** Реестр техдолга vs код: синхронизация `09` / `10` Notes / Operational Limits (2026-05-10).
+- [x] **G1** Canonical write/dual-write hooks за пределами model test (`train` / `inference`) + общий `snapshot_hook` (2026-05-10).
+- [x] **G2** Расширение матрицы migration CLI + fixtures (`test_migration_edge_cases.py`, 2026-05-10).
+- [x] **G3** Analyze/registry legacy cleanup (`build_run_record` удалён; `registry_cli` → `metrics_reader`, 2026-05-10).
+- [x] **G4** `pt_uni` task-aware (cls/seg) + [`14-pt-uni-compare-contract.md`](./14-pt-uni-compare-contract.md) (2026-05-10).
+- [x] **G5** Provenance: backfill manifest из `training_metadata`; `ModelAdapter` учитывает `ultralytics_train.task` (2026-05-10).
+- [x] **G6** Утончение фасада: `cmd_scan` → `run_scan_command` в `analyze_table_service` (2026-05-10).
+- [x] **G7** Prediction bundle: `predictions_strict` в gateway + тесты контракта (2026-05-10).
+- [x] **G8** Таблица capability gaps в `docs/cli/inference.md` + `capability_gap_reason` в отчёте (2026-05-10).

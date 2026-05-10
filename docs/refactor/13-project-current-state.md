@@ -1,6 +1,6 @@
 # Актуальное состояние архитектуры SmarTrain (срез)
 
-**Дата среза:** 2026-05-09  
+**Дата среза:** 2026-05-10  
 **Назначение:** краткий narrative-snapshot структуры пакета, закрытых волн рефакторинга, границ слоёв и известных ограничений. Не заменяет детальные спецификации в `00`–`08`.
 
 **Источник истины по статусу волн и PR:** [`10-implementation-checklist.md`](./10-implementation-checklist.md) (чекбоксы Phase A–F и заметки). Журнал компромиссов и история шагов: [`09-tech-debt.md`](./09-tech-debt.md). Базовый аудит соответствия целевой архитектуре: [`11-plan-conformance-audit.md`](./11-plan-conformance-audit.md). Волна закрытия P0/P1 разрывов: [`12-gap-closure-wave-p0-p1.md`](./12-gap-closure-wave-p0-p1.md).
@@ -71,7 +71,7 @@
 - Контракты: [`tasks/contracts.py`](../../smartrain/tasks/contracts.py); нормализация метрик: [`tasks/metrics.py`](../../smartrain/tasks/metrics.py) и подпакеты `detection/`, `classification/`, `segmentation/`.
 - Gateway подключает task-aware нормализацию при загрузке метрик (см. Phase E в `10-implementation-checklist.md`).
 - **Inference:** `--task` / hint пробрасывается в capability resolution и runtime backend; отчёты поддерживают task-aware outputs (в т.ч. cls/seg), с деградацией для внешних провайдеров при отсутствии полей.
-- **Ограничение (model test):** внутреннее сравнение артефактов формата **`pt_uni`** ориентировано на **detection**; для `classification` / `segmentation` эта ветка **пропускается** с информационным сообщением — см. [`services/model_test_orchestrator.py`](../../smartrain/services/model_test_orchestrator.py).
+- **Model test / `pt_uni`:** внутреннее сравнение **`pt_uni`** включено для **detection**, **classification** и **segmentation** (проброс `task_type` в Ultralytics `val`); контракт — [`14-pt-uni-compare-contract.md`](./14-pt-uni-compare-contract.md).
 
 ---
 

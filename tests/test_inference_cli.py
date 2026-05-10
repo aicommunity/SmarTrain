@@ -672,8 +672,10 @@ def test_inference_external_provider_classification_empty_payload_normalized(mon
     assert report["task_type"] == "classification"
     assert report["summary"]["task_outputs_total"] == 0
     assert report["summary"]["capability_gap_images"] == 1
+    assert report["summary"]["capability_gap_reasons"] == ["missing_task_outputs.classification"]
     assert report["images"][0]["task_outputs"] == {"classification": {}}
     assert report["images"][0]["capability_gap"] is True
+    assert report["images"][0]["capability_gap_reason"] == "missing_task_outputs.classification"
 
 
 def test_inference_external_provider_segmentation_empty_payload_normalized(monkeypatch, tmp_path: Path) -> None:
@@ -719,8 +721,10 @@ def test_inference_external_provider_segmentation_empty_payload_normalized(monke
     assert report["task_type"] == "segmentation"
     assert report["summary"]["task_outputs_total"] == 0
     assert report["summary"]["capability_gap_images"] == 1
+    assert report["summary"]["capability_gap_reasons"] == ["missing_task_outputs.segments"]
     assert report["images"][0]["task_outputs"] == {"segments": []}
     assert report["images"][0]["capability_gap"] is True
+    assert report["images"][0]["capability_gap_reason"] == "missing_task_outputs.segments"
 
 
 def test_inference_unknown_provider_in_weights_returns_error(monkeypatch, tmp_path: Path, capsys) -> None:

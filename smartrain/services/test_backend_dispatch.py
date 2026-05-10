@@ -40,6 +40,7 @@ def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
                 collect_performance=bool(ctx.args.perf),
                 perf_warmup_images=int(max(0, ctx.args.perf_warmup_images)),
                 runtime_device=ctx.args.device,
+                task_type=ctx.task_type,
             )
             return pt_result.success, pt_result.error
         mtr.complete_missing_test_artifacts(
@@ -76,6 +77,7 @@ def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
         collect_performance=bool(ctx.args.perf),
         perf_warmup_images=int(max(0, ctx.args.perf_warmup_images)),
         runtime_device=ctx.args.device,
+        task_type=ctx.task_type,
     )
     return pt_result.success, pt_result.error
 
@@ -97,6 +99,7 @@ def _dispatch_pt_uni(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
         perf_warmup_images=int(max(0, ctx.args.perf_warmup_images)),
         onnx_provider_policy=ctx.onnx_provider_policy,
         runtime_device=ctx.args.device,
+        task_type=ctx.task_type,
     )
     if not pt_uni_result.success:
         return False, pt_uni_result.error
@@ -178,6 +181,7 @@ def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
         perf_warmup_images=int(max(0, ctx.args.perf_warmup_images)),
         onnx_provider_policy=ctx.onnx_provider_policy if ctx.fmt == "onnx" else None,
         runtime_device=ctx.args.device,
+        task_type=ctx.task_type,
     )
     return result.success, result.error
 
@@ -264,9 +268,10 @@ def run_internal_pt_uni_backend(
     data_yaml: str,
     args: Any,
     onnx_provider_policy: str,
+    task_type: str = "detection",
 ) -> tuple[bool, str | None]:
     ctx = TestBackendDispatchContext(
-        task_type="detection",
+        task_type=task_type,
         fmt="pt_uni",
         target_kind="runs",
         root_dir=root_dir,
