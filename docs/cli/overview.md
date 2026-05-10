@@ -32,6 +32,13 @@ smartrain analyze inference-benchmark --help
 smartrain model convert --help
 ```
 
+For argparse-forwarded commands exposed by Typer wrappers, use:
+
+```bash
+smartrain <command> -- --help
+smartrain <group> <subcommand> -- --help
+```
+
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
