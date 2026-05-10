@@ -581,6 +581,7 @@ def test_partial_args_do_not_trigger_interactive(
         ["scan", "--", "--unknown-flag"],
         ["fusion", "--", "--unknown-flag"],
         ["migrate", "--", "--unknown-flag"],
+        ["migrate", "--", "canonical", "--", "--unknown-flag"],
         ["registry", "runs-list", "--", "--unknown-flag"],
         ["analyze", "scan", "--", "--unknown-flag"],
         ["model", "convert", "--", "--unknown-flag"],
@@ -605,9 +606,14 @@ def test_unknown_flag_errors_are_user_friendly(
     "argv",
     [
         ["test", "--", "--task", "not-a-valid-task"],
+        ["test", "--", "--onnx-provider-policy", "bogus_policy"],
         ["inference", "--", "--task", "bogus"],
+        ["inference", "--", "--split", "bogus_split"],
+        ["inference", "--", "--data-mode", "bogus_mode"],
         ["migrate", "--", "canonical", "--source-kind", "not_run_model_all"],
         ["migrate", "--", "canonical", "--mode", "not_a_mode"],
+        ["analyze", "all", "--", "--profile", "not_a_profile"],
+        ["analyze", "all", "--", "--recompute-missing-metrics", "maybe"],
     ],
 )
 def test_invalid_choice_errors(
@@ -660,6 +666,52 @@ def test_migrate_canonical_dry_run_smoke(subprocess_env: dict[str, str], tmp_pat
     assert "Migration report JSON" in out
 
 
+def test_registry_runs_list_smoke(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["registry", "runs-list"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "runs with training_metadata.json not found" in out.lower()
+
+
+def test_registry_models_list_smoke(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["registry", "models-list"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "traceback" not in out.lower()
+
+
+def test_queue_list_smoke(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["queue", "list"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert (
+        "queue is empty" in out.lower()
+        or "no tasks" in out.lower()
+        or "queue file missing" in out.lower()
+    )
+
+
+def test_providers_status_smoke(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    cfg = tmp_path / "cfg"
+    env = dict(subprocess_env)
+    env["XDG_CONFIG_HOME"] = str(cfg)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["providers", "status"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "providers status" in out.lower() or "not_installed" in out.lower()
+
+
 def test_docs_cli_command_parity_contains_core_commands() -> None:
     docs_files = [
         Path("docs/cli/overview.md"),
@@ -684,3 +736,36 @@ def test_docs_cli_command_parity_contains_core_commands() -> None:
     ]
     missing = [marker for marker in expected_markers if marker not in combined]
     assert not missing, f"Missing CLI docs markers: {missing}"
+
+
+def test_docs_cli_group_subcommand_parity_has_key_entries() -> None:
+    docs_files = [
+        Path("docs/cli/overview.md"),
+        Path("docs/cli/analyze.md"),
+        Path("docs/cli/inference.md"),
+        Path("docs/cli/registry.md"),
+        Path("docs/cli/queue.md"),
+        Path("docs/cli/providers.md"),
+        Path("docs/getting-started/quickstart.md"),
+        Path("README.md"),
+    ]
+    combined = "\n".join(p.read_text(encoding="utf-8") for p in docs_files if p.is_file()).lower()
+    expected_entries = [
+        "smartrain report dataset",
+        "smartrain queue list",
+        "smartrain queue add",
+        "smartrain queue run",
+        "smartrain registry runs-list",
+        "smartrain registry models-list",
+        "smartrain providers status",
+        "smartrain providers install",
+        "smartrain providers doctor",
+        "smartrain analyze scan",
+        "smartrain analyze compare",
+        "smartrain analyze leaderboard",
+        "smartrain model convert",
+        "smartrain model release",
+        "smartrain migrate canonical",
+    ]
+    missing = [entry for entry in expected_entries if entry not in combined]
+    assert not missing, f"Missing docs subcommand entries: {missing}"
