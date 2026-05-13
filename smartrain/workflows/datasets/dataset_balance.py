@@ -18,9 +18,14 @@ from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_prompts import prompt_choice, prompt_multi_choice_csv, prompt_text, prompt_yes_no
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.workflows.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
+from smartrain.workflows.datasets.dataset_cli_catalog import (
+    EMPTY_DATASETS_INFO_MESSAGE,
+    load_datasets_catalog,
+    sorted_class_names_union_from_catalog,
+    try_prompt_dataset_interactive,
+)
 from smartrain.workflows.datasets.dataset_cli_common import (
     detect_split_from_path,
-    load_dataset_catalog,
     update_datasets_sidecar,
 )
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
@@ -253,10 +258,6 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
         help="Maximum removable fraction [0..1] per class in eval split when head trimming is enabled.",
     )
     return p
-
-
-def _load_catalog(layout: WorkspaceLayout) -> dict:
-    return load_dataset_catalog(layout)
 
 
 def _detect_split(images_path: str) -> str:
@@ -1354,15 +1355,20 @@ def main(argv=None):
     interactive_used = False
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
-    catalog = _load_catalog(layout)
+    catalog = load_datasets_catalog(layout)
     if not catalog:
-        print("[ERROR] datasets_info.json was not found or is empty.")
+        print(EMPTY_DATASETS_INFO_MESSAGE)
         return
 
-    if args.dataset is None and interactive_allowed and sys.stdin.isatty():
-        all_classes = sorted({k for v in catalog.values() if isinstance(v, dict) for k in (v.get("classes") or {}).keys()})
-        _interactive_fill(args, sorted(catalog.keys()), all_classes)
-        interactive_used = True
+    interactive_used = try_prompt_dataset_interactive(
+        args=args,
+        argv=argv,
+        fill=lambda: _interactive_fill(
+            args,
+            sorted(catalog.keys()),
+            sorted_class_names_union_from_catalog(catalog),
+        ),
+    )
     if not args.dataset:
         print("[ERROR] Incomplete arguments: specify --dataset.")
         return

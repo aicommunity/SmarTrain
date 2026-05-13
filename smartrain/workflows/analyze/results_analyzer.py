@@ -106,6 +106,14 @@ from smartrain.workflows.analyze.analyze_all_finalize_service import (
 from smartrain.workflows.analyze.analyze_all_command_service import (
     run_all_command as _svc_run_all_command,
 )
+
+# Subparser for `analyze all` — used to rebuild replay via cli_replay.build_non_interactive_command.
+_ANALYZE_ALL_SUBPARSER: argparse.ArgumentParser | None = None
+
+
+def _finalize_all_session_with_replay(**kwargs: Any) -> None:
+    kwargs["replay_parser"] = _ANALYZE_ALL_SUBPARSER
+    _svc_finalize_all_session(**kwargs)
 from smartrain.workflows.analyze.analyze_run_query_service import (
     build_run_record_canonical as _svc_build_run_record_canonical,
     filtered_run_records as _svc_filtered_run_records,
@@ -1149,7 +1157,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         run_all_quality_stage_cb=_svc_run_all_quality_stage,
         run_all_speed_stage_cb=_svc_run_all_speed_stage,
         run_all_pr_stage_cb=_svc_run_all_pr_stage,
-        finalize_all_session_cb=_svc_finalize_all_session,
+        finalize_all_session_cb=_finalize_all_session_with_replay,
         default_map_col=DEFAULT_MAP_COL,
         cmd_compare_cb=cmd_compare,
         cmd_export_table_cb=cmd_export_table,
@@ -1173,6 +1181,7 @@ def cmd_all(args: argparse.Namespace) -> None:
     )
 
 def build_analyze_arg_parser() -> argparse.ArgumentParser:
+    global _ANALYZE_ALL_SUBPARSER
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--workspace",
@@ -1249,6 +1258,7 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
     p_all.add_argument("--gpu-only-val", dest="gpu_only_val", action="store_true", default=True, help="Do not fallback to CPU in val()")
     p_all.add_argument("--allow-cpu-fallback", dest="gpu_only_val", action="store_false", help="Allow CPU fallback when GPU val() fails")
     p_all.set_defaults(func=cmd_all)
+    _ANALYZE_ALL_SUBPARSER = p_all
 
     p_exp = sub.add_parser("export-table", parents=[common], help="Export summary CSV for all runs")
     p_exp.add_argument("-o", "--output", type=str, default="runs_summary.csv")

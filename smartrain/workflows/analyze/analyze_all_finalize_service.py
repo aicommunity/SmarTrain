@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import argparse
 import os
-import shlex
 import sys
 from typing import Any, Callable
 
 import pandas as pd
+
+from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
 
 
 def finalize_all_session(
@@ -31,6 +33,7 @@ def finalize_all_session(
     write_manifest_cb: Callable[[str, dict[str, Any]], None],
     write_analysis_report_cb: Callable[..., dict[str, str]],
     record_failure_cb: Callable[..., None],
+    replay_parser: argparse.ArgumentParser | None = None,
 ) -> None:
     abbreviations = build_abbreviations_for_report_cb([baseline] + others)
     ultralytics_test_rows, ultralytics_test_artifacts = collect_ultralytics_test_artifacts_cb(
@@ -195,40 +198,23 @@ def finalize_all_session(
     for key, path in report_files.items():
         print(f"[OK] Report {key}: {path}")
 
-    replay_parts = [
-        "smartrain",
-        "analyze",
-        "all",
-        "--baseline",
-        baseline,
-        "--profile",
-        profile,
-        "--report-languages",
-        ",".join(report_languages),
-        "--scatter-x",
-        str(getattr(args, "scatter_x", "avg_inference_ms_per_frame")),
-        "--scatter-y",
-        str(getattr(args, "scatter_y", "mAP50-95")),
-        "--val-batch",
-        str(int(getattr(args, "val_batch", 1))),
-        "--val-imgsz",
-        str(int(getattr(args, "val_imgsz", 640))),
-        "--recompute-missing-metrics",
-        ("yes" if recompute_missing_metrics else "no"),
-    ]
-    workspace_val = getattr(args, "workspace", None)
-    if workspace_val is not None and str(workspace_val).strip().lower() not in {"", "none"}:
-        replay_parts.extend(["--workspace", str(workspace_val)])
-    for item in others:
-        replay_parts.extend(["--others", item])
-    if data_yaml:
-        replay_parts.extend(["--data-yaml", data_yaml])
-    if bool(getattr(args, "no_pdf", False)):
-        replay_parts.append("--no-pdf")
-    if bool(getattr(args, "no_odt", False)):
-        replay_parts.append("--no-odt")
-    replay_parts.append("--val-half" if bool(getattr(args, "val_half", True)) else "--no-val-half")
-    replay_parts.append("--gpu-only-val" if bool(getattr(args, "gpu_only_val", True)) else "--allow-cpu-fallback")
-    print("[INFO] Command for non-interactive retry:")
-    print(" ".join(shlex.quote(p) for p in replay_parts if p))
+    if replay_parser is not None:
+        setattr(args, "baseline", baseline)
+        setattr(args, "others", others)
+        setattr(args, "profile", profile)
+        rl_str = (
+            ",".join(report_languages)
+            if report_languages
+            else str(getattr(args, "report_languages", "ru,en") or "ru,en")
+        )
+        setattr(args, "report_languages", rl_str)
+        setattr(
+            args,
+            "recompute_missing_metrics_choice",
+            "yes" if recompute_missing_metrics else "no",
+        )
+        if data_yaml:
+            setattr(args, "data_yaml", data_yaml)
+        cmd = build_non_interactive_command("analyze all", replay_parser, args)
+        print_replay_command("after execution", cmd)
 

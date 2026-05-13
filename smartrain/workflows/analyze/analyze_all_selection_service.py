@@ -60,5 +60,9 @@ def prepare_all_selection(
         baseline = indexed[baseline_idx - 1][0]
         others = [indexed[i - 1][0] for i in others_idx if 1 <= i <= len(indexed) and indexed[i - 1][0] != baseline]
         profile = prompt_choice_cb("Profile", ["quality", "speed", "full"], default="full")
+        # So replay (`build_non_interactive_command`) sees the resolved selection.
+        setattr(args, "baseline", baseline)
+        setattr(args, "others", others)
+        setattr(args, "profile", profile)
     return baseline, others, profile, interactive_mode
 

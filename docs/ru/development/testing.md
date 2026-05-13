@@ -2,6 +2,8 @@
 
 # Тестирование
 
+Настройки pytest заданы в `pyproject.toml` (`[tool.pytest.ini_options]`): `testpaths = ["tests"]`, `pythonpath = ["."]` — команды выполнять из корня репозитория.
+
 ## Запуск
 
 ```bash
@@ -15,7 +17,21 @@ pytest
 pytest tests/test_model_training_module.py
 pytest tests/test_results_analyzer.py
 pytest tests/test_training_queue.py
+pytest tests/test_inference_cli.py -q
+pytest tests/regression/test_train_service_guardrails.py -q
+pytest -k "replay" tests/test_cli_replay.py -q
 ```
+
+Дополнительно:
+
+```bash
+pytest tests/test_cli_replay.py -q
+pytest -k "analyze" tests/test_results_analyzer_workflows.py -q
+```
+
+Эталонный паттерн CLI: `tests/test_cli_replay.py`.
+
+Интеграция canonical: `tests/integration/test_canonical_consumers.py`.
 
 ## Что проверять после изменений документации
 

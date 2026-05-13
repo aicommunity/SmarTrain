@@ -4,7 +4,29 @@
 
 This document captures real code flows and helps you quickly locate where to make changes.
 
-Sources of truth for this section: `smartrain/cli.py`, `smartrain/workflows/training/model_training_module.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/training_queue.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
+Sources of truth for this section: `smartrain/cli.py`, `smartrain/workflows/training/model_training_module.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/workflows/queue/training_queue.py`, `smartrain/workflows/queue/training_queue_cli.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
+
+**Package layout** (folder map): [package-layout.md](package-layout.md).
+
+## Functional navigation
+
+Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_apps/*`). Use this table to find the right module when changing behavior.
+
+| Command / area | Typer entry (`cli.py`) | Argparse / `main` | Orchestration / services | Notes |
+|----------------|------------------------|-------------------|---------------------------|-------|
+| `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `model_training_module` | `services/train_service.py`, `workflows/training/*_service.py` | Profile merge: `core/training/train_profile.py` |
+| `test` | → `cli_apps/test_app` | `workflows/testing/model_test_cli.py` | `services/model_test_orchestrator.py`, `services/test_backend_dispatch.py` | Backends: `backends/train_test_registry.py` |
+| `inference` | → `cli_apps/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `workflows/inference/inference_backends.py` | |
+| `analyze` subcommands | Typer subcommands → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` | `workflows/analyze/analyze_*_service.py`, `services/analyze_*.py` | Metrics / canonical: `orchestrators/canonical_gateway.py` |
+| `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | `datasets_json_former.py` | | Writes `datasets_info.json` |
+| `fusion` | → `workflows/datasets/dataset_former.py` | same module | | |
+| `queue` | Typer → `workflows/queue/training_queue_cli.py` (`list`/`add`/…); `queue-run` → `_forward_argparse_command` → `training_queue.py` | `training_queue_cli` / `training_queue` | | Queue state under workspace |
+
+### Layers and imports
+
+- Modules under `smartrain/services/` must **not** import `smartrain.workflows.*`; they call workflow code through facades in `smartrain/core/workflow_adapters/`. Regression: `tests/regression/test_train_service_guardrails.py`.
+- Canonical read/write and gateway behavior: `orchestrators/canonical_gateway.py`, `domain/canonical/`, `adapters/canonical/`.
+- Narrative snapshot of layers and refactor waves (not duplicated here): [../refactor/13-project-current-state.md](../refactor/13-project-current-state.md).
 
 ## 1) Top-level architecture
 
