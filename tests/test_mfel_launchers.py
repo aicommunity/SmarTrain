@@ -5,7 +5,7 @@ import sys
 from types import ModuleType
 from pathlib import Path
 
-from smartrain.external_providers.launchers import mfel_infer_launcher, mfel_train_launcher
+from smartrain.external_providers.launchers import mfel_infer_launcher, mfel_train_launcher, mp_infer_launcher
 
 
 def test_mfel_train_launcher_reports_missing_dcnv4(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -85,3 +85,29 @@ def test_mfel_infer_launcher_device_cpu_kept_without_cuda(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     resolved = mfel_infer_launcher._resolve_mfel_predict_device("cpu")
     assert resolved == "cpu"
+
+
+def test_mfel_infer_structured_outputs_classification_top1() -> None:
+    probs = type(
+        "P",
+        (),
+        {"top1": 3, "top1conf": 0.88, "top5": [3, 1], "top5conf": [0.88, 0.1]},
+    )()
+    pred = type("R", (), {"probs": probs})()
+    out = mfel_infer_launcher._extract_task_outputs([pred], "classification")
+    cls = out.get("classification")
+    assert isinstance(cls, dict)
+    assert cls["top1"]["class_index"] == 3
+
+
+def test_mp_infer_structured_outputs_segmentation_polygon() -> None:
+    tensor_box = type("T", (), {"cpu": lambda self: self, "numpy": lambda self: [[1.0, 2.0, 5.0, 6.0]]})()
+    tensor_cls = type("T", (), {"cpu": lambda self: self, "numpy": lambda self: [0.0]})()
+    tensor_conf = type("T", (), {"cpu": lambda self: self, "numpy": lambda self: [0.9]})()
+    boxes = type("B", (), {"xyxy": tensor_box, "cls": tensor_cls, "conf": tensor_conf, "__len__": lambda self: 1})()
+    masks = type("M", (), {"xy": [[[1.0, 2.0], [2.0, 3.0], [5.0, 6.0]]]})()
+    pred = type("R", (), {"boxes": boxes, "masks": masks})()
+    out = mp_infer_launcher._extract_task_outputs([pred], "segmentation")
+    segs = out.get("segments")
+    assert isinstance(segs, list) and len(segs) == 1
+    assert segs[0]["polygon_roi_xy"][0] == [1.0, 2.0]

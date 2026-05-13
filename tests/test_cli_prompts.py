@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from smartrain import cli_prompts
+from smartrain.cli_support import cli_prompts
 
 
 def test_prompt_yes_no_default_true_empty(monkeypatch) -> None:

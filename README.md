@@ -29,6 +29,10 @@ smartrain train --data 2026-01-01_12-00-00-merged --device 0 -y
 - Single-workspace model: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `inference/`, `tmp/`.
 - Pipeline support: `scan -> fusion -> train -> analyze`.
 - Additional tools: `queue`, `registry`, `report`, `model`, `normalize-data-yaml`, `migrate-models`, `clearml-upload`, `plot`, `cvat`, `sahi`, `heatmap`, `orient`.
+- Internal package layout is being cleaned up from a flat root into domain folders:
+  - `smartrain/providers/*` for provider CLI/index/state internals
+  - `smartrain/core/runtime/*` for runtime environment profiling helpers
+  - `smartrain/workflows/*` for scenario-specific internals (`inference`, `testing`, etc.)
 
 ## How it works
 
@@ -88,7 +92,12 @@ pytest
   - `--preset weights-safe` for conservative balancing
   - `--preset rfs-aggressive` for stronger tail upsampling
   - `--preset hybrid-default` as a general default
+  - `--preset hybrid-aug-tail-budget` for constrained-growth hybrid-aug with tail-first budgeting and head trim
 - `smartrain balance` eval splits: `--eval-coverage` is on by default (keeps `val`/`test` non-empty when possible and improves class coverage there); use `--no-eval-coverage` to disable. The interactive wizard asks for this option.
+- External provider inference capability gaps for non-detection tasks are explicit in report contract:
+  - `summary.capability_gap_images` shows how many images fell back to degraded payload
+  - classification degraded payload: `images[].task_outputs.classification = {}`
+  - segmentation degraded payload: `images[].task_outputs.segments = []`
 - For `hash --validate`: `0` for a match, `1` for a mismatch, `2` for an error.
 - By default, the workspace queue uses `queue.txt` and `tmp/status.txt`.
 - Device selection in `train`, `test`, and `inference`:

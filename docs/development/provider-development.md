@@ -46,7 +46,7 @@ Rules:
 
 ## 4. Provider model catalog and strict validation
 
-File: `smartrain/train_model_catalog.py`
+File: `smartrain/core/training/train_model_catalog.py`
 
 Add provider aliases to `_EXTERNAL_PROVIDER_FALLBACK_ALIASES` and optional dynamic discovery.
 

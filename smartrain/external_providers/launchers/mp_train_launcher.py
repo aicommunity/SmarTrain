@@ -3,6 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from smartrain.core.runtime.mpl_runtime import configure_matplotlib_before_ultralytics, ensure_matplotlib_training_runtime
+
+configure_matplotlib_before_ultralytics()
+
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
@@ -17,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--name", default=None)
     args = p.parse_args(argv)
 
+    ensure_matplotlib_training_runtime(non_interactive=True)
     from ultralytics import YOLO  # noqa
 
     repo = Path(args.repo).expanduser().resolve()

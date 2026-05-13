@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.confidence_recommendation import write_not_available_recommendations
-from smartrain.metrics_reader import (
+from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
+from smartrain.workflows.analyze.metrics_reader import (
     flatten_metadata,
     latest_test_metrics_path,
     read_metrics_by_format_for_split,

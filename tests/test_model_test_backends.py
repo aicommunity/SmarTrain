@@ -7,16 +7,27 @@ from types import ModuleType
 
 from PIL import Image
 
-import smartrain.model_test_backends as model_test_backends
-from smartrain.model_test_backends import run_native_format_backend
-from smartrain.model_test_service import (
+import smartrain.workflows.testing.model_test_backends as model_test_backends
+from smartrain.workflows.testing.model_test_backends import run_native_format_backend
+from smartrain.workflows.testing.model_test_service import (
     format_metrics_path,
     format_recommendation_path,
     format_test_dir,
     has_matching_test_artifacts,
     test_artifacts_manifest_path as manifest_path_fn,
 )
-from smartrain.unified_metrics_adapter import collect_ultralytics_style_gt
+from smartrain.workflows.testing.unified_metrics_adapter import collect_ultralytics_style_gt
+
+
+def _stub_prepare_trt_runtime(_engine_path: str) -> dict:
+    """Avoid deserializing real TensorRT in tests — fake engine bytes can SIGABRT the interpreter."""
+    return {
+        "trt": None,
+        "cudart": None,
+        "engine": object(),
+        "context": object(),
+        "init_ns": 42_000_000,
+    }
 
 
 class _FakeInput:
@@ -226,14 +237,14 @@ def test_run_native_onnx_backend_retries_after_cuda_oom(monkeypatch, tmp_path: P
     calls = {"n": 0}
 
     def _flaky_onnx_infer(*_args, **_kwargs):
-        from smartrain.model_test_backends import _Pred
+        from smartrain.workflows.testing.model_test_backends import _Pred
 
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("CUDA out of memory while running onnxruntime")
         return [_Pred(image_path=str(ds / "test" / "images" / "a.jpg"), cls_id=0, conf=0.9, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
 
-    monkeypatch.setattr("smartrain.model_test_backends._infer_with_onnx_session", _flaky_onnx_infer)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends._infer_with_onnx_session", _flaky_onnx_infer)
 
     result = run_native_format_backend(
         root_dir=str(root_dir),
@@ -283,7 +294,7 @@ def test_run_native_onnx_backend_subprocess_mode(monkeypatch, tmp_path: Path) ->
         }
         return subprocess.CompletedProcess(args=_args[0] if _args else [], returncode=0, stdout=json.dumps(payload), stderr="")
 
-    monkeypatch.setattr("smartrain.model_test_backends.subprocess.run", _fake_subprocess_run)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends.subprocess.run", _fake_subprocess_run)
 
     result = run_native_format_backend(
         root_dir=str(root_dir),
@@ -317,7 +328,7 @@ def test_run_native_onnx_backend_subprocess_error_has_reason_code(monkeypatch, t
         payload = {"ok": False, "error": "CUDA out of memory during worker run"}
         return subprocess.CompletedProcess(args=_args[0] if _args else [], returncode=1, stdout=json.dumps(payload), stderr="")
 
-    monkeypatch.setattr("smartrain.model_test_backends.subprocess.run", _fake_subprocess_run)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends.subprocess.run", _fake_subprocess_run)
 
     result = run_native_format_backend(
         root_dir=str(root_dir),
@@ -387,11 +398,12 @@ def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path
     ds = _make_dataset(tmp_path, "ds_trt", with_test=True)
 
     def _fake_trt_infer(_engine_path, image_path, _input_hw, _conf_thr, _iou_thr, _names):
-        from smartrain.model_test_backends import _Pred
+        from smartrain.workflows.testing.model_test_backends import _Pred
 
         return [_Pred(image_path=image_path, cls_id=0, conf=0.95, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
 
-    monkeypatch.setattr("smartrain.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends._prepare_trt_runtime", _stub_prepare_trt_runtime)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
 
     result = run_native_format_backend(
         root_dir=str(root_dir),
@@ -427,7 +439,7 @@ def test_run_native_tensorrt_backend_marks_partial_ok_when_val_fails(monkeypatch
     (ds / "val" / "labels" / "a.txt").write_text("0 0.2 0.2 0.2 0.2\n", encoding="utf-8")
 
     def _fake_trt_infer(_engine_path, image_path, _input_hw, _conf_thr, _iou_thr, _names):
-        from smartrain.model_test_backends import _Pred
+        from smartrain.workflows.testing.model_test_backends import _Pred
 
         return [_Pred(image_path=image_path, cls_id=0, conf=0.95, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
 
@@ -438,8 +450,9 @@ def test_run_native_tensorrt_backend_marks_partial_ok_when_val_fails(monkeypatch
             raise RuntimeError("val split forced failure")
         return orig_collect_gt(data_yaml, split)
 
-    monkeypatch.setattr("smartrain.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
-    monkeypatch.setattr("smartrain.model_test_backends._collect_gt", _collect_gt_with_val_failure)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends._prepare_trt_runtime", _stub_prepare_trt_runtime)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends._collect_gt", _collect_gt_with_val_failure)
 
     result = run_native_format_backend(
         root_dir=str(root_dir),
@@ -534,16 +547,17 @@ def test_run_native_tensorrt_uses_artifact_imgsz_when_requested_differs(monkeypa
     (ds / "val" / "labels" / "a.txt").write_text("0 0.2 0.2 0.2 0.2\n", encoding="utf-8")
 
     def _fake_trt_infer(_engine_path, image_path, input_hw, _conf_thr, _iou_thr, _names):
-        from smartrain.model_test_backends import _Pred
+        from smartrain.workflows.testing.model_test_backends import _Pred
 
         assert input_hw == (640, 640)
         return [_Pred(image_path=image_path, cls_id=0, conf=0.95, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
 
     monkeypatch.setattr(
-        "smartrain.model_test_backends.read_model_sidecar_metadata",
+        "smartrain.workflows.testing.model_test_backends.read_model_sidecar_metadata",
         lambda _path: {"params": {"imgsz": 640}},
     )
-    monkeypatch.setattr("smartrain.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends._prepare_trt_runtime", _stub_prepare_trt_runtime)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends._infer_with_trt_engine", _fake_trt_infer)
 
     result = run_native_format_backend(
         root_dir=str(root_dir),
@@ -634,7 +648,7 @@ def test_run_native_onnx_backend_writes_deep_diagnostics_artifacts(monkeypatch, 
 
 
 def test_ultralytics_style_metrics_payload_is_stable() -> None:
-    from smartrain.model_test_backends import _Gt, _Pred, _compute_ultralytics_style_payload
+    from smartrain.workflows.testing.model_test_backends import _Gt, _Pred, _compute_ultralytics_style_payload
 
     names = ["obj"]
     preds = [
@@ -672,7 +686,7 @@ def test_collect_ultralytics_style_gt_filters_out_of_bounds_labels(tmp_path: Pat
 
 
 def test_pt_uni_uses_validator_style_backend(monkeypatch, tmp_path: Path) -> None:
-    from smartrain.model_test_backends import BackendRunResult
+    from smartrain.workflows.testing.model_test_backends import BackendRunResult
 
     root_dir = tmp_path / "run_pt_uni"
     root_dir.mkdir(parents=True, exist_ok=True)
@@ -694,7 +708,7 @@ def test_pt_uni_uses_validator_style_backend(monkeypatch, tmp_path: Path) -> Non
             target_path=str(weights_path),
         )
 
-    monkeypatch.setattr("smartrain.model_test_backends.run_ultralytics_backend", _fake_run_ultralytics_backend)
+    monkeypatch.setattr("smartrain.workflows.testing.model_test_backends.run_ultralytics_backend", _fake_run_ultralytics_backend)
 
     result = run_native_format_backend(
         root_dir=str(root_dir),

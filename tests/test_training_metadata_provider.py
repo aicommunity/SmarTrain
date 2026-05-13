@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.model_training_module import collect_system_profile, save_training_metadata
+from smartrain.workflows.training.model_training_module import collect_system_profile, save_training_metadata
 
 
 def test_training_metadata_contains_provider_block(tmp_path: Path) -> None:

@@ -15,7 +15,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Register: `registry`
 - Models: `model convert`, `model release`
 - Format tools: `cvat`, `sahi`, `heatmap`
-- Migration: `migrate-models`
+- Migration: `migrate`, `migrate-models`
 
 ## Reference
 
@@ -30,6 +30,13 @@ For nested commands:
 smartrain queue list --help
 smartrain analyze inference-benchmark --help
 smartrain model convert --help
+```
+
+For argparse-forwarded commands exposed by Typer wrappers, use:
+
+```bash
+smartrain <command> -- --help
+smartrain <group> <subcommand> -- --help
 ```
 
 Unified interactive contract:
@@ -59,7 +66,7 @@ Inference highlights:
 - Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
 - Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
 - Full inference JSON/artifact contract: [`inference.md`](inference.md).
-- `pt_uni` is internal-only and used for PT vs PT-uni comparison table generation (test/val), not as a user-facing inference format.
+- `pt_uni` is internal-only and used for PT vs PT-uni comparison table generation (test/val), not as a user-facing inference format. The model-test internal compare path supports detection/classification/segmentation task-aware routing.
 
 Model release highlights:
 
@@ -67,10 +74,16 @@ Model release highlights:
 - A sidecar JSON with the same basename is created next to the model file and includes source/training/metrics/classes/io specification.
 - Re-running for the same run with the same source hash performs a no-op skip.
 
+Migration highlights:
+
+- `smartrain migrate canonical --mode dry-run` previews canonical migration without writing files.
+- `smartrain migrate canonical --mode apply` writes canonical snapshots and reports.
+
 Balance and stats additions:
 
 - `smartrain balance` supports `weights`, `rfs`, and `hybrid` strategies, plus weight/rfs tuning flags.
-- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` applies tuned defaults for common scenarios.
+- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default,hybrid-aug-tail-budget}` applies tuned defaults for common scenarios.
+- For `--strategy hybrid-aug`, a constrained-growth tail-first mode is enabled by default: `--aug-total-bbox-cap-mult 1.10`, `--aug-budget-tail-first`, `--aug-budget-tail-gamma 1.0`, `--train-head-bbox-undersample median-factor`, `--train-head-bbox-cap-mult 5.0`, plus conservative eval head trimming `--eval-head-bbox-undersample median-factor --eval-head-bbox-cap-mult 8.0 --eval-head-bbox-min-count 30 --eval-head-bbox-max-remove-frac 0.35` (override with explicit flags).
 - `smartrain balance --eval-coverage` (default on) adjusts the balanced train pool so `val`/`test` stay non-empty when possible and missing classes in eval splits are filled from train; `--no-eval-coverage` disables this. Interactive `balance` prompts for the same choice.
 - `smartrain stats --balance-ready` prints imbalance metrics and balancing recommendations.
 - `smartrain prune empty` removes empty image/label pairs into a new `<dataset>_pruned` dataset.

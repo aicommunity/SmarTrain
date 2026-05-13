@@ -13,6 +13,18 @@ Both files are saved under:
 
 - `workspace/inference/<model>/<timestamp-source>/`
 
+## External provider capability matrix (task × payload)
+
+External adapters may return a degraded contract when task-specific fields are missing. Reports surface this via `images[].capability_gap`, `images[].capability_gap_reason`, and `summary.capability_gap_reasons`.
+
+| Task | Expected in `task_outputs` | `capability_gap` when |
+|------|----------------------------|------------------------|
+| `classification` | `classification` object (per-image) | object missing or empty |
+| `segmentation` | `segments` list (per-image) | list missing or empty |
+| `detection` | `detections` list (legacy flat field also accepted) | not used for gap detection in the same way; relies on list lengths |
+
+Stable reason tokens (examples): `missing_task_outputs.classification`, `missing_task_outputs.segments`.
+
 ## Supported model types
 
 Local model artifacts:

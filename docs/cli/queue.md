@@ -14,6 +14,8 @@ Fallback mode without a workspace uses legacy paths near the module (`training_q
 ```bash
 smartrain queue list
 smartrain queue add -- smartrain train --data my_dataset -y
+smartrain queue remove --id 1
+smartrain queue clear -y
 smartrain queue run --no-gui
 smartrain queue-run --no-gui
 ```

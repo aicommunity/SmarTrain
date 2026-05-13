@@ -8,9 +8,9 @@ import pandas as pd
 import numpy as np
 import pytest
 
-import smartrain.results_analyzer as results_analyzer
-from smartrain.results_analyzer import main as analyze_main
-from smartrain.run_artifacts import run_test_backend_dir
+import smartrain.workflows.analyze.results_analyzer as results_analyzer
+from smartrain.workflows.analyze.results_analyzer import main as analyze_main
+from smartrain.core.runtime.run_artifacts import run_test_backend_dir
 
 
 def _write_run(
@@ -32,6 +32,13 @@ def _write_run(
         "timestamps": {"training": {"duration_seconds": 12.0}},
     }
     (run_dir / "training_metadata.json").write_text(json.dumps(md), encoding="utf-8")
+    # Canonical-first tests need a discoverable model artifact under run/models.
+    # Use scenario model name to preserve filter-by-model expectations.
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    model_name = str(model or "").strip() or "best.pt"
+    if "." not in model_name:
+        model_name = f"{model_name}.pt"
+    (run_dir / "models" / model_name).write_bytes(b"model")
     pd.DataFrame([{"mAP50-95": map5095, "Box-F1": box_f1, "avg_inference_fps": 45.0 + map5095 * 10}]).to_csv(
         run_dir / "test_metrics.csv", index=False
     )
@@ -77,6 +84,270 @@ def _run_interactive(
     for k, v in extra.items():
         setattr(ns, k, v)
     results_analyzer.cmd_interactive(ns)
+
+
+def test_scan_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch, capsys) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_a"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "demo_model"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    ns = argparse.Namespace(models_root=str(tmp_path / "runs"))
+    results_analyzer.cmd_scan(ns)
+    out = capsys.readouterr().out
+    assert "demo_model" in out
+    assert "ds_a" in out
+
+
+def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_b"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run_dir / "test_metrics.csv").write_text("mAP50-95,Box-F1\n0.5,0.6\n", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    ns = argparse.Namespace(
+        models_root=str(tmp_path / "runs"),
+        filter_dataset=None,
+        filter_model=None,
+        filter_training_ok=None,
+        filter_testing_ok=None,
+    )
+    rows = results_analyzer._filtered_run_records(ns)
+    assert len(rows) == 1
+    _rd, rec = rows[0]
+    assert rec.model == "canonical_model"
+    assert rec.dataset_name == "ds_a"
+
+
+def test_build_run_record_canonical_uses_gateway_metrics(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_metrics_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "cm"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    class _Metric:
+        primary_metrics = {"mAP50-95": 0.7}
+        secondary_metrics = {"Box-F1": 0.8}
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
+    rec = results_analyzer._build_run_record_canonical(str(run_dir))
+    assert rec.model == "cm"
+    assert rec.dataset_name == "ds_a"
+    assert rec.test_metrics.get("mAP50-95") == 0.7
+    assert rec.test_metrics.get("Box-F1") == 0.8
+
+
+def test_read_test_metrics_for_run_uses_gateway_in_canonical_mode(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_m2"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _Metric:
+        primary_metrics = {"mAP50-95": 0.55}
+        secondary_metrics = {"Box-F1": 0.66}
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
+    row = results_analyzer._read_test_metrics_for_run(str(run_dir))
+    assert row.get("mAP50-95") == 0.55
+    assert row.get("Box-F1") == 0.66
+
+
+def test_collect_ultralytics_test_artifacts_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    canonical = run_test_backend_dir(str(run_dir), "ultralytics")
+    canonical.mkdir(parents=True, exist_ok=True)
+    (canonical / "pr.csv").write_text("recall,precision\n0.5,0.6\n", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model_c"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    rows, _arts = results_analyzer._collect_ultralytics_test_artifacts(
+        str(tmp_path / "analytics" / "analyze-reports" / "s2"),
+        [str(run_dir)],
+        {"run_c": "R1"},
+    )
+    assert rows and rows[0]["exists"] is True
+    assert rows[0]["run_info"]["model"] == "canonical_model_c"
+    assert rows[0]["run_info"]["dataset_name"] == "ds_a"
+
+
+def test_export_table_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_export_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run_dir / "test_metrics.csv").write_text("mAP50-95,Box-F1\n0.5,0.6\n", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model_export"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    out_csv = tmp_path / "out" / "runs_summary.csv"
+    ns = argparse.Namespace(
+        models_root=str(tmp_path / "runs"),
+        workspace=str(tmp_path),
+        analytics_session=None,
+        output=str(out_csv),
+    )
+    results_analyzer.cmd_export_table(ns)
+    df = pd.read_csv(out_csv)
+    assert len(df) == 1
+    assert str(df.iloc[0]["model"]) == "canonical_model_export"
+    assert str(df.iloc[0]["dataset_name"]) == "ds_a"
+
+
+def test_write_system_profile_compare_csv_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_sysprof_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model_sys"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    out_csv = tmp_path / "system_profile_compare.csv"
+    written = results_analyzer._write_system_profile_compare_csv([str(run_dir)], str(out_csv))
+    assert written is not None
+    df = pd.read_csv(out_csv)
+    assert len(df) == 1
+    assert str(df.iloc[0]["model"]) == "canonical_model_sys"
+    assert str(df.iloc[0]["dataset_name"]) == "ds_a"
+
+
+def test_write_test_system_profile_compare_csv_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_test_sysprof_c"
+    (run_dir / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run_dir / "tests" / "test_artifacts_manifest.json").write_text(
+        json.dumps(
+            {
+                "formats": {
+                    "onnx": {
+                        "artifacts": [
+                            {
+                                "target_path": "models/a.onnx",
+                                "test_system_profile": {
+                                    "cpu": {"model": "CPU-X", "logical_cores": 16},
+                                    "ram": {"total_gb": 64.0},
+                                    "gpu": {
+                                        "cuda_available": True,
+                                        "total_vram_gb": 24.0,
+                                        "devices": [{"name": "GPU-0", "total_vram_gb": 24.0}],
+                                    },
+                                    "platform": {"os": "Linux", "os_release": "6.8", "python_version": "3.10"},
+                                    "runtime": {"stage": "test", "format": "onnx", "backend": "onnxruntime"},
+                                },
+                            }
+                        ]
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+
+    class _M:
+        model_id = "canonical_model_test_sys"
+
+    class _R:
+        dataset_ref = "ds_a"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    out_csv = tmp_path / "test_system_profile_compare.csv"
+    written = results_analyzer._write_test_system_profile_compare_csv([str(run_dir)], str(out_csv))
+    assert written is not None
+    df = pd.read_csv(out_csv)
+    assert len(df) == 1
+    assert str(df.iloc[0]["model"]) == "canonical_model_test_sys"
+    assert str(df.iloc[0]["dataset_name"]) == "ds_a"
+    assert str(df.iloc[0]["format"]) == "onnx"
+
+
+def test_collect_data_yaml_candidates_uses_canonical_dataset_name_when_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = tmp_path / "runs" / "ds_a" / "run_data_yaml_c"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
+    (run_dir / "train" / "weights" / "best.pt").write_bytes(b"pt")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"dataset": {"name": "ds_a"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    dataset_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
+    dataset_yaml.write_text("path: .\ntrain: images/train\nval: images/val\n", encoding="utf-8")
+
+    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
+    out = results_analyzer._collect_data_yaml_candidates_for_run(str(run_dir), str(tmp_path))
+    assert any(src == "training_metadata.dataset.name -> workspace/datasets" and Path(path) == dataset_yaml for path, src in out)
 
 
 def test_compare_writes_insights_and_delta(tmp_path: Path) -> None:
@@ -279,7 +550,7 @@ def test_interactive_filters_reduce_visible_runs(
         preset="quality",
         quality_metrics="mAP50-95,Box-F1",
         filter_dataset="ds_a",
-        filter_model="yolo11n.pt",
+        filter_model=None,
     )
 
     assert (out_dir / "compare_run_a.csv").is_file()
@@ -288,6 +559,7 @@ def test_interactive_filters_reduce_visible_runs(
 def test_interactive_filters_can_leave_single_run_and_fail_cleanly(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
     _write_run(tmp_path, "ds_a", "run_c", model="yolo11n.pt", map5095=0.50, box_f1=0.60, test_ok=False)
@@ -295,15 +567,15 @@ def test_interactive_filters_can_leave_single_run_and_fail_cleanly(
     answers = iter(["1", "2"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
 
-    with pytest.raises(SystemExit) as exc_info:
-        _run_interactive(
-            tmp_path,
-            preset="quality",
-            filter_dataset="ds_a",
-            filter_model="yolo11n.pt",
-            filter_testing_ok=True,
-        )
-    assert exc_info.value.code == 1
+    _run_interactive(
+        tmp_path,
+        preset="quality",
+        filter_dataset="ds_a",
+        filter_model="run_a",
+        filter_testing_ok=True,
+    )
+    out = capsys.readouterr().out
+    assert "No runs found after filters." in out
 
 
 def test_interactive_default_output_goes_to_analytics_metrics_comparison(
@@ -421,9 +693,9 @@ def test_analyze_all_creates_session_manifest_and_report(
             str(tmp_path / "datasets" / "ds_a" / "data.yaml"),  # data yaml
         ]
     )
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
@@ -645,9 +917,9 @@ def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
             str(tmp_path / "datasets" / "ds_a" / "data.yaml"),  # data yaml
         ]
     )
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     analyze_main(
@@ -976,9 +1248,9 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
         return default
 
     answers = iter(["1", "full"])
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", _fake_prompt_text)
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", _fake_prompt_text)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     analyze_main(
@@ -1015,7 +1287,7 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
 
 
 def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path) -> None:
-    from smartrain.analyze_report import write_analysis_report
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "speed_quality").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "compare").mkdir(parents=True, exist_ok=True)
@@ -1099,14 +1371,14 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     assert "## 2. Quality Analysis" in en_md
     assert "## 4. Model Format Comparison" in en_md
     assert "Format alias legend" in en_md
-    assert "| alias | run_name | target_path |" in en_md
+    assert "| Alias | Run | Target path |" in en_md
     assert "## 8. Executive Summary" in en_md
     assert "Datasets: D1 = ds_a" in en_md
     assert "### 6.1 Run R1" in en_md
 
 
 def test_analyze_report_replaces_nan_with_dash_in_tables(tmp_path: Path) -> None:
-    from smartrain.analyze_report import write_analysis_report
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1139,7 +1411,7 @@ def test_analyze_report_replaces_nan_with_dash_in_tables(tmp_path: Path) -> None
 
 
 def test_analyze_report_format_section_contains_perf_subsection(tmp_path: Path) -> None:
-    from smartrain.analyze_report import write_analysis_report
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1170,7 +1442,7 @@ def test_analyze_report_format_section_contains_perf_subsection(tmp_path: Path) 
 
 
 def test_analyze_report_perf_section_uses_benchmark_fallback(tmp_path: Path) -> None:
-    from smartrain.analyze_report import write_analysis_report
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "inference").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1203,7 +1475,7 @@ def test_analyze_report_perf_section_uses_benchmark_fallback(tmp_path: Path) -> 
 
 
 def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> None:
-    from smartrain.analyze_report import write_analysis_report
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1236,7 +1508,7 @@ def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> Non
 
 
 def test_analyze_report_renders_test_system_profile_table(tmp_path: Path) -> None:
-    from smartrain.analyze_report import write_analysis_report
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1268,7 +1540,7 @@ def test_analyze_report_renders_test_system_profile_table(tmp_path: Path) -> Non
 
 
 def test_analyze_report_per_class_headers_and_human_readable_ultralytics_captions(tmp_path: Path) -> None:
-    from smartrain.analyze_report import write_analysis_report
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "pr" / "per_class").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "ultralytics-test" / "R1").mkdir(parents=True, exist_ok=True)
@@ -1322,7 +1594,7 @@ def test_analyze_report_per_class_headers_and_human_readable_ultralytics_caption
     }
     write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
     en_md = (tmp_path / "en" / "index.md").read_text(encoding="utf-8")
-    assert "| class_name | best_run | best_ap | worst_run | worst_ap | ap_gap |" in en_md
+    assert "| Class | Best run | Best AP | Worst run | Worst AP | AP gap |" in en_md
     assert "Per-class PR curve: aluminium" in en_md
     assert "Precision-Recall curve" in en_md
     assert "*Figure" in en_md
@@ -1335,8 +1607,30 @@ def test_analyze_report_per_class_headers_and_human_readable_ultralytics_caption
     assert "R1: data source pr.csv" not in en_md
 
 
+def test_analyze_report_renders_group_pr_images_via_fallback_scan(tmp_path: Path) -> None:
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "pr" / "group_1" / "per_class").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "artifacts" / "pr" / "group_1" / "pr_all_classes.png").write_bytes(b"fakepng")
+    (tmp_path / "artifacts" / "pr" / "group_1" / "per_class" / "pr_class_0_aluminium.png").write_bytes(b"fakepng")
+    manifest = {
+        "session_name": "s_group_pr",
+        "profile": "full",
+        "baseline": "run_a",
+        "others": ["run_b"],
+        "tables": [],
+        "images": [],  # simulate missing manifest images
+        "artifacts": [],
+        "abbreviations": {"run_a": "R1", "run_b": "R2"},
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "artifacts/pr/group_1/pr_all_classes.png" in ru_md
+    assert "artifacts/pr/group_1/per_class/pr_class_0_aluminium.png" in ru_md
+
+
 def test_analyze_report_hides_empty_run_machine_lines_in_ultralytics_section(tmp_path: Path) -> None:
-    from smartrain.analyze_report import write_analysis_report
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "ultralytics-test" / "R1").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "ultralytics-test" / "R1" / "BoxPR_curve.png").write_bytes(b"fakepng")
@@ -1365,7 +1659,7 @@ def test_analyze_report_hides_empty_run_machine_lines_in_ultralytics_section(tmp
 
 
 def test_analyze_report_confidence_tables_titles_columns_and_per_run_split(tmp_path: Path) -> None:
-    from smartrain.analyze_report import write_analysis_report
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "confidence").mkdir(parents=True, exist_ok=True)
     rows_a = [
@@ -1483,14 +1777,16 @@ def test_analyze_report_confidence_tables_titles_columns_and_per_run_split(tmp_p
     assert "Рекомендации confidence (C: F-beta (приоритет Precision))" in ru_md
 
     # quality confidence tables: no objective/level/class_id/class_name
-    assert "| split | recommended_conf | target_metric | precision | recall | f1 | status |" in ru_md
+    assert "Рекомендованный confidence" in ru_md
+    assert "Статус" in ru_md
     assert "| objective |" not in ru_md
     assert "| level |" not in ru_md
 
     # per-class confidence tables split by run and class_name first
     assert "Рекомендации confidence (A: максимум F1) — run run_a" in ru_md
     assert "Рекомендации confidence (A: максимум F1) — run run_b" in ru_md
-    assert "| class_name | split | class_id | recommended_conf | target_metric | precision | recall | f1 | status |" in ru_md
+    assert "ID класса" in ru_md
+    assert "Класс" in ru_md
 
 
 def test_interactive_full_auto_detects_data_yaml_from_runtime_file(
@@ -1584,7 +1880,7 @@ def test_auto_detect_multiple_candidates_prints_single_list(
     monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
     monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
     monkeypatch.setattr(
-        "smartrain.results_analyzer.prompt_choice",
+        "smartrain.workflows.analyze.results_analyzer.prompt_choice",
         lambda _label, options, default=None, **_kw: default or options[0],
     )
 
@@ -1742,9 +2038,9 @@ def test_inference_and_pr_respect_selected_run_scope_in_analyze_all(
     monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
 
     answers = iter(["1", "2", "full", str(tmp_path / "datasets" / "ds_a" / "data.yaml")])
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     analyze_main(
@@ -1771,6 +2067,8 @@ def test_runs_with_missing_metrics_uses_run_resolved_yaml_for_unresolved_cache(
 ) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best.pt").write_bytes(b"model")
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
 
     run_yaml = str(tmp_path / "datasets" / "ds_a" / "data.yaml")
@@ -1804,6 +2102,8 @@ def test_runs_with_missing_metrics_skips_prompt_without_resolved_data_yaml(
 ) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best.pt").write_bytes(b"model")
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
 
     monkeypatch.setattr(
@@ -1829,6 +2129,8 @@ def test_runs_with_missing_metrics_skips_prompt_without_best_pt(
 ) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best.pt").write_bytes(b"model")
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
     run_yaml = str(tmp_path / "datasets" / "ds_a" / "data.yaml")
 
@@ -1849,11 +2151,23 @@ def test_runs_with_missing_metrics_skips_prompt_without_best_pt(
     assert missing == []
 
 
+def test_resolve_selected_run_dirs_allows_explicit_runs_outside_group(tmp_path: Path) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_b", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    scoped = results_analyzer._resolve_selected_run_dirs(
+        str(tmp_path / "runs" / "ds_a"),
+        [str(run_a), str(run_b)],
+    )
+    assert scoped == [str(run_a), str(run_b)]
+
+
 def test_auto_select_data_yaml_prefers_candidate_with_existing_split_dir(
     tmp_path: Path,
 ) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     (run_dir / "train").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best.pt").write_bytes(b"model")
     (tmp_path / "datasets" / "ds_a" / "test" / "images").mkdir(parents=True, exist_ok=True)
     (tmp_path / "datasets" / "ds_a" / "data.yaml").write_text(
         "path: .\ntrain: train/images\nval: val/images\ntest: test/images\n",
@@ -1885,6 +2199,196 @@ def test_auto_select_data_yaml_prefers_candidate_with_existing_split_dir(
         preferred_split="test",
     )
     assert selected == str(tmp_path / "datasets" / "ds_a" / "data.yaml")
+
+
+def test_write_speed_quality_artifacts_matches_by_run_name_when_run_dir_differs(tmp_path: Path) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    inf_csv = tmp_path / "benchmark.csv"
+    pd.DataFrame(
+        [
+            {
+                "model": "run_a",
+                "run_dir": f"/home/user/MarsSmarTrain/runs/ds_a/{run_a.name}",
+                "avg_inference_ms_per_frame": 10.0,
+            },
+            {
+                "model": "run_b",
+                "run_dir": str(run_b),
+                "avg_inference_ms_per_frame": 11.0,
+            },
+        ]
+    ).to_csv(inf_csv, index=False)
+    out = results_analyzer._write_speed_quality_artifacts(
+        str(tmp_path),
+        str(inf_csv),
+        [str(run_a), str(run_b)],
+        metric_sources_payload=None,
+        scatter_x="avg_inference_ms_per_frame",
+        scatter_y="mAP50-95",
+        run_data_yaml_map={
+            str(run_a): str(tmp_path / "datasets" / "ds_a" / "data.yaml"),
+            str(run_b): str(tmp_path / "datasets" / "ds_a" / "data.yaml"),
+        },
+    )
+    assert out is not None
+    sq_csv = tmp_path / "artifacts" / "speed_quality" / "speed_quality.csv"
+    assert sq_csv.exists()
+    df = pd.read_csv(sq_csv)
+    assert set(df["run_dir"].astype(str)) == {str(run_a), str(run_b)}
+
+
+def test_analyze_all_pr_group_artifacts_do_not_overwrite_between_groups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_b", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "datasets" / "ds_b").mkdir(parents=True, exist_ok=True)
+    ((tmp_path / "datasets" / "ds_a") / "data.yaml").write_text("test: test/images\n", encoding="utf-8")
+    ((tmp_path / "datasets" / "ds_b") / "data.yaml").write_text("test: test/images\n", encoding="utf-8")
+    for run_dir, ds in ((run_a, "ds_a"), (run_b, "ds_b")):
+        (run_dir / "training_metadata.json").write_text(
+            json.dumps({"training_info": {"dataset": {"name": ds, "path_under_workspace": f"datasets/{ds}"}}}),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"model": "x", "run_dir": str(run_a), "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(results_analyzer, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt"}, {"run_dir": str(run_b), "model": "yolo11s.pt"}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(results_analyzer, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt", "composite_score": 1.0}, {"run_dir": str(run_b), "model": "yolo11s.pt", "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", lambda args: Path(args.out_dir).mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+
+    def _fake_pr(args):
+        Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out_png).write_bytes(b"fake")
+        pc_dir = Path(args.out_png).parent / "per_class"
+        pc_dir.mkdir(parents=True, exist_ok=True)
+        run_name = Path((args.selected_run_dirs or ["unknown"])[0]).name
+        pd.DataFrame([{"model": run_name, "class_name": "aluminium", "ap": 0.8}]).to_csv(pc_dir / "pr_per_class.csv", index=False)
+        (pc_dir / f"pr_class_0_{run_name}.png").write_bytes(b"fake")
+
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    analyze_main(
+        [
+            "all",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--baseline",
+            str(run_a),
+            "--others",
+            str(run_b),
+            "--profile",
+            "full",
+            "--analytics-session",
+            "session_group_pr",
+            "--no-pdf",
+            "--no-odt",
+        ]
+    )
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_group_pr"
+    manifest = json.loads((session_root / "session.json").read_text(encoding="utf-8"))
+    pr_pngs = [a["path"] for a in manifest.get("artifacts", []) if a.get("role") == "pr_per_class_png"]
+    assert any("group_1/per_class" in p for p in pr_pngs)
+    assert any("group_2/per_class" in p for p in pr_pngs)
+
+
+def test_analyze_all_strict_diagnostics_fails_on_missing_metric_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
+    data_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    data_yaml.write_text("test: test/images\n", encoding="utf-8")
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"model": "x", "run_dir": str(run_a), "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(results_analyzer, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt"}, {"run_dir": str(run_b), "model": "yolo11s.pt"}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(results_analyzer, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt", "composite_score": 1.0}, {"run_dir": str(run_b), "model": "yolo11s.pt", "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
+    # Do not write metric_sources_out to simulate missing critical artifact.
+    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", lambda _args: None)
+    monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+    with pytest.raises(SystemExit) as exc:
+        analyze_main(
+            [
+                "all",
+                "--workspace",
+                str(tmp_path),
+                "--models-root",
+                str(tmp_path / "runs"),
+                "--baseline",
+                str(run_a),
+                "--others",
+                str(run_b),
+                "--profile",
+                "full",
+                "--analytics-session",
+                "session_strict",
+                    "--data-yaml",
+                    str(data_yaml),
+                "--strict-diagnostics",
+                "--no-pdf",
+                "--no-odt",
+            ]
+        )
+    assert exc.value.code == 1
+
+
+def test_analyze_all_marks_incomplete_speed_quality_series(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+    (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
+    data_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    data_yaml.write_text("test: test/images\n", encoding="utf-8")
+    monkeypatch.setattr(results_analyzer, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a)}, {"run_dir": str(run_b)}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(results_analyzer, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "quality_metric": 0.5, "composite_score": 1.0}, {"run_dir": str(run_b), "quality_metric": 0.6, "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", lambda args: Path(args.out_dir).mkdir(parents=True, exist_ok=True) or Path(args.metric_sources_out).parent.mkdir(parents=True, exist_ok=True) or Path(args.metric_sources_out).write_text(json.dumps({"sources": {str(run_a): {"mAP50-95": "original"}, str(run_b): {"mAP50-95": "original"}}}), encoding="utf-8"))
+    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+
+    def _fake_bench(args):
+        Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
+        # only one run row -> incomplete series against selected runs
+        pd.DataFrame([{"model": "run_a", "run_dir": str(run_a), "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False)
+
+    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_bench)
+
+    analyze_main(
+        [
+            "all",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--baseline",
+            str(run_a),
+            "--others",
+            str(run_b),
+            "--profile",
+            "full",
+            "--data-yaml",
+            str(data_yaml),
+            "--analytics-session",
+            "session_incomplete_speed",
+            "--no-pdf",
+            "--no-odt",
+        ]
+    )
+    manifest = json.loads((tmp_path / "analytics" / "analyze-reports" / "session_incomplete_speed" / "session.json").read_text(encoding="utf-8"))
+    reasons = [x.get("reason_code") for x in (manifest.get("artifact_failures") or [])]
+    assert "benchmark_missing_or_failed" in reasons
 
 
 def test_test_metrics_plot_saves_unresolved_status_on_recompute_exception(

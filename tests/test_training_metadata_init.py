@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from smartrain import model_training_module as mtm
+from smartrain.workflows.training import model_training_module as mtm
 
 
 def test_ensure_initial_training_metadata_creates_skeleton(tmp_path: Path) -> None:

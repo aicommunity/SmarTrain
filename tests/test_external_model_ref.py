@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from smartrain.external_model_ref import parse_external_model_ref, validate_external_model_ref
+from smartrain.core.training.external_model_ref import parse_external_model_ref, validate_external_model_ref
 
 
 def test_parse_external_model_ref_valid() -> None:

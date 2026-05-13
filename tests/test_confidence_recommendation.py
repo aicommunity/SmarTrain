@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from smartrain.confidence_recommendation import (
+from smartrain.core.training.confidence_recommendation import (
     compute_confidence_recommendations,
     recommendation_file_path,
     recommendations_complete,
     write_not_available_recommendations,
     write_recommendation_file,
 )
-from smartrain.results_analyzer import _collect_confidence_recommendation_tables
+from smartrain.workflows.analyze.results_analyzer import _collect_confidence_recommendation_tables
 
 
 class _FakeMetrics:

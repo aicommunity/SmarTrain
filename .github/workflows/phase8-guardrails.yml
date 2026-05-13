@@ -1,0 +1,22 @@
+name: phase8-guardrails
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Phase 8 guardrails
+        run: python "scripts/ci/check_phase8_guardrails.py"

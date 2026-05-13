@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 from smartrain.external_providers.adapters import build_external_infer_spec, build_external_train_spec
@@ -49,7 +51,9 @@ def run_external_infer(
     device: str | None = None,
     target_dir: str | None = None,
     run_name: str | None = None,
-) -> int:
+    task_type: str | None = None,
+) -> int | dict[str, object]:
+    result_json_path = str(Path(tempfile.mkdtemp(prefix="smartrain-ext-infer-")) / "inference_result.json")
     spec = build_external_infer_spec(
         provider_id,
         repo_path,
@@ -60,8 +64,12 @@ def run_external_infer(
         device=device,
         target_dir=target_dir,
         run_name=run_name,
+        result_json=result_json_path,
+        task_type=task_type,
     )
-    return _run_python_script(spec.script_path, repo_path, venv_path, spec.args, spec.env_overrides)
+    rc = _run_python_script(spec.script_path, repo_path, venv_path, spec.args, spec.env_overrides)
+    payload = _try_load_structured_infer_result(result_json_path, return_code=rc)
+    return payload if payload is not None else rc
 
 
 def _run_python_script(
@@ -79,4 +87,36 @@ def _run_python_script(
     cmd = [python_bin, script_path, *list(args or [])]
     proc = subprocess.run(cmd, cwd=str(Path(cwd).expanduser().resolve()), env=env)
     return int(proc.returncode)
+
+
+def _try_load_structured_infer_result(path: str, *, return_code: int) -> dict[str, object] | None:
+    p = Path(path).expanduser().resolve()
+    if not p.is_file():
+        return None
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {
+            "return_code": int(return_code),
+            "images": [],
+            "diagnostics": {"structured_result_status": "invalid_json"},
+        }
+    if not isinstance(raw, dict):
+        return {
+            "return_code": int(return_code),
+            "images": [],
+            "diagnostics": {"structured_result_status": "invalid_payload_type"},
+        }
+    images = raw.get("images")
+    normalized_images = images if isinstance(images, list) else []
+    rc_raw = raw.get("return_code", return_code)
+    try:
+        rc = int(rc_raw)
+    except Exception:
+        rc = int(return_code)
+    out: dict[str, object] = {"return_code": rc, "images": normalized_images}
+    diagnostics = raw.get("diagnostics")
+    if isinstance(diagnostics, dict):
+        out["diagnostics"] = diagnostics
+    return out
 

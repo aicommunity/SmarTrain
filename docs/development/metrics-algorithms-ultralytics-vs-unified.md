@@ -103,7 +103,7 @@ When `pt` and `pt_uni` still differ, check in order:
 5. Runtime issues in `format_compare_issues.json` (OOM, runtime exceptions, missing artifacts).
 
 ## Implementation References
-- Unified evaluator: `smartrain/model_test_backends.py`
+- Unified evaluator: `smartrain/workflows/testing/model_test_backends.py`
   - `_build_ultralytics_style_stats()`
   - `_compute_ultralytics_style_payload()`
   - `_write_native_eval_artifacts()`

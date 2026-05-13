@@ -80,6 +80,7 @@ pytest
   - `--preset weights-safe` для консервативной балансировки
   - `--preset rfs-aggressive` для более агрессивного усиления tail-классов
   - `--preset hybrid-default` как универсальный дефолт
+  - `--preset hybrid-aug-tail-budget` для hybrid-aug с ограничением роста, tail-first бюджетом и прореживанием head
 - Подвыборки после `balance`: по умолчанию включено `--eval-coverage` (по возможности не оставлять пустыми `val`/`test` и улучшать покрытие классов в eval); отключить — `--no-eval-coverage`. В интерактивном режиме этот пункт задаётся отдельным вопросом.
 - Для `hash --validate`: `0` при совпадении, `1` при несовпадении, `2` при ошибке.
 - По умолчанию очередь workspace использует `queue.txt` и `tmp/status.txt`.

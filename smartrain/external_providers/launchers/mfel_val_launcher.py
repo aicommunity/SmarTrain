@@ -9,9 +9,10 @@ from pathlib import Path
 def _write_val_results_csv(result, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / "results.csv"
-    if hasattr(result, "to_csv"):
+    to_csv = getattr(result, "to_csv", None)
+    if callable(to_csv):
         try:
-            csv_path.write_text(str(result.to_csv()), encoding="utf-8")
+            csv_path.write_text(str(to_csv()), encoding="utf-8")
             return
         except Exception:
             pass
@@ -21,8 +22,9 @@ def _write_val_results_csv(result, out_dir: Path) -> None:
     for k in keys:
         v = None
         try:
-            if hasattr(result, "results_dict") and isinstance(result.results_dict, dict):
-                v = result.results_dict.get(k)
+            result_dict = getattr(result, "results_dict", None)
+            if isinstance(result_dict, dict):
+                v = result_dict.get(k)
         except Exception:
             v = None
         vals.append(v)
@@ -39,7 +41,7 @@ def _patch_mfel_missing_symbols() -> None:
         from ultralytics.nn.modules import block as block_mod
     except Exception:
         return
-    if hasattr(block_mod, "ConvModule"):
+    if getattr(block_mod, "ConvModule", None) is not None:
         return
 
     class MFELConvModuleShim:

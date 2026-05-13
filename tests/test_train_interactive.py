@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from smartrain import cli_prompts
-from smartrain import model_training_module as mtm
-from smartrain.run_artifacts import canonical_run_model_path
-from smartrain.workspace_paths import DATASETS_INFO_FILE, deploy_workspace
+from smartrain.cli_support import cli_prompts
+from smartrain.workflows.training import model_training_module as mtm
+from smartrain.core.runtime.run_artifacts import canonical_run_model_path
+from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, deploy_workspace
 
 
 def _patch_train_prompts(monkeypatch: pytest.MonkeyPatch, answers: Iterator[str]) -> None:

@@ -101,7 +101,7 @@
 
 ## Ссылки на реализацию
 - Unified в проекте:
-  - `smartrain/model_test_backends.py`
+  - `smartrain/workflows/testing/model_test_backends.py`
   - `_build_ultralytics_style_stats()`
   - `_compute_ultralytics_style_payload()`
   - `_write_native_eval_artifacts()`

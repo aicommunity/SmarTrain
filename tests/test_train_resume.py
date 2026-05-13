@@ -4,19 +4,30 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
 
-from smartrain import model_training_module as mtm
-from smartrain import run_discovery as rd
-from smartrain import train_resume as tr
-from smartrain.confidence_recommendation import write_not_available_recommendations
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.workflows.training import model_training_module as mtm
+from smartrain.core.runtime import run_discovery as rd
+from smartrain.workflows.training import train_resume as tr
+from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
+from smartrain.core.runtime.workspace_paths import deploy_workspace
+
+
+def _write_resumable_last_pt(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"epoch": 0, "optimizer": {"state": {}, "param_groups": []}}, path)
+
+
+def _write_stripped_last_pt(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"epoch": 299, "model": None}, path)
 
 
 def test_diagnose_run_marks_resumable_when_last_checkpoint_exists(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds" / "run1"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
     (run_dir / "train" / "args.yaml").write_text("epochs: 100\n", encoding="utf-8")
-    (run_dir / "train" / "weights" / "last.pt").write_text("bin", encoding="utf-8")
+    _write_resumable_last_pt(run_dir / "train" / "weights" / "last.pt")
 
     diag = tr.diagnose_run(str(run_dir))
     assert diag.status == tr.RUN_STATUS_RESUMABLE_INCOMPLETE
@@ -67,6 +78,95 @@ def test_diagnose_run_marks_pending_when_test_dir_exists_but_artifacts_incomplet
     assert "missing_metrics_csv" in diag.reasons
 
 
+def test_diagnose_run_resumable_when_train_ultralytics_last_exists(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_ultra_last"
+    (run_dir / "train-ultralytics" / "weights").mkdir(parents=True)
+    _write_resumable_last_pt(run_dir / "train-ultralytics" / "weights" / "last.pt")
+    (run_dir / "train-ultralytics" / "args.yaml").write_text("epochs: 30\n", encoding="utf-8")
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_RESUMABLE_INCOMPLETE
+    assert "resume_checkpoint_available" in diag.reasons
+
+
+def test_diagnose_run_stripped_last_not_resumable_incomplete(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_stripped"
+    (run_dir / "train-ultralytics" / "weights").mkdir(parents=True)
+    _write_stripped_last_pt(run_dir / "train-ultralytics" / "weights" / "last.pt")
+    (run_dir / "train-ultralytics" / "args.yaml").write_text("epochs: 30\n", encoding="utf-8")
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_INCOMPLETE_NON_RESUMABLE
+    assert "last_pt_present_but_stripped" in diag.reasons
+    assert diag.has_last_pt is False
+
+
+def test_diagnose_run_training_complete_pending_when_results_in_train_ultralytics_suffix_dir(
+    tmp_path: Path,
+) -> None:
+    """Ultralytics may write metrics under train-ultralytics-2/ when the default name is taken."""
+    run_dir = tmp_path / "runs" / "ds" / "run_suffix_csv"
+    run_dir.mkdir(parents=True)
+    (run_dir / "train-ultralytics" / "weights").mkdir(parents=True)
+    _write_stripped_last_pt(run_dir / "train-ultralytics" / "weights" / "last.pt")
+    (run_dir / "train-ultralytics-2" / "weights").mkdir(parents=True)
+    (run_dir / "train-ultralytics-2" / "weights" / "best.pt").write_text("x", encoding="utf-8")
+    (run_dir / "train-ultralytics-2" / "args.yaml").write_text("epochs: 3\n", encoding="utf-8")
+    (run_dir / "train-ultralytics-2" / "results.csv").write_text(
+        "epoch,mAP\n1,0.1\n2,0.2\n3,0.3\n", encoding="utf-8"
+    )
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"status": {"training": {"success": False}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING
+    assert "finalize_after_training_error_heuristic" in diag.reasons
+    assert "results_csv_present" in diag.reasons
+
+
+def test_diagnose_run_finalize_no_metadata_stripped_last_epochs_match(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_no_meta_done"
+    run_dir.mkdir(parents=True)
+    (run_dir / "train-ultralytics" / "weights").mkdir(parents=True)
+    _write_stripped_last_pt(run_dir / "train-ultralytics" / "weights" / "last.pt")
+    (run_dir / "train-ultralytics" / "weights" / "best.pt").write_text("x", encoding="utf-8")
+    (run_dir / "train-ultralytics" / "args.yaml").write_text("epochs: 3\n", encoding="utf-8")
+    (run_dir / "train-ultralytics" / "results.csv").write_text(
+        "epoch,mAP\n1,0.1\n2,0.2\n3,0.3\n", encoding="utf-8"
+    )
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING
+    assert "finalize_stripped_no_metadata_epochs_ok" in diag.reasons
+
+
+def test_diagnose_warns_archive_like_path_segment(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    run_dir = tmp_path / "nest" / "archive2.tar.gz" / "2026_run"
+    run_dir.mkdir(parents=True)
+    tr.diagnose_run(str(run_dir))
+    assert "archive-like" in capsys.readouterr().out
+
+
+def test_diagnose_run_finalize_pending_when_training_failed_but_weights_and_results_exist(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_finalize_pending"
+    run_dir.mkdir(parents=True)
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"status": {"training": {"success": False}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (run_dir / "train-ultralytics" / "weights").mkdir(parents=True)
+    (run_dir / "train-ultralytics" / "weights" / "best.pt").write_text("bin", encoding="utf-8")
+    (run_dir / "train-ultralytics" / "results.csv").write_text("epoch,mAP\n1,0.5\n", encoding="utf-8")
+
+    diag = tr.diagnose_run(str(run_dir))
+    assert diag.status == tr.RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING
+    assert "finalize_after_training_error_heuristic" in diag.reasons
+
+
 def test_diagnose_run_marks_incomplete_non_resumable_without_last(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds" / "run3"
     (run_dir / "train").mkdir(parents=True, exist_ok=True)
@@ -103,7 +203,7 @@ def test_resume_run_dir_success_calls_resume_and_updates_metadata(
     run_dir = tmp_path / "runs" / "ds" / "run5"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
     (run_dir / "train" / "args.yaml").write_text("epochs: 30\n", encoding="utf-8")
-    (run_dir / "train" / "weights" / "last.pt").write_text("bin", encoding="utf-8")
+    _write_resumable_last_pt(run_dir / "train" / "weights" / "last.pt")
 
     called: dict[str, bool] = {"resume": False, "metadata": False}
 
@@ -134,7 +234,7 @@ def test_run_discovery_finds_run_without_metadata_by_train_artifacts(tmp_path: P
     run_dir = tmp_path / "runs" / "ds" / "run_without_metadata"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
     (run_dir / "train" / "args.yaml").write_text("epochs: 20\n", encoding="utf-8")
-    (run_dir / "train" / "weights" / "last.pt").write_text("bin", encoding="utf-8")
+    _write_resumable_last_pt(run_dir / "train" / "weights" / "last.pt")
 
     runs = rd.find_run_directories(str(tmp_path / "runs"))
     assert str(run_dir) in runs
@@ -148,7 +248,7 @@ def test_resume_failed_before_epoch_stays_resumable_and_tracks_attempt(
     run_dir = tmp_path / "runs" / "ds" / "run_failed_resume"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
     (run_dir / "train" / "args.yaml").write_text("epochs: 30\n", encoding="utf-8")
-    (run_dir / "train" / "weights" / "last.pt").write_text("bin", encoding="utf-8")
+    _write_resumable_last_pt(run_dir / "train" / "weights" / "last.pt")
 
     def _raise_resume(_: str) -> None:
         raise RuntimeError("ssh disconnected")
@@ -221,6 +321,83 @@ def test_resume_runs_test_stage_when_training_complete_but_test_missing(
     assert called["meta"] is True
 
 
+def test_resume_test_backoff_retries_on_cuda_oom(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_backoff_ok"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    batches: list[int] = []
+    freed = {"count": 0}
+
+    def _fake_complete(*_args, **kwargs: object) -> bool:
+        runner_kwargs = kwargs.get("pt_test_runner_kwargs")
+        assert isinstance(runner_kwargs, dict)
+        b = int(runner_kwargs.get("val_batch", -1))
+        batches.append(b)
+        if len(batches) == 1:
+            raise RuntimeError("CUDA out of memory while testing")
+        return True
+
+    monkeypatch.setattr(mtm, "complete_missing_test_artifacts", _fake_complete)
+    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: freed.__setitem__("count", freed["count"] + 1))
+
+    mtm._complete_missing_test_with_backoff(
+        str(run_dir),
+        workspace_root=str(tmp_path),
+        initial_batch=4,
+        min_batch=1,
+        backoff=2,
+    )
+    assert batches == [4, 2]
+    assert freed["count"] == 1
+
+
+def test_resume_test_backoff_fails_when_min_batch_oom(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_backoff_fail"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    batches: list[int] = []
+
+    def _fake_complete(*_args, **kwargs: object) -> bool:
+        runner_kwargs = kwargs.get("pt_test_runner_kwargs")
+        assert isinstance(runner_kwargs, dict)
+        batches.append(int(runner_kwargs.get("val_batch", -1)))
+        raise RuntimeError("CUDA out of memory during validation")
+
+    monkeypatch.setattr(mtm, "complete_missing_test_artifacts", _fake_complete)
+    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: None)
+
+    with pytest.raises(RuntimeError, match="backoff exhausted"):
+        mtm._complete_missing_test_with_backoff(
+            str(run_dir),
+            workspace_root=str(tmp_path),
+            initial_batch=2,
+            min_batch=1,
+            backoff=2,
+        )
+    assert batches == [2, 1]
+
+
+def test_resume_test_backoff_does_not_retry_non_oom(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_backoff_non_oom"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    calls = {"count": 0}
+
+    def _fake_complete(*_args, **_kwargs) -> bool:
+        calls["count"] += 1
+        raise RuntimeError("dataset yaml malformed")
+
+    monkeypatch.setattr(mtm, "complete_missing_test_artifacts", _fake_complete)
+    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: None)
+
+    with pytest.raises(RuntimeError, match="dataset yaml malformed"):
+        mtm._complete_missing_test_with_backoff(
+            str(run_dir),
+            workspace_root=str(tmp_path),
+            initial_batch=4,
+            min_batch=1,
+            backoff=2,
+        )
+    assert calls["count"] == 1
+
+
 def test_resolve_dataset_path_for_resume_falls_back_to_workspace_dataset_dir(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     dataset_name = "my_dataset"
@@ -237,6 +414,66 @@ def test_resolve_dataset_path_for_resume_falls_back_to_workspace_dataset_dir(tmp
 
     resolved = tr.resolve_dataset_path_for_resume(str(run_dir), str(tmp_path))
     assert resolved == str(dataset_dir)
+
+
+def test_resolve_dataset_path_for_resume_uses_train_args_data_yaml_path(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "from_args_yaml"
+    dataset_dir.mkdir(parents=True)
+    (dataset_dir / "data.yaml").write_text("path: .\ntrain: train/images\nval: val/images\n", encoding="utf-8")
+
+    run_dir = tmp_path / "runs" / "some_ds" / "run_via_args"
+    run_dir.mkdir(parents=True)
+    (run_dir / "train-ultralytics").mkdir(parents=True)
+    (run_dir / "train-ultralytics" / "args.yaml").write_text(
+        f"data: {dataset_dir / 'data.yaml'}\n",
+        encoding="utf-8",
+    )
+
+    resolved = tr.resolve_dataset_path_for_resume(str(run_dir), str(tmp_path))
+    assert resolved == str(dataset_dir.resolve())
+
+
+def test_resolve_dataset_path_for_resume_uses_train_args_data_relative_to_workspace(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "rel_via_args"
+    dataset_dir.mkdir(parents=True)
+    (dataset_dir / "data.yaml").write_text("path: .\ntrain: train/images\nval: val/images\n", encoding="utf-8")
+
+    run_dir = tmp_path / "runs" / "some_ds" / "run_rel_args"
+    run_dir.mkdir(parents=True)
+    (run_dir / "train-ultralytics").mkdir(parents=True)
+    (run_dir / "train-ultralytics" / "args.yaml").write_text(
+        "data: datasets/rel_via_args\n",
+        encoding="utf-8",
+    )
+
+    resolved = tr.resolve_dataset_path_for_resume(str(run_dir), str(tmp_path))
+    assert resolved == str(dataset_dir.resolve())
+
+
+def test_resolve_dataset_path_for_resume_uses_runtime_yaml_pointer_from_train_args(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "via_runtime_pointer"
+    dataset_dir.mkdir(parents=True)
+    (dataset_dir / "data.yaml").write_text("path: .\ntrain: train/images\nval: val/images\n", encoding="utf-8")
+
+    run_dir = tmp_path / "runs" / "some_ds" / "run_runtime_pointer"
+    run_dir.mkdir(parents=True)
+    (run_dir / "train-ultralytics").mkdir(parents=True)
+    runtime_yaml = run_dir / "tmp" / "_runtime_data_train.yaml"
+    runtime_yaml.parent.mkdir(parents=True, exist_ok=True)
+    runtime_yaml.write_text(
+        f"path: {dataset_dir}\ntrain: train/images\nval: val/images\n",
+        encoding="utf-8",
+    )
+    (run_dir / "train-ultralytics" / "args.yaml").write_text(
+        f"data: {runtime_yaml}\n",
+        encoding="utf-8",
+    )
+
+    resolved = tr.resolve_dataset_path_for_resume(str(run_dir), str(tmp_path))
+    assert resolved == str(dataset_dir.resolve())
 
 
 def test_resolve_dataset_path_for_resume_uses_workspace_relative_metadata_path(tmp_path: Path) -> None:

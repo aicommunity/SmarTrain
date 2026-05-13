@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.dataset_prune import main as prune_main
-from smartrain.workspace_paths import DATASETS_INFO_FILE, WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.workflows.datasets.dataset_prune import main as prune_main
+from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, WORKSPACE_ENV_VAR, deploy_workspace
 
 
 def _write_jpg(path: Path, color: tuple[int, int, int]) -> None:
@@ -100,8 +100,8 @@ def test_prune_interactive_empty_mode(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     answers = iter(["empty", "src_ds", ""])
-    monkeypatch.setattr("smartrain.dataset_prune.prompt_choice", lambda *a, **k: next(answers))
-    monkeypatch.setattr("smartrain.dataset_prune.prompt_text", lambda *a, **k: "")
+    monkeypatch.setattr("smartrain.workflows.datasets.dataset_prune.prompt_choice", lambda *a, **k: next(answers))
+    monkeypatch.setattr("smartrain.workflows.datasets.dataset_prune.prompt_text", lambda *a, **k: "")
     prune_main([])
     assert (tmp_path / "datasets" / "src_ds_pruned").is_dir()
 

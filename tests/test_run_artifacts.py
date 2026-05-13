@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.run_artifacts import (
+from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     ensure_run_layout,
     materialize_canonical_run_model,

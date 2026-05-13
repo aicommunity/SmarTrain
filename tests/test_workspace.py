@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from smartrain.workspace_paths import (
+from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
     deploy_workspace,

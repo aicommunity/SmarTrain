@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.dataset_former import _collect_label_image_pairs, main as fusion_main, prune_output_empty_label_pairs
-from smartrain.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.workflows.datasets.dataset_former import _collect_label_image_pairs, main as fusion_main, prune_output_empty_label_pairs
+from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, WORKSPACE_ENV_VAR, deploy_workspace
 
 
 def _write_jpg(path: Path, color: tuple[int, int, int] = (10, 20, 30)) -> None:
@@ -301,7 +301,7 @@ def test_fusion_interactive_options_apply_defaults(tmp_path: Path, monkeypatch: 
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("smartrain.dataset_former._prompt_dataset_selection", lambda available: ["ds_a", "ds_b"])
+    monkeypatch.setattr("smartrain.workflows.datasets.dataset_former._prompt_dataset_selection", lambda available: ["ds_a", "ds_b"])
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
 
@@ -311,7 +311,7 @@ def test_fusion_interactive_options_apply_defaults(tmp_path: Path, monkeypatch: 
         args.include_partial_datasets = True
         args.fusion_split = "0.8,0.1,0.1"
 
-    monkeypatch.setattr("smartrain.dataset_former._prompt_interactive_options", _fake_options)
+    monkeypatch.setattr("smartrain.workflows.datasets.dataset_former._prompt_interactive_options", _fake_options)
 
     fusion_main([])
     assert (tmp_path / "datasets" / "merged_from_interactive" / "data.yaml").is_file()
