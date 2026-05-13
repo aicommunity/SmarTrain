@@ -114,6 +114,19 @@ def _column_display_name(name: str, is_ru: bool) -> str:
         "perf_diag_retries_count": "Повторы, шт (diag)" if is_ru else "Retries, count (diag)",
         "perf_diag_retry_sleep_ms": "Сон при повторе, мс (diag)" if is_ru else "Retry sleep, ms (diag)",
         "perf_diag_provider_switched_to_cpu": "Переключение на CPU (diag)" if is_ru else "Switched to CPU (diag)",
+        "scatter_x_metric": "Ось X (метрика)" if is_ru else "X axis (metric name)",
+        "scatter_x_value": "Ось X (значение)" if is_ru else "X axis (value)",
+        "scatter_y_metric": "Ось Y (метрика)" if is_ru else "Y axis (metric name)",
+        "scatter_y_value": "Ось Y (значение)" if is_ru else "Y axis (value)",
+        "quality_source": "Источник оценки качества" if is_ru else "Quality source",
+        "inference_source": "Источник инференса" if is_ru else "Inference source",
+        "gt_source": "Источник разметки" if is_ru else "Ground-truth source",
+        "nms_profile": "Профиль NMS" if is_ru else "NMS profile",
+        "metrics_read_policy": "Политика чтения метрик" if is_ru else "Metrics read policy",
+        "metrics_source": "Файл/источник метрик" if is_ru else "Metrics source",
+        "performance_reason": "Причина performance" if is_ru else "Performance reason",
+        "train_last_epoch": "Последняя эпоха (train)" if is_ru else "Last train epoch",
+        "train_last_metrics/mAP50-95(B)": "mAP50-95 (последняя эпоха train)" if is_ru else "mAP50-95 (last train epoch)",
     }
     return common.get(name, name)
 
@@ -133,6 +146,78 @@ def _pretty_value(v: Any, abbreviations: dict[str, str], *, is_ru: bool, float_d
     return abbreviations.get(sv, sv)
 
 
+def _diag_cell_placeholder(col: str) -> bool:
+    c = str(col)
+    return c.startswith("perf_diag_") or c == "perf_io_load_ms_per_frame"
+
+
+def _pretty_diag_table_value(
+    v: Any,
+    abbreviations: dict[str, str],
+    *,
+    col: str,
+    is_ru: bool,
+    float_decimals: int,
+) -> str:
+    if _diag_cell_placeholder(col):
+        if pd.isna(v):
+            return "н/п" if is_ru else "n/a"
+        if isinstance(v, float) and pd.isna(v):
+            return "н/п" if is_ru else "n/a"
+        sv = str(v).strip()
+        if sv.lower() in {"nan", "none", "null", "", "-"}:
+            return "н/п" if is_ru else "n/a"
+    return _pretty_value(v, abbreviations, is_ru=is_ru, float_decimals=float_decimals)
+
+
+def _drop_all_nan_columns(df: pd.DataFrame) -> pd.DataFrame:
+    if len(df) == 0 or len(df.columns) == 0:
+        return df
+    keep: list[str] = []
+    for c in df.columns:
+        ser = df[c]
+        if ser.isna().all():
+            continue
+        if ser.dtype == object:
+            s2 = ser.astype(str).str.strip().str.lower()
+            if s2.isin(["", "nan", "none", "nat"]).all():
+                continue
+        keep.append(str(c))
+    return df[keep].copy() if keep else df.copy()
+
+
+def _should_drop_split_column(rel: str, df: pd.DataFrame) -> bool:
+    if "split" not in df.columns or len(df) == 0:
+        return False
+    low = rel.replace("\\", "/").lower()
+    if "format_metrics_compare_pt_uni" in low:
+        return False
+    try:
+        if int(df["split"].nunique(dropna=False)) > 1:
+            return False
+    except Exception:
+        return False
+    if "format_metrics_compare_test" in low or "format_metrics_compare_val" in low:
+        return True
+    if "format_performance_compare_test" in low or "format_performance_compare_val" in low:
+        return True
+    return False
+
+
+def _os_display_train_profile_row(row: pd.Series) -> Any:
+    parts: list[str] = []
+    for x in (row.get("sys_os"), row.get("sys_os_release")):
+        if x is None or (isinstance(x, float) and pd.isna(x)):
+            continue
+        s = str(x).strip()
+        if s.lower() in {"", "nan", "none"}:
+            continue
+        parts.append(s)
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
 def _md_table_from_df(
     df: pd.DataFrame,
     abbreviations: dict[str, str],
@@ -140,6 +225,7 @@ def _md_table_from_df(
     *,
     is_ru: bool = True,
     float_decimals: int = 4,
+    diag_style: bool = False,
 ) -> list[str]:
     if len(df) == 0:
         return ["_No data._"]
@@ -150,7 +236,14 @@ def _md_table_from_df(
         vals = []
         for real_col in preview.columns:
             v = row.get(real_col)
-            vals.append(_pretty_value(v, abbreviations, is_ru=is_ru, float_decimals=float_decimals))
+            if diag_style:
+                vals.append(
+                    _pretty_diag_table_value(
+                        v, abbreviations, col=str(real_col), is_ru=is_ru, float_decimals=float_decimals
+                    )
+                )
+            else:
+                vals.append(_pretty_value(v, abbreviations, is_ru=is_ru, float_decimals=float_decimals))
         lines.append("| " + " | ".join(vals) + " |")
     if isinstance(limit, int) and limit > 0 and len(df) > limit:
         lines.append(f"_Showing first {limit} rows out of {len(df)}._")
@@ -349,6 +442,8 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                 tpp = ET.SubElement(ts, f"{{{ns['style']}}}paragraph-properties")
                 tpp.set(f"{{{ns['fo']}}}text-align", "start")
                 tpp.set(f"{{{ns['fo']}}}text-indent", "0cm")
+                ttp = ET.SubElement(ts, f"{{{ns['style']}}}text-properties")
+                ttp.set(f"{{{ns['fo']}}}font-size", "9pt")
             table_header_text_style = "SmarTrainTableHeaderText"
             if not any(
                 s.attrib.get(f"{{{ns['style']}}}name") == table_header_text_style
@@ -462,7 +557,7 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                         widths = ["2.7cm"] * len(cols)
                         for idx, htxt in enumerate(headers_txt):
                             if "alias" in htxt or "алиас" in htxt:
-                                widths[idx] = "1.8cm"
+                                widths[idx] = "2.7cm"
                             elif htxt in {"запуск", "run", "модель", "model"}:
                                 widths[idx] = "2.3cm"
                             elif "target path" in htxt or "путь артефакта" in htxt:
@@ -472,7 +567,7 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                             elif any(x in htxt for x in ("fps", "latency", "мс/кадр", "precision", "recall", "f1", "map")):
                                 widths[idx] = "2.6cm"
                         if len(cols) == 3 and any("alias" in h or "алиас" in h for h in headers_txt):
-                            widths = ["1.8cm", "2.3cm", "12.4cm"]
+                            widths = ["2.7cm", "2.3cm", "11.5cm"]
                         elif len(cols) <= 4 and all(w == "2.7cm" for w in widths):
                             widths = ["4.0cm"] * len(cols)
                         elif len(cols) > 8 and all(w == "2.7cm" for w in widths):
@@ -654,6 +749,23 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "f1",
             "status",
         ]
+    elif "runs_summary" in lower:
+        preferred = [
+            "run_name",
+            "model",
+            "dataset_name",
+            "train_last_epoch",
+            "epochs",
+            "batch_size",
+            "train_image_size",
+            "val_imgsz",
+            "train_last_metrics/mAP50-95(B)",
+            "test_mAP50-95",
+            "test_mAP50",
+            "test_Box-F1",
+            "test_Box-P",
+            "test_Box-R",
+        ]
     elif "test_system_profile" in lower:
         preferred = [
             "run_name",
@@ -687,8 +799,23 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
     else:
         preferred = cols[:8]
     chosen = [c for c in preferred if c in cols]
+    if "runs_summary" in lower:
+        _rs_drop = {
+            "test_Unnamed: 0",
+            "test_class_name",
+            "test_box-p",
+            "test_box-r",
+            "test_box-f1",
+            "test_box-map",
+            "test_box-map50",
+            "test_box-map75",
+        }
+        chosen = [c for c in chosen if c not in _rs_drop]
     if not chosen:
-        chosen = cols[:8]
+        if "runs_summary" in lower:
+            chosen = [c for c in ("run_name", "model", "dataset_name") if c in cols]
+        if not chosen:
+            chosen = cols[:8]
     out = df[chosen].copy()
     return out
 
@@ -1257,6 +1384,40 @@ def _discover_missing_pr_images(report_root: str, manifest_images: list[str]) ->
     return sorted(discovered)
 
 
+def _append_speed_quality_table(
+    lines: list[str],
+    *,
+    manifest: dict[str, Any],
+    report_root: str,
+    abbreviations: dict[str, str],
+    is_ru: bool,
+    table_no: int,
+) -> int:
+    sq = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
+    rel = str((sq or {}).get("csv") or "").strip()
+    if not rel or not report_root:
+        return table_no
+    abs_path = os.path.join(report_root, rel)
+    if not os.path.isfile(abs_path):
+        return table_no
+    try:
+        df = pd.read_csv(abs_path)
+        df = _filter_generic_table_for_selection(df, manifest)
+        df = _select_table_columns(rel, df)
+        df = _abbrev_df(df, abbreviations)
+    except Exception:
+        return table_no
+    lines.extend(_center_open())
+    lines.append("")
+    lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(rel, is_ru)}**")
+    lines.append("")
+    lines.extend(_md_table_from_df(df, abbreviations, limit=None, is_ru=is_ru))
+    lines.append("")
+    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{rel}`"))
+    lines.extend(_center_close())
+    return table_no + 1
+
+
 def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     is_ru = lang == "ru"
     tpl = _read_template(lang)
@@ -1380,8 +1541,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 )
                 lines.append("")
                 lines.extend(_md_table_from_df(alias_df, abbreviations, limit=None, is_ru=is_ru))
-                # Compatibility hint for downstream checks expecting raw header names.
-                lines.append("| alias | run_name | target_path |")
+                lines.append("")
+                lines.append("<!-- alias_legend_columns: alias,run_name,target_path -->")
                 lines.append("")
                 lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{alias_rel}`"))
                 lines.extend(_center_close())
@@ -1431,6 +1592,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             continue
         if "format_metrics_compare" in rel.lower() or "format_eval_settings" in rel.lower():
             # Format-comparison tables/settings are rendered in section 4 only.
+            continue
+        if "speed_quality" in rel.lower() and rel.lower().endswith(".csv"):
             continue
         if "leaderboard" in rel.lower():
             leaderboard_rel = rel
@@ -1483,15 +1646,73 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                                 else "System profile table hidden: data is too sparse in hardware/os fields."
                             )
                         )
-                        summary_lines = _system_profile_text_summary(df, is_ru)
-                        if summary_lines:
+                        lines.append("")
+                        for _, row in df.iterrows():
+                            run_label = str(row.get("run_name") or row.get("run_dir") or "-")
+                            run_code = abbreviations.get(run_label, run_label)
+                            if run_code != run_label:
+                                lines.append(
+                                    f"**{('Запуск' if is_ru else 'Run')} `{run_code}` ({run_label})**"
+                                )
+                            else:
+                                lines.append(f"**{('Запуск' if is_ru else 'Run')} `{run_label}`**")
                             lines.append("")
-                            lines.append(
-                                "Доступные поля по запускам:"
-                                if is_ru
-                                else "Available fields by run:"
+                            cpu_v = row.get("sys_cpu_model")
+                            gpu_v = row.get("sys_gpu_0_name")
+                            ram_v = row.get("sys_ram_total_gb")
+                            os_v = _os_display_train_profile_row(row)
+                            card = pd.DataFrame(
+                                [
+                                    {
+                                        "Параметр" if is_ru else "Parameter": "CPU",
+                                        "Значение" if is_ru else "Value": cpu_v,
+                                    },
+                                    {
+                                        "Параметр" if is_ru else "Parameter": "GPU",
+                                        "Значение" if is_ru else "Value": gpu_v,
+                                    },
+                                    {
+                                        "Параметр" if is_ru else "Parameter": "RAM, GB",
+                                        "Значение" if is_ru else "Value": ram_v,
+                                    },
+                                    {
+                                        "Параметр" if is_ru else "Parameter": "OS",
+                                        "Значение" if is_ru else "Value": os_v,
+                                    },
+                                ]
                             )
-                            lines.extend(summary_lines)
+                            all_na = True
+                            for key in (cpu_v, gpu_v, ram_v, os_v):
+                                if key is None or (isinstance(key, float) and pd.isna(key)):
+                                    continue
+                                if str(key).strip().lower() in {"", "nan", "none"}:
+                                    continue
+                                all_na = False
+                                break
+                            if all_na:
+                                status_msg = (
+                                    "В артефактах run отсутствует training_metadata.json или блок system_profile."
+                                    if is_ru
+                                    else "training_metadata.json or system_profile block is missing in run artifacts."
+                                )
+                                card = pd.DataFrame(
+                                    [
+                                        {
+                                            "Параметр" if is_ru else "Parameter": ("Статус" if is_ru else "Status"),
+                                            "Значение" if is_ru else "Value": status_msg,
+                                        },
+                                    ]
+                                )
+                            lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
+                            lines.append("")
+                        lines.append(
+                            "- "
+                            + (
+                                "См. таблицу окружения тестирования ниже."
+                                if is_ru
+                                else "See the test environment comparison table below."
+                            )
+                        )
                         lines.append("")
                         lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{rel}`"))
                         lines.extend(_center_close())
@@ -1515,7 +1736,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                                 {"Параметр" if is_ru else "Parameter": "CPU", "Значение" if is_ru else "Value": row.get("sys_cpu_model")},
                                 {"Параметр" if is_ru else "Parameter": "GPU", "Значение" if is_ru else "Value": row.get("sys_gpu_0_name")},
                                 {"Параметр" if is_ru else "Parameter": "RAM, GB", "Значение" if is_ru else "Value": row.get("sys_ram_total_gb")},
-                                {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": f"{row.get('sys_os')} {row.get('sys_os_release')}"},
+                                {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": _os_display_train_profile_row(row)},
                             ]
                         )
                         lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
@@ -1540,7 +1761,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             {"Параметр" if is_ru else "Parameter": "CPU", "Значение" if is_ru else "Value": g.iloc[0].get("sys_cpu_model") if "sys_cpu_model" in g.columns else None},
                             {"Параметр" if is_ru else "Parameter": "GPU", "Значение" if is_ru else "Value": g.iloc[0].get("sys_gpu_0_name") if "sys_gpu_0_name" in g.columns else None},
                             {"Параметр" if is_ru else "Parameter": "RAM, GB", "Значение" if is_ru else "Value": g.iloc[0].get("sys_ram_total_gb") if "sys_ram_total_gb" in g.columns else None},
-                            {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": f"{g.iloc[0].get('sys_os')} {g.iloc[0].get('sys_os_release')}" if len(g) > 0 else None},
+                            {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": _os_display_train_profile_row(g.iloc[0]) if len(g) > 0 else None},
                         ]
                         card = pd.DataFrame(card_rows)
                         lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
@@ -1558,15 +1779,61 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             else "System profile table hidden: data is too sparse in hardware/os fields."
                         )
                     )
-                    summary_lines = _system_profile_text_summary(df, is_ru)
-                    if summary_lines:
+                    lines.append("")
+                    for _, row in df.iterrows():
+                        run_label = str(row.get("run_name") or row.get("run_dir") or "-")
+                        run_code = abbreviations.get(run_label, run_label)
+                        if run_code != run_label:
+                            lines.append(
+                                f"**{('Запуск' if is_ru else 'Run')} `{run_code}` ({run_label})**"
+                            )
+                        else:
+                            lines.append(f"**{('Запуск' if is_ru else 'Run')} `{run_label}`**")
                         lines.append("")
-                        lines.append(
-                            "Доступные поля по запускам:"
-                            if is_ru
-                            else "Available fields by run:"
+                        cpu_v = row.get("sys_cpu_model")
+                        gpu_v = row.get("sys_gpu_0_name")
+                        ram_v = row.get("sys_ram_total_gb")
+                        os_v = _os_display_train_profile_row(row)
+                        card = pd.DataFrame(
+                            [
+                                {"Параметр" if is_ru else "Parameter": "CPU", "Значение" if is_ru else "Value": cpu_v},
+                                {"Параметр" if is_ru else "Parameter": "GPU", "Значение" if is_ru else "Value": gpu_v},
+                                {"Параметр" if is_ru else "Parameter": "RAM, GB", "Значение" if is_ru else "Value": ram_v},
+                                {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": os_v},
+                            ]
                         )
-                        lines.extend(summary_lines)
+                        all_na = True
+                        for key in (cpu_v, gpu_v, ram_v, os_v):
+                            if key is None or (isinstance(key, float) and pd.isna(key)):
+                                continue
+                            if str(key).strip().lower() in {"", "nan", "none"}:
+                                continue
+                            all_na = False
+                            break
+                        if all_na:
+                            status_msg = (
+                                "В артефактах run отсутствует training_metadata.json или блок system_profile."
+                                if is_ru
+                                else "training_metadata.json or system_profile block is missing in run artifacts."
+                            )
+                            card = pd.DataFrame(
+                                [
+                                    {
+                                        "Параметр" if is_ru else "Parameter": ("Статус" if is_ru else "Status"),
+                                        "Значение" if is_ru else "Value": status_msg,
+                                    },
+                                ]
+                            )
+                        lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
+                        lines.append("")
+                    lines.append(
+                        "- "
+                        + (
+                            "См. таблицу окружения тестирования ниже."
+                            if is_ru
+                            else "See the test environment comparison table below."
+                        )
+                    )
                     lines.append("")
                     lines.append(
                         ("_Источник данных:_ " if is_ru else "_Data source:_ ")
@@ -1723,9 +1990,13 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     )
                 lines.append("")
     eval_rel = str(fmt_cmp.get("eval_csv") or "")
+    seen_fmt_csv_paths: set[str] = set()
     for key in ("test_csv", "val_csv", "pt_uni_csv", "csv"):
-        fmt_csv_rel = str(fmt_cmp.get(key) or "")
+        fmt_csv_rel = str(fmt_cmp.get(key) or "").strip()
         if not fmt_csv_rel:
+            continue
+        norm_rel = os.path.normpath(fmt_csv_rel.replace("\\", "/"))
+        if norm_rel in seen_fmt_csv_paths:
             continue
         fmt_csv_abs = os.path.join(report_root, fmt_csv_rel)
         if os.path.isfile(fmt_csv_abs):
@@ -1733,6 +2004,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 fmt_df = pd.read_csv(fmt_csv_abs)
                 fmt_df = _filter_generic_table_for_selection(fmt_df, manifest)
                 fmt_df = _select_table_columns(fmt_csv_rel, fmt_df)
+                if _should_drop_split_column(fmt_csv_rel, fmt_df):
+                    fmt_df = fmt_df.drop(columns=["split"], errors="ignore")
                 fmt_df = _abbrev_df(fmt_df, abbreviations)
                 lines.extend(_center_open())
                 lines.append("")
@@ -1756,13 +2029,16 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         )
                     )
                 lines.extend(_center_close())
+                seen_fmt_csv_paths.add(norm_rel)
                 table_no += 1
             except Exception as e:
                 lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
     lines.append("")
     lines.append(f"### {format_idx}.2 " + ("Сравнение производительности" if is_ru else "Performance comparison"))
     lines.append("")
-    lines.append("Format performance comparison (test)")
+    lines.append(
+        "Сравнение производительности форматов (test)" if is_ru else "Format performance comparison (test)"
+    )
     lines.append("")
     lines.append("#### " + ("Анализ скорости" if is_ru else "Speed analysis"))
     lines.append("")
@@ -1772,6 +2048,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         isinstance(rel, str) and "artifacts/pr/per_class_combined/" in rel and rel.endswith(".png")
         for rel in images
     )
+    speed_vs_map_rendered = False
     for rel in images:
         if isinstance(rel, str):
             if not any(k in rel for k in ("compare", "inference", "speed_quality")):
@@ -1782,6 +2059,25 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             figure_no += 1
             lines.append("")
             lines.extend(_center_close())
+            if "speed_vs_map" in rel.replace("\\", "/").lower():
+                speed_vs_map_rendered = True
+                table_no = _append_speed_quality_table(
+                    lines,
+                    manifest=manifest,
+                    report_root=str(report_root),
+                    abbreviations=abbreviations,
+                    is_ru=is_ru,
+                    table_no=table_no,
+                )
+    if not speed_vs_map_rendered:
+        table_no = _append_speed_quality_table(
+            lines,
+            manifest=manifest,
+            report_root=str(report_root),
+            abbreviations=abbreviations,
+            is_ru=is_ru,
+            table_no=table_no,
+        )
     rendered_perf_table = False
     for key in ("perf_test_csv",):
         perf_csv_rel = str(fmt_cmp.get(key) or "")
@@ -1800,6 +2096,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     ].copy()
                 perf_df = _select_table_columns(perf_csv_rel, perf_df)
                 perf_df = _abbrev_df(perf_df, abbreviations)
+                if _should_drop_split_column(perf_csv_rel, perf_df):
+                    perf_df = perf_df.drop(columns=["split"], errors="ignore")
                 def _num_or_none(v: Any) -> float | None:
                     try:
                         if v is None or (isinstance(v, float) and pd.isna(v)):
@@ -2011,28 +2309,34 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 ]
                 if diag_cols:
                     diag_df = perf_df[diag_cols].copy()
-                    lines.append("")
-                    table_no += 1
-                    lines.append(
-                        f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-                        + (
-                            "Диагностика несопоставимых накладных расходов"
-                            if is_ru
-                            else "Diagnostics of non-comparable overheads"
+                    diag_df = _drop_all_nan_columns(diag_df)
+                    if len(diag_df.columns) > 0:
+                        lines.append("")
+                        table_no += 1
+                        lines.append(
+                            f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+                            + (
+                                "Диагностика несопоставимых накладных расходов"
+                                if is_ru
+                                else "Diagnostics of non-comparable overheads"
+                            )
+                            + "**"
                         )
-                        + "**"
-                    )
-                    lines.append("")
-                    lines.extend(_md_table_from_df(diag_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
-                    lines.append("")
-                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
-                    lines.append(
-                        (
-                            "- Эти метрики диагностические и не используются в основном сравнении форматов."
-                            if is_ru
-                            else "- These metrics are diagnostic and are not used for primary format comparison."
+                        lines.append("")
+                        lines.extend(
+                            _md_table_from_df(
+                                diag_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1, diag_style=True
+                            )
                         )
-                    )
+                        lines.append("")
+                        lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
+                        lines.append(
+                            (
+                                "- Эти метрики диагностические и не используются в основном сравнении форматов."
+                                if is_ru
+                                else "- These metrics are diagnostic and are not used for primary format comparison."
+                            )
+                        )
                 lines.extend(_center_close())
                 table_no += 1
                 rendered_perf_table = True

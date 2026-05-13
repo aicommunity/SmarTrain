@@ -62,8 +62,17 @@ def build_non_interactive_command(
             if not value:
                 continue
             if opt:
-                for item in value:
-                    parts.extend([opt, str(item)])
+                nargs = getattr(action, "nargs", None)
+                # nargs '+', '*', or int>1: emit ``--opt v1 v2 ...`` once. Repeating ``--opt`` per
+                # item breaks re-parsing (each ``nargs='+'`` consumes only its own tail; later
+                # ``--opt`` groups replace earlier ones).
+                if (not isinstance(action, argparse._AppendAction)) and (
+                    nargs in ("+", "*") or (isinstance(nargs, int) and nargs > 1)
+                ):
+                    parts.extend([opt] + [str(x) for x in value])
+                else:
+                    for item in value:
+                        parts.extend([opt, str(item)])
             else:
                 parts.extend([str(x) for x in value])
             continue

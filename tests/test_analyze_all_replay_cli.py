@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 
 from smartrain.cli_support.cli_replay import build_non_interactive_command
 from smartrain.workflows.analyze.results_analyzer import build_analyze_arg_parser
@@ -47,6 +48,7 @@ def test_analyze_all_replay_includes_baseline_others_and_recompute_choice() -> N
         ]
     )
     cmd = build_non_interactive_command("analyze all", p_all, ns)
+    assert cmd.count("--others") == 1, "nargs='+' requires one --others block for round-trip parse"
     assert "analyze" in cmd
     assert "all" in cmd
     assert "/workspace/runs/ds/2026-01-01" in cmd
@@ -57,3 +59,7 @@ def test_analyze_all_replay_includes_baseline_others_and_recompute_choice() -> N
     assert "--recompute-missing-metrics" in cmd
     assert "yes" in cmd
     assert "/workspace/datasets/ds/data.yaml" in cmd
+
+    tok = shlex.split(cmd)
+    ns2 = root.parse_args(tok[tok.index("all") :])
+    assert ns2.others == ns.others

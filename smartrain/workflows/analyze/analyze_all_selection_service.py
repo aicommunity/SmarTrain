@@ -13,17 +13,24 @@ def prepare_all_selection(
     prompt_text_cb: Callable[..., str],
     prompt_choice_cb: Callable[..., str],
 ) -> tuple[str, list[str], str, bool]:
-    interactive_mode = sys.stdin.isatty()
+    """Fourth return value is True only when baseline/profile were chosen via interactive prompts.
+
+    It must **not** be equated with ``sys.stdin.isatty()``: a TTY plus a complete CLI (baseline,
+    profile, others) must not trigger secondary prompts such as data.yaml mode.
+    """
+    tty = sys.stdin.isatty()
     baseline = str(getattr(args, "baseline", "") or "").strip()
     others = [str(x).strip() for x in (getattr(args, "others", []) or []) if str(x).strip()]
     profile = str(getattr(args, "profile", "") or "").strip().lower()
+    selection_prompts_used = False
     if not baseline or profile not in {"quality", "speed", "full"}:
-        if not interactive_mode:
+        if not tty:
             print(
                 "[ERROR] Non-interactive `smartrain analyze all` requires --baseline and --profile.",
                 file=sys.stderr,
             )
             sys.exit(2)
+        selection_prompts_used = True
         indexed = filtered_run_records_cb(args)
         if len(indexed) < 2:
             print("[ERROR] Need at least two runs for full analysis.")
@@ -64,5 +71,5 @@ def prepare_all_selection(
         setattr(args, "baseline", baseline)
         setattr(args, "others", others)
         setattr(args, "profile", profile)
-    return baseline, others, profile, interactive_mode
+    return baseline, others, profile, selection_prompts_used
 

@@ -158,9 +158,14 @@ def finalize_all_session(
         }
     if format_compare:
         manifest["format_comparison"] = format_compare
+        test_csv_val = str(format_compare.get("test_csv") or "").strip()
         for key in ("test_csv", "val_csv", "pt_uni_csv", "eval_csv", "csv"):
-            rel = str(format_compare.get(key) or "")
-            if rel and rel not in manifest["tables"]:
+            rel = str(format_compare.get(key) or "").strip()
+            if not rel:
+                continue
+            if key == "csv" and test_csv_val and rel == test_csv_val:
+                continue
+            if rel not in manifest["tables"]:
                 manifest["tables"].append(rel)
 
     manifest_path = os.path.join(session_root, "session.json")
