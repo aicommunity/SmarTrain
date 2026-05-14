@@ -95,7 +95,14 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="ONNX provider policy: gpu_strict, gpu_preferred, cpu_only.",
     )
-    p.add_argument("--non-interactive", "-y", action="store_true", help="Disable interactive prompts.")
+    p.add_argument(
+        "--non-interactive",
+        "-y",
+        "--nit",
+        action="store_true",
+        dest="non_interactive",
+        help="Disable interactive prompts (Typer also accepts --nit before subcommand flags).",
+    )
     return p
 
 
@@ -732,9 +739,10 @@ def _check_onnx_format_preflight(policy: str) -> tuple[bool, str | None]:
 def main(argv: list[str] | None = None) -> None:
     parser = build_model_test_arg_parser()
     args = parser.parse_args(argv)
-    ensure_matplotlib_training_runtime(non_interactive=bool(getattr(args, "non_interactive", False)))
-    interactive = is_interactive_allowed(bool(getattr(args, "non_interactive", False)))
-    request = make_command_request("test", argv if argv is not None else [], interactive_allowed=interactive)
+    argv_list = list(argv) if argv is not None else []
+    interactive = is_interactive_allowed(argv_list)
+    ensure_matplotlib_training_runtime(non_interactive=not interactive)
+    request = make_command_request("test", argv_list, interactive_allowed=interactive)
     workspace_root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(workspace_root)
     atexit.register(lambda wr=workspace_root: best_effort_prune_workspace_runs_detect(wr))

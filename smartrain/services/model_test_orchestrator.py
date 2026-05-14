@@ -6,16 +6,6 @@ import argparse
 from typing import Any
 
 
-def _formats_option_explicit_in_argv(argv: list[str] | None) -> bool:
-    """True if the user passed ``--formats`` on the CLI (so we must not re-prompt for backends)."""
-    if not argv:
-        return False
-    for tok in argv:
-        if tok == "--formats" or tok.startswith("--formats="):
-            return True
-    return False
-
-
 def run_model_test_after_setup(
     *,
     parser: argparse.ArgumentParser,
@@ -55,9 +45,7 @@ def run_model_test_after_setup(
     replay: str | None = None
     results: list[tuple[str, bool, str | None]] = []
     selected_artifacts: list[tuple[str, str]] = []
-    argv = list(getattr(request, "argv", ()) or ())
-    skip_backend_prompts = _formats_option_explicit_in_argv(argv)
-    if interactive and target_kind == "runs" and not skip_backend_prompts:
+    if interactive and target_kind == "runs":
         candidates = mtr.discover_run_artifact_candidates(root_dir)
         enabled_formats = mtr.prompt_export_backends_interactive(root_dir, candidates)
         formats = [fmt for fmt in mtr.SUPPORTED_TEST_FORMATS if fmt in enabled_formats]

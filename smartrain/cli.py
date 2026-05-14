@@ -16,6 +16,10 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 
+from smartrain.cli_support.typer_non_interactive import (
+    env_forces_non_interactive_cli,
+    strip_typer_meta_non_interactive_flags,
+)
 from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
 from smartrain.core.training.train_backend_registry import default_train_provider
 from smartrain.core.training.train_model_catalog import TrainModelCatalog
@@ -317,11 +321,12 @@ def _forward_argparse_command(
     prepend_args: list[str] | None = None,
     empty_args_mode: str = "help",
 ) -> None:
-    args = list(prepend_args or []) + list(ctx.args)
-    non_interactive = any(tok in args for tok in ("-y", "--non-interactive"))
-    if non_interactive:
+    raw = list(prepend_args or []) + list(ctx.args)
+    filtered, meta_stripped = strip_typer_meta_non_interactive_flags(raw)
+    legacy_ni = any(tok in raw for tok in ("-y", "--non-interactive"))
+    if meta_stripped or legacy_ni or env_forces_non_interactive_cli():
         interactive_allowed = False
-    elif len(args) == 0 and empty_args_mode in ("invoke", "invoke_if_tty_else_help"):
+    elif len(filtered) == 0 and empty_args_mode in ("invoke", "invoke_if_tty_else_help"):
         interactive_allowed = True
     else:
         # Allow prompts when the user passed flags (e.g. smartrain test --run ...) from a TTY.
@@ -336,15 +341,15 @@ def _forward_argparse_command(
             existing = getattr(parser_obj, "epilog", None)
             setattr(parser_obj, "epilog", f"{existing}\n\n{examples}" if existing else examples)
 
-    if not args:
+    if not filtered:
         if empty_args_mode == "invoke":
             with _interactive_flag_env(interactive_allowed):
-                _invoke_module_main(module, args)
+                _invoke_module_main(module, filtered)
             return
         if empty_args_mode == "invoke_if_tty_else_help":
             if sys.stdin.isatty():
                 with _interactive_flag_env(interactive_allowed):
-                    _invoke_module_main(module, args)
+                    _invoke_module_main(module, filtered)
                 return
         if build_parser:
             parser = build_parser()
@@ -355,20 +360,20 @@ def _forward_argparse_command(
                 parser.print_help()
             raise typer.Exit(0)
 
-    if build_parser and any(tok in ("--help", "-h") for tok in args):
+    if build_parser and any(tok in ("--help", "-h") for tok in filtered):
         parser = build_parser()
         if prog is not None and hasattr(parser, "prog"):
             parser.prog = prog
         _enhance_parser_help(parser)
         try:
-            parser.parse_args(args)
+            parser.parse_args(filtered)
         except SystemExit as e:
             code = e.code
             if code is None:
                 code = 0
             raise typer.Exit(code if isinstance(code, int) else 1)
     with _interactive_flag_env(interactive_allowed):
-        _invoke_module_main(module, args)
+        _invoke_module_main(module, filtered)
 
 
 @app.command(
