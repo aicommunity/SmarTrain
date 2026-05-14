@@ -22,6 +22,19 @@
 | `fusion` | → `workflows/datasets/dataset_former.py` | тот же модуль | | |
 | `queue` | Typer → `workflows/queue/training_queue_cli.py` (`list`/`add`/…); `queue-run` → `_forward_argparse_command` → `training_queue.py` | `training_queue_cli` / `training_queue` | | Состояние очереди в workspace |
 
+## CLI: интерактив и replay
+
+Typer (`cli.py`, `_forward_argparse_command`) вырезает служебные токены `--nit` и `--smartrain-replay` до вызова `main(argv)` подкоманды; в argparse они не попадают. `-y` / `--non-interactive` на пересылаемом argv по-прежнему отключают интерактив на стороне Typer (не вырезаются). Переменная `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (см. `smartrain/cli_support/typer_non_interactive.py`) задаёт тот же режим без флагов. Строки replay из `build_non_interactive_command` / `emit_replay` заканчиваются одним `--nit`, чтобы копипаст совпадал с входом через `smartrain`.
+
+| Режим | TTY | `--nit` | Неполные обязательные args | Поведение |
+|-------|-----|---------|---------------------------|-----------|
+| Ручной | да | нет | да/нет | Как сейчас: возможны промпты при неполноте; иначе ошибка парсера |
+| Ручной | да | да | нет | Без интерактива Typer; модули как при non_interactive |
+| Ручной | да | да | да | Ошибка (`parser.error` / явное сообщение), без интерактивного добора |
+| Replay | да | да (в строке) | — | Предсказуемый неинтерактивный запуск |
+
+У `train` остаются свои флаги подтверждения (`--yes` / `-y` для каталога и т.д.); это не то же самое, что Typer `--nit`. Вызов workflow через `python -m ...` без обёртки Typer не вырезает `--nit`; см. [../../refactor/tech-debt-cli-replay-nit.md](../../refactor/tech-debt-cli-replay-nit.md).
+
 ### Слои и импорты
 
 - В `smartrain/services/` **запрещены** прямые импорты `smartrain.workflows.*`; доступ к реализациям — через фасады `smartrain/core/workflow_adapters/`. Регрессия: `tests/regression/test_train_service_guardrails.py`.

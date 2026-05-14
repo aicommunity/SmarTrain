@@ -22,6 +22,19 @@ Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_apps
 | `fusion` | → `workflows/datasets/dataset_former.py` | same module | | |
 | `queue` | Typer → `workflows/queue/training_queue_cli.py` (`list`/`add`/…); `queue-run` → `_forward_argparse_command` → `training_queue.py` | `training_queue_cli` / `training_queue` | | Queue state under workspace |
 
+## CLI: interactive mode and replay
+
+Typer (`cli.py`, `_forward_argparse_command`) strips Typer-only tokens `--nit` and `--smartrain-replay` before calling each subcommand’s `main(argv)`. Those flags never reach argparse. Legacy `-y` / `--non-interactive` on the forwarded argv still force non-interactive routing (they are not stripped). Environment `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (see `smartrain/cli_support/typer_non_interactive.py`) forces the same policy without argv flags. Replay strings built via `build_non_interactive_command` / `emit_replay` append a single trailing `--nit` so pasted commands match Typer behavior.
+
+| Mode | TTY | `--nit` | Incomplete required args | Behavior |
+|------|-----|---------|--------------------------|----------|
+| Manual | yes | no | yes / no | Same as today: module prompts may run when args are incomplete; otherwise argparse errors |
+| Manual | yes | yes | no | No Typer-driven interactivity; modules behave as in non-interactive mode |
+| Manual | yes | yes | yes | Error (`parser.error` / explicit message), no interactive fill-in |
+| Replay (paste) | yes | yes (in the printed line) | — | Predictable non-interactive run |
+
+`train` keeps its own confirmation flags (`--yes` / `-y` for output directory etc.); do not treat them as the Typer `--nit` contract. Typer `--nit` applies to the outer `smartrain` invocation; replay lines include `--nit` for copy-paste. Invoking a workflow module with `python -m ...` without the Typer wrapper does not strip `--nit`; that path is documented as unsupported in [../refactor/tech-debt-cli-replay-nit.md](../refactor/tech-debt-cli-replay-nit.md).
+
 ### Layers and imports
 
 - Modules under `smartrain/services/` must **not** import `smartrain.workflows.*`; they call workflow code through facades in `smartrain/core/workflow_adapters/`. Regression: `tests/regression/test_train_service_guardrails.py`.
