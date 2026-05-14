@@ -27,6 +27,9 @@ def ultralytics_pt_rich_files_required(task_type: str | None) -> tuple[str, ...]
         "pr.csv",
         "pr_per_class.csv",
     )
+    # Ultralytics DetMetrics / SegmentMetrics both run box branch with prefix "Box" first; see
+    # ultralytics.utils.metrics.SegmentMetrics.process (box curves + mask curves). Completeness for
+    # SmarTrain analyze aligns with the same Box* + confusion plots as detection.
     detect_style = (
         "BoxF1_curve.png",
         "BoxPR_curve.png",
@@ -37,6 +40,8 @@ def ultralytics_pt_rich_files_required(task_type: str | None) -> tuple[str, ...]
     )
     if t in {"classification", "classify", "cls"}:
         return base
+    if t in {"segmentation", "segment", "seg"}:
+        return base + detect_style
     return base + detect_style
 
 
