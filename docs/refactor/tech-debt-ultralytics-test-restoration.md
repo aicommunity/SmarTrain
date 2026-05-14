@@ -10,6 +10,7 @@
 | TD-004 | WONTFIX | CI / `pytest -m slow` | Plan §4.4: disk snapshot after real `val` on CPU. | Deferred: full suite already ~8m; add when a tiny public seg/det weights fixture is standardized for CI. |
 | TD-005 | DONE | `model_test_orchestrator.run_model_test_after_setup` | Plan §3.1 alt: MPL before PT if entry bypasses CLI. | `ensure_matplotlib_training_runtime` already called at start of orchestrator (non_interactive from args). |
 | TD-006 | WONTFIX | `_finalize_ultralytics_pt_test_dir` PR CSV writes | Plan §3.2: skip overwriting `pr.csv` without `--force`. | Deferred: naive `not args.force` breaks normal re-test; needs `should_rerun` or separate `overwrite_pr_metrics` API — out of scope for this closure. |
+| TD-007 | DONE | `model_test_orchestrator` + `cli_replay` | `smartrain test --run … --formats …` from TTY still prompted for backends; replay lacked `--non-interactive`. | Skip backend/artifact prompts when `--formats` is present in argv; append `--non-interactive` to printed `smartrain test` replay when missing. |
 
 ## Burn-down checklist
 
@@ -19,3 +20,4 @@
 - [x] TD-005
 - [x] TD-004 (WONTFIX — documented)
 - [x] TD-006 (WONTFIX — documented)
+- [x] TD-007

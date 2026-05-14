@@ -83,7 +83,11 @@ def build_non_interactive_command(
             parts.append(str(value))
 
     safe_parts = [shlex.quote(p) for p in parts if p]
-    return " ".join(safe_parts)
+    cmd = " ".join(safe_parts)
+    # Replay for `smartrain test` must be copy-pasteable in CI / scripts; TTY runs omit `-y` by default.
+    if command_name.strip() == "test" and "--non-interactive" not in parts and "-y" not in parts:
+        cmd = f"{cmd} --non-interactive"
+    return cmd
 
 
 def print_replay_command(stage: str, command: str) -> None:
