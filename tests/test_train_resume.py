@@ -11,6 +11,16 @@ from smartrain.core.runtime import run_discovery as rd
 from smartrain.workflows.training import train_resume as tr
 from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
 from smartrain.core.runtime.workspace_paths import deploy_workspace
+from smartrain.workflows.testing.ultralytics_test_contract import ultralytics_pt_rich_files_required
+
+
+def _touch_missing_ultralytics_pt_rich_files(test_dir: Path, *, task_type: str | None = None) -> None:
+    """Stub files so has_complete_test_artifacts(run_dir, \"pt\") passes in unit tests."""
+    for name in ultralytics_pt_rich_files_required(task_type):
+        path = test_dir / name
+        if path.is_file():
+            continue
+        path.write_bytes(b"stub")
 
 
 def _write_resumable_last_pt(path: Path) -> None:
@@ -40,6 +50,7 @@ def test_diagnose_run_marks_completed_from_metadata(tmp_path: Path) -> None:
     (run_dir / "test" / "args.yaml").write_text("name: test\n", encoding="utf-8")
     (run_dir / "test" / "pr.csv").write_text("recall,precision\n0.0,1.0\n", encoding="utf-8")
     (run_dir / "test" / "pr_per_class.csv").write_text("class_name,ap\nobj,0.5\n", encoding="utf-8")
+    _touch_missing_ultralytics_pt_rich_files(run_dir / "test")
     (run_dir / "test_metrics.csv").write_text("mAP50-95\n0.5\n", encoding="utf-8")
     write_not_available_recommendations(model_dir=str(run_dir), split="test", reason="stub")
     write_not_available_recommendations(model_dir=str(run_dir), split="val", reason="stub")
@@ -309,7 +320,7 @@ def test_resume_runs_test_stage_when_training_complete_but_test_missing(
         assert diagnosis is not None
         called["meta"] = True
 
-    monkeypatch.setattr(mtm, "test_yolo", _fake_test)
+    monkeypatch.setattr(mtm, "_resume_ultralytics_pt_test_runner", _fake_test)
     monkeypatch.setattr(mtm, "update_resume_test_metadata", _fake_test_meta)
     monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: None)
 
