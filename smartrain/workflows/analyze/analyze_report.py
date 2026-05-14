@@ -9,7 +9,7 @@ import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 import numpy as np
@@ -1392,6 +1392,7 @@ def _append_speed_quality_table(
     abbreviations: dict[str, str],
     is_ru: bool,
     table_no: int,
+    emit_before_table: Callable[[], None] | None = None,
 ) -> int:
     sq = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
     rel = str((sq or {}).get("csv") or "").strip()
@@ -1407,6 +1408,8 @@ def _append_speed_quality_table(
         df = _abbrev_df(df, abbreviations)
     except Exception:
         return table_no
+    if emit_before_table is not None:
+        emit_before_table()
     lines.extend(_center_open())
     lines.append("")
     lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(rel, is_ru)}**")
@@ -1467,6 +1470,18 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             "split": "",
                         }
                     )
+    early_figure1_rel: str | None = None
+    if report_root:
+        for _img in images:
+            if not isinstance(_img, str):
+                continue
+            if not any(k in _img for k in ("compare", "inference", "speed_quality")):
+                continue
+            if "speed_vs_map" in _img.replace("\\", "/").lower():
+                continue
+            if os.path.isfile(os.path.join(str(report_root), _img)):
+                early_figure1_rel = _img
+                break
     lines.append(_sec("context"))
     lines.append("")
     if tpl.get("INTRO"):
@@ -1518,6 +1533,28 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     alias_rel = str(fmt_cmp.get("alias_legend_csv") or "")
     eval_rel = str(fmt_cmp.get("eval_csv") or "")
     table_no = 1
+    figure_no = 1
+    early_figure1_inserted = False
+    early_figure1_emitted_in_doc = False
+
+    def _emit_figure_1_before_table_11() -> None:
+        nonlocal figure_no, early_figure1_inserted, early_figure1_emitted_in_doc
+        if early_figure1_inserted or table_no != 11:
+            return
+        early_figure1_inserted = True
+        rel_e = early_figure1_rel
+        if not rel_e or not report_root:
+            return
+        if not os.path.isfile(os.path.join(str(report_root), rel_e)):
+            return
+        lines.extend(_center_open())
+        lines.append(f"![]({os.path.join('..', rel_e)}){{ width=95% }}")
+        lines.append(f"*{_figure_caption(rel_e, figure_no, abbreviations, manifest, is_ru)}*")
+        figure_no += 1
+        lines.append("")
+        lines.extend(_center_close())
+        early_figure1_emitted_in_doc = True
+
     if alias_rel:
         alias_abs = os.path.join(report_root, alias_rel)
         if os.path.isfile(alias_abs):
@@ -1534,6 +1571,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 alias_df = _abbrev_df(alias_df, abbreviations)
                 lines.extend(_center_open())
                 lines.append("")
+                _emit_figure_1_before_table_11()
                 lines.append(
                     f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
                     + ("Легенда алиасов форматов" if is_ru else "Format alias legend")
@@ -1562,6 +1600,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 eval_df = _abbrev_df(eval_df, abbreviations)
                 lines.extend(_center_open())
                 lines.append("")
+                _emit_figure_1_before_table_11()
                 lines.append(
                     f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
                     + ("Параметры расчета метрик по форматам" if is_ru else "Metric calculation settings by format")
@@ -1584,7 +1623,6 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     if tpl.get("QUALITY"):
         lines.extend(_justify_block(tpl["QUALITY"]))
     tables = manifest.get("tables") or []
-    figure_no = 1
     env_subsection_opened = False
     leaderboard_rel = ""
     for rel in tables:
@@ -1618,6 +1656,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             env_subsection_opened = True
         lines.extend(_center_open())
         lines.append("")
+        _emit_figure_1_before_table_11()
         lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(rel, is_ru)}**")
         lines.append("")
         table_no += 1
@@ -1860,6 +1899,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 test_summary = _build_test_metrics_summary(full_df, abbreviations)
                 if len(test_summary) > 0:
                     lines.extend(_center_open())
+                    lines.append("")
+                    _emit_figure_1_before_table_11()
                     lines.append(
                         f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
                         + ("Сводка test-метрик Ultralytics" if is_ru else "Ultralytics test metrics summary")
@@ -2009,6 +2050,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 fmt_df = _abbrev_df(fmt_df, abbreviations)
                 lines.extend(_center_open())
                 lines.append("")
+                _emit_figure_1_before_table_11()
                 lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(fmt_csv_rel, is_ru)}**")
                 lines.append("")
                 lines.extend(_md_table_from_df(fmt_df, abbreviations, limit=None, is_ru=is_ru))
@@ -2051,6 +2093,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     speed_vs_map_rendered = False
     for rel in images:
         if isinstance(rel, str):
+            if early_figure1_emitted_in_doc and early_figure1_rel and rel == early_figure1_rel:
+                continue
             if not any(k in rel for k in ("compare", "inference", "speed_quality")):
                 continue
             lines.extend(_center_open())
@@ -2068,6 +2112,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     abbreviations=abbreviations,
                     is_ru=is_ru,
                     table_no=table_no,
+                    emit_before_table=_emit_figure_1_before_table_11,
                 )
     if not speed_vs_map_rendered:
         table_no = _append_speed_quality_table(
@@ -2077,6 +2122,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             abbreviations=abbreviations,
             is_ru=is_ru,
             table_no=table_no,
+            emit_before_table=_emit_figure_1_before_table_11,
         )
     rendered_perf_table = False
     for key in ("perf_test_csv",):
@@ -2181,6 +2227,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 pipeline_df = perf_df[pipeline_cols].copy() if pipeline_cols else perf_df.copy()
                 lines.extend(_center_open())
                 lines.append("")
+                _emit_figure_1_before_table_11()
                 lines.append(
                     f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
                     + (
@@ -2232,6 +2279,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     lines.append(f"{idx}. **{title}** — {descr}")
                 lines.append("")
                 table_no += 1
+                _emit_figure_1_before_table_11()
                 lines.append(
                     f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
                     + (
@@ -2313,6 +2361,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     if len(diag_df.columns) > 0:
                         lines.append("")
                         table_no += 1
+                        _emit_figure_1_before_table_11()
                         lines.append(
                             f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
                             + (
@@ -2372,6 +2421,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     perf_df = _abbrev_df(perf_df, abbreviations)
                     lines.extend(_center_open())
                     lines.append("")
+                    _emit_figure_1_before_table_11()
                     lines.append(
                         f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
                         + ("Fallback: скорость инференса по benchmark" if is_ru else "Fallback: inference benchmark speed")
@@ -2413,6 +2463,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 if len(pr_sum) > 0:
                     lines.extend(_center_open())
                     lines.append("")
+                    _emit_figure_1_before_table_11()
                     lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(pr_csv_rel, is_ru)}**")
                     lines.append("")
                     pr_sum = _abbrev_df(pr_sum, abbreviations)
@@ -2481,6 +2532,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     full_title = f"{objective_title} — run {run_name}"
                 else:
                     full_title = f"{objective_title} — run {run_name}"
+                _emit_figure_1_before_table_11()
                 lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {full_title}**")
                 lines.append("")
                 lines.extend(_md_table_from_df(local_df, abbreviations, limit=None, is_ru=is_ru))
@@ -2630,6 +2682,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lb_df = _abbrev_df(lb_df, abbreviations)
                 lines.extend(_center_open())
                 lines.append("")
+                _emit_figure_1_before_table_11()
                 lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(leaderboard_rel, is_ru)}**")
                 lines.append("")
                 lines.extend(_md_table_from_df(lb_df, abbreviations, limit=None, is_ru=is_ru))
