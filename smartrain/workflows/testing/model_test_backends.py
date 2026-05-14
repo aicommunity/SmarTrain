@@ -7,6 +7,7 @@ import time
 import tempfile
 import json
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,6 +28,10 @@ from ultralytics import YOLO
 from ultralytics.utils import nms as ultralytics_nms
 from ultralytics.utils.metrics import ap_per_class
 
+from smartrain.core.inference.ultralytics_metrics_pr import (
+    extract_pr_curve_from_ultralytics_metrics,
+    extract_pr_curve_per_class_from_ultralytics_metrics,
+)
 from smartrain.core.training.confidence_recommendation import (
     compute_confidence_recommendations,
     write_not_available_recommendations,
@@ -43,7 +48,7 @@ from smartrain.workflows.testing.model_test_service import (
     format_test_dir_for_write,
     persist_target_test_artifacts_state,
 )
-from smartrain.core.runtime.run_artifacts import ensure_run_layout, read_model_sidecar_metadata
+from smartrain.core.runtime.run_artifacts import ensure_run_layout, read_model_sidecar_metadata, run_tests_dir
 from smartrain.workflows.models import tensorrt_checks as trt_checks
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_runs_detect_near_run, ultralytics_sidecar_dir
 from smartrain.workflows.testing.unified_metrics_adapter import collect_ultralytics_style_gt
@@ -1942,6 +1947,100 @@ def _ultralytics_val_task_kw(task_type: str | None) -> dict[str, str]:
     return {}
 
 
+def _finalize_ultralytics_pt_test_dir(
+    *,
+    root_dir: str,
+    format_name: str,
+    result: Any,
+    weights_path: str,
+    dataset_yaml_path: str,
+    imgsz: int | None,
+    val_conf: float | None,
+    val_iou: float | None,
+    val_batch: int | None,
+) -> None:
+    """Normalize Ultralytics val() output into the canonical tests/test-ultralytics layout."""
+    if str(format_name or "pt").strip().lower() != "pt":
+        return
+    test_dir = format_test_dir_for_write(root_dir, format_name)
+    os.makedirs(test_dir, exist_ok=True)
+    for src_name, dst_name in (
+        ("PR_curve.png", "BoxPR_curve.png"),
+        ("F1_curve.png", "BoxF1_curve.png"),
+        ("P_curve.png", "BoxP_curve.png"),
+        ("R_curve.png", "BoxR_curve.png"),
+    ):
+        src_p = os.path.join(test_dir, src_name)
+        dst_p = os.path.join(test_dir, dst_name)
+        if os.path.isfile(src_p) and not os.path.isfile(dst_p):
+            shutil.copy2(src_p, dst_p)
+
+    pr_pair = extract_pr_curve_from_ultralytics_metrics(result)
+    if pr_pair is not None:
+        recall, precision = pr_pair
+        pd.DataFrame({"recall": recall.astype(float), "precision": precision.astype(float)}).to_csv(
+            os.path.join(test_dir, "pr.csv"), index=False, encoding="utf-8"
+        )
+    elif not os.path.isfile(os.path.join(test_dir, "pr.csv")):
+        pd.DataFrame({"recall": [0.0], "precision": [0.0]}).to_csv(
+            os.path.join(test_dir, "pr.csv"), index=False, encoding="utf-8"
+        )
+
+    per_class = extract_pr_curve_per_class_from_ultralytics_metrics(result)
+    names_list = _load_names(dataset_yaml_path)
+    pc_path = os.path.join(test_dir, "pr_per_class.csv")
+    if per_class is not None:
+        rx, y2d = per_class
+        rows: list[dict[str, Any]] = []
+        for class_id in range(y2d.shape[0]):
+            class_name = names_list[class_id] if class_id < len(names_list) else f"class_{class_id}"
+            ap = float(np.trapz(y2d[class_id], rx))
+            for idx in range(len(rx)):
+                rows.append(
+                    {
+                        "run_dir": root_dir,
+                        "model": "pt",
+                        "class_id": class_id,
+                        "class_name": class_name,
+                        "recall": float(rx[idx]),
+                        "precision": float(y2d[class_id, idx]),
+                        "ap": ap,
+                    }
+                )
+        pd.DataFrame(rows).to_csv(pc_path, index=False, encoding="utf-8")
+    elif not os.path.isfile(pc_path):
+        pd.DataFrame(
+            columns=["run_dir", "model", "class_id", "class_name", "recall", "precision", "ap"],
+        ).to_csv(pc_path, index=False, encoding="utf-8")
+
+    if not os.path.isfile(os.path.join(test_dir, "args.yaml")):
+        eval_params = normalize_eval_params(imgsz=imgsz, conf=val_conf, iou=val_iou)
+        _write_test_args_yaml(
+            test_dir,
+            backend="ultralytics",
+            format_name=format_name,
+            weights_path=weights_path,
+            data_yaml_path=dataset_yaml_path,
+            imgsz=int(eval_params["imgsz"]),
+            conf=float(eval_params["conf"]),
+            iou=float(eval_params["iou"]),
+            batch=int(val_batch) if val_batch is not None else None,
+            inference_source="ultralytics_model_val",
+            gt_source="ultralytics_validator",
+            nms_profile="ultralytics_validator_multilabel",
+        )
+
+    if not any(
+        os.path.isfile(os.path.join(test_dir, n))
+        for n in ("val_batch0_pred.jpg", "val_batch0_labels.jpg", "val_batch1_pred.jpg")
+    ):
+        print(
+            f"[WARN] {format_name}: expected val_batch preview images not found under {test_dir}; "
+            "Ultralytics version or dataset may omit them.",
+            file=sys.stderr,
+        )
+
+
 def run_ultralytics_backend(
     *,
     root_dir: str,
@@ -2052,9 +2151,11 @@ def run_ultralytics_backend(
     val_kwargs = {
         "data": dataset_yaml_path,
         "split": "test",
-        "project": root_dir,
-        "name": os.path.basename(format_test_dir_for_write(root_dir, format_name)),
+        "project": str(run_tests_dir(root_dir)),
+        "name": "test-ultralytics",
         "exist_ok": True,
+        "plots": True,
+        "save": True,
     }
     if imgsz is not None:
         val_kwargs["imgsz"] = imgsz
@@ -2068,9 +2169,21 @@ def run_ultralytics_backend(
         val_kwargs["device"] = str(runtime_device).strip()
     val_kwargs.update(_ultralytics_val_task_kw(task_type))
     try:
+        ensure_run_layout(root_dir)
         test_image_count = len(_split_images_from_yaml(dataset_yaml_path, "test", 0))
         result = model.val(**val_kwargs)
         _save_metrics_csv_for_format(result, root_dir, format_name)
+        _finalize_ultralytics_pt_test_dir(
+            root_dir=root_dir,
+            format_name=format_name,
+            result=result,
+            weights_path=weights_path,
+            dataset_yaml_path=dataset_yaml_path,
+            imgsz=imgsz,
+            val_conf=val_conf,
+            val_iou=val_iou,
+            val_batch=val_batch,
+        )
         if not conf_rec_disable:
             _ensure_confidence_recommendations_for_explicit_artifact(
                 model=model,

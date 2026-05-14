@@ -28,6 +28,7 @@ from smartrain.workflows.testing.model_test_service import (
     resolve_root_dir_for_target,
 )
 from smartrain.services.model_test_orchestrator import run_model_test_after_setup
+from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
 from smartrain.workflows.training.train_resume import resolve_dataset_path_for_resume
 from smartrain.core.runtime.run_artifacts import (
@@ -731,6 +732,7 @@ def _check_onnx_format_preflight(policy: str) -> tuple[bool, str | None]:
 def main(argv: list[str] | None = None) -> None:
     parser = build_model_test_arg_parser()
     args = parser.parse_args(argv)
+    ensure_matplotlib_training_runtime(non_interactive=bool(getattr(args, "non_interactive", False)))
     interactive = is_interactive_allowed(bool(getattr(args, "non_interactive", False)))
     request = make_command_request("test", argv if argv is not None else [], interactive_allowed=interactive)
     workspace_root = resolve_workspace_root(args.workspace)

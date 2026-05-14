@@ -20,49 +20,24 @@ class TestBackendDispatchContext:
 
 def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
     from smartrain.core.workflow_adapters import testing_runtime_api as mtr
-    from smartrain.backends.train_test_registry import resolve_test_backend
-
-    def _backend_for(local_fmt: str) -> str:
-        return resolve_test_backend(task_type=ctx.task_type, model_format=local_fmt).backend
 
     if ctx.target_kind == "runs":
-        if bool(ctx.args.deep_diagnostics) or bool(ctx.args.perf):
-            pt_result = mtr.run_ultralytics_backend(
-                root_dir=ctx.root_dir,
-                weights_path=ctx.primary_path,
-                dataset_yaml_path=ctx.data_yaml,
-                format_name="pt",
-                imgsz=ctx.args.imgsz,
-                val_conf=ctx.args.conf,
-                val_iou=ctx.args.iou,
-                val_batch=ctx.args.batch,
-                deep_diagnostics=bool(ctx.args.deep_diagnostics),
-                collect_performance=bool(ctx.args.perf),
-                perf_warmup_images=int(max(0, ctx.args.perf_warmup_images)),
-                runtime_device=ctx.args.device,
-                task_type=ctx.task_type,
-            )
-            return pt_result.success, pt_result.error
-        mtr.complete_missing_test_artifacts(
-            ctx.root_dir,
-            workspace_root=ctx.workspace_root,
-            pt_test_runner=__import__("smartrain.workflows.training.model_training_module", fromlist=["test_yolo"]).test_yolo,
-            pt_test_runner_kwargs={
-                "val_imgsz": ctx.args.imgsz,
-                "val_conf": ctx.args.conf,
-                "val_iou": ctx.args.iou,
-                "val_batch": ctx.args.batch,
-            },
-        )
-        mtr.persist_target_test_artifacts_state(
-            ctx.root_dir,
+        pt_result = mtr.run_ultralytics_backend(
+            root_dir=ctx.root_dir,
+            weights_path=ctx.primary_path,
+            dataset_yaml_path=ctx.data_yaml,
             format_name="pt",
-            target_path=ctx.primary_path,
-            dataset_yaml=ctx.data_yaml,
-            backend=_backend_for("pt"),
-            status="ok",
+            imgsz=ctx.args.imgsz,
+            val_conf=ctx.args.conf,
+            val_iou=ctx.args.iou,
+            val_batch=ctx.args.batch,
+            deep_diagnostics=bool(ctx.args.deep_diagnostics),
+            collect_performance=bool(ctx.args.perf),
+            perf_warmup_images=int(max(0, ctx.args.perf_warmup_images)),
+            runtime_device=ctx.args.device,
+            task_type=ctx.task_type,
         )
-        return True, None
+        return pt_result.success, pt_result.error
 
     pt_result = mtr.run_ultralytics_backend(
         root_dir=ctx.root_dir,
