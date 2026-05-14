@@ -74,6 +74,10 @@ from smartrain.workflows.analyze.analyze_benchmark_service import (
     run_inference_benchmark as _svc_run_inference_benchmark,
     run_inference_plot as _svc_run_inference_plot,
 )
+from smartrain.core.inference.ultralytics_metrics_pr import (
+    extract_pr_curve_from_ultralytics_metrics,
+    extract_pr_curve_per_class_from_ultralytics_metrics,
+)
 from smartrain.workflows.analyze.analyze_pr_curves_service import (
     resolve_pr_output_png as _svc_resolve_pr_output_png,
     run_pr_curves as _svc_run_pr_curves,
@@ -736,79 +740,6 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def _extract_pr_curve_from_metrics(metrics_obj: Any) -> tuple[np.ndarray, np.ndarray] | None:
-    """Try to extract all-classes PR curve from Ultralytics metrics object."""
-    sources = [metrics_obj, getattr(metrics_obj, "box", None)]
-    for src in sources:
-        if src is None:
-            continue
-        curves = getattr(src, "curves_results", None)
-        if not curves:
-            continue
-        for item in curves:
-            if not isinstance(item, (list, tuple)) or len(item) < 2:
-                continue
-            x = np.asarray(item[0], dtype=float)
-            y = np.asarray(item[1], dtype=float)
-            x_label = str(item[2]) if len(item) > 2 else ""
-            y_label = str(item[3]) if len(item) > 3 else ""
-            title = str(item[4]) if len(item) > 4 else ""
-            marker = f"{x_label} {y_label} {title}".lower()
-
-            # Keep only PR curve data (Recall -> Precision).
-            if "recall" not in marker or "precision" not in marker:
-                continue
-
-            if y.ndim >= 2:
-                # Usually shape: (num_classes, points); average across classes.
-                valid_rows = ~np.all(np.isnan(y), axis=1)
-                if bool(np.any(valid_rows)):
-                    y = np.nanmean(y[valid_rows], axis=0)
-                else:
-                    continue
-            if x.ndim > 1:
-                x = np.ravel(x)
-            if y.ndim > 1:
-                y = np.ravel(y)
-
-            n = min(len(x), len(y))
-            if n == 0:
-                continue
-            return x[:n], y[:n]
-    return None
-
-
-def _extract_pr_curve_per_class_from_metrics(metrics_obj: Any) -> tuple[np.ndarray, np.ndarray] | None:
-    """Return recall grid and per-class precision curves if available."""
-    sources = [metrics_obj, getattr(metrics_obj, "box", None)]
-    for src in sources:
-        if src is None:
-            continue
-        curves = getattr(src, "curves_results", None)
-        if not curves:
-            continue
-        for item in curves:
-            if not isinstance(item, (list, tuple)) or len(item) < 2:
-                continue
-            x = np.asarray(item[0], dtype=float)
-            y = np.asarray(item[1], dtype=float)
-            marker = " ".join(str(v) for v in item[2:5]).lower()
-            if "recall" not in marker or "precision" not in marker:
-                continue
-            if y.ndim < 2:
-                continue
-            if x.ndim > 1:
-                x = np.ravel(x)
-            n_points = min(len(x), int(y.shape[-1]))
-            if n_points <= 0:
-                continue
-            y2d = y[:, :n_points] if y.shape[1] >= n_points else y[:n_points, :].T
-            if y2d.shape[1] != n_points:
-                continue
-            return x[:n_points], y2d
-    return None
-
-
 def _safe_name(value: str) -> str:
     return re.sub(r"[^\w.\-+]+", "_", value, flags=re.UNICODE).strip("._") or "class"
 
@@ -1038,8 +969,8 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
         resolve_run_val_profile_cb=_resolve_run_val_profile,
         ultralytics_sidecar_dir_cb=ultralytics_sidecar_dir,
         run_val_memory_safe_cb=_run_val_memory_safe,
-        extract_pr_curve_cb=_extract_pr_curve_from_metrics,
-        extract_pr_curve_per_class_cb=_extract_pr_curve_per_class_from_metrics,
+        extract_pr_curve_cb=extract_pr_curve_from_ultralytics_metrics,
+        extract_pr_curve_per_class_cb=extract_pr_curve_per_class_from_ultralytics_metrics,
         append_cache_entry_cb=append_cache_entry,
         safe_name_cb=_safe_name,
         resolve_workspace_root_cb=resolve_workspace_root,
