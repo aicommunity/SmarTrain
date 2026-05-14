@@ -28,7 +28,7 @@ def test_baseline_help_snapshots(subprocess_env: dict[str, str], tmp_path: Path)
     cases: list[tuple[list[str], list[str]]] = [
         (["--help"], ["deploy", "train", "analyze", "inference"]),
         (["train", "--", "--help"], ["Examples:", "--data", "--model"]),
-        (["test", "--", "--help"], ["--formats", "--weights", "--non-interactive"]),
+        (["test", "--", "--help"], ["--formats", "--weights", "--non-interactive", "--nit"]),
         (["inference", "--", "--help"], ["--data-mode", "--source-dir", "--model-name"]),
         (["analyze", "scan", "--", "--help"], ["--workspace", "--models-root"]),
         (["balance", "--", "--help"], ["--dataset", "--strategy", "--preset"]),
@@ -56,4 +56,5 @@ def test_replay_builder_baseline_for_boolean_optional_flags() -> None:
     assert "--perf False" not in replay
     assert "--name sample" in replay
     assert "-y" in replay or "--non-interactive" in replay
+    assert replay.rstrip().endswith("--nit")
 

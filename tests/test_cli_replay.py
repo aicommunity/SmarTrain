@@ -27,6 +27,8 @@ def test_replay_boolean_optional_action_does_not_emit_true_false_values() -> Non
     assert "--include-partial-datasets" in cmd
     assert "True" not in cmd
     assert "False" not in cmd
+    assert cmd.rstrip().endswith("--nit")
+    assert cmd.count("--nit") == 1
 
 
 def test_replay_fusion_boolean_optional_false_emits_negative_flag() -> None:
@@ -100,4 +102,6 @@ def test_replay_other_interactive_commands_do_not_emit_python_bools() -> None:
         assert " True" not in cmd and " False" not in cmd
         for flag in expected_flags:
             assert flag in cmd
+        assert cmd.rstrip().endswith("--nit")
+        assert cmd.count("--nit") == 1
 
