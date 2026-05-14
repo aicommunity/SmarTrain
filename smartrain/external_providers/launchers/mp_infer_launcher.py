@@ -3,8 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from smartrain.core.inference.ultralytics_prediction_extract import extract_task_outputs_from_ultralytics_preds
+
+
+def _extract_task_outputs(preds: Any, task_type: str) -> dict[str, Any]:
+    return extract_task_outputs_from_ultralytics_preds(None, preds, task_type=task_type)
 
 
 def main(argv: list[str] | None = None) -> int:
