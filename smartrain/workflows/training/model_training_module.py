@@ -168,6 +168,7 @@ from smartrain.workflows.testing.model_test_service import (
 )
 from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
+    canonicalize_run_ultralytics_layout,
     materialize_canonical_run_model,
     resolve_run_model_with_legacy_fallback,
     run_tmp_dir,
@@ -1063,13 +1064,7 @@ def _resolve_cli_paths_with_profile(args, u_cfg: dict) -> tuple[str | None, str,
 
 
 def _finalize_train_kwargs(ultralytics_cfg: dict[str, Any], data_yaml: str, model_dir: str) -> dict[str, Any]:
-    """Force Ultralytics train directory under ``model_dir``.
-
-    ``name="train-ultralytics"`` and ``exist_ok=False`` mean a second training run in the same
-    ``model_dir`` gets a new sibling folder (e.g. ``train-ultralytics-2``) instead of overwriting
-    the first — Ultralytics avoids clobbering artifacts. Unusual absolute paths under the run
-    (e.g. segments like ``*.tar.gz``) usually come from workspace/dataset layout, not from this call.
-    """
+    """Force Ultralytics train directory under ``model_dir`` (``train-ultralytics``, ``exist_ok=True``)."""
     return _svc_finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
 
 
@@ -1406,6 +1401,11 @@ def train_yolo(
                 pass
 
     try:
+        canonicalize_run_ultralytics_layout(model_dir)
+    except Exception:
+        pass
+
+    try:
         if not os.path.isfile(canonical_best_path):
             legacy = resolve_run_model_with_legacy_fallback(model_dir)
             if legacy is not None and legacy.is_file():
@@ -1544,7 +1544,7 @@ def test_yolo(
         "split": "test",
         "project": str(run_tests_dir(model_dir)),
         "name": "test-ultralytics",
-        "exist_ok": False,
+        "exist_ok": True,
         "plots": False,
         "save": False,
     }
@@ -1607,6 +1607,11 @@ def test_yolo(
         test_end_time = datetime.now()
         print(f"[ERROR] Failed to test {model_dir} on dataset {dataset_path}: {e}")
         raise
+    finally:
+        try:
+            canonicalize_run_ultralytics_layout(model_dir)
+        except Exception:
+            pass
 
     return test_start_time, test_end_time, inference_record
 
@@ -1705,6 +1710,10 @@ def _ensure_confidence_recommendations(
             fallback_confidence=float(fallback_confidence),
         )
         print(f"[WARN] Failed to compute val confidence recommendations: {exc}")
+    try:
+        canonicalize_run_ultralytics_layout(model_dir)
+    except Exception:
+        pass
 
 
 def save_metrics_csv(test_result, model_dir):
