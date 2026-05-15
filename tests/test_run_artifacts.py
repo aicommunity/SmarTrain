@@ -101,3 +101,16 @@ def test_ensure_run_layout_migration_does_not_overwrite_new_paths(tmp_path: Path
     assert (tests_root / "test_metrics.csv").read_text(encoding="utf-8") == "new-metrics"
     assert not (run_dir / "test" / "pr.csv").exists()
     assert not (run_dir / "test_metrics.csv").exists()
+
+
+def test_ensure_run_layout_merges_parallel_test_ultralytics_dir(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-parallel-ultra"
+    parallel = run_dir / "test-ultralytics"
+    parallel.mkdir(parents=True, exist_ok=True)
+    (parallel / "BoxPR_curve.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01")
+
+    ensure_run_layout(str(run_dir))
+    dest = run_tests_dir(str(run_dir)) / "test-ultralytics"
+    assert (dest / "BoxPR_curve.png").is_file()
+    assert not parallel.exists()
+

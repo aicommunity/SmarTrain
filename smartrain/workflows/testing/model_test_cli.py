@@ -28,6 +28,7 @@ from smartrain.workflows.testing.model_test_service import (
     resolve_root_dir_for_target,
 )
 from smartrain.services.model_test_orchestrator import run_model_test_after_setup
+from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
 from smartrain.workflows.training.train_resume import resolve_dataset_path_for_resume
 from smartrain.core.runtime.run_artifacts import (
@@ -94,7 +95,14 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="ONNX provider policy: gpu_strict, gpu_preferred, cpu_only.",
     )
-    p.add_argument("--non-interactive", "-y", action="store_true", help="Disable interactive prompts.")
+    p.add_argument(
+        "--non-interactive",
+        "-y",
+        "--nit",
+        action="store_true",
+        dest="non_interactive",
+        help="Disable interactive prompts (Typer also accepts --nit before subcommand flags).",
+    )
     return p
 
 
@@ -731,8 +739,12 @@ def _check_onnx_format_preflight(policy: str) -> tuple[bool, str | None]:
 def main(argv: list[str] | None = None) -> None:
     parser = build_model_test_arg_parser()
     args = parser.parse_args(argv)
-    interactive = is_interactive_allowed(bool(getattr(args, "non_interactive", False)))
-    request = make_command_request("test", argv if argv is not None else [], interactive_allowed=interactive)
+    argv_list = list(argv) if argv is not None else []
+    request = make_command_request(
+        "test", argv_list, interactive_allowed=is_interactive_allowed(argv_list)
+    )
+    interactive = request.interactive_allowed
+    ensure_matplotlib_training_runtime(non_interactive=not interactive)
     workspace_root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(workspace_root)
     atexit.register(lambda wr=workspace_root: best_effort_prune_workspace_runs_detect(wr))

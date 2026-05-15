@@ -14,6 +14,11 @@ from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_prompts import prompt_choice, prompt_text
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.workflows.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
+from smartrain.workflows.datasets.dataset_cli_catalog import (
+    EMPTY_DATASETS_INFO_MESSAGE,
+    load_datasets_catalog,
+    try_prompt_dataset_interactive,
+)
 from smartrain.workflows.datasets.dataset_former import _image_content_hash
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.workflows.datasets.dataset_passport import next_dataset_name, write_dataset_passport
@@ -58,15 +63,6 @@ def build_prune_arg_parser() -> argparse.ArgumentParser:
     sub.add_parser("empty", parents=[build_prune_empty_arg_parser()], add_help=False)
     sub.add_parser("dedup", parents=[build_prune_dedup_arg_parser()], add_help=False)
     return p
-
-
-def _load_catalog(layout: WorkspaceLayout) -> dict[str, Any]:
-    p = layout.work_datasets_info_path()
-    if not os.path.isfile(p):
-        return {}
-    with open(p, "r", encoding="utf-8") as f:
-        obj = json.load(f)
-    return obj if isinstance(obj, dict) else {}
 
 
 def _label_has_valid_yolo_line(path: str) -> bool:
@@ -290,9 +286,9 @@ def main(argv=None) -> None:
 
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
-    catalog = _load_catalog(layout)
+    catalog = load_datasets_catalog(layout)
     if not catalog:
-        print("[ERROR] datasets_info.json was not found or is empty.")
+        print(EMPTY_DATASETS_INFO_MESSAGE)
         return
 
     interactive_used = False
@@ -308,8 +304,11 @@ def main(argv=None) -> None:
         args = parser.parse_args([])
         _interactive_fill(args, mode, sorted(catalog.keys()))
         interactive_used = True
-    elif args.dataset is None and interactive_allowed and sys.stdin.isatty():
-        _interactive_fill(args, mode, sorted(catalog.keys()))
+    elif try_prompt_dataset_interactive(
+        args=args,
+        argv=argv,
+        fill=lambda: _interactive_fill(args, mode, sorted(catalog.keys())),
+    ):
         interactive_used = True
 
     if not args.dataset:

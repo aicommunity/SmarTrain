@@ -18,6 +18,11 @@ from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_prompts import prompt_yes_no
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.workflows.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
+from smartrain.workflows.datasets.dataset_cli_catalog import (
+    EMPTY_DATASETS_INFO_MESSAGE,
+    load_datasets_catalog,
+    try_prompt_dataset_interactive,
+)
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.workflows.datasets.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
@@ -105,15 +110,6 @@ def build_orient_arg_parser() -> argparse.ArgumentParser:
         help="Path to external checkpoint for initialization/additional training of RotNet.",
     )
     return p
-
-
-def _load_catalog(layout: WorkspaceLayout) -> dict:
-    p = layout.work_datasets_info_path()
-    if not os.path.isfile(p):
-        return {}
-    with open(p, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data if isinstance(data, dict) else {}
 
 
 def _interactive_fill(args, *, dataset_names: list[str]) -> None:
@@ -618,14 +614,16 @@ def main(argv=None) -> None:
     interactive_used = False
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
-    catalog = _load_catalog(layout)
+    catalog = load_datasets_catalog(layout)
     if not catalog:
-        print("[ERROR] datasets_info.json was not found or is empty.")
+        print(EMPTY_DATASETS_INFO_MESSAGE)
         return
 
-    if args.dataset is None and interactive_allowed and sys.stdin.isatty():
-        _interactive_fill(args, dataset_names=sorted(catalog.keys()))
-        interactive_used = True
+    interactive_used = try_prompt_dataset_interactive(
+        args=args,
+        argv=argv,
+        fill=lambda: _interactive_fill(args, dataset_names=sorted(catalog.keys())),
+    )
     if not args.dataset:
         print("[ERROR] Incomplete arguments: specify --dataset.")
         return

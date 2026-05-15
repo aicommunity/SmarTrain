@@ -82,14 +82,28 @@ def test_model_test_cli_run_uses_existing_resume_logic(monkeypatch, tmp_path: Pa
         encoding="utf-8",
     )
 
-    called: dict[str, str] = {}
+    called: dict[str, Any] = {}
 
-    def _fake_complete(run_dir_arg: str, **kwargs) -> bool:
-        called["run_dir"] = run_dir_arg
-        called["workspace_root"] = kwargs["workspace_root"]
-        return True
+    from datetime import datetime
 
-    monkeypatch.setattr("smartrain.workflows.testing.model_test_cli.complete_missing_test_artifacts", _fake_complete)
+    from smartrain.workflows.testing.model_test_backends import BackendRunResult
+
+    def _fake_run_ultralytics_backend(**kwargs):
+        called["root_dir"] = kwargs.get("root_dir")
+        return BackendRunResult(
+            format="pt",
+            backend="ultralytics",
+            success=True,
+            test_start_time=datetime.now(),
+            test_end_time=datetime.now(),
+            inference={},
+            target_path=kwargs.get("weights_path"),
+        )
+
+    monkeypatch.setattr(
+        "smartrain.core.workflow_adapters.testing_runtime_api.run_ultralytics_backend",
+        _fake_run_ultralytics_backend,
+    )
     monkeypatch.setattr("smartrain.workflows.testing.model_test_cli.has_complete_test_artifacts", lambda *_args, **_kwargs: False)
     class _FakeResult:
         success = True
@@ -99,8 +113,7 @@ def test_model_test_cli_run_uses_existing_resume_logic(monkeypatch, tmp_path: Pa
     smartrain_test_main(
         ["--workspace", str(tmp_path), "--run", str(run_dir), "--formats", "pt", "--no-perf", "-y"]
     )
-    assert called["run_dir"] == str(run_dir)
-    assert called["workspace_root"] == str(tmp_path)
+    assert called["root_dir"] == str(run_dir)
 
 
 def test_model_test_cli_rejects_public_pt_uni_format(tmp_path: Path) -> None:
@@ -659,8 +672,16 @@ def test_model_test_cli_skips_matching_existing_test_from_args_yaml_fallback(mon
     test_onnx_dir = Path(format_test_dir(str(run_dir), "onnx"))
     test_onnx_dir.mkdir(parents=True, exist_ok=True)
     (test_onnx_dir / "args.yaml").write_text(f"data: {dataset_yaml}\n", encoding="utf-8")
-    for name in ("pr.csv", "pr_per_class.csv"):
-        (test_onnx_dir / name).write_text("x", encoding="utf-8")
+    from smartrain.workflows.testing.ultralytics_test_contract import native_format_rich_files_required
+
+    for name in native_format_rich_files_required():
+        dest = test_onnx_dir / name
+        if dest.is_file():
+            continue
+        if name.endswith(".png"):
+            dest.write_bytes(b"\x89PNG\r\n\x1a\n")
+        else:
+            dest.write_text("x", encoding="utf-8")
     Path(format_recommendation_path(str(run_dir), "test", "onnx")).write_text(
         json.dumps({"objectives": {"A": {"global": {"threshold": 0.1}}, "B": {"global": {"threshold": 0.1}}, "C": {"global": {"threshold": 0.1}}}}),
         encoding="utf-8",

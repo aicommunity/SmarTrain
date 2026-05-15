@@ -20,22 +20,13 @@ from smartrain.core.runtime.run_artifacts import model_sidecar_metadata_path
 
 import yaml
 from smartrain.core.training.confidence_recommendation import read_recommendation_file, recommendations_complete
+from smartrain.workflows.testing.ultralytics_test_contract import rich_files_required_for_format
 
 TEST_ARTIFACTS_MANIFEST = "test_artifacts_manifest.json"
 PUBLIC_TEST_FORMATS = ("pt", "onnx", "engine", "trt")
 INTERNAL_TEST_FORMATS = ("pt_uni",)
 SUPPORTED_TEST_FORMATS = PUBLIC_TEST_FORMATS
 ALL_TEST_FORMATS = PUBLIC_TEST_FORMATS + INTERNAL_TEST_FORMATS
-_RICH_TEST_FILES = (
-    "args.yaml",
-    "pr.csv",
-    "pr_per_class.csv",
-    "BoxF1_curve.png",
-    "BoxPR_curve.png",
-    "BoxP_curve.png",
-    "BoxR_curve.png",
-    "confusion_matrix.png",
-)
 
 
 @dataclass
@@ -233,12 +224,12 @@ def _write_json_atomic(path: str, payload: dict[str, Any]) -> None:
             pass
 
 
-def _existing_rich_files(test_dir: str) -> list[str]:
-    out: list[str] = []
-    for name in _RICH_TEST_FILES:
-        if os.path.exists(os.path.join(test_dir, name)):
-            out.append(name)
-    return out
+def _existing_rich_files(root_dir: str, fmt: str) -> list[str]:
+    test_dir = format_test_dir(root_dir, fmt)
+    if not os.path.isdir(test_dir):
+        return []
+    required = rich_files_required_for_format(root_dir, fmt)
+    return [name for name in required if os.path.isfile(os.path.join(test_dir, name))]
 
 
 def get_test_artifacts_status(root_dir: str, format_name: str | None = "pt") -> TestArtifactsStatus:
@@ -254,8 +245,12 @@ def get_test_artifacts_status(root_dir: str, format_name: str | None = "pt") -> 
     test_dir_exists = os.path.isdir(test_dir)
     confidence_test_complete = recommendations_complete(read_recommendation_file(test_json))
     confidence_val_complete = recommendations_complete(read_recommendation_file(val_json))
-    existing_rich = _existing_rich_files(test_dir) if test_dir_exists else []
-    rich_artifacts_complete = test_dir_exists and len(existing_rich) >= 3
+    existing_rich = _existing_rich_files(root_dir, fmt) if test_dir_exists else []
+    required = rich_files_required_for_format(root_dir, fmt) if test_dir_exists else ()
+    missing_rich = (
+        [n for n in required if not os.path.isfile(os.path.join(test_dir, n))] if test_dir_exists else []
+    )
+    rich_artifacts_complete = test_dir_exists and not missing_rich
     missing: list[str] = []
     if not metrics_exists:
         missing.append("metrics_csv")
@@ -281,8 +276,9 @@ def get_test_artifacts_status(root_dir: str, format_name: str | None = "pt") -> 
         missing.append("confidence_val")
     if not test_dir_exists:
         missing.append("test_dir")
-    elif not rich_artifacts_complete:
-        missing.append("rich_artifacts")
+    elif missing_rich:
+        for name in missing_rich:
+            missing.append(f"rich_artifact:{name}")
     return TestArtifactsStatus(
         root_dir=os.path.abspath(root_dir),
         format=fmt,

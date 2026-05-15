@@ -11,7 +11,7 @@ def resolve_all_data_yaml_context(
     baseline: str,
     others: list[str],
     profile: str,
-    interactive_mode: bool,
+    selection_prompts_used: bool,
     build_run_data_yaml_map_cb: Callable[..., tuple[dict[str, str], dict[str, str], list[str]]],
     auto_select_data_yaml_cb: Callable[..., str | None],
     prompt_choice_cb: Callable[..., str],
@@ -36,7 +36,7 @@ def resolve_all_data_yaml_context(
             for rd in selected_run_dirs:
                 run_data_yaml_map.setdefault(rd, data_yaml)
             unique_data_yaml = sorted(set(run_data_yaml_map.values()))
-        elif interactive_mode and len(unique_data_yaml) > 1:
+        elif selection_prompts_used and sys.stdin.isatty() and len(unique_data_yaml) > 1:
             print("[INFO] Multiple datasets detected across selected runs.")
             for rd in selected_run_dirs:
                 dy = run_data_yaml_map.get(rd)
@@ -62,14 +62,14 @@ def resolve_all_data_yaml_context(
                     unique_data_yaml = [data_yaml]
         elif not data_yaml and len(unique_data_yaml) == 1:
             data_yaml = unique_data_yaml[0]
-        elif not data_yaml and interactive_mode and not run_data_yaml_map:
+        elif not data_yaml and selection_prompts_used and sys.stdin.isatty() and not run_data_yaml_map:
             data_yaml = prompt_text_cb("Path to data.yaml (required for speed/full)", default="").strip()
             if data_yaml:
                 for rd in selected_run_dirs:
                     run_data_yaml_map[rd] = data_yaml
                 unique_data_yaml = [data_yaml]
 
-        if not data_yaml and not run_data_yaml_map and not interactive_mode:
+        if not data_yaml and not run_data_yaml_map and not (selection_prompts_used and sys.stdin.isatty()):
             print(
                 "[ERROR] No data.yaml resolved for selected runs; use --data-yaml or ensure metadata/runtime yaml is present.",
                 file=sys.stderr,

@@ -4,7 +4,42 @@
 
 This document captures real code flows and helps you quickly locate where to make changes.
 
-Sources of truth for this section: `smartrain/cli.py`, `smartrain/workflows/training/model_training_module.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/training_queue.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
+Sources of truth for this section: `smartrain/cli.py`, `smartrain/workflows/training/model_training_module.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/workflows/queue/training_queue.py`, `smartrain/workflows/queue/training_queue_cli.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
+
+**Package layout** (folder map): [package-layout.md](package-layout.md).
+
+## Functional navigation
+
+Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_apps/*`). Use this table to find the right module when changing behavior.
+
+| Command / area | Typer entry (`cli.py`) | Argparse / `main` | Orchestration / services | Notes |
+|----------------|------------------------|-------------------|---------------------------|-------|
+| `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `model_training_module` | `services/train_service.py`, `workflows/training/*_service.py` | Profile merge: `core/training/train_profile.py` |
+| `test` | → `cli_apps/test_app` | `workflows/testing/model_test_cli.py` | `services/model_test_orchestrator.py`, `services/test_backend_dispatch.py` | Backends: `backends/train_test_registry.py` |
+| `inference` | → `cli_apps/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `workflows/inference/inference_backends.py` | |
+| `analyze` subcommands | Typer subcommands → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` | `workflows/analyze/analyze_*_service.py`, `services/analyze_*.py` | Metrics / canonical: `orchestrators/canonical_gateway.py` |
+| `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | `datasets_json_former.py` | | Writes `datasets_info.json` |
+| `fusion` | → `workflows/datasets/dataset_former.py` | same module | | |
+| `queue` | Typer → `workflows/queue/training_queue_cli.py` (`list`/`add`/…); `queue-run` → `_forward_argparse_command` → `training_queue.py` | `training_queue_cli` / `training_queue` | | Queue state under workspace |
+
+## CLI: interactive mode and replay
+
+Typer (`cli.py`, `_forward_argparse_command`) strips Typer-only tokens `--nit` and `--smartrain-replay` (including `--nit=…` / `--smartrain-replay=…` forms) before calling each subcommand’s `main(argv)`. Use `--nit` as a separate token in scripts; `=`-forms are stripped for Typer routing but are not the canonical argparse contract. Legacy `-y` / `--non-interactive` on the forwarded argv still force non-interactive routing (they are not stripped). Environment `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (see `smartrain/cli_support/typer_non_interactive.py`) forces the same policy without argv flags. Replay strings built via `build_non_interactive_command` / `emit_replay` append a single trailing `--nit` so pasted commands match Typer behavior. Details: [../cli/replay-and-non-interactive.md](../cli/replay-and-non-interactive.md).
+
+| Mode | TTY | `--nit` | Incomplete required args | Behavior |
+|------|-----|---------|--------------------------|----------|
+| Manual | yes | no | yes / no | Same as today: module prompts may run when args are incomplete; otherwise argparse errors |
+| Manual | yes | yes | no | No Typer-driven interactivity; modules behave as in non-interactive mode |
+| Manual | yes | yes | yes | Error (`parser.error` / explicit message), no interactive fill-in |
+| Replay (paste) | yes | yes (in the printed line) | — | Predictable non-interactive run |
+
+`train` keeps its own confirmation flags (`--yes` / `-y` for output directory etc.); do not treat them as the Typer `--nit` contract. Typer `--nit` applies to the outer `smartrain` invocation; replay lines include `--nit` for copy-paste. Invoking a workflow module with `python -m ...` without the Typer wrapper does not strip `--nit`; that path is documented as unsupported in [../refactor/tech-debt-cli-replay-nit.md](../refactor/tech-debt-cli-replay-nit.md).
+
+### Layers and imports
+
+- Modules under `smartrain/services/` must **not** import `smartrain.workflows.*`; they call workflow code through facades in `smartrain/core/workflow_adapters/`. Regression: `tests/regression/test_train_service_guardrails.py`.
+- Canonical read/write and gateway behavior: `orchestrators/canonical_gateway.py`, `domain/canonical/`, `adapters/canonical/`.
+- Narrative snapshot of layers and refactor waves (not duplicated here): [../refactor/13-project-current-state.md](../refactor/13-project-current-state.md).
 
 ## 1) Top-level architecture
 

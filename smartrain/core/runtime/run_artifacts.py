@@ -122,6 +122,11 @@ def _migrate_legacy_test_artifacts(root: Path) -> None:
     for legacy_name, new_name in legacy_to_new_dirs.items():
         _move_tree_merge_to_canonical(root / legacy_name, tests_root / new_name)
 
+    root_ultra = root / "test-ultralytics"
+    canonical_ultra = tests_root / "test-ultralytics"
+    if root_ultra.is_dir():
+        _move_tree_merge_to_canonical(root_ultra, canonical_ultra)
+
     legacy_patterns = (
         "test_metrics*.csv",
         "val_metrics*.csv",

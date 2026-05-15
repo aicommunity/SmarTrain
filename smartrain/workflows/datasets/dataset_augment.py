@@ -28,9 +28,14 @@ from smartrain.cli_support.cli_replay import build_non_interactive_command, prin
 from smartrain.workflows.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.workflows.datasets.dataset_passport import next_dataset_name, write_dataset_passport
+from smartrain.workflows.datasets.dataset_cli_catalog import (
+    EMPTY_DATASETS_INFO_MESSAGE,
+    load_datasets_catalog,
+    sorted_class_names_union_from_catalog,
+    try_prompt_dataset_interactive,
+)
 from smartrain.workflows.datasets.dataset_cli_common import (
     detect_split_from_path,
-    load_dataset_catalog,
     update_datasets_sidecar,
 )
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
@@ -159,10 +164,6 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-legend", action="store_true")
     return p
-
-
-def _load_catalog(layout: WorkspaceLayout) -> dict:
-    return load_dataset_catalog(layout)
 
 
 def _detect_split(images_path: str) -> str:
@@ -1187,18 +1188,21 @@ def main(argv=None):
     root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(root)
     atexit.register(lambda wr=root: best_effort_prune_workspace_runs_detect(wr))
-    catalog = _load_catalog(layout)
+    catalog = load_datasets_catalog(layout)
     if not catalog:
-        print("[ERROR] datasets_info.json was not found or is empty.")
+        print(EMPTY_DATASETS_INFO_MESSAGE)
         return
 
-    if args.dataset is None and not argv:
-        # just in case, but our subcommand is called with arguments from the cli
-        pass
-    if args.dataset is None and interactive_allowed and sys.stdin.isatty():
-        all_classes = sorted({k for v in catalog.values() if isinstance(v, dict) for k in (v.get("classes") or {}).keys()})
-        _interactive_fill(args, sorted(catalog.keys()), all_classes, layout.root)
-        interactive_used = True
+    interactive_used = try_prompt_dataset_interactive(
+        args=args,
+        argv=argv,
+        fill=lambda: _interactive_fill(
+            args,
+            sorted(catalog.keys()),
+            sorted_class_names_union_from_catalog(catalog),
+            layout.root,
+        ),
+    )
 
     if not args.dataset:
         print("[ERROR] Incomplete arguments: specify --dataset.")

@@ -42,7 +42,7 @@ def run_all_command(
     write_manifest_cb: Callable[..., Any],
     write_analysis_report_cb: Callable[..., Any],
 ) -> None:
-    baseline, others, profile, interactive_mode = prepare_all_selection_cb(
+    baseline, others, profile, selection_prompts_used = prepare_all_selection_cb(
         args,
         filtered_run_records_cb=filtered_run_records_cb,
         prompt_int_cb=prompt_int_cb,
@@ -55,7 +55,7 @@ def run_all_command(
             baseline=baseline,
             others=others,
             profile=profile,
-            interactive_mode=interactive_mode,
+            selection_prompts_used=selection_prompts_used,
             build_run_data_yaml_map_cb=build_run_data_yaml_map_cb,
             auto_select_data_yaml_cb=auto_select_data_yaml_cb,
             prompt_choice_cb=prompt_choice_cb,

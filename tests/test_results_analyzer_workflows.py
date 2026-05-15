@@ -1505,9 +1505,170 @@ def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> Non
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
     assert "Системный профиль не показан" in ru_md
     assert "| run_name | model | dataset_name |" not in ru_md
+    assert "| Параметр | Значение |" in ru_md
+    assert "См. таблицу окружения тестирования ниже." in ru_md
 
 
-def test_analyze_report_renders_test_system_profile_table(tmp_path: Path) -> None:
+def test_analyze_report_alias_legend_has_no_fake_data_row(tmp_path: Path) -> None:
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [{"alias": "PT1", "format": "pt", "run_name": "run_a", "target_path": "models/run_a.pt"}]
+    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_alias_legend.csv", index=False)
+    manifest = {
+        "session_name": "s_alias",
+        "profile": "quality",
+        "baseline": "run_a",
+        "others": [],
+        "tables": [],
+        "images": [],
+        "artifacts": [],
+        "format_comparison": {"alias_legend_csv": "artifacts/format_compare/format_alias_legend.csv"},
+        "abbreviations": {},
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "<!-- alias_legend_columns: alias,run_name,target_path -->" in ru_md
+    assert "\n| alias | run_name | target_path |\n" not in ru_md
+
+
+def test_analyze_report_dedups_format_compare_csv_keys(tmp_path: Path) -> None:
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [{"alias": "PT1", "run_name": "run_a", "split": "test", "format": "pt", "mAP50-95": 0.61}]
+    ).to_csv(tmp_path / "artifacts" / "format_compare" / "format_metrics_compare_test.csv", index=False)
+    manifest = {
+        "session_name": "s_dedup",
+        "profile": "quality",
+        "baseline": "run_a",
+        "others": [],
+        "tables": [],
+        "images": [],
+        "artifacts": [],
+        "format_comparison": {
+            "test_csv": "artifacts/format_compare/format_metrics_compare_test.csv",
+            "csv": "artifacts/format_compare/format_metrics_compare_test.csv",
+        },
+        "abbreviations": {},
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert ru_md.count("Сравнение метрик по форматам (test)") == 1
+
+
+def test_analyze_report_runs_summary_prefers_canonical_test_columns(tmp_path: Path) -> None:
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "run_dir": "runs/ds_a/run_a",
+                "run_name": "run_a",
+                "model": "m1",
+                "dataset_name": "ds_a",
+                "test_Unnamed: 0": 0.0,
+                "test_class_name": "x",
+                "test_mAP50-95": 0.61,
+                "test_mAP50": 0.72,
+                "test_Box-F1": 0.8,
+                "test_Box-P": 0.81,
+                "test_Box-R": 0.79,
+            }
+        ]
+    ).to_csv(tmp_path / "artifacts" / "table" / "runs_summary.csv", index=False)
+    manifest = {
+        "session_name": "s_rs",
+        "profile": "quality",
+        "baseline": "run_a",
+        "others": [],
+        "tables": ["artifacts/table/runs_summary.csv"],
+        "images": [],
+        "artifacts": [],
+        "abbreviations": {},
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "test mAP50-95" in ru_md
+    assert "test_Unnamed" not in ru_md
+    assert "test_class_name" not in ru_md
+
+
+def test_analyze_report_speed_quality_after_speed_vs_map(tmp_path: Path) -> None:
+    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+
+    (tmp_path / "artifacts" / "speed_quality").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "artifacts" / "compare").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "artifacts" / "inference").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [{"model": "M1", "scatter_x_metric": "x", "scatter_x_value": 1.0, "scatter_y_metric": "y", "scatter_y_value": 0.5, "quality_source": "s"}]
+    ).to_csv(tmp_path / "artifacts" / "speed_quality" / "speed_quality.csv", index=False)
+    (tmp_path / "artifacts" / "compare" / "compare_curves.png").write_bytes(b"p")
+    (tmp_path / "artifacts" / "inference" / "benchmark_bars.png").write_bytes(b"p")
+    (tmp_path / "artifacts" / "speed_quality" / "speed_vs_map.png").write_bytes(b"p")
+    manifest = {
+        "session_name": "s_sq",
+        "profile": "full",
+        "baseline": "run_a",
+        "others": [],
+        "tables": ["artifacts/speed_quality/speed_quality.csv"],
+        "images": [
+            "artifacts/compare/compare_curves.png",
+            "artifacts/inference/benchmark_bars.png",
+            "artifacts/speed_quality/speed_vs_map.png",
+        ],
+        "artifacts": [],
+        "speed_quality": {"csv": "artifacts/speed_quality/speed_quality.csv"},
+        "format_comparison": {},
+        "abbreviations": {},
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    pos_fig = ru_md.find("speed_vs_map.png")
+    pos_tbl = ru_md.find("speed_quality.csv", pos_fig)
+    assert pos_fig != -1 and pos_tbl != -1 and pos_tbl > pos_fig
+    q2 = ru_md.index("## 2.")
+    f4 = ru_md.index("## 4.")
+    assert "speed_quality.csv" not in ru_md[q2:f4]
+
+
+def test_flat_row_canonical_merges_training_metadata_system_profile(tmp_path: Path) -> None:
+    from smartrain.workflows.analyze.analyze_run_query_service import flat_row_canonical
+
+    run_dir = tmp_path / "run_a"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "system_profile": {
+            "cpu": {"model": "TestCPU", "architecture": "x86_64", "logical_cores": 8, "physical_cores": 4},
+            "ram": {"total_gb": 16.0},
+            "gpu": {"cuda_available": True, "devices": [{"name": "RTX", "total_vram_gb": 8.0}], "total_vram_gb": 8.0},
+            "disk": {"mount_point": "/", "filesystem": "ext4", "total_gb": 100.0, "free_gb": 50.0},
+            "platform": {"os": "Linux", "os_release": "6.0", "python_version": "3.12", "hostname": "h"},
+        }
+    }
+    (run_dir / "training_metadata.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    def _fake_rec(_rd: str):
+        from smartrain.workflows.analyze.analyze_models import RunRecord
+
+        return RunRecord(
+            run_dir=str(run_dir),
+            model="m",
+            dataset_name="d",
+            training_ok=True,
+            testing_ok=True,
+            training_duration_s=None,
+            test_metrics={},
+            train_last_metrics={},
+        )
+
+    row = flat_row_canonical(str(run_dir), build_run_record_cb=_fake_rec)
+    assert row.get("sys_cpu_model") == "TestCPU"
+    assert row.get("sys_os") == "Linux"
+    assert row.get("sys_gpu_0_name") == "RTX"
     from smartrain.workflows.analyze.analyze_report import write_analysis_report
 
     (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
