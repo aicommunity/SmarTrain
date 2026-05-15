@@ -57,6 +57,21 @@ def best_effort_prune_workspace_runs_detect(workspace_root: str) -> None:
     prune_ultralytics_default_detect_under_runs(WorkspaceLayout(workspace_root).runs)
 
 
+_RUN_SIDECAR_DIR_NAMES = (
+    ".ultralytics_scratch",
+    ".ultralytics_predict_scratch",
+)
+
+
+def prune_empty_sidecar_dirs(run_dir: str) -> None:
+    """Remove empty Ultralytics scratch dirs under a run root."""
+    root = os.path.abspath(os.path.expanduser(run_dir))
+    for name in _RUN_SIDECAR_DIR_NAMES:
+        p = os.path.join(root, name)
+        if os.path.isdir(p) and not _subtree_has_any_file(p):
+            shutil.rmtree(p, ignore_errors=True)
+
+
 def best_effort_prune_runs_detect_near_run(run_dir: str) -> None:
     """If ``run_dir`` is under ``.../runs/...``, prune empty ``.../runs/detect`` junk."""
     cur = os.path.abspath(os.path.expanduser(run_dir))

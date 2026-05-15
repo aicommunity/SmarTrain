@@ -48,9 +48,18 @@ from smartrain.workflows.testing.model_test_service import (
     format_test_dir_for_write,
     persist_target_test_artifacts_state,
 )
-from smartrain.core.runtime.run_artifacts import ensure_run_layout, read_model_sidecar_metadata, run_tests_dir
+from smartrain.core.runtime.run_artifacts import (
+    canonicalize_run_ultralytics_layout,
+    ensure_run_layout,
+    read_model_sidecar_metadata,
+    run_tests_dir,
+)
 from smartrain.workflows.models import tensorrt_checks as trt_checks
-from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_runs_detect_near_run, ultralytics_sidecar_dir
+from smartrain.core.runtime.ultralytics_ephemeral import (
+    best_effort_prune_runs_detect_near_run,
+    prune_empty_sidecar_dirs,
+    ultralytics_sidecar_dir,
+)
 from smartrain.workflows.testing.unified_metrics_adapter import collect_ultralytics_style_gt
 from smartrain.workflows.testing.unified_validator_core import EvalProvenance, normalize_eval_params
 
@@ -1897,7 +1906,7 @@ def _ensure_confidence_recommendations_for_explicit_artifact(
         "plots": False,
         "save": False,
         "verbose": False,
-        "project": root_dir,
+        "project": str(run_tests_dir(root_dir)),
         "name": f"val-recs-{format_name}",
         "exist_ok": True,
     }
@@ -1934,6 +1943,10 @@ def _ensure_confidence_recommendations_for_explicit_artifact(
             beta_precision=float(beta_precision),
             fallback_confidence=float(fallback_confidence),
         )
+    try:
+        canonicalize_run_ultralytics_layout(root_dir)
+    except Exception:
+        pass
 
 
 def _ultralytics_val_task_kw(task_type: str | None) -> dict[str, str]:
@@ -2413,7 +2426,15 @@ def run_ultralytics_backend(
             error=str(exc),
         )
     finally:
+        try:
+            canonicalize_run_ultralytics_layout(root_dir)
+        except Exception:
+            pass
         best_effort_prune_runs_detect_near_run(root_dir)
+        try:
+            prune_empty_sidecar_dirs(root_dir)
+        except Exception:
+            pass
 
 
 def run_native_format_backend(

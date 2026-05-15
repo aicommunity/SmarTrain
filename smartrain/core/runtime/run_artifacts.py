@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+LEGACY_RUN_ROOT_VAL_RECS_PREFIX = "val-recs-"
+
+_PROTECTED_RUN_ROOT_DIR_NAMES = frozenset({"models", "tmp", ".smartrain", ".smartrain_cache"})
 
 
 def _normalize_run_root(run_dir: str | Path) -> Path:
@@ -59,11 +66,167 @@ def run_test_format_dir(run_dir: str, format_name: str) -> Path:
     return run_tests_dir(run_dir) / f"test_{safe_fmt}"
 
 
+def subtree_has_files(path: Path) -> bool:
+    """True if path is a file or a directory tree containing at least one file."""
+    if path.is_file():
+        return True
+    if not path.is_dir():
+        return False
+    for _root, _dirs, files in os.walk(path, followlinks=False):
+        if files:
+            return True
+    return False
+
+
+def _is_ultralytics_suffix_dir(name: str, canonical_name: str) -> bool:
+    if name == canonical_name:
+        return True
+    if not name.startswith(canonical_name):
+        return False
+    tail = name[len(canonical_name) :]
+    if not tail:
+        return False
+    return bool(re.fullmatch(r"-?\d+", tail))
+
+
+def _score_ultralytics_artifact_dir(path: Path, *, kind: str) -> tuple[int, float]:
+    priority = 0
+    if kind == "train":
+        if (path / "results.csv").is_file():
+            priority = 100
+        elif (path / "weights" / "best.pt").is_file():
+            priority = 90
+        elif (path / "weights" / "last.pt").is_file():
+            priority = 85
+        elif (path / "args.yaml").is_file():
+            priority = 70
+    elif kind == "test":
+        if (path / "pr.csv").is_file():
+            priority = 80
+        elif (path / "args.yaml").is_file():
+            priority = 70
+        elif (path / "BoxPR_curve.png").is_file():
+            priority = 65
+    if priority == 0 and subtree_has_files(path):
+        priority = 10
+    try:
+        mtime = path.stat().st_mtime if path.exists() else 0.0
+    except OSError:
+        mtime = 0.0
+    return priority, mtime
+
+
+def _consolidate_ultralytics_named_dir(parent: Path, canonical_name: str, *, kind: str) -> None:
+    if not parent.is_dir():
+        return
+    candidates = [
+        p for p in parent.iterdir() if p.is_dir() and _is_ultralytics_suffix_dir(p.name, canonical_name)
+    ]
+    if not candidates:
+        return
+    canonical = parent / canonical_name
+    canonical.mkdir(parents=True, exist_ok=True)
+    for src in sorted(candidates, key=lambda p: _score_ultralytics_artifact_dir(p, kind=kind), reverse=True):
+        if src.resolve() == canonical.resolve():
+            continue
+        _move_tree_merge_to_canonical(src, canonical)
+    for entry in list(parent.iterdir()):
+        if not entry.is_dir():
+            continue
+        if not _is_ultralytics_suffix_dir(entry.name, canonical_name):
+            continue
+        if entry.resolve() == canonical.resolve():
+            continue
+        if not subtree_has_files(entry):
+            shutil.rmtree(entry, ignore_errors=True)
+
+
+def consolidate_train_backend_dir(run_dir: str, backend: str = "ultralytics") -> None:
+    root = _normalize_run_root(run_dir)
+    safe = str(backend or "ultralytics").strip().lower().replace("/", "-").replace("\\", "-")
+    _consolidate_ultralytics_named_dir(root, f"train-{safe}", kind="train")
+
+
+def consolidate_test_backend_dir(run_dir: str, backend: str = "ultralytics") -> None:
+    tests = run_tests_dir(run_dir)
+    safe = str(backend or "ultralytics").strip().lower().replace("/", "-").replace("\\", "-")
+    _consolidate_ultralytics_named_dir(tests, f"test-{safe}", kind="test")
+
+
+def consolidate_val_recs_dirs(run_dir: str) -> None:
+    tests = run_tests_dir(run_dir)
+    if not tests.is_dir():
+        return
+    for entry in list(tests.iterdir()):
+        if not entry.is_dir():
+            continue
+        if entry.name != "val-ultralytics-recs" and not entry.name.startswith("val-recs-"):
+            continue
+        _consolidate_ultralytics_named_dir(tests, entry.name, kind="val")
+        if entry.is_dir() and not subtree_has_files(entry):
+            shutil.rmtree(entry, ignore_errors=True)
+
+
+def relocate_or_remove_legacy_val_recs_at_run_root(run_dir: str) -> None:
+    root = _normalize_run_root(run_dir)
+    tests = run_tests_dir(str(root))
+    tests.mkdir(parents=True, exist_ok=True)
+    for entry in list(root.iterdir()):
+        if not entry.is_dir():
+            continue
+        if not entry.name.startswith(LEGACY_RUN_ROOT_VAL_RECS_PREFIX):
+            continue
+        dest = tests / entry.name
+        if not subtree_has_files(entry):
+            shutil.rmtree(entry, ignore_errors=True)
+            continue
+        _move_tree_merge_to_canonical(entry, dest)
+
+
+def prune_empty_subdirs(run_dir: str) -> None:
+    root = _normalize_run_root(run_dir)
+    if not root.is_dir():
+        return
+
+    def _prune_children(container: Path) -> None:
+        if not container.is_dir():
+            return
+        for child in list(container.iterdir()):
+            if not child.is_dir():
+                continue
+            if child.name in _PROTECTED_RUN_ROOT_DIR_NAMES:
+                continue
+            if not subtree_has_files(child):
+                shutil.rmtree(child, ignore_errors=True)
+
+    _prune_children(root)
+    tests = root / "tests"
+    if tests.is_dir():
+        _prune_children(tests)
+
+
+def canonicalize_run_ultralytics_layout(run_dir: str) -> None:
+    """Idempotent post-process: merge Ultralytics suffix dirs, drop empty legacy shells."""
+    root = _normalize_run_root(run_dir)
+    if not root.is_dir():
+        return
+    consolidate_train_backend_dir(str(root), backend="ultralytics")
+    consolidate_test_backend_dir(str(root), backend="ultralytics")
+    consolidate_val_recs_dirs(str(root))
+    relocate_or_remove_legacy_val_recs_at_run_root(str(root))
+    prune_empty_subdirs(str(root))
+
+
+def remove_empty_train_ultralytics_dir(model_dir: str, backend: str = "ultralytics") -> None:
+    p = run_train_backend_dir(model_dir, backend)
+    if p.is_dir() and not subtree_has_files(p):
+        shutil.rmtree(p, ignore_errors=True)
+
+
 def _migrate_legacy_run_layout(root: Path) -> None:
     # Lazy migration with cleanup: move legacy artifacts into canonical
     # layout and remove legacy folders/files after successful relocation.
     run_tests_dir(str(root)).mkdir(parents=True, exist_ok=True)
-    run_train_backend_dir(str(root), "ultralytics").mkdir(parents=True, exist_ok=True)
     _migrate_legacy_train_artifacts(root)
     _migrate_legacy_test_artifacts(root)
 
@@ -148,6 +311,7 @@ def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:
     tmp.mkdir(parents=True, exist_ok=True)
     tests.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_run_layout(root)
+    canonicalize_run_ultralytics_layout(str(root))
     for runtime_name in ("_runtime_data_train.yaml", "_runtime_data_test.yaml"):
         src = root / runtime_name
         dst = tmp / runtime_name

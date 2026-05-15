@@ -5,6 +5,9 @@ import copy
 
 def finalize_train_kwargs(ultralytics_cfg: dict, data_yaml: str, model_dir: str) -> dict:
     """Force Ultralytics train directory under ``model_dir``."""
+    from smartrain.core.runtime.run_artifacts import remove_empty_train_ultralytics_dir
+
+    remove_empty_train_ultralytics_dir(model_dir)
     k = copy.deepcopy(ultralytics_cfg)
     overwritten: list[str] = []
     if "data" in k:
@@ -19,7 +22,7 @@ def finalize_train_kwargs(ultralytics_cfg: dict, data_yaml: str, model_dir: str)
     k["data"] = data_yaml
     k["project"] = model_dir
     k["name"] = "train-ultralytics"
-    k["exist_ok"] = False
+    k["exist_ok"] = True
     k.setdefault("mode", "train")
     if overwritten:
         print(

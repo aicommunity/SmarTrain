@@ -128,7 +128,7 @@ def test_finalize_train_kwargs_forces_dataset_and_run_paths():
     assert out["data"] == "/dataset/data.yaml"
     assert out["project"] == "/runs/out"
     assert out["name"] == "train-ultralytics"
-    assert out["exist_ok"] is False
+    assert out["exist_ok"] is True
     assert out["epochs"] == 2
 
 
