@@ -18,6 +18,20 @@ def test_strip_removes_nit_and_smartrain_replay() -> None:
     assert stripped is True
 
 
+def test_strip_removes_nit_equals_form() -> None:
+    raw = ["test", "--nit=1", "--run", "x"]
+    filtered, stripped = strip_typer_meta_non_interactive_flags(raw)
+    assert filtered == ["test", "--run", "x"]
+    assert stripped is True
+
+
+def test_strip_removes_smartrain_replay_equals_form() -> None:
+    raw = ["train", "--smartrain-replay=", "--data", "ds"]
+    filtered, stripped = strip_typer_meta_non_interactive_flags(raw)
+    assert filtered == ["train", "--data", "ds"]
+    assert stripped is True
+
+
 def test_strip_no_meta_returns_same_list() -> None:
     raw = ["train", "--data", "ds", "-y"]
     filtered, stripped = strip_typer_meta_non_interactive_flags(raw)

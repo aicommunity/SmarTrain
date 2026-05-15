@@ -24,7 +24,7 @@ Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_apps
 
 ## CLI: interactive mode and replay
 
-Typer (`cli.py`, `_forward_argparse_command`) strips Typer-only tokens `--nit` and `--smartrain-replay` before calling each subcommand’s `main(argv)`. Those flags never reach argparse. Legacy `-y` / `--non-interactive` on the forwarded argv still force non-interactive routing (they are not stripped). Environment `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (see `smartrain/cli_support/typer_non_interactive.py`) forces the same policy without argv flags. Replay strings built via `build_non_interactive_command` / `emit_replay` append a single trailing `--nit` so pasted commands match Typer behavior.
+Typer (`cli.py`, `_forward_argparse_command`) strips Typer-only tokens `--nit` and `--smartrain-replay` (including `--nit=…` / `--smartrain-replay=…` forms) before calling each subcommand’s `main(argv)`. Use `--nit` as a separate token in scripts; `=`-forms are stripped for Typer routing but are not the canonical argparse contract. Legacy `-y` / `--non-interactive` on the forwarded argv still force non-interactive routing (they are not stripped). Environment `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (see `smartrain/cli_support/typer_non_interactive.py`) forces the same policy without argv flags. Replay strings built via `build_non_interactive_command` / `emit_replay` append a single trailing `--nit` so pasted commands match Typer behavior. Details: [../cli/replay-and-non-interactive.md](../cli/replay-and-non-interactive.md).
 
 | Mode | TTY | `--nit` | Incomplete required args | Behavior |
 |------|-----|---------|--------------------------|----------|

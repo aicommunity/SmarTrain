@@ -740,9 +740,11 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_model_test_arg_parser()
     args = parser.parse_args(argv)
     argv_list = list(argv) if argv is not None else []
-    interactive = is_interactive_allowed(argv_list)
+    request = make_command_request(
+        "test", argv_list, interactive_allowed=is_interactive_allowed(argv_list)
+    )
+    interactive = request.interactive_allowed
     ensure_matplotlib_training_runtime(non_interactive=not interactive)
-    request = make_command_request("test", argv_list, interactive_allowed=interactive)
     workspace_root = resolve_workspace_root(args.workspace)
     layout = WorkspaceLayout(workspace_root)
     atexit.register(lambda wr=workspace_root: best_effort_prune_workspace_runs_detect(wr))

@@ -7,6 +7,7 @@
 | TD-R01 | DONE | `cli.py` / `python -m` | Typer-only `--nit`; `python -m` without Typer does not strip `--nit`. | WONTFIX for unsupported `python -m` full replay strings; use `smartrain ...` or strip `--nit` before argparse-only tests. Documented in `docs/development/architecture.md`. |
 | TD-R02 | DONE | `train` argparse | Unify `--nit` with `--yes` / `-y` dest or keep Typer-only `--nit` for train. | Typer-only `--nit` on the outer command; train keeps `--yes`/`-y` for workspace confirmations. Documented in `docs/development/architecture.md`. |
 | TD-R03 | DONE | Replay call graph | Ensure all replay paths append `--nit` once. | Implemented in `build_non_interactive_command` (used by `emit_replay` and direct `print_replay_command` callers). |
+| TD-R04 | DONE | Orchestrator H2 (`_formats_option_explicit_in_argv`) | Skip backend prompts when `--formats` in argv without Typer `--nit`. | Removed; replay always appends `--nit`; see `docs/cli/replay-and-non-interactive.md` (Legacy replay). |
 
 ### Audit: `build_non_interactive_command` / `emit_replay` (grep)
 

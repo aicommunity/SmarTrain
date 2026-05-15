@@ -16,6 +16,14 @@ def env_forces_non_interactive_cli() -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _is_typer_meta_non_interactive_token(tok: str) -> bool:
+    if tok in TYPER_META_NON_INTERACTIVE_FLAGS:
+        return True
+    if tok.startswith("--nit=") or tok.startswith("--smartrain-replay="):
+        return True
+    return False
+
+
 def strip_typer_meta_non_interactive_flags(argv: list[str]) -> tuple[list[str], bool]:
     """Remove Typer-only tokens; return (filtered_argv, True if any token was removed)."""
     if not argv:
@@ -23,7 +31,7 @@ def strip_typer_meta_non_interactive_flags(argv: list[str]) -> tuple[list[str], 
     stripped = False
     out: list[str] = []
     for tok in argv:
-        if tok in TYPER_META_NON_INTERACTIVE_FLAGS:
+        if _is_typer_meta_non_interactive_token(tok):
             stripped = True
             continue
         out.append(tok)

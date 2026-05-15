@@ -24,7 +24,7 @@
 
 ## CLI: интерактив и replay
 
-Typer (`cli.py`, `_forward_argparse_command`) вырезает служебные токены `--nit` и `--smartrain-replay` до вызова `main(argv)` подкоманды; в argparse они не попадают. `-y` / `--non-interactive` на пересылаемом argv по-прежнему отключают интерактив на стороне Typer (не вырезаются). Переменная `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (см. `smartrain/cli_support/typer_non_interactive.py`) задаёт тот же режим без флагов. Строки replay из `build_non_interactive_command` / `emit_replay` заканчиваются одним `--nit`, чтобы копипаст совпадал с входом через `smartrain`.
+Typer (`cli.py`, `_forward_argparse_command`) вырезает служебные токены `--nit` и `--smartrain-replay` (включая формы `--nit=…` / `--smartrain-replay=…`) до вызова `main(argv)` подкоманды; в argparse они не попадают. В скриптах предпочтителен отдельный токен `--nit`. `-y` / `--non-interactive` на пересылаемом argv по-прежнему отключают интерактив на стороне Typer (не вырезаются). Переменная `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (см. `smartrain/cli_support/typer_non_interactive.py`) задаёт тот же режим без флагов. Строки replay из `build_non_interactive_command` / `emit_replay` заканчиваются одним `--nit`. Подробнее (EN): [../../cli/replay-and-non-interactive.md](../../cli/replay-and-non-interactive.md).
 
 | Режим | TTY | `--nit` | Неполные обязательные args | Поведение |
 |-------|-----|---------|---------------------------|-----------|
