@@ -279,6 +279,13 @@ def run_inference_benchmark(
         except Exception as exc:
             print(f"[WARN] {model_name}: benchmark error: {exc}")
             clear_gpu_memory_cb()
+        finally:
+            try:
+                from smartrain.core.runtime.ultralytics_ephemeral import prune_empty_sidecar_dirs
+
+                prune_empty_sidecar_dirs(run_dir)
+            except Exception:
+                pass
 
     if not rows:
         print("[ERROR] No benchmark results produced.", file=sys.stderr)

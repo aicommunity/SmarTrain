@@ -132,6 +132,13 @@ def test_finalize_train_kwargs_forces_dataset_and_run_paths():
     assert out["epochs"] == 2
 
 
+def test_test_yolo_val_kwargs_use_exist_ok_true() -> None:
+    import inspect
+
+    source = inspect.getsource(mtm.test_yolo)
+    assert '"exist_ok": True' in source or "'exist_ok': True" in source
+
+
 def test_merge_cli_sets_default_device_when_missing():
     u: dict = {}
     merge_cli_into_ultralytics_cfg(

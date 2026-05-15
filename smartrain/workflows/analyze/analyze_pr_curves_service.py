@@ -155,6 +155,13 @@ def run_pr_curves(
                 print(f"[WARN] {label}: val() error: {exc}")
                 clear_gpu_memory_cb()
                 continue
+            finally:
+                try:
+                    from smartrain.core.runtime.ultralytics_ephemeral import prune_empty_sidecar_dirs
+
+                    prune_empty_sidecar_dirs(run_dir)
+                except Exception:
+                    pass
             pr = extract_pr_curve_cb(metrics)
             if pr is None:
                 print(f"[WARN] {label}: PR curve not available in metrics object, skipping")

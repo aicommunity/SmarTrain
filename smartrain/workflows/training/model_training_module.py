@@ -1374,20 +1374,11 @@ def train_yolo(
         register_weighted_sampling_callback(model)
 
     training_end_time = None
-    raw_best_candidate = os.path.join(model_dir, "train-ultralytics", "weights", "best.pt")
-    raw_best_path = raw_best_candidate if os.path.isfile(raw_best_candidate) else None
     canonical_best_path = canonical_run_model_path(model_dir, ".pt")
+    model_path = canonical_best_path
     try:
         model.train(**train_kw)
         training_end_time = datetime.now()
-        model_path = (
-            _materialize_canonical_run_model(model_dir, source_path=raw_best_path, move=True)
-            or canonical_best_path
-        )
-        print("\n" + "-" * 60)
-        if os.path.exists(model_path):
-            print("[OK] Training complete.")
-            print(f"[INFO] Model saved at path:\n{model_path}")
     except Exception as e:
         training_end_time = datetime.now()
         print(
@@ -1399,19 +1390,24 @@ def train_yolo(
                 clearml_task.close()
             except Exception:
                 pass
+        try:
+            canonicalize_run_ultralytics_layout(model_dir)
+        except Exception:
+            pass
 
     try:
-        canonicalize_run_ultralytics_layout(model_dir)
-    except Exception:
-        pass
-
-    try:
-        if not os.path.isfile(canonical_best_path):
-            legacy = resolve_run_model_with_legacy_fallback(model_dir)
-            if legacy is not None and legacy.is_file():
-                materialize_canonical_run_model(
-                    model_dir, source_path=str(legacy), move=True, normalize_metadata=True
-                )
+        best_src = resolve_run_model_with_legacy_fallback(model_dir)
+        materialized = _materialize_canonical_run_model(
+            model_dir,
+            source_path=str(best_src) if best_src is not None else None,
+            move=True,
+            normalize_metadata=True,
+        )
+        model_path = str(materialized) if materialized is not None else canonical_best_path
+        print("\n" + "-" * 60)
+        if os.path.exists(model_path):
+            print("[OK] Training complete.")
+            print(f"[INFO] Model saved at path:\n{model_path}")
     except Exception:
         pass
 
