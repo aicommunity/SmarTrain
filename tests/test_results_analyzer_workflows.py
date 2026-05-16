@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import pytest
 
+import smartrain.services.analyze.workflow_dispatch as workflow_dispatch
 import smartrain.workflows.analyze.results_analyzer as results_analyzer
 from smartrain.workflows.analyze.results_analyzer import main as analyze_main
 from smartrain.core.runtime.run_artifacts import run_test_backend_dir
@@ -446,8 +447,8 @@ def test_interactive_speed_preset_calls_benchmark_and_plot(
         Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out_png).write_bytes(b"fakepng")
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", _fake_plot)
 
     answers = iter(["1", "2"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
@@ -492,9 +493,9 @@ def test_interactive_full_preset_calls_quality_speed_and_pr(
         Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out_png).write_bytes(b"fakepng")
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", _fake_plot)
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", _fake_pr)
 
     answers = iter(["1", "2"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
@@ -681,9 +682,9 @@ def test_analyze_all_creates_session_manifest_and_report(
         Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out_png).write_bytes(b"fakepng")
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", _fake_plot)
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", _fake_pr)
 
     answers = iter(
         [
@@ -693,9 +694,9 @@ def test_analyze_all_creates_session_manifest_and_report(
             str(tmp_path / "datasets" / "ds_a" / "data.yaml"),  # data yaml
         ]
     )
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_choice", lambda *_a, **_k: str(next(answers)))
 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
@@ -895,9 +896,9 @@ def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
     run_b = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
     pd.DataFrame([{"mAP50-95": 0.56}]).to_csv(run_b / "test_metrics.csv", index=False)
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", lambda _args: None)
 
     recompute_calls = {"n": 0}
     orig_cmd_tm = results_analyzer.cmd_test_metrics_plot
@@ -907,7 +908,7 @@ def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
             recompute_calls["n"] += 1
         return orig_cmd_tm(args)
 
-    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", _wrapped_cmd_tm)
+    monkeypatch.setattr(workflow_dispatch, "cmd_test_metrics_plot", _wrapped_cmd_tm)
 
     answers = iter(
         [
@@ -917,9 +918,9 @@ def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
             str(tmp_path / "datasets" / "ds_a" / "data.yaml"),  # data yaml
         ]
     )
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_choice", lambda *_a, **_k: str(next(answers)))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     analyze_main(
@@ -1233,9 +1234,9 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
     run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
     _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", lambda _args: None)
 
     prompt_defaults: dict[str, str] = {}
 
@@ -1248,9 +1249,9 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
         return default
 
     answers = iter(["1", "full"])
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", _fake_prompt_text)
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_text", _fake_prompt_text)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     analyze_main(
@@ -1978,9 +1979,9 @@ def test_interactive_full_auto_detects_data_yaml_from_runtime_file(
         Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out_png).write_bytes(b"fakepng")
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", _fake_plot)
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", _fake_pr)
     answers = iter(["1", "2"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
 
@@ -2004,9 +2005,9 @@ def test_auto_detect_prints_data_yaml_source(
     runtime_yaml = run_a / "_runtime_data_train.yaml"
     runtime_yaml.write_text("path: datasets/ds_a\ntrain: train/images\nval: val/images\ntest: test/images\n", encoding="utf-8")
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", lambda _args: None)
 
     answers = iter(["1", "2"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
@@ -2037,11 +2038,11 @@ def test_auto_detect_multiple_candidates_prints_single_list(
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", lambda _args: None)
     monkeypatch.setattr(
-        "smartrain.workflows.analyze.results_analyzer.prompt_choice",
+        "smartrain.services.analyze.workflow_dispatch.prompt_choice",
         lambda _label, options, default=None, **_kw: default or options[0],
     )
 
@@ -2190,18 +2191,18 @@ def test_inference_and_pr_respect_selected_run_scope_in_analyze_all(
         Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame([{"model": "run_a", "composite_score": 1.0, "run_dir": str(run_a)}]).to_csv(args.out_csv, index=False)
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_benchmark)
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", _fake_plot)
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
-    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt"}]).to_csv(args.output, index=False))
-    monkeypatch.setattr(results_analyzer, "cmd_leaderboard", _fake_leaderboard)
-    monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", _fake_benchmark)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", _fake_plot)
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", _fake_pr)
+    monkeypatch.setattr(workflow_dispatch, "cmd_test_metrics_plot", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt"}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_leaderboard", _fake_leaderboard)
+    monkeypatch.setattr(workflow_dispatch, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
 
     answers = iter(["1", "2", "full", str(tmp_path / "datasets" / "ds_a" / "data.yaml")])
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_int", lambda *_a, **_k: int(next(answers)))
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_text", lambda *_a, **_k: str(next(answers)))
-    monkeypatch.setattr("smartrain.workflows.analyze.results_analyzer.prompt_choice", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_int", lambda *_a, **_k: int(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_text", lambda *_a, **_k: str(next(answers)))
+    monkeypatch.setattr("smartrain.services.analyze.workflow_dispatch.prompt_choice", lambda *_a, **_k: str(next(answers)))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     analyze_main(
@@ -2245,7 +2246,7 @@ def test_runs_with_missing_metrics_uses_run_resolved_yaml_for_unresolved_cache(
         assert data_yaml == run_yaml
         return {"unresolved_metrics": ["Box-F1"]}
 
-    monkeypatch.setattr(results_analyzer, "_load_recompute_status", _fake_load_status)
+    monkeypatch.setattr(workflow_dispatch, "_load_recompute_status", _fake_load_status)
 
     missing = results_analyzer._runs_with_missing_metrics(
         [str(run_dir)],
@@ -2272,7 +2273,7 @@ def test_runs_with_missing_metrics_skips_prompt_without_resolved_data_yaml(
         "_resolve_data_yaml_for_run",
         lambda *_a, **_k: ("", "none"),
     )
-    monkeypatch.setattr(results_analyzer, "_load_recompute_status", lambda *_a, **_k: None)
+    monkeypatch.setattr(workflow_dispatch, "_load_recompute_status", lambda *_a, **_k: None)
 
     missing = results_analyzer._runs_with_missing_metrics(
         [str(run_dir)],
@@ -2300,7 +2301,7 @@ def test_runs_with_missing_metrics_skips_prompt_without_best_pt(
         "_resolve_data_yaml_for_run",
         lambda *_a, **_k: (run_yaml, "mock"),
     )
-    monkeypatch.setattr(results_analyzer, "_load_recompute_status", lambda *_a, **_k: None)
+    monkeypatch.setattr(workflow_dispatch, "_load_recompute_status", lambda *_a, **_k: None)
 
     missing = results_analyzer._runs_with_missing_metrics(
         [str(run_dir)],
@@ -2415,12 +2416,12 @@ def test_analyze_all_pr_group_artifacts_do_not_overwrite_between_groups(
             encoding="utf-8",
         )
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"model": "x", "run_dir": str(run_a), "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False))
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
-    monkeypatch.setattr(results_analyzer, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt"}, {"run_dir": str(run_b), "model": "yolo11s.pt"}]).to_csv(args.output, index=False))
-    monkeypatch.setattr(results_analyzer, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt", "composite_score": 1.0}, {"run_dir": str(run_b), "model": "yolo11s.pt", "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
-    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", lambda args: Path(args.out_dir).mkdir(parents=True, exist_ok=True))
-    monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"model": "x", "run_dir": str(run_a), "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(workflow_dispatch, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt"}, {"run_dir": str(run_b), "model": "yolo11s.pt"}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt", "composite_score": 1.0}, {"run_dir": str(run_b), "model": "yolo11s.pt", "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_test_metrics_plot", lambda args: Path(args.out_dir).mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(workflow_dispatch, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
 
     def _fake_pr(args):
         Path(args.out_png).parent.mkdir(parents=True, exist_ok=True)
@@ -2431,7 +2432,7 @@ def test_analyze_all_pr_group_artifacts_do_not_overwrite_between_groups(
         pd.DataFrame([{"model": run_name, "class_name": "aluminium", "ap": 0.8}]).to_csv(pc_dir / "pr_per_class.csv", index=False)
         (pc_dir / f"pr_class_0_{run_name}.png").write_bytes(b"fake")
 
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", _fake_pr)
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", _fake_pr)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
     analyze_main(
@@ -2469,14 +2470,14 @@ def test_analyze_all_strict_diagnostics_fails_on_missing_metric_sources(
     (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
     data_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
     data_yaml.write_text("test: test/images\n", encoding="utf-8")
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"model": "x", "run_dir": str(run_a), "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False))
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
-    monkeypatch.setattr(results_analyzer, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt"}, {"run_dir": str(run_b), "model": "yolo11s.pt"}]).to_csv(args.output, index=False))
-    monkeypatch.setattr(results_analyzer, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt", "composite_score": 1.0}, {"run_dir": str(run_b), "model": "yolo11s.pt", "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"model": "x", "run_dir": str(run_a), "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(workflow_dispatch, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt"}, {"run_dir": str(run_b), "model": "yolo11s.pt"}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "model": "yolo11n.pt", "composite_score": 1.0}, {"run_dir": str(run_b), "model": "yolo11s.pt", "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
     # Do not write metric_sources_out to simulate missing critical artifact.
-    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", lambda _args: None)
-    monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+    monkeypatch.setattr(workflow_dispatch, "cmd_test_metrics_plot", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
     with pytest.raises(SystemExit) as exc:
         analyze_main(
             [
@@ -2512,19 +2513,19 @@ def test_analyze_all_marks_incomplete_speed_quality_series(
     (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
     data_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
     data_yaml.write_text("test: test/images\n", encoding="utf-8")
-    monkeypatch.setattr(results_analyzer, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a)}, {"run_dir": str(run_b)}]).to_csv(args.output, index=False))
-    monkeypatch.setattr(results_analyzer, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "quality_metric": 0.5, "composite_score": 1.0}, {"run_dir": str(run_b), "quality_metric": 0.6, "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
-    monkeypatch.setattr(results_analyzer, "cmd_test_metrics_plot", lambda args: Path(args.out_dir).mkdir(parents=True, exist_ok=True) or Path(args.metric_sources_out).parent.mkdir(parents=True, exist_ok=True) or Path(args.metric_sources_out).write_text(json.dumps({"sources": {str(run_a): {"mAP50-95": "original"}, str(run_b): {"mAP50-95": "original"}}}), encoding="utf-8"))
-    monkeypatch.setattr(results_analyzer, "cmd_inference_plot", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
-    monkeypatch.setattr(results_analyzer, "cmd_pr_curves", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
-    monkeypatch.setattr(results_analyzer, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+    monkeypatch.setattr(workflow_dispatch, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a)}, {"run_dir": str(run_b)}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "quality_metric": 0.5, "composite_score": 1.0}, {"run_dir": str(run_b), "quality_metric": 0.6, "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_test_metrics_plot", lambda args: Path(args.out_dir).mkdir(parents=True, exist_ok=True) or Path(args.metric_sources_out).parent.mkdir(parents=True, exist_ok=True) or Path(args.metric_sources_out).write_text(json.dumps({"sources": {str(run_a): {"mAP50-95": "original"}, str(run_b): {"mAP50-95": "original"}}}), encoding="utf-8"))
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_plot", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(workflow_dispatch, "cmd_pr_curves", lambda args: Path(args.out_png).parent.mkdir(parents=True, exist_ok=True) or Path(args.out_png).write_bytes(b"fake"))
+    monkeypatch.setattr(workflow_dispatch, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
 
     def _fake_bench(args):
         Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True)
         # only one run row -> incomplete series against selected runs
         pd.DataFrame([{"model": "run_a", "run_dir": str(run_a), "avg_inference_ms_per_frame": 10.0}]).to_csv(args.out_csv, index=False)
 
-    monkeypatch.setattr(results_analyzer, "cmd_inference_benchmark", _fake_bench)
+    monkeypatch.setattr(workflow_dispatch, "cmd_inference_benchmark", _fake_bench)
 
     analyze_main(
         [
@@ -2600,7 +2601,7 @@ def test_test_metrics_plot_saves_unresolved_status_on_recompute_exception(
             }
         )
 
-    monkeypatch.setattr(results_analyzer, "_save_recompute_status", _fake_save_status)
+    monkeypatch.setattr(workflow_dispatch, "_save_recompute_status", _fake_save_status)
 
     analyze_main(
         [

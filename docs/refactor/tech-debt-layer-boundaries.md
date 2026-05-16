@@ -29,4 +29,4 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 
 ## Transitional guardrail allowlist
 
-- `services/analyze/cli_commands.py` → `workflows.analyze` facade dispatch
+(empty — patch surface: `services/analyze/workflow_dispatch.py`)

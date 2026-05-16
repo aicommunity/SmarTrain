@@ -687,11 +687,11 @@ def _filtered_run_records(args: argparse.Namespace) -> list[tuple[str, Any]]:
 
 
 def _workflow_attr(name: str):
-    """Resolve via workflows facade so tests can monkeypatch results_analyzer."""
+    """Resolve via services dispatch module (patchable in tests)."""
 
-    from smartrain.workflows.analyze import results_analyzer as _ra
+    from smartrain.services.analyze import workflow_dispatch as _wd
 
-    return getattr(_ra, name)
+    return getattr(_wd, name)
 
 
 def _workflow_analyze_cmd(name: str):

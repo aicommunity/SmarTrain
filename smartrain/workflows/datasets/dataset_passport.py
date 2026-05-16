@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
+from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.core.runtime.path_portable import relativize_abs_paths_in_obj, relativize_if_under
 
 

@@ -5,7 +5,7 @@ import shutil
 import sys
 from typing import Optional, Tuple
 
-from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
+from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 
 
 def _copy_source_to_training(

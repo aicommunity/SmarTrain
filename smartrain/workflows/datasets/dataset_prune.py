@@ -20,7 +20,7 @@ from smartrain.workflows.datasets.dataset_cli_catalog import (
     try_prompt_dataset_interactive,
 )
 from smartrain.workflows.datasets.dataset_former import _image_content_hash
-from smartrain.workflows.datasets.dataset_hash import calculate_dataset_hash
+from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.workflows.datasets.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root

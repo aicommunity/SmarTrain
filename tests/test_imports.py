@@ -14,7 +14,7 @@ def test_import_cli_modules() -> None:
         "smartrain.core.runtime.workspace_paths",
         "smartrain.workflows.datasets.datasets_json_former",
         "smartrain.workflows.datasets.dataset_former",
-        "smartrain.workflows.datasets.dataset_hash",
+        "smartrain.services.datasets.dataset_hash",
         "smartrain.workflows.datasets.dataset_roi_yolo",
         "smartrain.workflows.training.model_training_module",
         "smartrain.workflows.queue.training_queue",

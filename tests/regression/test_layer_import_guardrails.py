@@ -13,12 +13,7 @@ _FORBIDDEN_PREFIX_PAIRS: tuple[tuple[str, str], ...] = (
 )
 
 # (relative path under repo root, forbidden module prefix)
-_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
-    {
-        # cmd_all stage callbacks: patchable via workflows.analyze.results_analyzer
-        ("smartrain/services/analyze/cli_commands.py", "smartrain.workflows.analyze"),
-    }
-)
+_ALLOWLIST: frozenset[tuple[str, str]] = frozenset()
 
 
 def _py_files_under(prefix: str) -> list[Path]:

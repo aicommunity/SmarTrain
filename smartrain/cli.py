@@ -595,11 +595,11 @@ def cmd_hash(ctx: typer.Context) -> None:
     Notes:
       - validate exit codes: 0 match, 1 mismatch, 2 error.
     """
-    from smartrain.workflows.datasets.dataset_hash import build_hash_arg_parser
+    from smartrain.services.datasets.dataset_hash import build_hash_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.workflows.datasets.dataset_hash",
+        module="smartrain.services.datasets.dataset_hash",
         build_parser=build_hash_arg_parser,
         prog="smartrain hash",
     )

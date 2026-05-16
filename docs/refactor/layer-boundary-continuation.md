@@ -30,19 +30,15 @@
 | LB-C3 | `train_yolo_execution_service` + metadata IO in `train_metadata_io_service` |
 | LB-C4 | `services/testing/backends/native_eval.py` + `format_runners.py`; `model_test_backends.py` facade |
 | LB-C5 | `prompts.py` + `_workflow_attr` facade dispatch |
-| LB-C8 | CI: `pytest tests/regression/test_layer_import_guardrails.py` in phase8 workflow |
-
 | LB-C6 | `report_markdown.py`, `report_odt.py`, thin `report_writer.py` |
+| LB-C8 | CI: `pytest tests/regression/test_layer_import_guardrails.py` in phase8 workflow |
+| LB-C7 (partial) | `services/datasets/{dataset_hash,yolo_labels}.py`; `workflow_dispatch` (empty allowlist) |
 
 ## Deferred (non-blocking)
 
 | id | Notes |
 |----|-------|
-| LB-C7 | `workflows/datasets/` → `services/datasets/` when dataset CLI is refactored |
-
-## Allowlist (transitional)
-
-- `services/analyze/cli_commands.py` → `workflows.analyze` facade (test patch surface)
+| LB-C7 | Remaining `workflows/datasets/*` → `services/datasets/` when dataset CLI is refactored |
 
 ## Key paths after closure
 
