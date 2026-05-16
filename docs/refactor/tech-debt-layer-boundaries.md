@@ -1,7 +1,7 @@
 # Tech debt: layer boundaries
 
 Operational waves: layer-boundary refactor (waves 0–8). Journal: [`09-tech-debt.md`](./09-tech-debt.md).  
-Continuation: [`layer-boundary-continuation.md`](./layer-boundary-continuation.md).
+Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-continuation.md).
 
 ## Register
 
@@ -11,31 +11,23 @@ Continuation: [`layer-boundary-continuation.md`](./layer-boundary-continuation.m
 | TD-LB-001 | DONE | naming | Two `TaskContext` types | `TaskTypeLabel`, `CanonicalIdentity` |
 | TD-LB-002 | DONE | naming | `train_backend_registry` vs execution `TrainBackend` | `ultralytics_model_alias_registry` |
 | TD-LB-003 | DONE | orchestrators | `canonical_gateway` → workflows | `adapters/canonical/read/metrics_csv` |
-| TD-LB-004 | DONE | backends | Adapters proxy workflows | `implementations/ultralytics/inference.py`; adapters use implementations |
+| TD-LB-004 | DONE | backends | Adapters proxy workflows | `implementations/ultralytics/inference.py` |
 | TD-LB-005 | DONE | analyze | Split workflows/services | `services/analyze/` |
-| TD-LB-006 | PARTIAL | workflows | Fat CLI | Thin `results_analyzer`; MTM/test_backends slimmed (LB-C3/C4 partial) |
+| TD-LB-006 | DONE | workflows | Fat CLI | Thin facades; execution in `services/` (2026-05-16) |
 | TD-LB-007 | DONE | testing | test_backends → MTM profile | `core/runtime/system_profile` |
 | TD-LB-008 | DONE | inference | Wrong run discovery import | `core.runtime.run_discovery` |
 | TD-LB-009 | DONE | runtime | Legacy model path fallback | `resolve_run_model` (no rglob) |
-| TD-LB-010 | PARTIAL | LOC | Monolith modules | Analyze moved; report_writer/MTM/test_backends open (LB-C6) |
-| TD-LB-099 | DONE | closure | Program audit | `layer-boundary-continuation.md` |
+| TD-LB-010 | PARTIAL | LOC | Monolith modules | `report_writer` remains (~3.4k LOC); LB-C6 deferred |
+| TD-LB-099 | DONE | closure | Program audit | Continuation closed 2026-05-16 |
 
 ## Burn-down checklist
 
-- [x] TD-LB-000
-- [x] TD-LB-001
-- [x] TD-LB-002
-- [x] TD-LB-003
-- [x] TD-LB-004 (PARTIAL — see continuation LB-C1)
-- [x] TD-LB-005
-- [x] TD-LB-006 (PARTIAL — see LB-C3/C4)
-- [x] TD-LB-007
-- [x] TD-LB-008
-- [x] TD-LB-009
-- [x] TD-LB-010 (PARTIAL — see LB-C6)
+- [x] TD-LB-000 … TD-LB-009
+- [x] TD-LB-006
+- [x] TD-LB-010 (PARTIAL — `report_writer` only)
 - [x] TD-LB-099
 
-## Transitional guardrail allowlist (remove with continuation items)
+## Transitional guardrail allowlist
 
-- `services/analyze/report_writer.py` → lazy `workflows.datasets` export (LB-C2 follow-up)
-- `services/analyze/cli_commands.py` → `workflows.analyze` facade dispatch (test patch surface; LB-C5)
+- `services/analyze/report_writer.py` → lazy `workflows.datasets` export
+- `services/analyze/cli_commands.py` → `workflows.analyze` facade dispatch

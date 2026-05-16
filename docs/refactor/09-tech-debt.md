@@ -4,7 +4,8 @@ Operational execution status and PR-level checkboxes: [`10-implementation-checkl
 
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
-- 2026-05-15: Layer-boundary refactor waves 0–8 closed. Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md). LB-C3 mostly done (`train_yolo_execution_service`); LB-C4 partial (native eval extracted). Residual: [`layer-boundary-continuation.md`](./layer-boundary-continuation.md) (ONNX/TRT runners, report_writer split).
+- 2026-05-16: Layer-boundary continuation **closed**. Train/test execution in `services/training` and `services/testing/backends`; workflow facades for analyze and test. Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md). Deferred LOC: `report_writer` (LB-C6), datasets wave (LB-C7).
+- 2026-05-15: Layer-boundary refactor waves 0–8 closed. Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md).
 
 - 2026-05-06: Root-package migration plan started (`root-package-structure-migration`). Inventory lock fixed for Batch 1 candidates:
   - moved `smartrain/provider_install_state.py` -> `smartrain/providers/core/provider_install_state.py`
