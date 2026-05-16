@@ -5,7 +5,7 @@ import re
 import shutil
 from typing import Any, Callable
 
-from smartrain.workflows.testing.ultralytics_test_contract import ULTRALYTICS_TEST_COLLECT_IMAGE_NAMES
+from smartrain.core.testing.ultralytics_test_contract import ULTRALYTICS_TEST_COLLECT_IMAGE_NAMES
 
 
 def collect_ultralytics_test_artifacts(

@@ -9,12 +9,12 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from smartrain.workflows.testing.model_test_service import (
+from smartrain.core.testing.artifact_paths import (
     INTERNAL_TEST_FORMATS,
     SUPPORTED_TEST_FORMATS,
-    format_test_dir,
     format_metrics_path,
     format_metrics_path_for_split,
+    format_test_dir,
     load_test_artifacts_manifest,
 )
 
