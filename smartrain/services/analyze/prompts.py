@@ -1,4 +1,4 @@
-"""Analyze CLI prompts (patchable via workflows.analyze.results_analyzer re-exports)."""
+"""Analyze CLI prompts (re-exported by workflows.analyze.results_analyzer)."""
 
 from __future__ import annotations
 

@@ -11,15 +11,15 @@ One-line guide to `smartrain/` so you can navigate by **function** without readi
 
 ## workflows/
 
-User-facing CLI flows and orchestration: argparse `main()`, Typer glue, dataset/train/test/inference/analyze pipelines.
+Thin CLI facades: argparse `main()`, Typer glue, re-exports into `services/`. Business logic lives in `services/`, not here.
 
 Subpackages (each maps to commands or command groups):
 
-- `training/` — train CLI (`train_entry`, `model_training_module`, `train_*_service`).
-- `datasets/` — scan, fusion, augment, balance, prune, orient, report, CVAT helpers; `dataset_access.py` for filesystem layout; `dataset_cli_catalog.py` / `dataset_cli_common.py` for catalog + interactive selection.
-- `testing/` — model test CLI and backends.
-- `inference/` — inference CLI, backends, SAHI/heatmap helpers.
-- `analyze/` — analyze subcommands; many `analyze_*_service.py` modules; `results_analyzer.py` builds the argparse tree.
+- `training/` — train CLI (`train_entry`, `model_training_module` for train/resume/interactive; execution in `services/training/`).
+- `datasets/` — thin facades (`dataset_former.py`, `datasets_json_former.py`, …) → `services/datasets/`.
+- `testing/` — `model_test_cli.py`, `model_test_backends.py` (facade) → `services/testing/backends/`.
+- `inference/` — inference CLI, SAHI/heatmap helpers; runtime in `services/inference_service.py`.
+- `analyze/` — `results_analyzer.py` (facade) → `services/analyze/cli_commands.py`.
 - `queue/` — training queue (`training_queue.py`).
 - `registry/` — registry CLI.
 - `migration/` — migration CLI.
@@ -29,7 +29,7 @@ Subpackages (each maps to commands or command groups):
 
 ## services/
 
-Use-case helpers shared across flows. **Must not** import `smartrain.workflows.*` (use `core/workflow_adapters/`).
+Use-case layer: `analyze/`, `datasets/`, `training/`, `testing/`, `inference_service.py`, `reporting/`. **Must not** import `smartrain.workflows.*` (use `core/workflow_adapters/` where a workflow entry is still required).
 
 ## core/
 

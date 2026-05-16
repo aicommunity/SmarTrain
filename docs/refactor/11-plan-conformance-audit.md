@@ -29,3 +29,9 @@ This baseline confirms:
 ## Scope for follow-up wave planning
 
 The next implementation wave should target only actionable P0/P1 gaps and preserve existing behavior through compatibility wrappers and regression-first delivery.
+
+## Layer boundaries (post wave 8, 2026-05-16)
+
+Layer-boundary refactor (waves 0–8, continuation LB-C1–C8) is **closed**. Conformance matrix and evidence: [`layer-boundary-continuation.md`](./layer-boundary-continuation.md). Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md).
+
+Residual LOC in `workflows/training/model_training_module.py` and `workflows/testing/model_test_cli.py` is documented as compositional CLI (interactive/resume), not a layer violation — execution paths use `services/training` and `services/testing/backends`.

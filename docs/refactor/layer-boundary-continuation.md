@@ -46,7 +46,7 @@
 | Test backends | `smartrain/services/testing/backends/format_runners.py`, `native_eval.py` |
 | Test facade | `smartrain/workflows/testing/model_test_backends.py` |
 | Report export | `smartrain/services/reporting/document_export.py` |
-| Datasets (partial) | `smartrain/services/datasets/` |
+| Datasets | `smartrain/services/datasets/` + thin `workflows/datasets/*` facades |
 | Analyze report | `smartrain/services/analyze/report_{markdown,odt,writer}.py` |
 | TensorRT utils | `smartrain/core/models/tensorrt_checks.py` |
 | Validator core | `smartrain/services/testing/unified_validator_core.py` |

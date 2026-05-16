@@ -15,11 +15,11 @@ Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_apps
 | Command / area | Typer entry (`cli.py`) | Argparse / `main` | Orchestration / services | Notes |
 |----------------|------------------------|-------------------|---------------------------|-------|
 | `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `model_training_module` | `services/train_service.py`, `workflows/training/*_service.py` | Profile merge: `core/training/train_profile.py` |
-| `test` | → `cli_apps/test_app` | `workflows/testing/model_test_cli.py` | `services/model_test_orchestrator.py`, `services/test_backend_dispatch.py` | Backends: `backends/train_test_registry.py` |
-| `inference` | → `cli_apps/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `workflows/inference/inference_backends.py` | |
-| `analyze` subcommands | Typer subcommands → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` | `workflows/analyze/analyze_*_service.py`, `services/analyze_*.py` | Metrics / canonical: `orchestrators/canonical_gateway.py` |
-| `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | `datasets_json_former.py` | | Writes `datasets_info.json` |
-| `fusion` | → `workflows/datasets/dataset_former.py` | same module | | |
+| `test` | → `cli_apps/test_app` | `workflows/testing/model_test_cli.py` | `services/model_test_orchestrator.py`, `services/test_backend_dispatch.py`, `services/testing/backends/format_runners.py` | Dispatch via `core/workflow_adapters/testing_runtime_api.py` |
+| `inference` | → `cli_apps/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `backends/implementations/ultralytics/inference.py` | |
+| `analyze` subcommands | Typer subcommands → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` (facade) | `services/analyze/*` | Metrics / canonical: `orchestrators/canonical_gateway.py` |
+| `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | facade → `services/datasets/datasets_json_former.py` | | Writes `datasets_info.json` |
+| `fusion` | → `workflows/datasets/dataset_former.py` (facade) | `services/datasets/dataset_former.py` | | |
 | `queue` | Typer → `workflows/queue/training_queue_cli.py` (`list`/`add`/…); `queue-run` → `_forward_argparse_command` → `training_queue.py` | `training_queue_cli` / `training_queue` | | Queue state under workspace |
 
 ## CLI: interactive mode and replay
