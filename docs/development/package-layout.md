@@ -39,6 +39,21 @@ Shared mechanics: `runtime/` (workspace paths, env), `training/` (profiles, cata
 
 - `canonical_gateway.py` — canonical reads, metrics, task context.
 
+## Three canonical packages (do not confuse)
+
+| Package | Role |
+|---------|------|
+| `smartrain/canonical/` | Schema v2, deprecation policy, refs |
+| `smartrain/domain/canonical/` | DTOs (`CanonicalIdentity`, payloads) |
+| `smartrain/adapters/canonical/` | Disk read/write, legacy mapper |
+
+## Glossary: backend vs model alias
+
+| Term | Location | Meaning |
+|------|----------|---------|
+| **Execution backend** | `backends/contracts.py` (`TrainBackend`, `TestBackend`, `InferenceBackend`) | Runtime engine (ultralytics, onnxruntime, tensorrt) |
+| **Ultralytics model alias** | `core/training/ultralytics_model_alias_registry.py` | YOLO YAML name aliases (`yolo11n`, …), not ONNX/TRT |
+
 ## domain/ and adapters/
 
 - `domain/canonical/` — DTOs and validation.

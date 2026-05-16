@@ -8,7 +8,7 @@ from typing import Final
 
 
 @dataclass(frozen=True)
-class TrainBackendSpec:
+class UltralyticsModelAliasSpec:
     provider: str
     supported_aliases: tuple[str, ...]
 
@@ -36,8 +36,6 @@ def _aliases_from_yaml_names(yaml_names: list[str]) -> tuple[str, ...]:
         if not alias:
             continue
         aliases.add(alias)
-        # Ultralytics family files (e.g., yolo11.yaml, yolo11-seg.yaml)
-        # implicitly support scale suffixes n/s/m/l/x.
         m = re.match(r"^(yolo(?:v)?\d+)(-[a-z0-9]+)?$", alias)
         if m:
             base = m.group(1)
@@ -71,12 +69,12 @@ def _discover_ultralytics_supported_aliases() -> tuple[str, ...]:
     return aliases
 
 
-_ULTRALYTICS_SPEC: Final[TrainBackendSpec] = TrainBackendSpec(
+_ULTRALYTICS_SPEC: Final[UltralyticsModelAliasSpec] = UltralyticsModelAliasSpec(
     provider="ultralytics",
     supported_aliases=_discover_ultralytics_supported_aliases(),
 )
 
-_TRAIN_BACKEND_REGISTRY: Final[dict[str, TrainBackendSpec]] = {
+_ALIAS_REGISTRY: Final[dict[str, UltralyticsModelAliasSpec]] = {
     _ULTRALYTICS_SPEC.provider: _ULTRALYTICS_SPEC,
 }
 
@@ -85,14 +83,13 @@ def default_train_provider() -> str:
     return _ULTRALYTICS_SPEC.provider
 
 
-def get_train_backend_spec(provider: str | None = None) -> TrainBackendSpec:
+def get_ultralytics_model_alias_spec(provider: str | None = None) -> UltralyticsModelAliasSpec:
     key = (provider or default_train_provider()).strip().lower()
-    if key not in _TRAIN_BACKEND_REGISTRY:
-        known = ", ".join(sorted(_TRAIN_BACKEND_REGISTRY.keys()))
+    if key not in _ALIAS_REGISTRY:
+        known = ", ".join(sorted(_ALIAS_REGISTRY.keys()))
         raise ValueError(f"Unknown training provider: {provider!r}. Known providers: {known}")
-    return _TRAIN_BACKEND_REGISTRY[key]
+    return _ALIAS_REGISTRY[key]
 
 
 def list_train_providers() -> tuple[str, ...]:
-    return tuple(sorted(_TRAIN_BACKEND_REGISTRY.keys()))
-
+    return tuple(sorted(_ALIAS_REGISTRY.keys()))

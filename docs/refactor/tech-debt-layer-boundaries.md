@@ -7,8 +7,8 @@ Operational waves: layer-boundary refactor plan (waves 0–8). Journal: [`09-tec
 | id | status | area | deferred_decision | resolution |
 |----|--------|------|-------------------|------------|
 | TD-LB-000 | DONE | baseline | — | LOC 2049/2954/1431/3476; guardrails + allowlist for TD-LB-003/004 |
-| TD-LB-001 | OPEN | naming | Two `TaskContext` types | Wave 1 → `TaskTypeLabel`, `CanonicalIdentity` |
-| TD-LB-002 | OPEN | naming | `train_backend_registry` vs execution `TrainBackend` | Wave 1 → `ultralytics_model_alias_registry` |
+| TD-LB-001 | DONE | naming | Two `TaskContext` types | `TaskTypeLabel`, `CanonicalIdentity` |
+| TD-LB-002 | DONE | naming | `train_backend_registry` vs execution `TrainBackend` | `ultralytics_model_alias_registry` |
 | TD-LB-003 | OPEN | orchestrators | `canonical_gateway` imports `workflows.analyze` | Wave 3 → `adapters/canonical/read/metrics_csv` |
 | TD-LB-004 | OPEN | backends | `ultralytics_adapter` proxies `workflows.inference` | Wave 5 → `backends/implementations/ultralytics` |
 | TD-LB-005 | OPEN | analyze | Logic split `workflows/analyze` vs `services/analyze_*` | Wave 2 → `services/analyze/` |
@@ -21,8 +21,8 @@ Operational waves: layer-boundary refactor plan (waves 0–8). Journal: [`09-tec
 ## Burn-down checklist
 
 - [x] TD-LB-000
-- [ ] TD-LB-001
-- [ ] TD-LB-002
+- [x] TD-LB-001
+- [x] TD-LB-002
 - [ ] TD-LB-003
 - [ ] TD-LB-004
 - [ ] TD-LB-005

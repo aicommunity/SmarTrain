@@ -9,7 +9,7 @@ from typing import Any
 from smartrain.adapters.canonical.read.factory import ReadAdapterFactory
 from smartrain.adapters.canonical.read.resolvers import infer_source_kind
 from smartrain.adapters.canonical.write.writer import WriteReport, write_canonical_snapshot
-from smartrain.domain.canonical.context import TaskContext
+from smartrain.domain.canonical.context import CanonicalIdentity
 from smartrain.domain.canonical.models import CanonicalMetricsRef, CanonicalPayload, CanonicalPredictionRef
 from smartrain.domain.canonical.types import TaskType
 from smartrain.domain.canonical.validators import validate_payload
@@ -46,7 +46,7 @@ def resolve_task_context(
     *,
     source_kind: str | None = None,
     options: CanonicalGatewayOptions | None = None,
-) -> TaskContext:
+) -> CanonicalIdentity:
     """Derive task/backend/model identity for a run or model directory (PR 6.5)."""
     payload = load_target(ref, source_kind=source_kind, options=options)
     if not payload.models:
@@ -55,7 +55,7 @@ def resolve_task_context(
     r = payload.runs[0] if payload.runs else None
     sk = (source_kind or "").strip().lower() or infer_source_kind(ref)
     ap = os.path.abspath(os.path.expanduser(str(ref).strip()))
-    return TaskContext(
+    return CanonicalIdentity(
         source_kind=sk,
         source_ref=ap,
         task_type=m.task_type,

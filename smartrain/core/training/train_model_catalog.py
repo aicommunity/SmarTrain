@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from smartrain.core.training.train_backend_registry import default_train_provider, get_train_backend_spec
+from smartrain.core.training.ultralytics_model_alias_registry import (
+    default_train_provider,
+    get_ultralytics_model_alias_spec,
+)
 
 
 _EXTERNAL_PROVIDER_FALLBACK_ALIASES: dict[str, tuple[str, ...]] = {
@@ -101,5 +104,5 @@ class TrainModelCatalog:
         key = (self.provider or "").strip().lower()
         if key in _EXTERNAL_PROVIDER_FALLBACK_ALIASES:
             return _discover_external_provider_aliases(key, repo_path=self.provider_repo_path)
-        return get_train_backend_spec(key).supported_aliases
+        return get_ultralytics_model_alias_spec(key).supported_aliases
 

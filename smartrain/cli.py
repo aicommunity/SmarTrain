@@ -21,7 +21,7 @@ from smartrain.cli_support.typer_non_interactive import (
     strip_typer_meta_non_interactive_flags,
 )
 from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
-from smartrain.core.training.train_backend_registry import default_train_provider
+from smartrain.core.training.ultralytics_model_alias_registry import default_train_provider
 from smartrain.core.training.train_model_catalog import TrainModelCatalog
 from smartrain.providers.core.global_index import list_provider_records
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace

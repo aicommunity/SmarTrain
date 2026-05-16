@@ -6,7 +6,8 @@ from smartrain.tasks.contracts import (
     TASK_CLASSIFICATION,
     TASK_DETECTION,
     TASK_SEGMENTATION,
-    TaskContext,
+    TaskTypeLabel,
+    normalize_task_type,
 )
 from smartrain.tasks.metrics import resolve_task_metrics_adapter
 
@@ -15,7 +16,8 @@ __all__ = [
     "TASK_DETECTION",
     "TASK_CLASSIFICATION",
     "TASK_SEGMENTATION",
-    "TaskContext",
+    "TaskTypeLabel",
+    "normalize_task_type",
     "TaskExecutionContext",
     "resolve_task_metrics_adapter",
 ]

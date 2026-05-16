@@ -33,7 +33,7 @@ def test_import_cli_modules() -> None:
         "smartrain.workflows.datasets.cvat11_converter",
         "smartrain.workflows.datasets.cvat_cli",
         "smartrain.core.training.train_profile",
-        "smartrain.core.training.train_backend_registry",
+        "smartrain.core.training.ultralytics_model_alias_registry",
         "smartrain.core.training.train_model_catalog",
         "smartrain.core.training.train_model_resolver",
         "smartrain.core.training.external_model_ref",

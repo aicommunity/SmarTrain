@@ -6,7 +6,7 @@ from smartrain.domain.canonical.types import BackendType, ModelFormat, TaskType
 
 
 @dataclass(frozen=True)
-class TaskContext:
+class CanonicalIdentity:
     """Resolved task/backend identity for a canonical target (PR 6.5 gateway surface)."""
 
     source_kind: str

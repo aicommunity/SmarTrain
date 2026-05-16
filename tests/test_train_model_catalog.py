@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from smartrain.core.training.train_backend_registry import (
+from smartrain.core.training.ultralytics_model_alias_registry import (
     _aliases_from_yaml_names,
     default_train_provider,
-    get_train_backend_spec,
+    get_ultralytics_model_alias_spec,
     list_train_providers,
 )
 from smartrain.core.training.train_model_catalog import TrainModelCatalog
@@ -34,14 +34,14 @@ def test_train_model_resolver_keeps_custom_model_supported_flag_false() -> None:
     assert resolved.is_supported_alias is False
 
 
-def test_train_backend_registry_default_provider() -> None:
+def test_ultralytics_model_alias_registry_default_provider() -> None:
     assert default_train_provider() == "ultralytics"
     assert "ultralytics" in list_train_providers()
 
 
-def test_train_backend_registry_unknown_provider_raises() -> None:
+def test_ultralytics_model_alias_registry_unknown_provider_raises() -> None:
     with pytest.raises(ValueError):
-        get_train_backend_spec("missing-provider")
+        get_ultralytics_model_alias_spec("missing-provider")
 
 
 def test_aliases_from_yaml_names_includes_rtdetr() -> None:
