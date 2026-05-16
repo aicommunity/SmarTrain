@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from smartrain.cli_support.cli_prompts import prompt_choice, prompt_int, prompt_text
 from smartrain.services.analyze import cli_commands as _impl
+from smartrain.services.analyze.prompts import prompt_choice, prompt_int, prompt_text
 
 build_analyze_arg_parser = _impl.build_analyze_arg_parser
 main = _impl.main

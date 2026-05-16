@@ -14,11 +14,11 @@
 | G5 | Class-based extension | Partial | `AnalyzeCommandRegistry`, `CapabilityRegistry` / `BackendRegistry` alias |
 | G6 | `services` ⊄ `workflows` | Met | Guardrails + allowlist for transitional imports |
 | G7 | `orchestrators` ⊄ `workflows` | Met | Gateway uses `adapters.canonical.read.metrics_csv` |
-| G8 | `backends` ⊄ `workflows` | Partial | Allowlist until ultralytics implementations move |
+| G8 | `backends` ⊄ `workflows` | Met | `backends/implementations/ultralytics/inference.py`; adapters import implementations |
 | G9 | Train/test not monoliths in workflows | Partial | Train `*_service` moved; MTM / `model_test_backends` still large |
 | G10 | Canonical metrics read | Met | `metrics_csv` adapter |
 
-**Score:** 5 Met, 5 Partial, 0 Not met (mandatory continuation below).
+**Score:** 6 Met, 4 Partial, 0 Not met (mandatory continuation below).
 
 ## Remaining gaps (ordered)
 
@@ -26,8 +26,8 @@
 
 | id | Gap | Files | Done when |
 |----|-----|-------|-----------|
-| LB-C1 | `backends/*_adapter.py` import `workflows.inference` | `ultralytics_adapter.py`, `external_provider_adapter.py` | Implement `backends/implementations/ultralytics/`; empty guardrails allowlist |
-| LB-C2 | `services/analyze/*` imports `workflows.testing` / `workflows.datasets` | `metrics_reader.py`, `report_writer.py`, `ultralytics_test_artifacts.py` | Move contracts to `core/` or `adapters/`; drop allowlist entries |
+| LB-C1 | ~~`backends/*_adapter.py` import `workflows.inference`~~ | — | **Done** — `backends/implementations/ultralytics/inference.py` |
+| LB-C2 | ~~`services/analyze/*` imports `workflows.testing`~~ | `report_writer.py` (lazy `datasets`) | **Mostly done** — `core/testing/artifact_paths`, `ultralytics_test_contract`; report export still lazy allowlist |
 
 ### P1 — reduces confusion / debt
 
@@ -35,7 +35,7 @@
 |----|-----|-------|-----------|
 | LB-C3 | `model_training_module.py` still ~2000 LOC | `workflows/training/` | Extract runners to `services/training/`; `train_entry` → thin CLI |
 | LB-C4 | `model_test_backends.py` ~3000 LOC | `workflows/testing/` | Split into `services/testing/backends/` |
-| LB-C5 | `cli_commands.py` imports `workflows.analyze` facade | `services/analyze/cli_commands.py` | `services/analyze/prompts.py` bridge; remove allowlist |
+| LB-C5 | `cli_commands.py` → facade for patchable cmds/prompts | `cli_commands.py` | **Done** — `prompts.py` + `_workflow_attr`; allowlist only for lazy import sites |
 | LB-C6 | `report_writer.py` ~3400 LOC | `services/analyze/` | Internal split (sections/builders); separate TD |
 
 ### P2 — nice to have

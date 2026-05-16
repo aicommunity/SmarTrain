@@ -44,22 +44,7 @@ from smartrain.services.analyze.cache import (
     weights_hash,
 )
 from smartrain.cli_support.cli_argparse import CliArgumentParser
-def prompt_choice(*args: Any, **kwargs: Any) -> str:
-    from smartrain.workflows.analyze import results_analyzer
-
-    return results_analyzer.prompt_choice(*args, **kwargs)
-
-
-def prompt_int(*args: Any, **kwargs: Any) -> int:
-    from smartrain.workflows.analyze import results_analyzer
-
-    return results_analyzer.prompt_int(*args, **kwargs)
-
-
-def prompt_text(*args: Any, **kwargs: Any) -> str:
-    from smartrain.workflows.analyze import results_analyzer
-
-    return results_analyzer.prompt_text(*args, **kwargs)
+from smartrain.services.analyze.prompts import prompt_choice, prompt_int, prompt_text
 from smartrain.services.analyze.metrics_reader import (
     DEFAULT_MAP_COL,
     latest_test_metrics_path,
@@ -387,7 +372,9 @@ def _auto_select_data_yaml(
     for idx, path in enumerate(candidates, start=1):
         src = source_by_path.get(path, "unknown")
         print(f"  {idx}. {path}  [source: {src}]")
-    picked = prompt_choice("Select data.yaml", candidates, default=candidates[0], show_options=False)
+    picked = _workflow_attr("prompt_choice")(
+        "Select data.yaml", candidates, default=candidates[0], show_options=False
+    )
     return picked
 
 
@@ -699,6 +686,32 @@ def _filtered_run_records(args: argparse.Namespace) -> list[tuple[str, Any]]:
     return _svc_filtered_run_records(args, build_run_record_cb=_build_run_record_canonical)
 
 
+def _workflow_attr(name: str):
+    """Resolve via workflows facade so tests can monkeypatch results_analyzer."""
+
+    from smartrain.workflows.analyze import results_analyzer as _ra
+
+    return getattr(_ra, name)
+
+
+def _workflow_analyze_cmd(name: str):
+    """Delegate cmd_* via workflows facade (patchable in tests)."""
+
+    def _run(args: argparse.Namespace) -> None:
+        return _workflow_attr(name)(args)
+
+    return _run
+
+
+def _workflow_callback(name: str):
+    """Delegate arbitrary facade attr (prompts, _recompute_*, etc.)."""
+
+    def _call(*args: Any, **kwargs: Any) -> Any:
+        return _workflow_attr(name)(*args, **kwargs)
+
+    return _call
+
+
 def cmd_interactive(args: argparse.Namespace) -> None:
     indexed = _filtered_run_records(args)
     if not indexed:
@@ -708,14 +721,14 @@ def cmd_interactive(args: argparse.Namespace) -> None:
         args=args,
         indexed=indexed,
         session_artifacts_dir=_session_artifacts_dir,
-        cmd_compare=cmd_compare,
-        cmd_test_metrics_plot=cmd_test_metrics_plot,
-        cmd_inference_benchmark=cmd_inference_benchmark,
-        cmd_inference_plot=cmd_inference_plot,
-        cmd_pr_curves=cmd_pr_curves,
+        cmd_compare=_workflow_analyze_cmd("cmd_compare"),
+        cmd_test_metrics_plot=_workflow_analyze_cmd("cmd_test_metrics_plot"),
+        cmd_inference_benchmark=_workflow_analyze_cmd("cmd_inference_benchmark"),
+        cmd_inference_plot=_workflow_analyze_cmd("cmd_inference_plot"),
+        cmd_pr_curves=_workflow_analyze_cmd("cmd_pr_curves"),
         runs_with_missing_metrics=_runs_with_missing_metrics,
         auto_select_data_yaml=_auto_select_data_yaml,
-        prompt_choice=prompt_choice,
+        prompt_choice=_workflow_attr("prompt_choice"),
     )
 
 
@@ -1076,9 +1089,9 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
         resolve_selected_run_dirs_cb=_resolve_selected_run_dirs,
         latest_test_metrics_path_cb=latest_test_metrics_path,
         load_recompute_status_cb=_load_recompute_status,
-        save_recompute_status_cb=_save_recompute_status,
+        save_recompute_status_cb=_workflow_callback("_save_recompute_status"),
         resolve_data_yaml_for_run_cb=_resolve_data_yaml_for_run,
-        recompute_run_test_metrics_cb=_recompute_run_test_metrics,
+        recompute_run_test_metrics_cb=_workflow_callback("_recompute_run_test_metrics"),
         compute_fingerprint_cb=compute_fingerprint,
         run_cache_root_cb=run_cache_root,
         data_yaml_hash_cb=data_yaml_hash,
@@ -1089,17 +1102,15 @@ def cmd_test_metrics_plot(args: argparse.Namespace) -> None:
 
 
 def cmd_all(args: argparse.Namespace) -> None:
-    from smartrain.workflows.analyze import results_analyzer as _ra
-
     _svc_run_all_command(
         args=args,
         prepare_all_selection_cb=_svc_prepare_all_selection,
         resolve_all_data_yaml_context_cb=_svc_resolve_all_data_yaml_context,
         session_root_cb=_session_root,
         filtered_run_records_cb=_filtered_run_records,
-        prompt_int_cb=prompt_int,
-        prompt_text_cb=prompt_text,
-        prompt_choice_cb=prompt_choice,
+        prompt_int_cb=_workflow_attr("prompt_int"),
+        prompt_text_cb=_workflow_attr("prompt_text"),
+        prompt_choice_cb=_workflow_attr("prompt_choice"),
         build_run_data_yaml_map_cb=_build_run_data_yaml_map,
         auto_select_data_yaml_cb=_auto_select_data_yaml,
         run_all_baseline_artifacts_cb=_svc_run_all_baseline_artifacts,
@@ -1108,21 +1119,21 @@ def cmd_all(args: argparse.Namespace) -> None:
         run_all_pr_stage_cb=_svc_run_all_pr_stage,
         finalize_all_session_cb=_finalize_all_session_with_replay,
         default_map_col=DEFAULT_MAP_COL,
-        cmd_compare_cb=_ra.cmd_compare,
-        cmd_export_table_cb=_ra.cmd_export_table,
+        cmd_compare_cb=_workflow_analyze_cmd("cmd_compare"),
+        cmd_export_table_cb=_workflow_analyze_cmd("cmd_export_table"),
         write_system_profile_compare_csv_cb=_write_system_profile_compare_csv,
         write_test_system_profile_compare_csv_cb=_write_test_system_profile_compare_csv,
-        cmd_leaderboard_cb=_ra.cmd_leaderboard,
+        cmd_leaderboard_cb=_workflow_analyze_cmd("cmd_leaderboard"),
         collect_missing_metrics_recompute_plan_cb=_collect_missing_metrics_recompute_plan,
-        cmd_test_metrics_plot_cb=_ra.cmd_test_metrics_plot,
+        cmd_test_metrics_plot_cb=_workflow_analyze_cmd("cmd_test_metrics_plot"),
         group_runs_by_data_yaml_cb=_group_runs_by_data_yaml,
-        cmd_inference_benchmark_cb=_ra.cmd_inference_benchmark,
-        cmd_inference_plot_cb=_ra.cmd_inference_plot,
+        cmd_inference_benchmark_cb=_workflow_analyze_cmd("cmd_inference_benchmark"),
+        cmd_inference_plot_cb=_workflow_analyze_cmd("cmd_inference_plot"),
         write_speed_quality_artifacts_cb=_write_speed_quality_artifacts,
-        cmd_pr_curves_cb=_ra.cmd_pr_curves,
+        cmd_pr_curves_cb=_workflow_analyze_cmd("cmd_pr_curves"),
         safe_name_cb=_safe_name,
         build_abbreviations_for_report_cb=_build_abbreviations_for_report,
-        collect_ultralytics_test_artifacts_cb=_collect_ultralytics_test_artifacts,
+        collect_ultralytics_test_artifacts_cb=_workflow_callback("_collect_ultralytics_test_artifacts"),
         write_format_compare_artifacts_cb=_write_format_compare_artifacts,
         collect_confidence_recommendation_tables_cb=_collect_confidence_recommendation_tables,
         write_manifest_cb=write_manifest,

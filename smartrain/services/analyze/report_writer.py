@@ -15,7 +15,24 @@ import pandas as pd
 import numpy as np
 
 from smartrain.services.analyze.schema_contracts import ensure_analyze_session_manifest
-from smartrain.workflows.datasets.dataset_report import _export_odt_builtin_zip, _export_odt_odfpy, _export_pdf_fpdf2, _try_pandoc_odt, _try_pandoc_pdf
+
+
+def _dataset_report_exports() -> tuple[Any, ...]:
+    from smartrain.workflows.datasets.dataset_report import (
+        _export_odt_builtin_zip,
+        _export_odt_odfpy,
+        _export_pdf_fpdf2,
+        _try_pandoc_odt,
+        _try_pandoc_pdf,
+    )
+
+    return (
+        _export_odt_builtin_zip,
+        _export_odt_odfpy,
+        _export_pdf_fpdf2,
+        _try_pandoc_odt,
+        _try_pandoc_pdf,
+    )
 
 
 def _read_template(lang: str) -> dict[str, str]:
@@ -286,6 +303,7 @@ def _pandoc_executable() -> str | None:
 def _try_pandoc_odt_analyze(report_root: str, lang: str) -> bool:
     exe = _pandoc_executable()
     if not exe:
+        _try_pandoc_odt = _dataset_report_exports()[3]
         return _try_pandoc_odt(report_root, lang)
     rel_md = f"{lang}/index.md"
     rel_odt = f"report-{lang}.odt"
@@ -3442,6 +3460,13 @@ def write_analysis_report(
     langs = [str(x).strip().lower() for x in languages if str(x).strip()]
     if not langs:
         langs = ["ru", "en"]
+    (
+        _export_odt_builtin_zip,
+        _export_odt_odfpy,
+        _export_pdf_fpdf2,
+        _try_pandoc_odt,
+        _try_pandoc_pdf,
+    ) = _dataset_report_exports()
     for lang in langs:
         lang_dir = os.path.join(report_root, lang)
         os.makedirs(lang_dir, exist_ok=True)

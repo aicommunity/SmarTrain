@@ -11,7 +11,7 @@ Continuation: [`layer-boundary-continuation.md`](./layer-boundary-continuation.m
 | TD-LB-001 | DONE | naming | Two `TaskContext` types | `TaskTypeLabel`, `CanonicalIdentity` |
 | TD-LB-002 | DONE | naming | `train_backend_registry` vs execution `TrainBackend` | `ultralytics_model_alias_registry` |
 | TD-LB-003 | DONE | orchestrators | `canonical_gateway` → workflows | `adapters/canonical/read/metrics_csv` |
-| TD-LB-004 | PARTIAL | backends | Adapters proxy workflows | `BackendRegistry` alias; LB-C1 in continuation |
+| TD-LB-004 | DONE | backends | Adapters proxy workflows | `implementations/ultralytics/inference.py`; adapters use implementations |
 | TD-LB-005 | DONE | analyze | Split workflows/services | `services/analyze/` |
 | TD-LB-006 | PARTIAL | workflows | Fat CLI | Thin `results_analyzer`; MTM/test_backends remain (LB-C3/C4) |
 | TD-LB-007 | DONE | testing | test_backends → MTM profile | `core/runtime/system_profile` |
@@ -37,6 +37,5 @@ Continuation: [`layer-boundary-continuation.md`](./layer-boundary-continuation.m
 
 ## Transitional guardrail allowlist (remove with continuation items)
 
-- `backends/ultralytics_adapter.py`, `external_provider_adapter.py` → LB-C1
-- `services/analyze/metrics_reader.py`, `report_writer.py`, `ultralytics_test_artifacts.py` → LB-C2
-- `services/analyze/cli_commands.py` → `workflows.analyze` (facade) → LB-C5
+- `services/analyze/report_writer.py` → lazy `workflows.datasets` export (LB-C2 follow-up)
+- `services/analyze/cli_commands.py` → `workflows.analyze` facade dispatch (test patch surface; LB-C5)
