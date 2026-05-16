@@ -3,18 +3,33 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     canonicalize_run_ultralytics_layout,
     consolidate_train_backend_dir,
     ensure_run_layout,
     materialize_canonical_run_model,
+    reject_documentation_placeholder_path,
     relocate_or_remove_legacy_val_recs_at_run_root,
     resolve_run_model_with_legacy_fallback,
     run_train_backend_dir,
     run_tests_dir,
 )
 from smartrain.core.runtime.ultralytics_ephemeral import prune_empty_sidecar_dirs
+
+
+def test_reject_documentation_placeholder_path_ellipsis() -> None:
+    with pytest.raises(ValueError, match="ellipsis placeholder"):
+        reject_documentation_placeholder_path("...", kind="run_dir")
+    with pytest.raises(ValueError, match="ellipsis placeholder"):
+        reject_documentation_placeholder_path("/tmp/runs/.../run-1", kind="run_dir")
+
+
+def test_ensure_run_layout_rejects_placeholder_run_dir(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="ellipsis placeholder"):
+        ensure_run_layout(str(tmp_path / "..."))
 
 
 def test_resolve_run_model_with_legacy_fallback_prefers_canonical(tmp_path: Path) -> None:

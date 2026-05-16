@@ -14,7 +14,25 @@ LEGACY_RUN_ROOT_VAL_RECS_PREFIX = "val-recs-"
 _PROTECTED_RUN_ROOT_DIR_NAMES = frozenset({"models", "tmp", ".smartrain", ".smartrain_cache"})
 
 
+def reject_documentation_placeholder_path(path: str | Path, *, kind: str = "path") -> None:
+    """Reject literal ``...`` used as a docs/CLI placeholder (not a filesystem parent dir)."""
+    raw = str(path or "").strip()
+    if not raw:
+        return
+    if raw == "..." or "..." in raw.split("/") or "..." in raw.split("\\"):
+        raise ValueError(
+            f"Invalid {kind}: {raw!r} contains '...' as a path segment. "
+            "Replace with the full real directory path (see docs), not an ellipsis placeholder."
+        )
+    if Path(raw).expanduser().name == "...":
+        raise ValueError(
+            f"Invalid {kind}: {raw!r} resolves to a directory named '...'. "
+            "Use the full run or workspace path."
+        )
+
+
 def _normalize_run_root(run_dir: str | Path) -> Path:
+    reject_documentation_placeholder_path(run_dir, kind="run_dir")
     root = Path(run_dir).expanduser().resolve()
     # Defensive normalization: callers may accidentally pass runs/<run>/models
     # or runs/<run>/tmp/tests/train-* instead of runs/<run>.

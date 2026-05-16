@@ -54,14 +54,18 @@ def resolve_workspace_root(cli_workspace: str | None) -> str:
     Root source: CLI argument (non-empty) overrides the SMART_TRAIN_WORKSPACE environment variable.
     Otherwise, it’s a clear mistake.
     """
+    from smartrain.core.runtime.run_artifacts import reject_documentation_placeholder_path
+
     if cli_workspace is not None:
         w = cli_workspace.strip()
         if w:
+            reject_documentation_placeholder_path(w, kind="workspace")
             return os.path.abspath(os.path.expanduser(w))
     env_val = os.environ.get(WORKSPACE_ENV_VAR)
     if env_val is not None:
         e = env_val.strip()
         if e:
+            reject_documentation_placeholder_path(e, kind="workspace")
             return os.path.abspath(os.path.expanduser(e))
     raise ValueError(
         "The workspace root is not set: specify --workspace or an environment variable"
