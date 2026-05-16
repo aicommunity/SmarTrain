@@ -22,7 +22,7 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 | TD-LB-012 | DONE | LOC | MTM / model_test_cli | Parsers + resume in `services/training/`; test CLI in `services/testing/model_test_cli_service.py`; MTM ~1k LOC (2026-05-16) |
 | TD-LB-013 | DONE | train/inference delta | LB-D1–D4 execution path | `train_wiring`, `train_cli_main`, `TrainRuntimeOps`, slim `inference_cli` (2026-05-16) |
 | TD-LB-014 | DONE | canonical read | Silent `detection` default | `ModelAdapter` requires provenance; `migrate_model_task_provenance.py` (2026-05-16) |
-| TD-LB-015 | OPEN | testing LOC | `format_runners.py` ~2k LOC | Split into support + ultralytics + native modules; keep facade re-exports |
+| TD-LB-015 | DONE | testing LOC | `format_runners.py` ~2k LOC | Split: `format_runners_support.py`, `format_runners_ultralytics.py`, `format_runners_native.py`, thin facade (2026-05-16) |
 | TD-LB-099 | DONE | closure | Program audit | Continuation closed 2026-05-16 |
 
 ## Burn-down checklist
@@ -34,7 +34,7 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 - [x] TD-LB-012
 - [x] TD-LB-013
 - [x] TD-LB-014
-- [ ] TD-LB-015
+- [x] TD-LB-015
 - [x] TD-LB-099
 
 ## Transitional guardrail allowlist

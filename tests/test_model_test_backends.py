@@ -245,7 +245,7 @@ def test_run_native_onnx_backend_retries_after_cuda_oom(monkeypatch, tmp_path: P
         return [_Pred(image_path=str(ds / "test" / "images" / "a.jpg"), cls_id=0, conf=0.9, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
 
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._infer_with_onnx_session",
+        "smartrain.services.testing.backends.format_runners_support._infer_with_onnx_session",
         _flaky_onnx_infer,
     )
 
@@ -297,7 +297,7 @@ def test_run_native_onnx_backend_subprocess_mode(monkeypatch, tmp_path: Path) ->
         }
         return subprocess.CompletedProcess(args=_args[0] if _args else [], returncode=0, stdout=json.dumps(payload), stderr="")
 
-    monkeypatch.setattr("smartrain.services.testing.backends.format_runners.subprocess.run", _fake_subprocess_run)
+    monkeypatch.setattr("smartrain.services.testing.backends.format_runners_support.subprocess.run", _fake_subprocess_run)
 
     result = run_native_format_backend(
         root_dir=str(root_dir),
@@ -331,7 +331,7 @@ def test_run_native_onnx_backend_subprocess_error_has_reason_code(monkeypatch, t
         payload = {"ok": False, "error": "CUDA out of memory during worker run"}
         return subprocess.CompletedProcess(args=_args[0] if _args else [], returncode=1, stdout=json.dumps(payload), stderr="")
 
-    monkeypatch.setattr("smartrain.services.testing.backends.format_runners.subprocess.run", _fake_subprocess_run)
+    monkeypatch.setattr("smartrain.services.testing.backends.format_runners_support.subprocess.run", _fake_subprocess_run)
 
     result = run_native_format_backend(
         root_dir=str(root_dir),
@@ -406,11 +406,11 @@ def test_run_native_tensorrt_backend_writes_test_artifacts(monkeypatch, tmp_path
         return [_Pred(image_path=image_path, cls_id=0, conf=0.95, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
 
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._prepare_trt_runtime",
+        "smartrain.services.testing.backends.format_runners_support._prepare_trt_runtime",
         _stub_prepare_trt_runtime,
     )
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._infer_with_trt_engine",
+        "smartrain.services.testing.backends.format_runners_support._infer_with_trt_engine",
         _fake_trt_infer,
     )
 
@@ -460,15 +460,15 @@ def test_run_native_tensorrt_backend_marks_partial_ok_when_val_fails(monkeypatch
         return orig_collect_gt(data_yaml, split)
 
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._prepare_trt_runtime",
+        "smartrain.services.testing.backends.format_runners_support._prepare_trt_runtime",
         _stub_prepare_trt_runtime,
     )
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._infer_with_trt_engine",
+        "smartrain.services.testing.backends.format_runners_support._infer_with_trt_engine",
         _fake_trt_infer,
     )
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._collect_gt",
+        "smartrain.services.testing.backends.format_runners_support._collect_gt",
         _collect_gt_with_val_failure,
     )
 
@@ -575,11 +575,11 @@ def test_run_native_tensorrt_uses_artifact_imgsz_when_requested_differs(monkeypa
         lambda _path: {"params": {"imgsz": 640}},
     )
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._prepare_trt_runtime",
+        "smartrain.services.testing.backends.format_runners_support._prepare_trt_runtime",
         _stub_prepare_trt_runtime,
     )
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._infer_with_trt_engine",
+        "smartrain.services.testing.backends.format_runners_support._infer_with_trt_engine",
         _fake_trt_infer,
     )
 

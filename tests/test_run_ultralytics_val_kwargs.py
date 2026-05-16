@@ -46,25 +46,25 @@ def test_run_ultralytics_backend_passes_canonical_val_kwargs(
             captured["val_kwargs"] = kwargs
             return SimpleNamespace()
 
-    monkeypatch.setattr("smartrain.services.testing.backends.format_runners.YOLO", _FakeModel)
+    monkeypatch.setattr("smartrain.services.testing.backends.format_runners_support.YOLO", _FakeModel)
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._save_metrics_csv_for_format",
+        "smartrain.services.testing.backends.format_runners_support._save_metrics_csv_for_format",
         lambda *_a, **_k: str(tmp_path / "ignored.csv"),
     )
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._finalize_ultralytics_pt_test_dir",
+        "smartrain.services.testing.backends.format_runners_support._finalize_ultralytics_pt_test_dir",
         lambda **_k: None,
     )
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._ensure_confidence_recommendations_for_explicit_artifact",
+        "smartrain.services.testing.backends.format_runners_support._ensure_confidence_recommendations_for_explicit_artifact",
         lambda **_k: None,
     )
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners.persist_target_test_artifacts_state",
+        "smartrain.services.testing.backends.format_runners_support.persist_target_test_artifacts_state",
         lambda *_a, **_k: None,
     )
     monkeypatch.setattr(
-        "smartrain.services.testing.backends.format_runners._collect_test_system_profile",
+        "smartrain.services.testing.backends.format_runners_support._collect_test_system_profile",
         lambda **_k: {},
     )
 

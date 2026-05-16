@@ -1,6 +1,6 @@
 # Layer-boundary delta plan (LB-D1 … LB-D7)
 
-**Status:** D1–D5 done; D6–D7 pending  
+**Status:** D1–D6 done  
 **Baseline:** layer-boundary refactor closed 2026-05-16; register TD-LB-000…012 DONE.
 
 ## Execution order
@@ -12,8 +12,8 @@
 5. **LB-D5.3** — Remove no-op `emit_legacy_read_deprecation_warnings` — **done**
 6. **LB-D5.2** — Rename mfel / `external_infer_fallback` → `external_eval_substitute` — **done**
 7. **LB-D5.1** — `model_adapter` requires `task_type` + migration script — **done** (`scripts/migrate_model_task_provenance.py`)
-8. **LB-D6** — Split `format_runners.py` (separate PR) — **pending**
-9. **LB-D7** — Docs + register TD-LB-013…015 — **in progress**
+8. **LB-D6** — Split `format_runners.py` — **done** (facade ~50 LOC; `format_runners_support` / `_ultralytics` / `_native`)
+9. **LB-D7** — Docs + register TD-LB-013…015 — **done**
 
 ## LOC targets
 

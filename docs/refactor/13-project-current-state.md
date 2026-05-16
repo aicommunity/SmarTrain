@@ -112,8 +112,7 @@
 
 ## Следующий горизонт (backlog, без обязательства срока)
 
-1. **LB-D6:** разбить [`format_runners.py`](../../smartrain/services/testing/backends/format_runners.py) (~2k LOC) с сохранением monkeypatch-совместимости фасада.
-2. **Дальнейшее утоньшение MTM:** interactive/hooks в workflows; train CLI — [`train_cli_main`](../../smartrain/services/training/train_cli_main.py) + [`train_wiring`](../../smartrain/workflows/training/train_wiring.py).
+1. **Дальнейшее утоньшение MTM:** interactive/hooks в workflows; train CLI — [`train_cli_main`](../../smartrain/services/training/train_cli_main.py) + [`train_wiring`](../../smartrain/workflows/training/train_wiring.py).
 3. **Документация RU:** синхронизация [`../ru/development/architecture.md`](../ru/development/architecture.md) с EN-срезом datasets/services.
 
 ---
