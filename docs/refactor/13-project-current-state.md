@@ -103,6 +103,15 @@
 
 ---
 
+## Layer boundary refactor (in progress)
+
+**Register:** [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md)  
+**Waves:** 0 process/guardrails → 1 naming → 2 analyze → 3 canonical gateway → 4 train/test/inference → 5 backends → 6 fallbacks → 7 datasets (optional) → 8 audit + continuation.
+
+**Guardrails:** [`tests/regression/test_layer_import_guardrails.py`](../../tests/regression/test_layer_import_guardrails.py) — forbids `services`/`orchestrators`/`domain`/`backends` → `workflows` (backends allowlist until Wave 5).
+
+---
+
 ## Следующий горизонт (backlog, без обязательства срока)
 
 1. **Расширение `pt_uni` / internal compare на classification и segmentation:** спроектировать контракт метрик и артефактов сравнения (аналог текущего detection-only пути), затем снять guard в orchestrator и добавить регрессионные тесты.
