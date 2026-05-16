@@ -19,7 +19,7 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 | TD-LB-009 | DONE | runtime | Legacy model path fallback | `resolve_run_model` (no rglob) |
 | TD-LB-010 | DONE | LOC | Monolith modules | Analyze report split + `services/reporting/document_export.py` (2026-05-16) |
 | TD-LB-011 | DONE | datasets | workflows/datasets monolith | Logic in `services/datasets/`; thin `workflows/datasets/*` facades (2026-05-16) |
-| TD-LB-012 | PARTIAL | LOC | MTM / model_test_cli | Parsers + resume CLI in `services/training/`; MTM ~1k LOC (2026-05-16) |
+| TD-LB-012 | DONE | LOC | MTM / model_test_cli | Parsers + resume in `services/training/`; test CLI in `services/testing/model_test_cli_service.py`; MTM ~1k LOC (2026-05-16) |
 | TD-LB-099 | DONE | closure | Program audit | Continuation closed 2026-05-16 |
 
 ## Burn-down checklist
@@ -28,7 +28,7 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 - [x] TD-LB-006
 - [x] TD-LB-010
 - [x] TD-LB-011
-- [x] TD-LB-012 (PARTIAL — `model_test_cli` remains)
+- [x] TD-LB-012
 - [x] TD-LB-099
 
 ## Transitional guardrail allowlist

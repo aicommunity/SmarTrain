@@ -98,7 +98,7 @@
 
 - Внешние провайдеры могут не отдавать полные cls/seg поля; допустим деградированный контракт до расширения провайдеров.
 - **Canonical model read** ([`adapters/canonical/read/model_adapter.py`](../../smartrain/adapters/canonical/read/model_adapter.py)): разрешение `task_type` — metadata → подсказка по имени файла → последний резерв `detection`; `backend_type` — metadata → подсказка по формату весов.
-- Крупные композиционные входы: [`model_training_module.py`](../../smartrain/workflows/training/model_training_module.py) (~1k LOC; argparse/resume CLI в [`services/training/train_cli_parsers.py`](../../smartrain/services/training/train_cli_parsers.py), [`train_resume_cli_service.py`](../../smartrain/services/training/train_resume_cli_service.py)), [`model_test_cli.py`](../../smartrain/workflows/testing/model_test_cli.py) (~860 LOC); исполнение train/test в `services/training` и `services/testing/backends`.
+- Крупные композиционные входы: [`model_training_module.py`](../../smartrain/workflows/training/model_training_module.py) (~1k LOC; argparse/resume CLI в [`services/training/`](../../smartrain/services/training/)), [`model_test_cli.py`](../../smartrain/workflows/testing/model_test_cli.py) (фасад → [`model_test_cli_service.py`](../../smartrain/services/testing/model_test_cli_service.py)); артефакты тестов — [`model_test_service.py`](../../smartrain/services/testing/model_test_service.py).
 
 ---
 
@@ -112,7 +112,7 @@
 
 ## Следующий горизонт (backlog, без обязательства срока)
 
-1. **Утоньшение `model_test_cli`:** перенос interactive/plan helpers в `services/testing/` (MTM resume/argparse уже вынесены).
+1. **Дальнейшее утоньшение MTM:** interactive/hooks остаются в workflows; train/test CLI и сервисы — в `services/`.
 2. **Документация RU:** синхронизация [`../ru/development/architecture.md`](../ru/development/architecture.md) с EN-срезом datasets/services.
 
 ---

@@ -59,6 +59,34 @@ def _parse_roi_class_ids(raw: str | None) -> list[int] | None:
     return out or None
 
 
+def resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, str]:
+    """Resolve promoted model directory name into a resolved weights path."""
+    models_root = Path(layout.models).resolve()
+    candidate_rel = Path(name)
+    if candidate_rel.suffix.lower() in SUPPORTED_INFERENCE_EXTS and not candidate_rel.is_absolute():
+        file_path = (models_root / candidate_rel).resolve()
+        if file_path.is_file():
+            parts = candidate_rel.as_posix().split("/")
+            model_dir_name = parts[0] if parts else file_path.stem
+            return file_path, model_dir_name
+
+    mdir = (Path(layout.models) / name).resolve()
+    if not mdir.is_dir():
+        raise FileNotFoundError(f"Model directory not found: {mdir}")
+
+    manifest = mdir / MANIFEST_NAME
+    if manifest.is_file():
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        wf = payload.get("weights_file")
+        if isinstance(wf, str) and wf.strip():
+            p = (mdir / wf).resolve()
+            if p.is_file():
+                return p, name
+
+    canonical = canonical_target_from_model_dir(mdir)
+    return canonical.model_path.resolve(), name
+
+
 def _resolve_run_ref(layout: WorkspaceLayout, ref: str) -> Path:
     s = str(ref).strip()
     if not s:
