@@ -25,18 +25,18 @@ import pandas as pd
 import yaml
 from tqdm import tqdm
 
-from smartrain.workflows.analyze.compare_service import (
+from smartrain.services.analyze.compare import (
     build_delta_rows,
     compute_composite_score,
     generate_compare_insights,
 )
-from smartrain.workflows.analyze.analyze_report import write_analysis_report, write_manifest
+from smartrain.services.analyze.report_writer import write_analysis_report, write_manifest
 from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     materialize_canonical_run_model,
     run_test_backend_dir,
 )
-from smartrain.workflows.analyze.analyze_cache import (
+from smartrain.services.analyze.cache import (
     append_cache_entry,
     compute_fingerprint,
     data_yaml_hash,
@@ -45,7 +45,7 @@ from smartrain.workflows.analyze.analyze_cache import (
 )
 from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_prompts import prompt_choice, prompt_int, prompt_text
-from smartrain.workflows.analyze.metrics_reader import (
+from smartrain.services.analyze.metrics_reader import (
     DEFAULT_MAP_COL,
     latest_test_metrics_path,
     pick_map_column,
@@ -59,14 +59,14 @@ from smartrain.core.runtime.run_discovery import find_run_directories, is_run_di
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.training.confidence_recommendation import recommendation_file_path, read_recommendation_file
-from smartrain.workflows.analyze.analyze_models import RunRecord
-from smartrain.workflows.analyze.analyze_compare_session_service import (
+from smartrain.services.analyze.models import RunRecord
+from smartrain.services.analyze.compare_session import (
     resolve_default_relative_output,
     resolve_session_artifacts_dir,
     resolve_session_name,
     resolve_session_root,
 )
-from smartrain.workflows.analyze.analyze_benchmark_service import (
+from smartrain.services.analyze.benchmark import (
     collect_split_images as _svc_collect_split_images,
     resolve_inference_csv_path as _svc_resolve_inference_csv_path,
     resolve_inference_plot_png as _svc_resolve_inference_plot_png,
@@ -78,36 +78,36 @@ from smartrain.core.inference.ultralytics_metrics_pr import (
     extract_pr_curve_from_ultralytics_metrics,
     extract_pr_curve_per_class_from_ultralytics_metrics,
 )
-from smartrain.workflows.analyze.analyze_pr_curves_service import (
+from smartrain.services.analyze.pr_curves import (
     resolve_pr_output_png as _svc_resolve_pr_output_png,
     run_pr_curves as _svc_run_pr_curves,
 )
-from smartrain.workflows.analyze.analyze_test_metrics_service import (
+from smartrain.services.analyze.test_metrics_plot import (
     resolve_test_metrics_plot_png as _svc_resolve_test_metrics_plot_png,
     run_test_metrics_plot as _svc_run_test_metrics_plot,
 )
-from smartrain.workflows.analyze.analyze_all_selection_service import (
+from smartrain.services.analyze.all_selection import (
     prepare_all_selection as _svc_prepare_all_selection,
 )
-from smartrain.workflows.analyze.analyze_all_data_yaml_service import (
+from smartrain.services.analyze.all_data_yaml import (
     resolve_all_data_yaml_context as _svc_resolve_all_data_yaml_context,
 )
-from smartrain.workflows.analyze.analyze_all_baseline_artifacts_service import (
+from smartrain.services.analyze.all_baseline_artifacts import (
     run_all_baseline_artifacts as _svc_run_all_baseline_artifacts,
 )
-from smartrain.workflows.analyze.analyze_all_quality_stage_service import (
+from smartrain.services.analyze.all_quality_stage import (
     run_all_quality_stage as _svc_run_all_quality_stage,
 )
-from smartrain.workflows.analyze.analyze_all_speed_stage_service import (
+from smartrain.services.analyze.all_speed_stage import (
     run_all_speed_stage as _svc_run_all_speed_stage,
 )
-from smartrain.workflows.analyze.analyze_all_pr_stage_service import (
+from smartrain.services.analyze.all_pr_stage import (
     run_all_pr_stage as _svc_run_all_pr_stage,
 )
-from smartrain.workflows.analyze.analyze_all_finalize_service import (
+from smartrain.services.analyze.all_finalize import (
     finalize_all_session as _svc_finalize_all_session,
 )
-from smartrain.workflows.analyze.analyze_all_command_service import (
+from smartrain.services.analyze.all_command import (
     run_all_command as _svc_run_all_command,
 )
 
@@ -118,14 +118,14 @@ _ANALYZE_ALL_SUBPARSER: argparse.ArgumentParser | None = None
 def _finalize_all_session_with_replay(**kwargs: Any) -> None:
     kwargs["replay_parser"] = _ANALYZE_ALL_SUBPARSER
     _svc_finalize_all_session(**kwargs)
-from smartrain.workflows.analyze.analyze_run_query_service import (
+from smartrain.services.analyze.run_query import (
     build_run_record_canonical as _svc_build_run_record_canonical,
     filtered_run_records as _svc_filtered_run_records,
     flat_row_canonical as _svc_flat_row_canonical,
     matches_optional_bool as _svc_matches_optional_bool,
     read_test_metrics_for_run as _svc_read_test_metrics_for_run,
 )
-from smartrain.workflows.analyze.analyze_recompute_cache_service import (
+from smartrain.services.analyze.recompute_cache import (
     collect_missing_metrics_recompute_plan as _svc_collect_missing_metrics_recompute_plan,
     load_recompute_status as _svc_load_recompute_status,
     recompute_run_test_metrics as _svc_recompute_run_test_metrics,
@@ -134,28 +134,28 @@ from smartrain.workflows.analyze.analyze_recompute_cache_service import (
     runs_with_missing_metrics as _svc_runs_with_missing_metrics,
     save_recompute_status as _svc_save_recompute_status,
 )
-from smartrain.workflows.analyze.analyze_system_profile_service import (
+from smartrain.services.analyze.system_profile_compare import (
     write_system_profile_compare_csv as _svc_write_system_profile_compare_csv,
     write_test_system_profile_compare_csv as _svc_write_test_system_profile_compare_csv,
 )
-from smartrain.workflows.analyze.analyze_ultralytics_test_service import (
+from smartrain.services.analyze.ultralytics_test_artifacts import (
     collect_ultralytics_test_artifacts as _svc_collect_ultralytics_test_artifacts,
 )
-from smartrain.workflows.analyze.analyze_compare_finalize_service import (
+from smartrain.services.analyze.compare_finalize import (
     finalize_compare_analytics_session as _svc_finalize_compare_analytics_session,
     resolve_compare_artifact_path as _svc_resolve_compare_artifact_path,
     resolve_compare_png_path as _svc_resolve_compare_png_path,
 )
-from smartrain.services.analyze_data_yaml import collect_data_yaml_candidates_for_run
-from smartrain.services.analyze_table_service import export_runs_table, run_scan_command
-from smartrain.services.analyze_compare_service import run_compare_workflow
-from smartrain.services.analyze_artifact_builders import (
+from smartrain.services.analyze.data_yaml import collect_data_yaml_candidates_for_run
+from smartrain.services.analyze.table import export_runs_table, run_scan_command
+from smartrain.services.analyze.compare_workflow import run_compare_workflow
+from smartrain.services.analyze.artifact_builders import (
     collect_confidence_recommendation_tables,
     write_speed_quality_artifacts,
 )
-from smartrain.services.analyze_format_compare_service import write_format_compare_artifacts
-from smartrain.services.analyze_interactive_service import run_interactive_workflow
-from smartrain.services.analyze_leaderboard_service import (
+from smartrain.services.analyze.format_compare import write_format_compare_artifacts
+from smartrain.services.analyze.interactive import run_interactive_workflow
+from smartrain.services.analyze.leaderboard import (
     build_leaderboard_records,
     write_leaderboard_csv,
 )

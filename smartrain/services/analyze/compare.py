@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd
 
-from smartrain.workflows.analyze.analyze_models import RunRecord
+from smartrain.services.analyze.models import RunRecord
 
 
 def build_delta_rows(

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from smartrain.workflows.analyze.analyze_all_data_yaml_service import resolve_all_data_yaml_context
+from smartrain.services.analyze.all_data_yaml import resolve_all_data_yaml_context
 
 
 def test_multiple_data_yaml_no_prompt_when_selection_not_interactive() -> None:

@@ -6,7 +6,7 @@ import shutil
 import sys
 from typing import Callable
 
-from smartrain.workflows.analyze.analyze_schema_contracts import ensure_analyze_session_manifest
+from smartrain.services.analyze.schema_contracts import ensure_analyze_session_manifest
 
 
 def resolve_compare_artifact_path(path: str, session_dir: str) -> str:

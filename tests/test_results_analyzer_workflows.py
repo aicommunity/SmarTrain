@@ -1287,7 +1287,7 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
 
 
 def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "speed_quality").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "compare").mkdir(parents=True, exist_ok=True)
@@ -1378,7 +1378,7 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
 
 
 def test_analyze_report_replaces_nan_with_dash_in_tables(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1411,7 +1411,7 @@ def test_analyze_report_replaces_nan_with_dash_in_tables(tmp_path: Path) -> None
 
 
 def test_analyze_report_format_section_contains_perf_subsection(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1442,7 +1442,7 @@ def test_analyze_report_format_section_contains_perf_subsection(tmp_path: Path) 
 
 
 def test_analyze_report_perf_section_uses_benchmark_fallback(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "inference").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1475,7 +1475,7 @@ def test_analyze_report_perf_section_uses_benchmark_fallback(tmp_path: Path) -> 
 
 
 def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1510,7 +1510,7 @@ def test_analyze_report_hides_sparse_system_profile_table(tmp_path: Path) -> Non
 
 
 def test_analyze_report_alias_legend_has_no_fake_data_row(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1534,7 +1534,7 @@ def test_analyze_report_alias_legend_has_no_fake_data_row(tmp_path: Path) -> Non
 
 
 def test_analyze_report_dedups_format_compare_csv_keys(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "format_compare").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1560,7 +1560,7 @@ def test_analyze_report_dedups_format_compare_csv_keys(tmp_path: Path) -> None:
 
 
 def test_analyze_report_runs_summary_prefers_canonical_test_columns(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1598,7 +1598,7 @@ def test_analyze_report_runs_summary_prefers_canonical_test_columns(tmp_path: Pa
 
 
 def test_analyze_report_speed_quality_after_speed_vs_map(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "speed_quality").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "compare").mkdir(parents=True, exist_ok=True)
@@ -1636,7 +1636,7 @@ def test_analyze_report_speed_quality_after_speed_vs_map(tmp_path: Path) -> None
 
 
 def test_flat_row_canonical_merges_training_metadata_system_profile(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_run_query_service import flat_row_canonical
+    from smartrain.services.analyze.run_query import flat_row_canonical
 
     run_dir = tmp_path / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1652,7 +1652,7 @@ def test_flat_row_canonical_merges_training_metadata_system_profile(tmp_path: Pa
     (run_dir / "training_metadata.json").write_text(json.dumps(meta), encoding="utf-8")
 
     def _fake_rec(_rd: str):
-        from smartrain.workflows.analyze.analyze_models import RunRecord
+        from smartrain.services.analyze.models import RunRecord
 
         return RunRecord(
             run_dir=str(run_dir),
@@ -1669,7 +1669,7 @@ def test_flat_row_canonical_merges_training_metadata_system_profile(tmp_path: Pa
     assert row.get("sys_cpu_model") == "TestCPU"
     assert row.get("sys_os") == "Linux"
     assert row.get("sys_gpu_0_name") == "RTX"
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
@@ -1701,7 +1701,7 @@ def test_flat_row_canonical_merges_training_metadata_system_profile(tmp_path: Pa
 
 
 def test_analyze_report_per_class_headers_and_human_readable_ultralytics_captions(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "pr" / "per_class").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "ultralytics-test" / "R1").mkdir(parents=True, exist_ok=True)
@@ -1769,7 +1769,7 @@ def test_analyze_report_per_class_headers_and_human_readable_ultralytics_caption
 
 
 def test_analyze_report_renders_group_pr_images_via_fallback_scan(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "pr" / "group_1" / "per_class").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "pr" / "group_1" / "pr_all_classes.png").write_bytes(b"fakepng")
@@ -1791,7 +1791,7 @@ def test_analyze_report_renders_group_pr_images_via_fallback_scan(tmp_path: Path
 
 
 def test_analyze_report_hides_empty_run_machine_lines_in_ultralytics_section(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "ultralytics-test" / "R1").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "ultralytics-test" / "R1" / "BoxPR_curve.png").write_bytes(b"fakepng")
@@ -1820,7 +1820,7 @@ def test_analyze_report_hides_empty_run_machine_lines_in_ultralytics_section(tmp
 
 
 def test_analyze_report_confidence_tables_titles_columns_and_per_run_split(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "confidence").mkdir(parents=True, exist_ok=True)
     rows_a = [

@@ -18,7 +18,7 @@ from smartrain.core.runtime.run_artifacts import canonical_run_model_path, mater
 from smartrain.core.runtime.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.runtime.run_discovery import find_run_directories
-from smartrain.workflows.analyze.metrics_reader import latest_test_metrics_path, load_metadata
+from smartrain.services.analyze.metrics_reader import latest_test_metrics_path, load_metadata
 
 
 MANIFEST_NAME = "model_manifest.json"

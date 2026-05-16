@@ -139,7 +139,7 @@ def test_diagnose_run_training_complete_pending_when_results_in_train_ultralytic
 
 def test_canonicalize_resolves_suffix_train_results_csv(tmp_path: Path) -> None:
     from smartrain.core.runtime.run_artifacts import canonicalize_run_ultralytics_layout
-    from smartrain.workflows.analyze.metrics_reader import results_csv_path
+    from smartrain.services.analyze.metrics_reader import results_csv_path
 
     run_dir = tmp_path / "runs" / "ds" / "run_suffix_canonicalize"
     run_dir.mkdir(parents=True)

@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 from smartrain.core.runtime.run_discovery import find_run_directories
-from smartrain.workflows.analyze.analyze_models import RunRecord
+from smartrain.services.analyze.models import RunRecord
 
 
 def matches_optional_bool(value: bool | None, expected: bool | None) -> bool:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from smartrain.services.analyze_artifacts import (
+from smartrain.services.analyze.artifacts import (
     default_relative_output,
     session_artifacts_dir,
     session_name,

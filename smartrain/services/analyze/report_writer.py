@@ -14,7 +14,7 @@ from typing import Any, Callable
 import pandas as pd
 import numpy as np
 
-from smartrain.workflows.analyze.analyze_schema_contracts import ensure_analyze_session_manifest
+from smartrain.services.analyze.schema_contracts import ensure_analyze_session_manifest
 from smartrain.workflows.datasets.dataset_report import _export_odt_builtin_zip, _export_odt_odfpy, _export_pdf_fpdf2, _try_pandoc_odt, _try_pandoc_pdf
 
 

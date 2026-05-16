@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from smartrain.workflows.analyze.metrics_reader import (
+from smartrain.services.analyze.metrics_reader import (
     read_metrics_by_format_for_split,
     read_metrics_by_format_for_split_artifacts,
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
-from smartrain.workflows.analyze.analyze_schema_contracts import ensure_format_compare_index
+from smartrain.services.analyze.schema_contracts import ensure_format_compare_index
 from smartrain.workflows.testing.model_test_service import load_test_artifacts_manifest
 
 __all__ = [
