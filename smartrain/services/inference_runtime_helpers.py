@@ -30,13 +30,12 @@ from smartrain.core.workflow_adapters.inference_runtime_api import (
     _full_image_crop,
     _select_roi_boxes,
 )
+from smartrain.services.datasets.dataset_roi_yolo import ON_EMPTY_MODES, ROI_POLICIES
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
 SUPPORTED_INFERENCE_EXTS = {".pt", ".onnx", ".engine", ".trt"}
 DATA_MODES = ("folder", "dataset-split")
-ROI_POLICIES = ("largest", "highest_conf")
-ON_EMPTY_MODES = ("skip", "full", "fail")
 
 
 def sanitize_segment(value: str) -> str:
@@ -149,7 +148,30 @@ def infer_img_size_from_model_context_safe(model_path: Path) -> int | None:
     return infer_img_size_from_model_context(model_path)
 
 
-def _load_catalog(layout: WorkspaceLayout) -> dict[str, Any]:
+def discover_model_entries(layout: WorkspaceLayout) -> list[tuple[str, str, str]]:
+    """Return tuples: (display_label, model_name_arg_value, model_dir_name)."""
+    root = Path(layout.models)
+    if not root.is_dir():
+        return []
+    out: list[tuple[str, str, str]] = []
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        files = sorted(
+            p
+            for p in d.rglob("*")
+            if p.is_file()
+            and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS
+            and not is_internal_conversion_artifact(p)
+        )
+        if not files:
+            out.append((f"{d.name}/(no model files)", d.name, d.name))
+            continue
+        for fp in files:
+            rel = fp.relative_to(root).as_posix()
+            out.append((rel, rel, d.name))
+    return out
+
+
+def load_catalog(layout: WorkspaceLayout) -> dict[str, Any]:
     path = Path(layout.work_datasets_info_path())
     if not path.is_file():
         return {}
@@ -177,7 +199,7 @@ def collect_folder_images(source_dir: str, limit: int) -> list[str]:
 def collect_split_images_for_dataset(
     layout: WorkspaceLayout, dataset: str, split: str, limit: int
 ) -> tuple[list[str], str]:
-    catalog = _load_catalog(layout)
+    catalog = load_catalog(layout)
     if dataset not in catalog:
         raise KeyError(f"Dataset {dataset!r} not found in {layout.work_datasets_info_path()}")
     entry = catalog[dataset]

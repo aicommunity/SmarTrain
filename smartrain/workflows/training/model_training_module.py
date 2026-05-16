@@ -28,6 +28,7 @@ from smartrain.workflows.training.train_resume import (
     RUN_STATUS_RESUMABLE_INCOMPLETE,
     RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
     RunDiagnosis,
+    diagnose_run,
     resolve_dataset_path_for_resume,
     list_incomplete_runs,
     resume_training_in_run,
@@ -183,7 +184,7 @@ from smartrain.core.runtime.workspace_paths import (
     DATASETS_INFO_FILE,
 )
 from smartrain.core.runtime.run_discovery import find_run_directories
-from smartrain.workflows.testing.model_test_service import (
+from smartrain.services.testing.model_test_service import (
     complete_missing_test_artifacts,
     format_metrics_path,
     sync_test_artifacts_manifest,
@@ -265,84 +266,34 @@ def _next_backoff_batch(current: int, min_batch: int, backoff: int) -> int:
     return _svc_next_backoff_batch(current, min_batch, backoff)
 
 
-def _complete_missing_test_with_backoff(
-    run_dir: str,
-    *,
-    workspace_root: str,
-    initial_batch: int | None,
-    min_batch: int,
-    backoff: int,
-) -> None:
-    _svc_complete_missing_test_with_backoff(
+def _complete_missing_test_with_backoff(run_dir: str, *, workspace_root: str, initial_batch: int | None, min_batch: int, backoff: int) -> None:
+    from smartrain.workflows.training import train_wiring
+
+    return train_wiring.complete_missing_test_with_backoff(
         run_dir,
         workspace_root=workspace_root,
         initial_batch=initial_batch,
         min_batch=min_batch,
         backoff=backoff,
-        complete_missing_test_artifacts_cb=complete_missing_test_artifacts,
-        pt_test_runner_cb=_resume_ultralytics_pt_test_runner,
-        update_metadata_cb=update_resume_test_metadata,
-        maybe_free_cuda_memory_cb=_maybe_free_cuda_memory,
     )
 
 
 def _run_calc_confidence_command(argv: list[str]) -> int:
-    return _svc_run_calc_confidence_command(
-        argv,
-        ensure_resume_confidence_recommendations_cb=_ensure_resume_confidence_recommendations,
-    )
+    from smartrain.workflows.training import train_wiring
+
+    return train_wiring.run_calc_confidence_command(argv)
 
 
 def _run_resume_command(argv: list[str]) -> int:
-    from smartrain.workflows.training import train_resume as _train_resume
+    from smartrain.workflows.training import train_wiring
 
-    return _svc_run_resume_command(
-        argv,
-        run_status_resumable_incomplete=RUN_STATUS_RESUMABLE_INCOMPLETE,
-        run_status_training_complete_test_pending=RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
-        list_incomplete_runs_cb=list_incomplete_runs,
-        diagnose_run_cb=_train_resume.diagnose_run,
-        resume_training_in_run_cb=resume_training_in_run,
-        update_resume_metadata_cb=update_resume_metadata,
-        update_resume_test_metadata_cb=update_resume_test_metadata,
-        complete_missing_test_with_backoff_cb=_complete_missing_test_with_backoff,
-        ensure_resume_confidence_recommendations_cb=_ensure_resume_confidence_recommendations,
-        ensure_matplotlib_training_runtime_cb=ensure_matplotlib_training_runtime,
-        maybe_free_cuda_memory_cb=_maybe_free_cuda_memory,
-    )
+    return train_wiring.run_resume_command(argv)
 
 
-def _ensure_resume_confidence_recommendations(
-    run_dir: str,
-    workspace_root: str,
-    val_batch: int = 1,
-) -> None:
-    test_payload = read_recommendation_file(recommendation_file_path(run_dir, "test"))
-    val_payload = read_recommendation_file(recommendation_file_path(run_dir, "val"))
-    if recommendations_complete(test_payload) and recommendations_complete(val_payload):
-        return
+def _ensure_resume_confidence_recommendations(run_dir: str, workspace_root: str, val_batch: int = 1) -> None:
+    from smartrain.services.training.train_resume_confidence_service import ensure_resume_confidence_recommendations
 
-    best_pt = canonical_run_model_path(run_dir, ".pt")
-    if not os.path.isfile(best_pt):
-        print(
-            "[WARN] Resume post-check: recommendations missing but canonical run model is absent; "
-            "cannot recompute confidence recommendations."
-        )
-        return
-
-    dataset_path = resolve_dataset_path_for_resume(run_dir, workspace_root)
-    if not dataset_path:
-        print(
-            "[WARN] Resume post-check: recommendations missing but dataset path is unresolved; "
-            "cannot recompute confidence recommendations."
-        )
-        return
-
-    print("[INFO] Resume post-check: recomputing missing confidence recommendations (val/test).")
-    _maybe_free_cuda_memory()
-    # Recompute path is primarily for backfilling recommendations on existing runs.
-    # Keep val/test memory profile conservative to avoid OOM on small GPUs.
-    test_yolo(run_dir, dataset_path, val_batch=max(1, int(val_batch)), non_interactive=True)
+    return ensure_resume_confidence_recommendations(run_dir, workspace_root, val_batch=val_batch)
 
 
 def _prompt_input(label: str, default: str = "", completer=None, show_default_hint: bool = True) -> str:
@@ -692,152 +643,22 @@ def _run_mfel_external_val_fallback(
     )
 
 
-def _merge_sources_with_priority(
-    *,
-    config_profile: dict[str, Any],
-    ultralytics_profile: dict[str, Any],
-    args: Any,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    # Base: --config
-    u_cfg, sm_opts = extract_smartrain_options(config_profile)
+def _merge_sources_with_priority(*args, **kwargs):
+    from smartrain.services.training.train_config_merge_service import merge_sources_with_priority as _merge
 
-    # Overlay: --ultralytics_yaml (minus ignored keys)
-    if ultralytics_profile:
-        ignored = sorted(k for k in ultralytics_profile.keys() if k in _ULTRALYTICS_YAML_IGNORED_KEYS)
-        if ignored:
-            print(
-                "[WARNING] --ultralytics_yaml: keys ignored: "
-                + ", ".join(ignored)
-            )
-        filtered = {k: v for k, v in ultralytics_profile.items() if k not in _ULTRALYTICS_YAML_IGNORED_KEYS}
-        u_from_ultra, sm_from_ultra = extract_smartrain_options(filtered)
-        cli_key_map = {
-            "model": "model",
-            "epochs": "epochs",
-            "batch": "batch",
-            "imgsz": "img_size",
-            "task": "task",
-        }
-        overridden_by_cli: list[str] = []
-        for yaml_key, cli_attr in cli_key_map.items():
-            if yaml_key in u_from_ultra and getattr(args, cli_attr, None) is not None:
-                overridden_by_cli.append(yaml_key)
-        if overridden_by_cli:
-            print(
-                "[WARNING] --ultralytics_yaml: The following keys will be overridden by the CLI: "
-                + ", ".join(sorted(overridden_by_cli))
-            )
-        u_cfg.update(u_from_ultra)
-        sm_opts.update(sm_from_ultra)
-    return u_cfg, sm_opts
+    return _merge(*args, **kwargs)
 
 
-def _train_yolo_hooks() -> TrainYoloHooks:
-    def _setup_weighted_sampling_env() -> None:
-        from smartrain.services.datasets.weighted_yolo_dataset import setup_weighted_sampling_env
+def train_yolo(*args, **kwargs):
+    from smartrain.services.training.train_yolo_hooks import build_train_yolo_hooks
 
-        setup_weighted_sampling_env()
-
-    def _register_weighted_sampling_callback(model: Any) -> None:
-        from smartrain.services.datasets.weighted_yolo_dataset import register_weighted_sampling_callback
-
-        register_weighted_sampling_callback(model)
-
-    return TrainYoloHooks(
-        setup_weighted_sampling_env=_setup_weighted_sampling_env,
-        register_weighted_sampling_callback=_register_weighted_sampling_callback,
-    )
+    return _svc_train_yolo(*args, **kwargs, hooks=build_train_yolo_hooks())
 
 
-def train_yolo(
-    dataset_path: str,
-    target_dir: str,
-    non_interactive: bool = False,
-    workspace_root: str | None = None,
-    ultralytics_cfg: dict[str, Any] | None = None,
-    smartrain_opts: dict[str, Any] | None = None,
-):
-    return _svc_train_yolo(
-        dataset_path,
-        target_dir,
-        non_interactive=non_interactive,
-        workspace_root=workspace_root,
-        ultralytics_cfg=ultralytics_cfg,
-        smartrain_opts=smartrain_opts,
-        hooks=_train_yolo_hooks(),
-    )
+def _resume_ultralytics_pt_test_runner(*args, **kwargs):
+    from smartrain.services.training.train_resume_pt_test_runner import resume_ultralytics_pt_test_runner
 
-
-def _resume_ultralytics_pt_test_runner(
-    model_dir: str,
-    dataset_path: str,
-    training_start_time=None,
-    training_end_time=None,
-    train_img_size=None,
-    val_imgsz=None,
-    val_conf=None,
-    val_iou=None,
-    val_batch=None,
-    conf_rec_disable: bool = False,
-    conf_rec_beta_recall: float = 2.0,
-    conf_rec_beta_precision: float = 0.5,
-    conf_rec_fallback: float = 0.25,
-    *,
-    non_interactive: bool = False,
-):
-    """Resume-time PT test: same artifacts as `smartrain test` (Ultralytics val + plots)."""
-    from smartrain.orchestrators.canonical_gateway import resolve_task_context
-    from smartrain.workflows.testing.model_test_backends import run_ultralytics_backend
-
-    mpl_rt = ensure_matplotlib_training_runtime(non_interactive=bool(non_interactive))
-    data_yaml = _build_runtime_data_yaml(dataset_path, model_dir, stage="test")
-    weights = canonical_run_model_path(model_dir, ".pt")
-    if not os.path.isfile(weights):
-        raise FileNotFoundError(f"canonical run model is missing: {weights}")
-    try:
-        ctx = resolve_task_context(model_dir)
-        t_raw = (ctx.task_type or "detect").strip().lower()
-    except Exception:
-        t_raw = "detect"
-    if t_raw in {"classification", "classify", "cls"}:
-        task_type = "classification"
-    elif t_raw in {"segmentation", "segment", "seg"}:
-        task_type = "segmentation"
-    else:
-        task_type = "detection"
-
-    res = run_ultralytics_backend(
-        root_dir=model_dir,
-        weights_path=weights,
-        dataset_yaml_path=data_yaml,
-        format_name="pt",
-        imgsz=val_imgsz if val_imgsz is not None else train_img_size,
-        val_conf=val_conf,
-        val_iou=val_iou,
-        val_batch=val_batch,
-        conf_rec_disable=bool(conf_rec_disable),
-        conf_rec_beta_recall=float(conf_rec_beta_recall),
-        conf_rec_beta_precision=float(conf_rec_beta_precision),
-        conf_rec_fallback=float(conf_rec_fallback),
-        deep_diagnostics=False,
-        collect_performance=False,
-        perf_warmup_images=5,
-        runtime_device=None,
-        task_type=task_type,
-    )
-    if not res.success:
-        raise RuntimeError(str(res.error or "run_ultralytics_backend failed"))
-
-    inference_record: dict[str, Any] = {
-        "imgsz": val_imgsz if val_imgsz is not None else train_img_size,
-        "conf": val_conf,
-        "iou": val_iou,
-        "batch": val_batch,
-        "matplotlib_runtime": mpl_rt.as_dict(),
-    }
-    if isinstance(res.inference, dict):
-        inference_record.update(res.inference)
-    return res.test_start_time or datetime.now(), res.test_end_time or datetime.now(), inference_record
+    return resume_ultralytics_pt_test_runner(*args, **kwargs)
 
 
 def test_yolo(
@@ -1004,43 +825,19 @@ def _ensure_device_available_or_raise(device: str | None) -> None:
 
 
 def main(argv=None):
-    if argv is None:
-        argv = sys.argv[1:]
-    request = make_command_request("train", argv, interactive_allowed=is_interactive_allowed(argv))
-    aux_rc = _svc_handle_aux_train_commands(
+    from smartrain.services.training.train_cli_main import main as _cli_main
+    from smartrain.workflows.training import train_wiring
+
+    return _cli_main(
         argv,
-        run_resume_command_cb=_run_resume_command,
-        run_calc_confidence_command_cb=_run_calc_confidence_command,
-    )
-    if aux_rc is not None:
-        return aux_rc
-    return _svc_run_train_cli_pipeline(
-        argv,
-        request=request,
-        parse_args_cb=parse_args,
-        apply_external_provider_defaults_cb=_apply_external_provider_defaults,
-        list_provider_specs_cb=list_provider_specs,
-        parse_external_model_ref_cb=parse_external_model_ref,
-        validate_external_model_ref_cb=validate_external_model_ref,
-        build_train_arg_parser_cb=build_train_arg_parser,
-        run_interactive_train_setup_cb=_run_interactive_train_setup,
-        emit_replay_cb=emit_replay,
-        load_train_profile_cb=load_train_profile,
-        load_ultralytics_yaml_cb=_load_ultralytics_yaml,
-        merge_sources_with_priority_cb=_merge_sources_with_priority,
-        merge_cli_into_ultralytics_cfg_cb=merge_cli_into_ultralytics_cfg,
-        apply_cli_smartrain_overrides_cb=apply_cli_smartrain_overrides,
-        resolve_device_request_cb=resolve_device_request,
-        resolve_cli_paths_with_profile_cb=_resolve_cli_paths_with_profile,
-        normalize_model_spec_cb=_normalize_model_spec,
-        ensure_device_available_or_raise_cb=_ensure_device_available_or_raise,
-        device_display_name_cb=device_display_name,
-        run_train_after_setup_cb=run_train_after_setup,
-        default_device_value_cb=default_device_value,
-        model_version_default=MODEL_VERSION,
-        epochs_default=EPOCHS,
-        batch_default=BATCH,
-        img_size_default=IMG_SIZE,
+        run_resume_command_cb=train_wiring.run_resume_command,
+        run_calc_confidence_command_cb=train_wiring.run_calc_confidence_command,
+        parse_args_cb=train_wiring.parse_train_args_cb,
+        run_interactive_train_setup_cb=train_wiring.run_interactive_train_setup_cb,
+        load_ultralytics_yaml_cb=train_wiring.load_ultralytics_yaml_cb,
+        resolve_cli_paths_with_profile_cb=train_wiring.resolve_cli_paths_with_profile_cb,
+        run_train_after_setup_cb=train_wiring.run_train_after_setup_cb,
+        normalize_model_spec_cb=train_wiring.normalize_model_spec_cb,
     )
 
 

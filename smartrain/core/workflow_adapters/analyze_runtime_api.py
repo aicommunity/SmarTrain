@@ -7,7 +7,7 @@ from smartrain.services.analyze.metrics_reader import (
     read_test_system_profile_by_format_artifacts,
 )
 from smartrain.services.analyze.schema_contracts import ensure_format_compare_index
-from smartrain.workflows.testing.model_test_service import load_test_artifacts_manifest
+from smartrain.services.testing.model_test_service import load_test_artifacts_manifest
 
 __all__ = [
     "read_metrics_by_format_for_split",
