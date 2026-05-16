@@ -32,14 +32,11 @@
 | LB-C5 | `prompts.py` + `_workflow_attr` facade dispatch |
 | LB-C6 | `report_markdown.py`, `report_odt.py`, thin `report_writer.py` |
 | LB-C8 | CI: `pytest tests/regression/test_layer_import_guardrails.py` in phase8 workflow |
-| LB-C7 (partial) | `services/datasets/` (20 modules: hash, stats, scan, access, report, json scan services, …); `workflow_dispatch` |
-| LB-C7 (remaining) | CLI shells in `workflows/datasets/`: former, augment, balance, prune, orient, roi, cvat, `datasets_json_former`, `datasets_entry` |
+| LB-C7 | `services/datasets/` (full logic); `workflows/datasets/` thin facades + `datasets_entry` |
 
 ## Deferred (non-blocking)
 
-| id | Notes |
-|----|-------|
-| LB-C7 | Thin `workflows/datasets/*_entry` facades over moved `services/datasets` implementations |
+(none for layer-boundary continuation)
 
 ## Key paths after closure
 

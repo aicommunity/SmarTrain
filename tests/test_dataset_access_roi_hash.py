@@ -239,7 +239,7 @@ def test_roi_dataset_name_with_zip_suffix_resolves_key(tmp_path: Path) -> None:
     fake_model.predict = MagicMock(return_value=[fake_result])
     out_dir = tmp_path / "datasets" / "from_zip_suffix"
 
-    with patch("smartrain.workflows.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
+    with patch("smartrain.services.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
         roi_main(
             [
                 "--workspace",
@@ -275,7 +275,7 @@ def test_roi_workspace_flat_mock_yolo(tmp_path: Path) -> None:
     fake_model.task = "detect"
     fake_model.predict = MagicMock(return_value=[fake_result])
 
-    with patch("smartrain.workflows.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
+    with patch("smartrain.services.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
         roi_main(
             [
                 "--workspace",
@@ -322,7 +322,7 @@ def test_roi_workspace_external_path_via_datasets_list(tmp_path: Path) -> None:
     fake_model.task = "detect"
     fake_model.predict = MagicMock(return_value=[fake_result])
 
-    with patch("smartrain.workflows.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
+    with patch("smartrain.services.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
         roi_main(
             [
                 "--workspace",
@@ -381,7 +381,7 @@ def test_roi_multiple_datasets_batch_mode(tmp_path: Path) -> None:
     fake_model = MagicMock()
     fake_model.task = "detect"
     fake_model.predict = MagicMock(return_value=[fake_result])
-    with patch("smartrain.workflows.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
+    with patch("smartrain.services.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
         roi_main(
             [
                 "--workspace",
@@ -412,7 +412,7 @@ def test_roi_legacy_direct_source_without_datasets_info(tmp_path: Path) -> None:
     fake_model = MagicMock()
     fake_model.task = "detect"
     fake_model.predict = MagicMock(return_value=[fake_result])
-    with patch("smartrain.workflows.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
+    with patch("smartrain.services.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
         roi_main(
             [
                 "--source-path",
@@ -439,7 +439,7 @@ def test_roi_legacy_direct_images_only_without_labels(tmp_path: Path) -> None:
     fake_model = MagicMock()
     fake_model.task = "detect"
     fake_model.predict = MagicMock(return_value=[fake_result])
-    with patch("smartrain.workflows.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
+    with patch("smartrain.services.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
         roi_main(
             [
                 "--source-path",
@@ -471,7 +471,7 @@ def test_roi_images_only_flag_ignores_existing_labels(tmp_path: Path) -> None:
     fake_model = MagicMock()
     fake_model.task = "detect"
     fake_model.predict = MagicMock(return_value=[fake_result])
-    with patch("smartrain.workflows.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
+    with patch("smartrain.services.datasets.dataset_roi_yolo.YOLO", return_value=fake_model):
         roi_main(
             [
                 "--source-path",
