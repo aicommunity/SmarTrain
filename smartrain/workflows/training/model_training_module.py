@@ -170,7 +170,7 @@ from smartrain.core.runtime.run_artifacts import (
     canonical_run_model_path,
     canonicalize_run_ultralytics_layout,
     materialize_canonical_run_model,
-    resolve_run_model_with_legacy_fallback,
+    resolve_run_model,
     run_tmp_dir,
     run_tests_dir,
     run_test_backend_dir,
@@ -1143,7 +1143,7 @@ def _materialize_canonical_run_model(run_dir: str, source_path: str | None = Non
 
 
 def _find_external_best_checkpoint(run_dir: str) -> str | None:
-    found = resolve_run_model_with_legacy_fallback(run_dir, ".pt")
+    found = resolve_run_model(run_dir, ".pt")
     return str(found) if found is not None else None
 
 
@@ -1396,7 +1396,7 @@ def train_yolo(
             pass
 
     try:
-        best_src = resolve_run_model_with_legacy_fallback(model_dir)
+        best_src = resolve_run_model(model_dir)
         materialized = _materialize_canonical_run_model(
             model_dir,
             source_path=str(best_src) if best_src is not None else None,
@@ -1411,7 +1411,7 @@ def train_yolo(
     except Exception:
         pass
 
-    weights_dest = resolve_run_model_with_legacy_fallback(model_dir)
+    weights_dest = resolve_run_model(model_dir)
     training_weights_ok = weights_dest is not None and weights_dest.is_file()
 
     meta_extras = {

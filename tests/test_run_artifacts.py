@@ -13,7 +13,7 @@ from smartrain.core.runtime.run_artifacts import (
     materialize_canonical_run_model,
     reject_documentation_placeholder_path,
     relocate_or_remove_legacy_val_recs_at_run_root,
-    resolve_run_model_with_legacy_fallback,
+    resolve_run_model,
     run_train_backend_dir,
     run_tests_dir,
 )
@@ -32,7 +32,7 @@ def test_ensure_run_layout_rejects_placeholder_run_dir(tmp_path: Path) -> None:
         ensure_run_layout(str(tmp_path / "..."))
 
 
-def test_resolve_run_model_with_legacy_fallback_prefers_canonical(tmp_path: Path) -> None:
+def test_resolve_run_model_prefers_canonical(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds1" / "run-1"
     (run_dir / "train-ultralytics" / "weights").mkdir(parents=True, exist_ok=True)
     legacy = run_dir / "train-ultralytics" / "weights" / "best.pt"
@@ -41,7 +41,7 @@ def test_resolve_run_model_with_legacy_fallback_prefers_canonical(tmp_path: Path
     canonical.parent.mkdir(parents=True, exist_ok=True)
     canonical.write_bytes(b"canonical")
 
-    resolved = resolve_run_model_with_legacy_fallback(str(run_dir), ".pt")
+    resolved = resolve_run_model(str(run_dir), ".pt")
     assert resolved == canonical
 
 

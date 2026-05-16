@@ -42,3 +42,6 @@ class CapabilityRegistry:
     def resolve_backend_id(self, *, task_type: str, model_format: str, require: str) -> str:
         return self.resolve(task_type=task_type, model_format=model_format, require=require).backend
 
+
+BackendRegistry = CapabilityRegistry
+

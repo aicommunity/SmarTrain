@@ -16,7 +16,7 @@ from smartrain.core.workflow_adapters.analyze_runtime_api import (
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
-from smartrain.core.runtime.run_artifacts import resolve_run_model_with_legacy_fallback
+from smartrain.core.runtime.run_artifacts import resolve_run_model
 from smartrain.orchestrators.canonical_gateway import load_metrics as canonical_load_metrics
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
@@ -56,7 +56,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                 if os.path.isfile(candidate):
                     return True
         if fmt in {"pt", "pt_uni"}:
-            return resolve_run_model_with_legacy_fallback(run_dir, ".pt") is not None
+            return resolve_run_model(run_dir, ".pt") is not None
         ext = ext_by_format.get(fmt)
         if not ext:
             return False

@@ -11,7 +11,7 @@ from datetime import datetime
 
 from smartrain.core.runtime.run_artifacts import (
     materialize_canonical_run_model,
-    resolve_run_model_with_legacy_fallback,
+    resolve_run_model,
     run_test_backend_dir,
     run_tests_dir,
     run_train_backend_dir,
@@ -118,7 +118,7 @@ def _materialize_canonical_run_model(run_dir: str, source_path: str | None = Non
 
 
 def _find_external_best_checkpoint(run_dir: str) -> str | None:
-    found = resolve_run_model_with_legacy_fallback(run_dir, ".pt")
+    found = resolve_run_model(run_dir, ".pt")
     return str(found) if found is not None else None
 
 
