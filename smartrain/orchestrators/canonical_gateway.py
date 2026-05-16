@@ -13,7 +13,7 @@ from smartrain.domain.canonical.context import CanonicalIdentity
 from smartrain.domain.canonical.models import CanonicalMetricsRef, CanonicalPayload, CanonicalPredictionRef
 from smartrain.domain.canonical.types import TaskType
 from smartrain.domain.canonical.validators import validate_payload
-from smartrain.services.analyze.metrics_reader import METRIC_AGG_COLUMNS, read_metrics_by_format_for_split
+from smartrain.adapters.canonical.read.metrics_csv import METRIC_AGG_COLUMNS, read_metrics_by_format_for_split
 from smartrain.tasks.context import TaskExecutionContext
 from smartrain.tasks.metrics import resolve_task_metrics_adapter
 

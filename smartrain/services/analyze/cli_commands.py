@@ -174,7 +174,6 @@ from smartrain.services.analyze.leaderboard import (
     build_leaderboard_records,
     write_leaderboard_csv,
 )
-from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
 from smartrain.services.analyze.commands.registry import AnalyzeCommandRegistry
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
@@ -183,7 +182,6 @@ _ANALYZE_COMMAND_REGISTRY = AnalyzeCommandRegistry()
 
 
 def _canonical_read_enabled() -> bool:
-    emit_legacy_read_deprecation_warnings()
     return True
 
 
