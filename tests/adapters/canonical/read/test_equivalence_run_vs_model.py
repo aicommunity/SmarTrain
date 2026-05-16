@@ -21,6 +21,10 @@ def test_equivalence_run_vs_model_for_same_pt_artifact(tmp_path: Path) -> None:
     model_dir = tmp_path / "models" / "demo_model"
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(pt_bytes)
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"task_type": "detection"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     run_payload = RunAdapter().read(str(run_dir))
     model_payload = ModelAdapter().read(str(model_dir))

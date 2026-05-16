@@ -5,13 +5,11 @@ from pathlib import Path
 from smartrain.workflows.inference.inference_cli import _resolve_model
 from smartrain.workflows.testing.model_test_cli import _infer_task_from_training_metadata
 from smartrain.workflows.analyze.results_analyzer import _canonical_read_enabled
-from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout, deploy_workspace
 
 
 def test_cutover_defaults_to_canonical_mode(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
-    emit_legacy_read_deprecation_warnings.cache_clear()
     monkeypatch.delenv("SMARTTRAIN_CANONICAL_READ", raising=False)
     monkeypatch.delenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", raising=False)
     assert _canonical_read_enabled() is True
@@ -21,7 +19,6 @@ def test_legacy_read_env_vars_are_ignored(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", "1")
     monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "0")
-    emit_legacy_read_deprecation_warnings.cache_clear()
 
     assert _canonical_read_enabled() is True
 

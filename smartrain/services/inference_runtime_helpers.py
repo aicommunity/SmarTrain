@@ -13,7 +13,6 @@ from typing import Any
 import yaml
 from PIL import Image
 
-from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
 from smartrain.canonical.refs import canonical_target_from_model_dir
 from smartrain.canonical.schema import wrap_inference_report_v2
 from smartrain.core.runtime.path_portable import relativize_if_under
@@ -108,7 +107,6 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
             raise FileNotFoundError(f"Unsupported canonical weights format: {p.suffix}")
         return p
 
-    emit_legacy_read_deprecation_warnings()
     if args.model_name:
         from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
 

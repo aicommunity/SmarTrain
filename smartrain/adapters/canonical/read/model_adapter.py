@@ -69,8 +69,11 @@ class ModelAdapter:
             task_type = normalize_task(inferred_task)
             task_resolution = "name_hint"
         else:
-            task_type = "detection"
-            task_resolution = "last_resort_default"
+            raise ValueError(
+                f"Cannot resolve task_type for model directory {model_dir}: "
+                "set task_type in model_manifest.json or training_metadata.json, "
+                "or use a weights filename with -cls/-seg hint."
+            )
 
         if str(raw_backend or "").strip():
             backend_type = normalize_backend(str(raw_backend))

@@ -164,7 +164,7 @@ from smartrain.services.train_runtime_helpers import (
     load_batch_from_training_metadata as _shared_load_batch_from_training_metadata,
     maybe_free_cuda_memory as _shared_maybe_free_cuda_memory,
     normalize_external_run_layout as _shared_normalize_external_run_layout,
-    run_mfel_external_val_fallback as _shared_run_mfel_external_val_fallback,
+    run_mfel_external_eval_substitute as _shared_run_mfel_external_eval_substitute,
     resolve_external_eval_source as _shared_resolve_external_eval_source,
     write_external_fallback_metrics as _shared_write_external_fallback_metrics,
 )
@@ -616,7 +616,7 @@ def _write_external_fallback_metrics(model_dir: str, *, provider_id: str, rc: in
     return _shared_write_external_fallback_metrics(model_dir, provider_id=provider_id, rc=rc)
 
 
-def _run_mfel_external_val_fallback(
+def _run_mfel_external_eval_substitute(
     *,
     repo_path: str,
     venv_path: str,
@@ -629,7 +629,7 @@ def _run_mfel_external_val_fallback(
     batch: int | None,
     device: str | None,
 ) -> int:
-    return _shared_run_mfel_external_val_fallback(
+    return _shared_run_mfel_external_eval_substitute(
         repo_path=repo_path,
         venv_path=venv_path,
         model_path=model_path,

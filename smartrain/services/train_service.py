@@ -26,7 +26,7 @@ from smartrain.services.train_runtime_helpers import (
     load_batch_from_training_metadata,
     maybe_free_cuda_memory,
     normalize_external_run_layout,
-    run_mfel_external_val_fallback,
+    run_mfel_external_eval_substitute,
     resolve_external_eval_source,
     write_external_fallback_metrics,
 )
@@ -190,7 +190,7 @@ def _run_external_provider_flow(
                 fallback_conf = float(args.val_conf) if args.val_conf is not None else 0.25
                 fallback_imgsz = int(args.val_imgsz) if args.val_imgsz is not None else int(img_size)
                 if external_provider == "mfel-yolo":
-                    fallback_rc = run_mfel_external_val_fallback(
+                    fallback_rc = run_mfel_external_eval_substitute(
                         repo_path=repo_path,
                         venv_path=venv_path,
                         model_path=best_model,
@@ -235,7 +235,7 @@ def _run_external_provider_flow(
                     inference_info = {
                         "imgsz": fallback_imgsz,
                         "conf": fallback_conf,
-                        "mode": "external_infer_fallback",
+                        "mode": "external_eval_substitute",
                     }
                     reason = "external_fallback_without_ultralytics_val_metrics"
                     write_not_available_recommendations(

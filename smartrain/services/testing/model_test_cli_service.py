@@ -41,9 +41,6 @@ from smartrain.core.runtime.device_selector import (
     resolve_device_request,
     validate_device_available,
 )
-from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
-
-
 def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(
         description="Complete missing test artifacts for runs/models and compare formats (empty call starts interactive mode)."
@@ -467,7 +464,6 @@ def _normalize_task_for_backend(task: str | None) -> str:
 
 
 def _infer_task_from_training_metadata(root_dir: str) -> str | None:
-    emit_legacy_read_deprecation_warnings()
     from smartrain.orchestrators.canonical_gateway import resolve_task_context
 
     ctx = resolve_task_context(root_dir)

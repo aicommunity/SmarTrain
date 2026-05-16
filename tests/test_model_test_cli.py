@@ -847,7 +847,10 @@ def test_model_test_cli_model_builds_pt_for_promoted_model(monkeypatch, tmp_path
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt", "source_run": ""}, ensure_ascii=False),
+        json.dumps(
+            {"weights_file": "demo_model.pt", "source_run": "", "task_type": "detection"},
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     dataset_dir = tmp_path / "datasets" / "ds_a"

@@ -70,6 +70,10 @@ def test_apply_model_source_kind_discovers_model_directories(tmp_path: Path) -> 
     model_dir = tmp_path / "models" / "export_a"
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "best.onnx").write_bytes(b"model")
+    (model_dir / "model_manifest.json").write_text(
+        '{"task_type": "detection", "backend_type": "onnxruntime"}',
+        encoding="utf-8",
+    )
 
     report = run_migration(
         workspace=str(tmp_path),

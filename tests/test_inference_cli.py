@@ -79,7 +79,7 @@ def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -123,7 +123,7 @@ def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monke
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -154,7 +154,7 @@ def test_inference_dataset_split(tmp_path: Path, monkeypatch) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -229,7 +229,7 @@ def test_inference_passes_task_hint_to_capability_resolution(tmp_path: Path, mon
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -277,7 +277,7 @@ def test_inference_passes_task_hint_to_runtime_backend_predict(tmp_path: Path, m
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -328,7 +328,7 @@ def test_inference_writes_classification_task_outputs(tmp_path: Path, monkeypatc
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -387,7 +387,7 @@ def test_inference_writes_segmentation_task_outputs(tmp_path: Path, monkeypatch)
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -452,7 +452,7 @@ def test_inference_fails_on_backend_capability_mismatch(tmp_path: Path, monkeypa
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -501,7 +501,7 @@ def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "images"

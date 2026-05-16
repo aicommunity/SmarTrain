@@ -126,20 +126,38 @@ def ensure_external_best_checkpoint_layout(run_dir: str) -> str | None:
     return _materialize_canonical_run_model(run_dir, _find_external_best_checkpoint(run_dir))
 
 
+_EXTERNAL_EVAL_SUBSTITUTE_MODES = frozenset({"external_eval_substitute", "external_infer_fallback"})
+
+
 def write_external_fallback_metrics(model_dir: str, *, provider_id: str, rc: int) -> str:
     test_dir = str(run_test_backend_dir(model_dir, "ultralytics"))
     os.makedirs(test_dir, exist_ok=True)
-    marker = os.path.join(test_dir, "fallback_infer.txt")
+    marker = os.path.join(test_dir, "fallback_eval_substitute.txt")
     with open(marker, "w", encoding="utf-8") as f:
-        f.write("external infer fallback was used for test stage\n")
+        f.write("external eval substitute was used for test stage\n")
+    legacy_marker = os.path.join(test_dir, "fallback_infer.txt")
+    if os.path.isfile(legacy_marker):
+        try:
+            os.remove(legacy_marker)
+        except OSError:
+            pass
     csv_path = os.path.join(str(run_tests_dir(model_dir)), "test_metrics.csv")
     with open(csv_path, "w", encoding="utf-8") as f:
         f.write("provider,test_mode,return_code\n")
-        f.write(f"{provider_id},external_infer_fallback,{int(rc)}\n")
+        f.write(f"{provider_id},external_eval_substitute,{int(rc)}\n")
     return csv_path
 
 
-def run_mfel_external_val_fallback(
+def normalize_external_eval_substitute_mode(mode: str | None) -> str | None:
+    key = str(mode or "").strip()
+    if not key:
+        return None
+    if key in _EXTERNAL_EVAL_SUBSTITUTE_MODES:
+        return "external_eval_substitute"
+    return key
+
+
+def run_mfel_external_eval_substitute(
     *,
     repo_path: str,
     venv_path: str,
