@@ -135,7 +135,9 @@ def test_finalize_train_kwargs_forces_dataset_and_run_paths():
 def test_test_yolo_val_kwargs_use_exist_ok_true() -> None:
     import inspect
 
-    source = inspect.getsource(mtm.test_yolo)
+    from smartrain.services.training import train_yolo_execution_service as train_exec
+
+    source = inspect.getsource(train_exec.test_yolo)
     assert '"exist_ok": True' in source or "'exist_ok': True" in source
 
 

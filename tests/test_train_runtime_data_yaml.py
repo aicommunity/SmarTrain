@@ -84,21 +84,33 @@ def test_train_yolo_builds_runtime_yaml_under_run_dir(monkeypatch: pytest.Monkey
     called: dict[str, str] = {}
 
     monkeypatch.setattr(mtm, "_normalize_model_spec", lambda *args, **kwargs: "yolo11n.pt")
-    monkeypatch.setattr(mtm, "calculate_dataset_hash", lambda *_args, **_kwargs: "hash")
-    monkeypatch.setattr(mtm, "_build_run_name", lambda *args, **kwargs: "run-id")
+    monkeypatch.setattr(
+        "smartrain.services.training.train_yolo_execution_service.calculate_dataset_hash",
+        lambda *_args, **_kwargs: "hash",
+    )
+    monkeypatch.setattr(
+        "smartrain.services.training.train_yolo_execution_service.build_run_name",
+        lambda *args, **kwargs: "run-id",
+    )
 
-    def _fake_build_runtime_yaml(dataset_path: str, run_dir: str, *, stage: str) -> str:
+    def _fake_build_runtime_yaml(dataset_path: str, run_dir: str, *, stage: str, **_kwargs: object) -> str:
         called["dataset_path"] = dataset_path
         called["run_dir"] = run_dir
         called["stage"] = stage
         return "/tmp/runtime_data_train.yaml"
 
-    monkeypatch.setattr(mtm, "_build_runtime_data_yaml", _fake_build_runtime_yaml)
+    monkeypatch.setattr(
+        "smartrain.services.training.train_yolo_execution_service.build_runtime_data_yaml",
+        _fake_build_runtime_yaml,
+    )
 
     def _stop_after_finalize(*_args, **_kwargs):
         raise RuntimeError("stop-after-runtime-yaml")
 
-    monkeypatch.setattr(mtm, "_finalize_train_kwargs", _stop_after_finalize)
+    monkeypatch.setattr(
+        "smartrain.services.training.train_yolo_execution_service.finalize_train_kwargs",
+        _stop_after_finalize,
+    )
 
     with pytest.raises(RuntimeError, match="stop-after-runtime-yaml"):
         mtm.train_yolo(str(ds), str(target_dir), non_interactive=True)

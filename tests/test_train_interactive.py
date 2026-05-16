@@ -549,7 +549,10 @@ def test_train_main_external_layout_normalized_to_train_subdir(
     target_root = tmp_path / "target"
     target_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(mtm, "calculate_dataset_hash", lambda _p: "abc12345")
+    monkeypatch.setattr(
+        "smartrain.services.training.train_yolo_execution_service.calculate_dataset_hash",
+        lambda _p: "abc12345",
+    )
     monkeypatch.setattr(mtm, "_build_run_name", lambda *a, **k: "run-fixed")
     called = {"test": False}
 

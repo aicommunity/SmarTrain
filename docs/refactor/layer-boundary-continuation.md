@@ -15,7 +15,7 @@
 | G6 | `services` ⊄ `workflows` | Met | Guardrails + allowlist for transitional imports |
 | G7 | `orchestrators` ⊄ `workflows` | Met | Gateway uses `adapters.canonical.read.metrics_csv` |
 | G8 | `backends` ⊄ `workflows` | Met | `backends/implementations/ultralytics/inference.py`; adapters import implementations |
-| G9 | Train/test not monoliths in workflows | Partial | MTM ~1874 LOC, `model_test_backends` ~2082 LOC; native eval + metadata IO in services |
+| G9 | Train/test not monoliths in workflows | Partial | MTM ~1547 LOC; `train_yolo_execution_service` ~489 LOC; test backends ~2082 LOC |
 | G10 | Canonical metrics read | Met | `metrics_csv` adapter |
 
 **Score:** 6 Met, 4 Partial, 0 Not met (mandatory continuation below).
@@ -33,7 +33,7 @@
 
 | id | Gap | Files | Done when |
 |----|-----|-------|-----------|
-| LB-C3 | `model_training_module.py` ~1874 LOC | `workflows/training/` | **Partial** — metadata IO in `train_metadata_io_service`; `train_yolo`/`test_yolo` remain |
+| LB-C3 | `model_training_module.py` ~1547 LOC | `workflows/training/` | **Mostly done** — `train_yolo`/`test_yolo` in `train_yolo_execution_service`; weighted sampling via hooks |
 | LB-C4 | `model_test_backends.py` ~2082 LOC | `workflows/testing/` | **Partial** — `services/testing/backends/native_eval.py` (~950 LOC); ONNX/TRT runners remain |
 | LB-C5 | `cli_commands.py` → facade for patchable cmds/prompts | `cli_commands.py` | **Done** — `prompts.py` + `_workflow_attr`; allowlist only for lazy import sites |
 | LB-C6 | `report_writer.py` ~3400 LOC | `services/analyze/` | Internal split (sections/builders); separate TD |
