@@ -1233,12 +1233,12 @@ def _merge_sources_with_priority(
 
 def _train_yolo_hooks() -> TrainYoloHooks:
     def _setup_weighted_sampling_env() -> None:
-        from smartrain.workflows.datasets.weighted_yolo_dataset import setup_weighted_sampling_env
+        from smartrain.services.datasets.weighted_yolo_dataset import setup_weighted_sampling_env
 
         setup_weighted_sampling_env()
 
     def _register_weighted_sampling_callback(model: Any) -> None:
-        from smartrain.workflows.datasets.weighted_yolo_dataset import register_weighted_sampling_callback
+        from smartrain.services.datasets.weighted_yolo_dataset import register_weighted_sampling_callback
 
         register_weighted_sampling_callback(model)
 

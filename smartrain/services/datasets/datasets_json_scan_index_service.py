@@ -10,7 +10,7 @@ from smartrain.core.runtime.workspace_paths import (
     resolve_or_extract_dataset_root,
 )
 
-from smartrain.workflows.datasets.datasets_json_normalize_service import (
+from smartrain.services.datasets.datasets_json_normalize_service import (
     _normalize_path_for_data_path,
 )
 

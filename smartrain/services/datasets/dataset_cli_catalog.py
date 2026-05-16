@@ -9,7 +9,7 @@ from typing import Any
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
-from smartrain.workflows.datasets.dataset_cli_common import (
+from smartrain.services.datasets.dataset_cli_common import (
     load_dataset_catalog,
     sorted_class_names_union_from_catalog,
 )

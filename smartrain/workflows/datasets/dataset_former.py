@@ -12,13 +12,14 @@ from tqdm import tqdm
 
 from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
-from smartrain.workflows.datasets.cvat11_converter import YOLO_IMAGE_EXTS
-from smartrain.workflows.datasets.dataset_access import (
+from smartrain.services.datasets.cvat11_converter import YOLO_IMAGE_EXTS
+from smartrain.services.datasets.dataset_access import (
     find_dataset_paths,
     iter_image_label_buckets,
     resolve_dataset_root_for_entry,
 )
-from smartrain.workflows.datasets.dataset_passport import write_dataset_passport
+from smartrain.services.datasets.dataset_passport import write_dataset_passport
+from smartrain.services.datasets.image_label_pairs import collect_label_image_pairs as _collect_label_image_pairs
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
@@ -66,28 +67,6 @@ def parse_fusion_split_arg(value: str | None) -> tuple[float, float, float]:
 
 def safe_mkdir(path):
     os.makedirs(path, exist_ok=True)
-
-
-def _collect_label_image_pairs(images_path: str, labels_path: str) -> list[tuple[str, str]]:
-    """
-    All YOLO *.txt under labels_path (recursive), paired with images under images_path
-    using the same relative path (labels/sub/a.txt -> images/sub/a.jpg).
-    """
-    pairs: list[tuple[str, str]] = []
-    labels_root = Path(labels_path)
-    images_root = Path(images_path)
-    if not labels_root.is_dir() or not images_root.is_dir():
-        return pairs
-    for label_path in sorted(labels_root.rglob("*.txt")):
-        rel = label_path.relative_to(labels_root)
-        parent = rel.parent
-        stem = rel.stem
-        for ext in YOLO_IMAGE_EXTS:
-            cand = images_root / parent / f"{stem}{ext}"
-            if cand.is_file():
-                pairs.append((str(cand), str(label_path)))
-                break
-    return pairs
 
 
 def _unique_merge_stem(dataset_name, src_image_path, used_stems):

@@ -418,13 +418,13 @@ def cmd_normalize_data_yaml(ctx: typer.Context) -> None:
       smartrain normalize-data-yaml --workspace /data/MarsSmarTrain
       smartrain normalize-data-yaml --datasets-dir /data/MarsSmarTrain/datasets --dry-run
     """
-    from smartrain.workflows.datasets.data_yaml_normalize import build_arg_parser
+    from smartrain.services.datasets.data_yaml_normalize import build_arg_parser
 
     parser = build_arg_parser()
     if getattr(ctx, "resilient_parsing", False):
         return
     args = parser.parse_args(list(ctx.args))
-    from smartrain.workflows.datasets.data_yaml_normalize import run_normalize
+    from smartrain.services.datasets.data_yaml_normalize import run_normalize
     from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
     if args.datasets_dir:
@@ -619,13 +619,13 @@ def cmd_stats(ctx: typer.Context) -> None:
       smartrain stats compare --left ds_a --right ds_b
       smartrain stats --workspace /data/MarsSmarTrain
     """
-    from smartrain.workflows.datasets.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
+    from smartrain.services.datasets.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
 
     parser = build_stats_compare_arg_parser if (ctx.args and ctx.args[0] == "compare") else build_stats_arg_parser
     prog = "smartrain stats compare" if (ctx.args and ctx.args[0] == "compare") else "smartrain stats"
     _forward_argparse_command(
         ctx,
-        module="smartrain.workflows.datasets.dataset_stats",
+        module="smartrain.services.datasets.dataset_stats",
         build_parser=parser,
         prog=prog,
         empty_args_mode="invoke_if_tty_else_help",
@@ -718,11 +718,11 @@ def cmd_report_dataset(ctx: typer.Context) -> None:
       smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
       smartrain report dataset --workspace /data/MarsSmarTrain --dataset my_dataset --no-pdf
     """
-    from smartrain.workflows.datasets.dataset_report import build_report_dataset_arg_parser
+    from smartrain.services.datasets.dataset_report import build_report_dataset_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.workflows.datasets.dataset_report",
+        module="smartrain.services.datasets.dataset_report",
         build_parser=build_report_dataset_arg_parser,
         prog="smartrain report dataset",
         empty_args_mode="invoke_if_tty_else_help",

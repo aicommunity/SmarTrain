@@ -9,8 +9,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from smartrain.workflows.datasets.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
-from smartrain.workflows.datasets.datasets_json_former import yolo_flat_image_label_buckets
+from smartrain.services.datasets.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
+from smartrain.services.datasets.datasets_json_scan_core_service import yolo_flat_image_label_buckets
 from smartrain.core.runtime.workspace_paths import resolve_or_extract_dataset_root
 
 

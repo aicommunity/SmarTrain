@@ -19,9 +19,9 @@ from smartrain.cli_support.cli_argparse import CliArgumentParser
 from smartrain.cli_support.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
 from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
 from smartrain.cli_support.cli_contracts import emit_replay, make_command_request
-from smartrain.workflows.datasets.dataset_access import resolve_dataset_root_for_entry
+from smartrain.services.datasets.dataset_access import resolve_dataset_root_for_entry
 from smartrain.workflows.datasets.dataset_roi_yolo import ON_EMPTY_MODES, ROI_POLICIES, _clamp_crop, _full_image_crop, _select_roi_boxes
-from smartrain.workflows.datasets.datasets_json_former import find_yaml_file
+from smartrain.services.datasets.dataset_scan import find_yaml_file
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.core.runtime.run_discovery import find_run_directories

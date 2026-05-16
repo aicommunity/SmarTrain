@@ -5,7 +5,7 @@ import yaml
 import xml.etree.ElementTree as ET
 from typing import List, Optional
 
-from smartrain.workflows.datasets.dataset_scan import (
+from smartrain.services.datasets.dataset_scan import (
     find_obj_data_file,
     find_obj_names_file,
     find_yaml_file,

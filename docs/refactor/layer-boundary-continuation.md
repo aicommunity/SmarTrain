@@ -32,13 +32,14 @@
 | LB-C5 | `prompts.py` + `_workflow_attr` facade dispatch |
 | LB-C6 | `report_markdown.py`, `report_odt.py`, thin `report_writer.py` |
 | LB-C8 | CI: `pytest tests/regression/test_layer_import_guardrails.py` in phase8 workflow |
-| LB-C7 (partial) | `services/datasets/{dataset_hash,yolo_labels}.py`; `workflow_dispatch` (empty allowlist) |
+| LB-C7 (partial) | `services/datasets/` (20 modules: hash, stats, scan, access, report, json scan services, …); `workflow_dispatch` |
+| LB-C7 (remaining) | CLI shells in `workflows/datasets/`: former, augment, balance, prune, orient, roi, cvat, `datasets_json_former`, `datasets_entry` |
 
 ## Deferred (non-blocking)
 
 | id | Notes |
 |----|-------|
-| LB-C7 | Remaining `workflows/datasets/*` → `services/datasets/` when dataset CLI is refactored |
+| LB-C7 | Thin `workflows/datasets/*_entry` facades over moved `services/datasets` implementations |
 
 ## Key paths after closure
 
@@ -48,6 +49,7 @@
 | Test backends | `smartrain/services/testing/backends/format_runners.py`, `native_eval.py` |
 | Test facade | `smartrain/workflows/testing/model_test_backends.py` |
 | Report export | `smartrain/services/reporting/document_export.py` |
+| Datasets (partial) | `smartrain/services/datasets/` |
 | Analyze report | `smartrain/services/analyze/report_{markdown,odt,writer}.py` |
 | TensorRT utils | `smartrain/core/models/tensorrt_checks.py` |
 | Validator core | `smartrain/services/testing/unified_validator_core.py` |
