@@ -547,7 +547,7 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
         captured["model_path"] = kwargs.get("model_path")
         return 0
 
-    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -603,7 +603,7 @@ def test_inference_external_provider_accepts_task_outputs_payload(monkeypatch, t
             ],
         }
 
-    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -649,7 +649,7 @@ def test_inference_external_provider_classification_empty_payload_normalized(mon
             ],
         }
 
-    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -698,7 +698,7 @@ def test_inference_external_provider_segmentation_empty_payload_normalized(monke
             ],
         }
 
-    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
