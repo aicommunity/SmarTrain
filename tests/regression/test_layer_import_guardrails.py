@@ -15,14 +15,9 @@ _FORBIDDEN_PREFIX_PAIRS: tuple[tuple[str, str], ...] = (
 # (relative path under repo root, forbidden module prefix)
 _ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
     {
-        # Wave 5: remove when backends/implementations/ultralytics is wired
-        ("smartrain/backends/ultralytics_adapter.py", "smartrain.workflows.inference"),
-        ("smartrain/backends/external_provider_adapter.py", "smartrain.workflows.inference"),
-        # Wave 2 follow-up: decouple analyze services from workflows (testing/datasets)
-        ("smartrain/services/analyze/metrics_reader.py", "smartrain.workflows.testing"),
+        # Lazy dataset report exporters (import inside write_analysis_report)
         ("smartrain/services/analyze/report_writer.py", "smartrain.workflows.datasets"),
-        ("smartrain/services/analyze/ultralytics_test_artifacts.py", "smartrain.workflows.testing"),
-        # CLI facade: prompts/cmd callbacks resolve via workflows.analyze.results_analyzer
+        # cmd_all stage callbacks: patchable via workflows.analyze.results_analyzer
         ("smartrain/services/analyze/cli_commands.py", "smartrain.workflows.analyze"),
     }
 )
