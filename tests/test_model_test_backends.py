@@ -553,7 +553,7 @@ def test_run_native_tensorrt_uses_artifact_imgsz_when_requested_differs(monkeypa
         return [_Pred(image_path=image_path, cls_id=0, conf=0.95, x1=10.0, y1=10.0, x2=30.0, y2=30.0)]
 
     monkeypatch.setattr(
-        "smartrain.workflows.testing.model_test_backends.read_model_sidecar_metadata",
+        "smartrain.services.testing.backends.native_eval.read_model_sidecar_metadata",
         lambda _path: {"params": {"imgsz": 640}},
     )
     monkeypatch.setattr("smartrain.workflows.testing.model_test_backends._prepare_trt_runtime", _stub_prepare_trt_runtime)
