@@ -13,7 +13,7 @@ Continuation: [`layer-boundary-continuation.md`](./layer-boundary-continuation.m
 | TD-LB-003 | DONE | orchestrators | `canonical_gateway` → workflows | `adapters/canonical/read/metrics_csv` |
 | TD-LB-004 | DONE | backends | Adapters proxy workflows | `implementations/ultralytics/inference.py`; adapters use implementations |
 | TD-LB-005 | DONE | analyze | Split workflows/services | `services/analyze/` |
-| TD-LB-006 | PARTIAL | workflows | Fat CLI | Thin `results_analyzer`; MTM/test_backends remain (LB-C3/C4) |
+| TD-LB-006 | PARTIAL | workflows | Fat CLI | Thin `results_analyzer`; MTM/test_backends slimmed (LB-C3/C4 partial) |
 | TD-LB-007 | DONE | testing | test_backends → MTM profile | `core/runtime/system_profile` |
 | TD-LB-008 | DONE | inference | Wrong run discovery import | `core.runtime.run_discovery` |
 | TD-LB-009 | DONE | runtime | Legacy model path fallback | `resolve_run_model` (no rglob) |

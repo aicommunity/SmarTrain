@@ -87,8 +87,11 @@ from smartrain.services.training.train_runtime_data_yaml_service import (
     split_dir_from_dataset_yaml as _svc_split_dir_from_dataset_yaml,
 )
 from smartrain.services.training.train_metadata_io_service import (
+    ensure_initial_training_metadata as _svc_ensure_initial_training_metadata,
     get_relative_path as _svc_get_relative_path,
     relative_to_workspace as _svc_relative_to_workspace,
+    save_metrics_csv as _svc_save_metrics_csv,
+    save_training_metadata as _svc_save_training_metadata,
     write_json_atomic as _svc_write_json_atomic,
 )
 from smartrain.services.training.train_resume_backoff_service import (
@@ -1612,20 +1615,6 @@ def test_yolo(
     return test_start_time, test_end_time, inference_record
 
 
-def _recommendation_summary_for_metadata(model_dir: str) -> dict[str, Any] | None:
-    out: dict[str, Any] = {"files": {}, "status": {}}
-    found = False
-    for split in ("val", "test"):
-        p = recommendation_file_path(model_dir, split)
-        payload = read_recommendation_file(p)
-        if not isinstance(payload, dict):
-            continue
-        found = True
-        out["files"][split] = os.path.basename(p)
-        out["status"][split] = payload.get("status")
-    return out if found else None
-
-
 def _ensure_confidence_recommendations(
     *,
     trained_model: Any,
@@ -1713,13 +1702,7 @@ def _ensure_confidence_recommendations(
 
 
 def save_metrics_csv(test_result, model_dir):
-    csv_file = os.path.join(str(run_tests_dir(model_dir)), "test_metrics.csv")
-
-    csv_data = test_result.to_csv()
-    with open(csv_file, "w", encoding="utf-8") as f:
-        f.write(csv_data)
-
-    return csv_file
+    return _svc_save_metrics_csv(test_result, model_dir)
 
 
 def _relative_to_workspace(path: str, workspace_root: str) -> str:
@@ -1743,98 +1726,18 @@ def _ensure_initial_training_metadata(
     workspace_root: str | None,
     task_type: str,
 ) -> None:
-    metadata_file = os.path.join(model_dir, "training_metadata.json")
-    payload: dict[str, Any] = {}
-    if os.path.isfile(metadata_file):
-        try:
-            with open(metadata_file, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-            if isinstance(existing, dict):
-                payload = existing
-        except Exception:
-            payload = {}
-
-    ti = payload.setdefault("training_info", {})
-    if not isinstance(ti, dict):
-        ti = {}
-        payload["training_info"] = ti
-    ti.setdefault("framework", "ultralytics")
-    provider = ti.setdefault("provider", {})
-    if not isinstance(provider, dict):
-        provider = {}
-        ti["provider"] = provider
-    provider.setdefault("type", "builtin")
-    provider.setdefault("id", "ultralytics")
-    ti.setdefault("task_type", task_type or "detection")
-    ti.setdefault("model", model_version)
-    ds = ti.setdefault("dataset", {})
-    if not isinstance(ds, dict):
-        ds = {}
-        ti["dataset"] = ds
-    ds.setdefault("name", os.path.basename(os.path.normpath(dataset_path)))
-    ds.setdefault("path_relative", _get_relative_path(dataset_path, model_dir))
-    ds.setdefault("hash", dataset_hash)
-    hp = ti.setdefault("hyperparameters", {})
-    if not isinstance(hp, dict):
-        hp = {}
-        ti["hyperparameters"] = hp
-    hp.setdefault("epochs", epochs)
-    hp.setdefault("batch_size", batch)
-    hp.setdefault("image_size", img_size)
-
-    ts = payload.setdefault("timestamps", {})
-    if not isinstance(ts, dict):
-        ts = {}
-        payload["timestamps"] = ts
-    tr_ts = ts.setdefault("training", {})
-    if not isinstance(tr_ts, dict):
-        tr_ts = {}
-        ts["training"] = tr_ts
-    tr_ts.setdefault("start", training_start_time.isoformat())
-    tr_ts.setdefault("end", None)
-    tr_ts.setdefault("duration_seconds", None)
-    te_ts = ts.setdefault("testing", {})
-    if not isinstance(te_ts, dict):
-        te_ts = {}
-        ts["testing"] = te_ts
-    te_ts.setdefault("start", None)
-    te_ts.setdefault("end", None)
-    te_ts.setdefault("duration_seconds", None)
-
-    status = payload.setdefault("status", {})
-    if not isinstance(status, dict):
-        status = {}
-        payload["status"] = status
-    tr_status = status.setdefault("training", {})
-    if not isinstance(tr_status, dict):
-        tr_status = {}
-        status["training"] = tr_status
-    tr_status.setdefault("success", None)
-    tr_status.setdefault("error", None)
-    te_status = status.setdefault("testing", {})
-    if not isinstance(te_status, dict):
-        te_status = {}
-        status["testing"] = te_status
-    te_status.setdefault("success", None)
-    te_status.setdefault("error", None)
-
-    paths = payload.setdefault("paths", {})
-    if not isinstance(paths, dict):
-        paths = {}
-        payload["paths"] = paths
-    paths.setdefault("model_directory", ".")
-    paths.setdefault("best_model", None)
-
-    if workspace_root is not None:
-        wb = payload.setdefault("workspace", {})
-        if not isinstance(wb, dict):
-            wb = {}
-            payload["workspace"] = wb
-        wb.setdefault("root", ".")
-        wb.setdefault("dataset_path_relative", _relative_to_workspace(dataset_path, workspace_root))
-        wb.setdefault("run_directory_relative", _relative_to_workspace(model_dir, workspace_root))
-
-    _write_json_atomic(metadata_file, payload)
+    _svc_ensure_initial_training_metadata(
+        model_dir=model_dir,
+        dataset_path=dataset_path,
+        model_version=model_version,
+        epochs=epochs,
+        batch=batch,
+        img_size=img_size,
+        training_start_time=training_start_time,
+        dataset_hash=dataset_hash,
+        workspace_root=workspace_root,
+        task_type=task_type,
+    )
 
 
 def save_training_metadata(
@@ -1863,111 +1766,33 @@ def save_training_metadata(
     matplotlib_runtime: dict[str, Any] | None = None,
     confidence_recommendation_config: dict[str, Any] | None = None,
 ):
-    ds_abs = os.path.abspath(dataset_path)
-    dataset_block: dict[str, Any] = {
-        "name": os.path.basename(os.path.normpath(dataset_path)),
-        "path_relative": _get_relative_path(dataset_path, model_dir),
-        "hash": dataset_hash,
-    }
-    if workspace_root is not None:
-        wr_abs = os.path.abspath(workspace_root)
-        if ds_abs == wr_abs or ds_abs.startswith(wr_abs + os.sep):
-            rel_uw = relativize_if_under(workspace_root, ds_abs)
-            if rel_uw is not None:
-                dataset_block["path_under_workspace"] = rel_uw
-        else:
-            dataset_block["path_absolute"] = ds_abs
-    else:
-        dataset_block["path_absolute"] = ds_abs
-
-    metadata = {
-        "training_info": {
-            "framework": "ultralytics" if training_provider == "ultralytics" else "external",
-            "provider": {
-                "type": "builtin" if training_provider == "ultralytics" else "external",
-                "id": external_provider_id if training_provider != "ultralytics" else "ultralytics",
-            },
-            "task_type": task_type or "detection",
-            "model": model_version,
-            "dataset": dataset_block,
-            "hyperparameters": {
-                "epochs": epochs,
-                "batch_size": batch,
-                "image_size": img_size,
-            },
-        },
-        "timestamps": {
-            "training": {
-                "start": training_start_time.isoformat() if training_start_time else None,
-                "end": training_end_time.isoformat() if training_end_time else None,
-                "duration_seconds": (training_end_time - training_start_time).total_seconds()
-                if training_start_time and training_end_time
-                else None,
-            },
-            "testing": {
-                "start": test_start_time.isoformat() if test_start_time else None,
-                "end": test_end_time.isoformat() if test_end_time else None,
-                "duration_seconds": (test_end_time - test_start_time).total_seconds()
-                if test_start_time and test_end_time
-                else None,
-            },
-        },
-        "status": {
-            "training": {
-                "success": training_success,
-                "error": training_error,
-            },
-            "testing": {
-                "success": test_success,
-                "error": test_error,
-            },
-        },
-        "paths": {
-            "model_directory": ".",
-            "best_model": os.path.basename(canonical_run_model_path(model_dir, ".pt"))
-            if os.path.exists(canonical_run_model_path(model_dir, ".pt"))
-            else None,
-        },
-    }
-
-    if ultralytics_train_summary:
-        metadata["training_info"]["ultralytics_train"] = ultralytics_train_summary
-
-    if workspace_root is not None:
-        metadata["workspace"] = {
-            "root": ".",
-            "dataset_path_relative": _relative_to_workspace(dataset_path, workspace_root),
-            "run_directory_relative": _relative_to_workspace(model_dir, workspace_root),
-        }
-
-    if inference:
-        metadata["inference"] = {k: v for k, v in inference.items() if v is not None}
-    sp_out: dict[str, Any] = dict(system_profile) if system_profile else {}
-    if matplotlib_runtime:
-        sp_out["matplotlib_runtime"] = matplotlib_runtime
-    if sp_out:
-        metadata["system_profile"] = sp_out
-    rec_summary = _recommendation_summary_for_metadata(model_dir)
-    if rec_summary:
-        if confidence_recommendation_config:
-            rec_summary["config"] = confidence_recommendation_config
-        metadata["recommendations"] = {"confidence": rec_summary}
-    test_manifest = sync_test_artifacts_manifest(
+    _svc_save_training_metadata(
         model_dir,
-        target_by_format={"pt": metadata["paths"].get("best_model")},
-        backend_by_format={"pt": "ultralytics"},
+        dataset_path,
+        model_version=model_version,
+        training_start_time=training_start_time,
+        training_end_time=training_end_time,
+        test_start_time=test_start_time,
+        test_end_time=test_end_time,
+        epochs=epochs,
+        batch=batch,
+        img_size=img_size,
+        training_success=training_success,
+        training_error=training_error,
+        test_success=test_success,
+        test_error=test_error,
+        dataset_hash=dataset_hash,
+        inference=inference,
+        workspace_root=workspace_root,
+        task_type=task_type,
+        ultralytics_train_summary=ultralytics_train_summary,
+        training_provider=training_provider,
+        external_provider_id=external_provider_id,
+        system_profile=system_profile,
+        matplotlib_runtime=matplotlib_runtime,
+        confidence_recommendation_config=confidence_recommendation_config,
+        sync_test_artifacts_manifest_cb=sync_test_artifacts_manifest,
     )
-    formats_payload = test_manifest.get("formats")
-    if isinstance(formats_payload, dict) and formats_payload:
-        metadata["test_artifacts_by_format"] = formats_payload
-
-    metadata_file = os.path.join(model_dir, "training_metadata.json")
-
-    try:
-        _write_json_atomic(metadata_file, metadata)
-        print(f"[INFO] Training metadata saved: {metadata_file}")
-    except Exception as e:
-        print(f"[WARNING] Failed to save metadata: {e}")
 
 
 def _get_relative_path(target_path, base_path):
