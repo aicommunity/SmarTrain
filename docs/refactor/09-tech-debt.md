@@ -4,7 +4,7 @@ Operational execution status and PR-level checkboxes: [`10-implementation-checkl
 
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
-- Layer-boundary refactor register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md) (in progress).
+- 2026-05-15: Layer-boundary refactor waves 0–8 closed. Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md). Residual: [`layer-boundary-continuation.md`](./layer-boundary-continuation.md) (LB-C1 backends, LB-C2 analyze IO, LB-C3/C4 train/test monoliths).
 
 - 2026-05-06: Root-package migration plan started (`root-package-structure-migration`). Inventory lock fixed for Batch 1 candidates:
   - moved `smartrain/provider_install_state.py` -> `smartrain/providers/core/provider_install_state.py`

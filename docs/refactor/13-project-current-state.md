@@ -103,12 +103,12 @@
 
 ---
 
-## Layer boundary refactor (in progress)
+## Layer boundary refactor (2026-05-15)
+
+**Status:** Waves 0–8 executed; mandatory follow-up in [`layer-boundary-continuation.md`](./layer-boundary-continuation.md) (LB-C1 P0: backends off workflows).
 
 **Register:** [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md)  
-**Waves:** 0 process/guardrails → 1 naming → 2 analyze → 3 canonical gateway → 4 train/test/inference → 5 backends → 6 fallbacks → 7 datasets (optional) → 8 audit + continuation.
-
-**Guardrails:** [`tests/regression/test_layer_import_guardrails.py`](../../tests/regression/test_layer_import_guardrails.py) — forbids `services`/`orchestrators`/`domain`/`backends` → `workflows` (backends allowlist until Wave 5).
+**Guardrails:** [`tests/regression/test_layer_import_guardrails.py`](../../tests/regression/test_layer_import_guardrails.py)
 
 ---
 
