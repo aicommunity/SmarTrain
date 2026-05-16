@@ -15,8 +15,6 @@ _FORBIDDEN_PREFIX_PAIRS: tuple[tuple[str, str], ...] = (
 # (relative path under repo root, forbidden module prefix)
 _ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
     {
-        # Lazy dataset report exporters (import inside write_analysis_report)
-        ("smartrain/services/analyze/report_writer.py", "smartrain.workflows.datasets"),
         # cmd_all stage callbacks: patchable via workflows.analyze.results_analyzer
         ("smartrain/services/analyze/cli_commands.py", "smartrain.workflows.analyze"),
     }

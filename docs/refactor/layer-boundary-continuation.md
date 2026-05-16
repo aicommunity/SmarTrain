@@ -26,23 +26,22 @@
 | id | Result |
 |----|--------|
 | LB-C1 | `backends/implementations/ultralytics/inference.py` |
-| LB-C2 | `core/testing/*`, lazy dataset export in `report_writer` (allowlist) |
+| LB-C2 | `core/testing/*`; shared export in `services/reporting/document_export.py` |
 | LB-C3 | `train_yolo_execution_service` + metadata IO in `train_metadata_io_service` |
 | LB-C4 | `services/testing/backends/native_eval.py` + `format_runners.py`; `model_test_backends.py` facade |
 | LB-C5 | `prompts.py` + `_workflow_attr` facade dispatch |
 | LB-C8 | CI: `pytest tests/regression/test_layer_import_guardrails.py` in phase8 workflow |
 
+| LB-C6 | `report_markdown.py`, `report_odt.py`, thin `report_writer.py` |
+
 ## Deferred (non-blocking)
 
 | id | Notes |
 |----|-------|
-| LB-C6 | `report_writer.py` internal split — LOC hygiene only |
 | LB-C7 | `workflows/datasets/` → `services/datasets/` when dataset CLI is refactored |
-| LB-C2 follow-up | Move dataset ODT/PDF exporters out of `workflows.datasets` (optional) |
 
 ## Allowlist (transitional)
 
-- `services/analyze/report_writer.py` → lazy `workflows.datasets` export
 - `services/analyze/cli_commands.py` → `workflows.analyze` facade (test patch surface)
 
 ## Key paths after closure
@@ -52,6 +51,8 @@
 | Train execution | `smartrain/services/training/train_yolo_execution_service.py` |
 | Test backends | `smartrain/services/testing/backends/format_runners.py`, `native_eval.py` |
 | Test facade | `smartrain/workflows/testing/model_test_backends.py` |
+| Report export | `smartrain/services/reporting/document_export.py` |
+| Analyze report | `smartrain/services/analyze/report_{markdown,odt,writer}.py` |
 | TensorRT utils | `smartrain/core/models/tensorrt_checks.py` |
 | Validator core | `smartrain/services/testing/unified_validator_core.py` |
 

@@ -17,7 +17,7 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 | TD-LB-007 | DONE | testing | test_backends → MTM profile | `core/runtime/system_profile` |
 | TD-LB-008 | DONE | inference | Wrong run discovery import | `core.runtime.run_discovery` |
 | TD-LB-009 | DONE | runtime | Legacy model path fallback | `resolve_run_model` (no rglob) |
-| TD-LB-010 | PARTIAL | LOC | Monolith modules | `report_writer` remains (~3.4k LOC); LB-C6 deferred |
+| TD-LB-010 | DONE | LOC | Monolith modules | Analyze report split + `services/reporting/document_export.py` (2026-05-16) |
 | TD-LB-099 | DONE | closure | Program audit | Continuation closed 2026-05-16 |
 
 ## Burn-down checklist
@@ -29,5 +29,4 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 
 ## Transitional guardrail allowlist
 
-- `services/analyze/report_writer.py` → lazy `workflows.datasets` export
 - `services/analyze/cli_commands.py` → `workflows.analyze` facade dispatch

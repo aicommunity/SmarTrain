@@ -4,7 +4,7 @@ Operational execution status and PR-level checkboxes: [`10-implementation-checkl
 
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
-- 2026-05-16: Layer-boundary continuation **closed**. Train/test execution in `services/training` and `services/testing/backends`; workflow facades for analyze and test. Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md). Deferred LOC: `report_writer` (LB-C6), datasets wave (LB-C7).
+- 2026-05-16: Layer-boundary continuation **closed**. Train/test execution in `services/training` and `services/testing/backends`; workflow facades for analyze and test. LB-C6 + shared `services/reporting/document_export.py` (no `services`→`workflows` for analyze export). Deferred: datasets wave (LB-C7). Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md).
 - 2026-05-15: Layer-boundary refactor waves 0–8 closed. Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md).
 
 - 2026-05-06: Root-package migration plan started (`root-package-structure-migration`). Inventory lock fixed for Batch 1 candidates:
