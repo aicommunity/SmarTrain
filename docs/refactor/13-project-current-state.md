@@ -97,7 +97,7 @@
 Краткий список; детали и ссылки на код — в разделе **Operational Limits** [`09-tech-debt.md`](./09-tech-debt.md).
 
 - Внешние провайдеры могут не отдавать полные cls/seg поля; допустим деградированный контракт до расширения провайдеров.
-- **Canonical model read** ([`adapters/canonical/read/model_adapter.py`](../../smartrain/adapters/canonical/read/model_adapter.py)): разрешение `task_type` — metadata → подсказка по имени файла → последний резерв `detection`; `backend_type` — metadata → подсказка по формату весов.
+- **Canonical model read** ([`adapters/canonical/read/model_adapter.py`](../../smartrain/adapters/canonical/read/model_adapter.py)): `task_type` — metadata → подсказка по имени файла; без provenance — ошибка (миграция: [`scripts/migrate_model_task_provenance.py`](../../scripts/migrate_model_task_provenance.py)). `backend_type` — metadata → подсказка по формату весов.
 - Крупные композиционные входы: [`model_training_module.py`](../../smartrain/workflows/training/model_training_module.py) (~1k LOC; argparse/resume CLI в [`services/training/`](../../smartrain/services/training/)), [`model_test_cli.py`](../../smartrain/workflows/testing/model_test_cli.py) (фасад → [`model_test_cli_service.py`](../../smartrain/services/testing/model_test_cli_service.py)); артефакты тестов — [`model_test_service.py`](../../smartrain/services/testing/model_test_service.py).
 
 ---
@@ -112,8 +112,9 @@
 
 ## Следующий горизонт (backlog, без обязательства срока)
 
-1. **Дальнейшее утоньшение MTM:** interactive/hooks остаются в workflows; train/test CLI и сервисы — в `services/`.
-2. **Документация RU:** синхронизация [`../ru/development/architecture.md`](../ru/development/architecture.md) с EN-срезом datasets/services.
+1. **LB-D6:** разбить [`format_runners.py`](../../smartrain/services/testing/backends/format_runners.py) (~2k LOC) с сохранением monkeypatch-совместимости фасада.
+2. **Дальнейшее утоньшение MTM:** interactive/hooks в workflows; train CLI — [`train_cli_main`](../../smartrain/services/training/train_cli_main.py) + [`train_wiring`](../../smartrain/workflows/training/train_wiring.py).
+3. **Документация RU:** синхронизация [`../ru/development/architecture.md`](../ru/development/architecture.md) с EN-срезом datasets/services.
 
 ---
 
