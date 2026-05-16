@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
+from smartrain.services.testing.model_test_service import complete_missing_test_artifacts
+from smartrain.services.train_runtime_helpers import maybe_free_cuda_memory
+from smartrain.services.training import train_cli_callbacks as _tcb
+from smartrain.services.training import train_cli_parsers
 from smartrain.services.training.train_resume_backoff_service import (
     complete_missing_test_with_backoff as _svc_complete_missing_test_with_backoff,
 )
@@ -10,66 +14,60 @@ from smartrain.services.training.train_resume_cli_service import (
     run_calc_confidence_command as _svc_run_calc_confidence_command,
     run_resume_command as _svc_run_resume_command,
 )
-from smartrain.services.training.train_runtime_ops import TrainRuntimeOps, build_train_runtime_ops
-
-def _resume_pt_test_runner(*args, **kwargs):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm._resume_ultralytics_pt_test_runner(*args, **kwargs)
-
-
-def _ensure_resume_confidence_recommendations_cb(run_dir: str, workspace_root: str, val_batch: int = 1) -> None:
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm._ensure_resume_confidence_recommendations(run_dir, workspace_root, val_batch=val_batch)
-
-
-def _update_resume_test_metadata_cb(*args, **kwargs):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm.update_resume_test_metadata(*args, **kwargs)
-
-
-def _maybe_free_cuda_memory_cb() -> None:
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm._maybe_free_cuda_memory()
-
-
-def _complete_missing_test_artifacts_cb(*args, **kwargs):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm.complete_missing_test_artifacts(*args, **kwargs)
-
-
-def _list_incomplete_runs_cb(*args, **kwargs):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm.list_incomplete_runs(*args, **kwargs)
-
-
-def _diagnose_run_cb(*args, **kwargs):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm.diagnose_run(*args, **kwargs)
-
-
-def _resume_training_in_run_cb(*args, **kwargs):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm.resume_training_in_run(*args, **kwargs)
-
-
-def _update_resume_metadata_cb(*args, **kwargs):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm.update_resume_metadata(*args, **kwargs)
-
-
+from smartrain.services.training.train_resume_confidence_service import ensure_resume_confidence_recommendations
+from smartrain.services.training.train_resume_pt_test_runner import resume_ultralytics_pt_test_runner
+from smartrain.services.training.train_runtime_ops import build_train_runtime_ops
 from smartrain.workflows.training.train_resume import (
     RUN_STATUS_RESUMABLE_INCOMPLETE,
     RUN_STATUS_TRAINING_COMPLETE_TEST_PENDING,
+    diagnose_run,
+    list_incomplete_runs,
+    resume_training_in_run,
+    update_resume_metadata,
+    update_resume_test_metadata,
 )
+
+parse_train_args_cb = train_cli_parsers.parse_train_args
+run_interactive_train_setup_cb = _tcb.run_interactive_train_setup_cb
+load_ultralytics_yaml_cb = _tcb.load_ultralytics_yaml_cb
+resolve_cli_paths_with_profile_cb = _tcb.resolve_cli_paths_with_profile_cb
+normalize_model_spec_cb = _tcb.normalize_model_spec_cb
+
+
+def _resume_pt_test_runner(*args, **kwargs):
+    return resume_ultralytics_pt_test_runner(*args, **kwargs)
+
+
+def _ensure_resume_confidence_recommendations_cb(run_dir: str, workspace_root: str, val_batch: int = 1) -> None:
+    return ensure_resume_confidence_recommendations(run_dir, workspace_root, val_batch=val_batch)
+
+
+def _update_resume_test_metadata_cb(*args, **kwargs):
+    return update_resume_test_metadata(*args, **kwargs)
+
+
+def _maybe_free_cuda_memory_cb() -> None:
+    return maybe_free_cuda_memory()
+
+
+def _complete_missing_test_artifacts_cb(*args, **kwargs):
+    return complete_missing_test_artifacts(*args, **kwargs)
+
+
+def _list_incomplete_runs_cb(*args, **kwargs):
+    return list_incomplete_runs(*args, **kwargs)
+
+
+def _diagnose_run_cb(*args, **kwargs):
+    return diagnose_run(*args, **kwargs)
+
+
+def _resume_training_in_run_cb(*args, **kwargs):
+    return resume_training_in_run(*args, **kwargs)
+
+
+def _update_resume_metadata_cb(*args, **kwargs):
+    return update_resume_metadata(*args, **kwargs)
 
 
 def complete_missing_test_with_backoff(
@@ -100,58 +98,10 @@ def run_calc_confidence_command(argv: list[str]) -> int:
     )
 
 
-def build_train_runtime_ops_from_mtm() -> TrainRuntimeOps:
-    from smartrain.workflows.training import model_training_module as mtm
-
-    base = build_train_runtime_ops()
-    return TrainRuntimeOps(
-        train_yolo=mtm.train_yolo,
-        test_yolo=mtm.test_yolo,
-        save_training_metadata=mtm.save_training_metadata,
-        collect_system_profile=base.collect_system_profile,
-        build_run_name=mtm._build_run_name,
-        resolve_external_eval_source=base.resolve_external_eval_source,
-        json_safe_train_summary=base.json_safe_train_summary,
-        load_batch_from_training_metadata=base.load_batch_from_training_metadata,
-        run_external_train=mtm.run_external_train,
-        run_external_infer=mtm.run_external_infer,
-    )
-
-
-def parse_train_args_cb(argv: list[str]):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm.parse_args(argv)
-
-
-def run_interactive_train_setup_cb(args) -> bool:
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm._run_interactive_train_setup(args)
-
-
-def resolve_cli_paths_with_profile_cb(args, u_cfg: dict):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm._resolve_cli_paths_with_profile(args, u_cfg)
-
-
-def load_ultralytics_yaml_cb(path: str | None):
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm._load_ultralytics_yaml(path)
-
-
-def normalize_model_spec_cb(spec, *, add_pt_when_missing: bool = False) -> str:
-    from smartrain.workflows.training import model_training_module as mtm
-
-    return mtm._normalize_model_spec(spec, add_pt_when_missing=add_pt_when_missing)
-
-
 def run_train_after_setup_cb(**kwargs):
     from smartrain.services.train_service import run_train_after_setup
 
-    return run_train_after_setup(**kwargs, runtime_ops=build_train_runtime_ops_from_mtm())
+    return run_train_after_setup(**kwargs, runtime_ops=build_train_runtime_ops())
 
 
 def run_resume_command(argv: list[str]) -> int:

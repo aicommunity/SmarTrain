@@ -2,7 +2,7 @@
 
 | Area | Files | Duplication Type | Refactor Target |
 |---|---|---|---|
-| CLI prompts | `model_training_module.py`, `dataset_augment.py`, `dataset_balance.py` | Repeated prompt/validation | `cli/core/interactive.py` |
+| CLI prompts | `train_cli_callbacks.py`, `dataset_augment.py`, `dataset_balance.py` | Repeated prompt/validation | `cli/core/interactive.py` |
 | Replay output | train/test/inference/dataset commands | Slightly different replay builders | `cli/core/replay.py` |
 | Dataset catalog/splits | `dataset_augment.py`, `dataset_balance.py`, `dataset_orient.py`, `dataset_prune.py` | Repeated dataset lookup and split logic | `dataset_cli_common.py` (`load_dataset_catalog`, …) + `dataset_cli_catalog.py` (interactive dataset prompt helper) |
 | Run/model resolution | `model_test_cli.py`, `inference_cli.py`, `results_analyzer.py` | Similar target resolution branches | canonical gateway layer |

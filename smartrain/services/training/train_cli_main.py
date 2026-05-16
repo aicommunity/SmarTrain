@@ -28,11 +28,11 @@ from smartrain.services.training.train_config_merge_service import merge_sources
 from smartrain.services.training.train_cli_callbacks import (
     apply_external_provider_defaults_cb,
     load_ultralytics_yaml_cb as _default_load_ultralytics_yaml_cb,
+    normalize_model_spec_cb as _default_normalize_model_spec_cb,
+    resolve_cli_paths_with_profile_cb as _default_resolve_cli_paths_with_profile_cb,
     run_interactive_train_setup_cb as _default_run_interactive_train_setup_cb,
 )
-from smartrain.services.training.train_cli_paths_service import resolve_cli_paths_with_profile as _default_resolve_cli_paths_with_profile
 from smartrain.services.train_service import run_train_after_setup as _default_run_train_after_setup
-from smartrain.services.training.train_model_resolution_service import normalize_model_spec
 from smartrain.services.training.training_cli_orchestration_service import (
     handle_aux_train_commands,
     run_train_cli_pipeline,
@@ -87,8 +87,8 @@ def main(
         merge_cli_into_ultralytics_cfg_cb=merge_cli_into_ultralytics_cfg,
         apply_cli_smartrain_overrides_cb=apply_cli_smartrain_overrides,
         resolve_device_request_cb=resolve_device_request,
-        resolve_cli_paths_with_profile_cb=resolve_cli_paths_with_profile_cb or _default_resolve_cli_paths_with_profile,
-        normalize_model_spec_cb=normalize_model_spec_cb or normalize_model_spec,
+        resolve_cli_paths_with_profile_cb=resolve_cli_paths_with_profile_cb or _default_resolve_cli_paths_with_profile_cb,
+        normalize_model_spec_cb=normalize_model_spec_cb or _default_normalize_model_spec_cb,
         ensure_device_available_or_raise_cb=ensure_device_available_or_raise,
         device_display_name_cb=device_display_name,
         run_train_after_setup_cb=run_train_after_setup_cb or _default_run_train_after_setup,

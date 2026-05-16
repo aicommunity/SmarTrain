@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from smartrain.workflows.training import model_training_module as mtm
+from smartrain.services.train_runtime_helpers import (
+    load_batch_from_training_metadata,
+    maybe_free_cuda_memory,
+)
+from smartrain.workflows.training import train_entry
 
 
 def test_load_batch_from_training_metadata_reads_batch_size(tmp_path: Path) -> None:
@@ -21,13 +25,13 @@ def test_load_batch_from_training_metadata_reads_batch_size(tmp_path: Path) -> N
         ),
         encoding="utf-8",
     )
-    assert mtm._load_batch_from_training_metadata(str(md)) == 8
+    assert load_batch_from_training_metadata(str(md)) == 8
 
 
 def test_load_batch_from_training_metadata_returns_none_when_missing(tmp_path: Path) -> None:
     md = tmp_path / "run2"
     md.mkdir()
-    assert mtm._load_batch_from_training_metadata(str(md)) is None
+    assert load_batch_from_training_metadata(str(md)) is None
 
 
 def test_test_only_default_val_batch_uses_metadata_then_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -44,16 +48,15 @@ def test_test_only_default_val_batch_uses_metadata_then_fallback(monkeypatch: py
         encoding="utf-8",
     )
 
-    # Minimal stubs so that main gets to the test_yolo call.
     args = argparse.Namespace(
         workspace=str(tmp_path),
         config=None,
         ultralytics_yaml=None,
         data="dummy_ds",
-        task=None,
-        model=None,
+        task="detect",
+        model="yolo11n.pt",
         epochs=None,
-        batch=7,  # will end up in u_cfg as fallback
+        batch=7,
         img_size=None,
         target_path=None,
         model_dir=str(md),
@@ -68,8 +71,14 @@ def test_test_only_default_val_batch_uses_metadata_then_fallback(monkeypatch: py
         clearml_project=None,
     )
 
-    monkeypatch.setattr(mtm, "parse_args", lambda _argv: args)
-    monkeypatch.setattr(mtm, "_resolve_cli_paths_with_profile", lambda *_a, **_k: (str(tmp_path), "/ds", "/runs"))
+    monkeypatch.setattr(
+        "smartrain.services.training.train_cli_main.parse_train_args",
+        lambda _argv: args,
+    )
+    monkeypatch.setattr(
+        "smartrain.services.training.train_cli_main._default_resolve_cli_paths_with_profile_cb",
+        lambda *_a, **_k: (str(tmp_path), "/ds", "/runs"),
+    )
 
     called: dict[str, int | None] = {"val_batch": None}
 
@@ -77,10 +86,16 @@ def test_test_only_default_val_batch_uses_metadata_then_fallback(monkeypatch: py
         called["val_batch"] = kw.get("val_batch")
         return None, None, {}
 
-    monkeypatch.setattr(mtm, "test_yolo", _fake_test_yolo)
-    monkeypatch.setattr(mtm, "save_training_metadata", lambda **_kw: None)
+    monkeypatch.setattr(
+        "smartrain.services.training.train_runtime_ops._test_yolo",
+        _fake_test_yolo,
+    )
+    monkeypatch.setattr(
+        "smartrain.services.training.train_metadata_io_service.save_training_metadata",
+        lambda **_kw: None,
+    )
 
-    mtm.main(["--test-only"])
+    train_entry.main(["--test-only"])
     assert called["val_batch"] == 3
 
 
@@ -106,7 +121,6 @@ def test_maybe_free_cuda_memory_calls_torch_when_available(monkeypatch: pytest.M
     fake = _FakeTorch()
     monkeypatch.setitem(sys.modules, "torch", fake)
 
-    mtm._maybe_free_cuda_memory()
+    maybe_free_cuda_memory()
     assert fake.cuda.empty_cache_called == 1
     assert fake.cuda.ipc_collect_called == 1
-

@@ -98,7 +98,7 @@
 
 - Внешние провайдеры могут не отдавать полные cls/seg поля; допустим деградированный контракт до расширения провайдеров.
 - **Canonical model read** ([`adapters/canonical/read/model_adapter.py`](../../smartrain/adapters/canonical/read/model_adapter.py)): `task_type` — metadata → подсказка по имени файла; без provenance — ошибка (миграция: [`scripts/migrate_model_task_provenance.py`](../../scripts/migrate_model_task_provenance.py)). `backend_type` — metadata → подсказка по формату весов.
-- Крупные композиционные входы: [`model_training_module.py`](../../smartrain/workflows/training/model_training_module.py) (~1k LOC; argparse/resume CLI в [`services/training/`](../../smartrain/services/training/)), [`model_test_cli.py`](../../smartrain/workflows/testing/model_test_cli.py) (фасад → [`model_test_cli_service.py`](../../smartrain/services/testing/model_test_cli_service.py)); артефакты тестов — [`model_test_service.py`](../../smartrain/services/testing/model_test_service.py).
+- Крупные композиционные входы: [`train_entry.py`](../../smartrain/workflows/training/train_entry.py) + [`train_wiring.py`](../../smartrain/workflows/training/train_wiring.py) (train CLI/resume в [`services/training/`](../../smartrain/services/training/); MTM удалён LB-D8), [`model_test_cli.py`](../../smartrain/workflows/testing/model_test_cli.py) (фасад → [`model_test_cli_service.py`](../../smartrain/services/testing/model_test_cli_service.py)); артефакты тестов — [`model_test_service.py`](../../smartrain/services/testing/model_test_service.py).
 
 ---
 
@@ -112,8 +112,8 @@
 
 ## Следующий горизонт (backlog, без обязательства срока)
 
-1. **Дальнейшее утоньшение MTM:** interactive/hooks в workflows; train CLI — [`train_cli_main`](../../smartrain/services/training/train_cli_main.py) + [`train_wiring`](../../smartrain/workflows/training/train_wiring.py).
-3. **Документация RU:** синхронизация [`../ru/development/architecture.md`](../ru/development/architecture.md) с EN-срезом datasets/services.
+1. **Train CLI (опционально):** дальнейшее утоньшение [`inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py) (LB-D4 LOC) и косметика wiring — основной train path уже в [`train_cli_main`](../../smartrain/services/training/train_cli_main.py) + [`train_wiring`](../../smartrain/workflows/training/train_wiring.py); MTM удалён (LB-D8).
+2. **Документация RU:** синхронизация [`../ru/development/architecture.md`](../ru/development/architecture.md) с EN-срезом datasets/services.
 
 ---
 

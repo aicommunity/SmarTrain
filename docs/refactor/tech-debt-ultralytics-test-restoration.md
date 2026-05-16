@@ -4,7 +4,7 @@
 
 | id | status | context | deferred_decision | resolution |
 |----|--------|---------|-------------------|------------|
-| TD-001 | DONE | `model_training_module` post-train / `train_service` | Post-training `test_yolo` still uses `plots=False`; full plot bundle is produced by `smartrain test` and resume path. | Documented: intentional; train keeps fast smoke test. |
+| TD-001 | DONE | `train_service` / `train_yolo_execution_service` | Post-training `test_yolo` still uses `plots=False`; full plot bundle is produced by `smartrain test` and resume path. | Documented: intentional; train keeps fast smoke test. |
 | TD-002 | DONE | `tests/test_run_ultralytics_val_kwargs.py` | Plan §4.2: assert `YOLO.val` kwargs (`project`→`tests`, `name`, `plots`, `save`). | Implemented: patched `YOLO` + post-val hooks; assert canonical kwargs. |
 | TD-003 | DONE | `ultralytics_test_contract.ultralytics_pt_rich_files_required` | Plan §0.2: explicit segmentation branch vs detection plot set. | Same tuple as detection: Ultralytics `SegmentMetrics` still runs box curves with `Box*` prefix before mask plots. |
 | TD-004 | WONTFIX | CI / `pytest -m slow` | Plan §4.4: disk snapshot after real `val` on CPU. | Deferred: full suite already ~8m; add when a tiny public seg/det weights fixture is standardized for CI. |

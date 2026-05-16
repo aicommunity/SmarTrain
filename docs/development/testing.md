@@ -14,7 +14,7 @@ pytest
 ## Recommended cuts
 
 ```bash
-pytest tests/test_model_training_module.py
+pytest tests/test_train_*.py tests/test_training_metadata*.py
 pytest tests/test_results_analyzer.py
 pytest tests/test_training_queue.py
 pytest tests/test_inference_cli.py -q

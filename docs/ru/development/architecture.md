@@ -4,7 +4,7 @@
 
 Документ фиксирует фактические потоки в коде и помогает быстро локализовать изменения.
 
-Источники правды для этого раздела: `smartrain/cli.py`, `smartrain/workflows/training/model_training_module.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/workflows/queue/training_queue.py`, `smartrain/workflows/queue/training_queue_cli.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
+Источники правды для этого раздела: `smartrain/cli.py`, `smartrain/workflows/training/train_entry.py`, `smartrain/workflows/training/train_wiring.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/workflows/queue/training_queue.py`, `smartrain/workflows/queue/training_queue_cli.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
 
 **Карта каталогов пакета:** [package-layout.md](../../development/package-layout.md) (EN).
 
@@ -14,7 +14,7 @@
 
 | Команда / область | Вход Typer (`cli.py`) | Argparse / `main` | Оркестрация / сервисы | Заметки |
 |-------------------|----------------------|-------------------|------------------------|---------|
-| `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `model_training_module` | `services/train_service.py`, `workflows/training/*_service.py` | Профиль: `core/training/train_profile.py` |
+| `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `services/training/train_cli_main.py` | `services/train_service.py`, `services/training/*`, `workflows/training/train_wiring.py` (resume) | Профиль: `core/training/train_profile.py` |
 | `test` | → `cli_apps/test_app` | `workflows/testing/model_test_cli.py` | `services/model_test_orchestrator.py`, `services/test_backend_dispatch.py` | Backends: `backends/train_test_registry.py` |
 | `inference` | → `cli_apps/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `workflows/inference/inference_backends.py` | |
 | Подкоманды `analyze` | Typer → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` | `workflows/analyze/analyze_*_service.py`, `services/analyze_*.py` | Метрики / canonical: `orchestrators/canonical_gateway.py` |
@@ -65,7 +65,7 @@ flowchart TD
 sequenceDiagram
   participant User
   participant CLI as cli.py
-  participant Train as model_training_module.py
+  participant Train as train_entry.py
   participant Profile as core/training/train_profile.py
   participant YOLO as ultralytics.YOLO
   User->>CLI: smartrain train ...

@@ -69,20 +69,18 @@ Close the highest-impact conformance gaps against the original refactor target-s
 - Legacy fallback paths are explicit, policy-gated, and documented.
 - No hidden bypass for canonical-enabled mode.
 
-## Step 4 (P1): Orchestrator thinning (targeted slices)
+## Step 4 (P1): Orchestrator thinning (targeted slices) — **closed (2026-05-16)**
 
-### Scope
-- Reduce cognitive complexity in `results_analyzer` and `model_training_module` by extracting remaining mixed-responsibility blocks.
+### Outcome
+- `results_analyzer.py` — thin CLI facade; analyze logic in `services/analyze/`.
+- Train: `model_training_module.py` **removed** (LB-D8 / TD-LB-016); entry `train_entry` + `train_wiring`; CLI and callbacks in `services/training/` (`train_cli_main.py`, `train_cli_callbacks.py`).
 
-### Candidate files
-- `smartrain/workflows/analyze/results_analyzer.py`
-- `smartrain/workflows/training/model_training_module.py`
-- New service modules under `smartrain/services/*` or `smartrain/workflows/*_service.py`
+### Historical scope (2026-05-08 plan)
+- Reduce cognitive complexity in `results_analyzer` and train orchestration by extracting mixed-responsibility blocks into `services/*`.
 
-### Definition of done
-- Large blocks moved behind named service boundaries.
-- Entry modules keep facade/orchestration roles only.
-- No behavior drift in interactive/non-interactive workflows.
+### Definition of done (met)
+- Large blocks behind named service boundaries; workflow entry modules are facades/wiring only.
+- No behavior drift in interactive/non-interactive workflows (regression suite green).
 
 ## Test protocol (minimum per step)
 

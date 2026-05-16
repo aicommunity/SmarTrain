@@ -4,7 +4,7 @@
 
 This document captures real code flows and helps you quickly locate where to make changes.
 
-Sources of truth for this section: `smartrain/cli.py`, `smartrain/workflows/training/model_training_module.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/workflows/queue/training_queue.py`, `smartrain/workflows/queue/training_queue_cli.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
+Sources of truth for this section: `smartrain/cli.py`, `smartrain/workflows/training/train_entry.py`, `smartrain/workflows/training/train_wiring.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/workflows/queue/training_queue.py`, `smartrain/workflows/queue/training_queue_cli.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
 
 **Package layout** (folder map): [package-layout.md](package-layout.md).
 
@@ -14,7 +14,7 @@ Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_apps
 
 | Command / area | Typer entry (`cli.py`) | Argparse / `main` | Orchestration / services | Notes |
 |----------------|------------------------|-------------------|---------------------------|-------|
-| `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `model_training_module` | `services/train_service.py`, `workflows/training/*_service.py` | Profile merge: `core/training/train_profile.py` |
+| `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `services/training/train_cli_main.py` | `services/train_service.py`, `services/training/*`, `workflows/training/train_wiring.py` (resume) | Profile merge: `core/training/train_profile.py` |
 | `test` | → `cli_apps/test_app` | `workflows/testing/model_test_cli.py` | `services/model_test_orchestrator.py`, `services/test_backend_dispatch.py`, `services/testing/backends/format_runners.py` | Dispatch via `core/workflow_adapters/testing_runtime_api.py` |
 | `inference` | → `cli_apps/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `backends/implementations/ultralytics/inference.py` | |
 | `analyze` subcommands | Typer subcommands → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` (facade) | `services/analyze/*` | Metrics / canonical: `orchestrators/canonical_gateway.py` |
@@ -65,13 +65,15 @@ Practical takeaway: changes to file contracts affect multiple commands at once.
 sequenceDiagram
   participant User
   participant CLI as cli.py
-  participant Train as model_training_module.py
+  participant Train as train_entry.py
+  participant CliMain as train_cli_main.py
   participant Profile as core/training/train_profile.py
   participant YOLO as ultralytics.YOLO
   User->>CLI: smartrain train ...
   CLI->>Train: main(argv)
-  Train->>Profile: merge parameters
-  Train->>Train: resolve dataset and runtime data.yaml
+  Train->>CliMain: run_train_cli_pipeline
+  CliMain->>Profile: merge parameters
+  CliMain->>CliMain: resolve dataset and runtime data.yaml
   Train->>YOLO: train()
   Train->>YOLO: val()
   Train->>Train: write metrics and training_metadata.json

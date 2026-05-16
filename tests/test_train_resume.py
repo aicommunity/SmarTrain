@@ -6,9 +6,10 @@ from pathlib import Path
 import pytest
 import torch
 
-from smartrain.workflows.training import model_training_module as mtm
 from smartrain.core.runtime import run_discovery as rd
+from smartrain.workflows.training import train_entry
 from smartrain.workflows.training import train_resume as tr
+from smartrain.workflows.training import train_wiring
 from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
 from smartrain.core.runtime.workspace_paths import deploy_workspace
 from smartrain.workflows.testing.ultralytics_test_contract import ultralytics_pt_rich_files_required
@@ -208,7 +209,7 @@ def test_diagnose_run_marks_incomplete_non_resumable_without_last(tmp_path: Path
 
 def test_resume_noninteractive_requires_run_dir(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
-    code = mtm._run_resume_command(["--workspace", str(tmp_path), "-y"])
+    code = train_wiring.run_resume_command(["--workspace", str(tmp_path), "-y"])
     assert code == 2
 
 
@@ -218,7 +219,7 @@ def test_resume_run_dir_fails_for_nonresumable_run(tmp_path: Path) -> None:
     (run_dir / "train").mkdir(parents=True, exist_ok=True)
     (run_dir / "train" / "args.yaml").write_text("epochs: 30\n", encoding="utf-8")
 
-    code = mtm._run_resume_command(
+    code = train_wiring.run_resume_command(
         ["--workspace", str(tmp_path), "--run-dir", str(run_dir), "-y"]
     )
     assert code == 2
@@ -246,10 +247,10 @@ def test_resume_run_dir_success_calls_resume_and_updates_metadata(
         assert diagnosis is not None
         called["metadata"] = True
 
-    monkeypatch.setattr(mtm, "resume_training_in_run", _fake_resume)
-    monkeypatch.setattr(mtm, "update_resume_metadata", _fake_meta)
+    monkeypatch.setattr(train_wiring, "_resume_training_in_run_cb", _fake_resume)
+    monkeypatch.setattr(train_wiring, "_update_resume_metadata_cb", _fake_meta)
 
-    code = mtm._run_resume_command(
+    code = train_wiring.run_resume_command(
         ["--workspace", str(tmp_path), "--run-dir", str(run_dir), "-y"]
     )
     assert code == 0
@@ -281,8 +282,8 @@ def test_resume_failed_before_epoch_stays_resumable_and_tracks_attempt(
     def _raise_resume(_: str) -> None:
         raise RuntimeError("ssh disconnected")
 
-    monkeypatch.setattr(mtm, "resume_training_in_run", _raise_resume)
-    code = mtm._run_resume_command(
+    monkeypatch.setattr(train_wiring, "_resume_training_in_run_cb", _raise_resume)
+    code = train_wiring.run_resume_command(
         ["--workspace", str(tmp_path), "--run-dir", str(run_dir), "-y"]
     )
     assert code == 1
@@ -337,11 +338,11 @@ def test_resume_runs_test_stage_when_training_complete_but_test_missing(
         assert diagnosis is not None
         called["meta"] = True
 
-    monkeypatch.setattr(mtm, "_resume_ultralytics_pt_test_runner", _fake_test)
-    monkeypatch.setattr(mtm, "update_resume_test_metadata", _fake_test_meta)
-    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: None)
+    monkeypatch.setattr(train_wiring, "_resume_pt_test_runner", _fake_test)
+    monkeypatch.setattr(train_wiring, "_update_resume_test_metadata_cb", _fake_test_meta)
+    monkeypatch.setattr(train_wiring, "_maybe_free_cuda_memory_cb", lambda: None)
 
-    code = mtm._run_resume_command(
+    code = train_wiring.run_resume_command(
         ["--workspace", str(tmp_path), "--run-dir", str(run_dir), "-y"]
     )
     assert code == 0
@@ -364,10 +365,12 @@ def test_resume_test_backoff_retries_on_cuda_oom(monkeypatch: pytest.MonkeyPatch
             raise RuntimeError("CUDA out of memory while testing")
         return True
 
-    monkeypatch.setattr(mtm, "complete_missing_test_artifacts", _fake_complete)
-    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: freed.__setitem__("count", freed["count"] + 1))
+    monkeypatch.setattr(train_wiring, "_complete_missing_test_artifacts_cb", _fake_complete)
+    monkeypatch.setattr(
+        train_wiring, "_maybe_free_cuda_memory_cb", lambda: freed.__setitem__("count", freed["count"] + 1)
+    )
 
-    mtm._complete_missing_test_with_backoff(
+    train_wiring.complete_missing_test_with_backoff(
         str(run_dir),
         workspace_root=str(tmp_path),
         initial_batch=4,
@@ -389,11 +392,11 @@ def test_resume_test_backoff_fails_when_min_batch_oom(monkeypatch: pytest.Monkey
         batches.append(int(runner_kwargs.get("val_batch", -1)))
         raise RuntimeError("CUDA out of memory during validation")
 
-    monkeypatch.setattr(mtm, "complete_missing_test_artifacts", _fake_complete)
-    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: None)
+    monkeypatch.setattr(train_wiring, "_complete_missing_test_artifacts_cb", _fake_complete)
+    monkeypatch.setattr(train_wiring, "_maybe_free_cuda_memory_cb", lambda: None)
 
     with pytest.raises(RuntimeError, match="backoff exhausted"):
-        mtm._complete_missing_test_with_backoff(
+        train_wiring.complete_missing_test_with_backoff(
             str(run_dir),
             workspace_root=str(tmp_path),
             initial_batch=2,
@@ -412,11 +415,11 @@ def test_resume_test_backoff_does_not_retry_non_oom(monkeypatch: pytest.MonkeyPa
         calls["count"] += 1
         raise RuntimeError("dataset yaml malformed")
 
-    monkeypatch.setattr(mtm, "complete_missing_test_artifacts", _fake_complete)
-    monkeypatch.setattr(mtm, "_maybe_free_cuda_memory", lambda: None)
+    monkeypatch.setattr(train_wiring, "_complete_missing_test_artifacts_cb", _fake_complete)
+    monkeypatch.setattr(train_wiring, "_maybe_free_cuda_memory_cb", lambda: None)
 
     with pytest.raises(RuntimeError, match="dataset yaml malformed"):
-        mtm._complete_missing_test_with_backoff(
+        train_wiring.complete_missing_test_with_backoff(
             str(run_dir),
             workspace_root=str(tmp_path),
             initial_batch=4,
@@ -590,11 +593,13 @@ def test_calc_confidence_non_interactive_processes_all_runs(
         assert workspace_root == str(tmp_path)
         called.append((run_dir, val_batch))
 
-    monkeypatch.setattr(mtm, "_ensure_resume_confidence_recommendations", _fake_ensure)
-    monkeypatch.setattr(mtm, "recommendations_complete", lambda _payload: True)
+    monkeypatch.setattr(train_wiring, "_ensure_resume_confidence_recommendations_cb", _fake_ensure)
     monkeypatch.setattr(
-        mtm,
-        "read_recommendation_file",
+        "smartrain.core.training.confidence_recommendation.recommendations_complete",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "smartrain.core.training.confidence_recommendation.read_recommendation_file",
         lambda _path: {
             "objectives": {
                 "A": {"global": {"threshold": 0.2}},
@@ -604,7 +609,7 @@ def test_calc_confidence_non_interactive_processes_all_runs(
         },
     )
 
-    rc = mtm.main(["calc-confidence", "--workspace", str(tmp_path), "-y"])
+    rc = train_entry.main(["calc-confidence", "--workspace", str(tmp_path), "-y"])
     assert rc == 0
     assert sorted(called) == sorted([(str(run_a), 1), (str(run_b), 1)])
 
@@ -623,11 +628,13 @@ def test_calc_confidence_non_interactive_with_run_dir(
         assert workspace_root == str(tmp_path)
         called.append((run_dir, val_batch))
 
-    monkeypatch.setattr(mtm, "_ensure_resume_confidence_recommendations", _fake_ensure)
-    monkeypatch.setattr(mtm, "recommendations_complete", lambda _payload: True)
+    monkeypatch.setattr(train_wiring, "_ensure_resume_confidence_recommendations_cb", _fake_ensure)
     monkeypatch.setattr(
-        mtm,
-        "read_recommendation_file",
+        "smartrain.core.training.confidence_recommendation.recommendations_complete",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "smartrain.core.training.confidence_recommendation.read_recommendation_file",
         lambda _path: {
             "objectives": {
                 "A": {"global": {"threshold": 0.2}},
@@ -637,7 +644,7 @@ def test_calc_confidence_non_interactive_with_run_dir(
         },
     )
 
-    rc = mtm.main(["calc-confidence", "--workspace", str(tmp_path), "--run-dir", "ds/run_a", "-y"])
+    rc = train_entry.main(["calc-confidence", "--workspace", str(tmp_path), "--run-dir", "ds/run_a", "-y"])
     assert rc == 0
     assert called == [(str(run_a), 1)]
 
@@ -655,11 +662,13 @@ def test_calc_confidence_passes_val_batch_to_recompute(
     def _fake_ensure(run_dir: str, workspace_root: str, val_batch: int = 1) -> None:
         called.append((run_dir, workspace_root, val_batch))
 
-    monkeypatch.setattr(mtm, "_ensure_resume_confidence_recommendations", _fake_ensure)
-    monkeypatch.setattr(mtm, "recommendations_complete", lambda _payload: True)
+    monkeypatch.setattr(train_wiring, "_ensure_resume_confidence_recommendations_cb", _fake_ensure)
     monkeypatch.setattr(
-        mtm,
-        "read_recommendation_file",
+        "smartrain.core.training.confidence_recommendation.recommendations_complete",
+        lambda _payload: True,
+    )
+    monkeypatch.setattr(
+        "smartrain.core.training.confidence_recommendation.read_recommendation_file",
         lambda _path: {
             "objectives": {
                 "A": {"global": {"threshold": 0.2}},
@@ -669,7 +678,7 @@ def test_calc_confidence_passes_val_batch_to_recompute(
         },
     )
 
-    rc = mtm.main(
+    rc = train_entry.main(
         ["calc-confidence", "--workspace", str(tmp_path), "--run-dir", "ds/run_a", "--val-batch", "2", "-y"]
     )
     assert rc == 0

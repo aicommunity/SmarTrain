@@ -6,7 +6,7 @@
 
 ## High-Priority Commands
 
-- `smartrain train` -> `smartrain/workflows/training/model_training_module.py`
+- `smartrain train` -> `smartrain/workflows/training/train_entry.py`
 - `smartrain test` -> `smartrain/workflows/testing/model_test_cli.py`
 - `smartrain inference` -> `smartrain/workflows/inference/inference_cli.py`
 - `smartrain analyze` -> `smartrain/workflows/analyze/results_analyzer.py`

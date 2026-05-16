@@ -34,4 +34,4 @@ The next implementation wave should target only actionable P0/P1 gaps and preser
 
 Layer-boundary refactor (waves 0–8, continuation LB-C1–C8) is **closed**. Conformance matrix and evidence: [`layer-boundary-continuation.md`](./layer-boundary-continuation.md). Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md).
 
-Residual LOC in `workflows/training/model_training_module.py` is documented as compositional training CLI (interactive/hooks); `workflows/testing/model_test_cli.py` is a thin facade — execution in `services/testing/`.
+Train CLI: [`train_entry.py`](../../smartrain/workflows/training/train_entry.py) + [`train_wiring.py`](../../smartrain/workflows/training/train_wiring.py); orchestration and interactive callbacks in [`services/training/`](../../smartrain/services/training/) (`train_cli_main.py`, `train_cli_callbacks.py`). `model_training_module.py` removed (LB-D8 / TD-LB-016, 2026-05-16). `workflows/testing/model_test_cli.py` remains a thin facade — execution in `services/testing/`.

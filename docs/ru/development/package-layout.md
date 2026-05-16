@@ -15,7 +15,7 @@
 
 Подпакеты:
 
-- `training/` — обучение (`train_entry`, `model_training_module`, `train_*_service`).
+- `training/` — обучение (`train_entry`, `train_wiring`, `train_*_service`).
 - `datasets/` — scan, fusion, augment, balance, prune, orient, отчёты, CVAT; `dataset_access.py` для работы с файловой структурой; `dataset_cli_catalog.py` / `dataset_cli_common.py` для каталога и интерактивного выбора датасета.
 - `testing/` — CLI и backend-и model test.
 - `inference/` — inference CLI, backends, SAHI/heatmap.

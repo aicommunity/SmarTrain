@@ -15,7 +15,7 @@ Thin CLI facades: argparse `main()`, Typer glue, re-exports into `services/`. Bu
 
 Subpackages (each maps to commands or command groups):
 
-- `training/` — train CLI (`train_entry`, `model_training_module` for train/resume/interactive; execution in `services/training/`).
+- `training/` — train CLI (`train_entry`, `train_wiring` for resume/calc-confidence; execution in `services/training/`).
 - `datasets/` — thin facades (`dataset_former.py`, `datasets_json_former.py`, …) → `services/datasets/`.
 - `testing/` — `model_test_cli.py`, `model_test_backends.py` (facade) → `services/testing/backends/`.
 - `inference/` — inference CLI, SAHI/heatmap helpers; runtime in `services/inference_service.py`.

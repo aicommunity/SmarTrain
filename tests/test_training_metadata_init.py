@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from smartrain.workflows.training import model_training_module as mtm
+from smartrain.services.training.train_metadata_io_service import ensure_initial_training_metadata
 
 
 def test_ensure_initial_training_metadata_creates_skeleton(tmp_path: Path) -> None:
@@ -13,7 +13,7 @@ def test_ensure_initial_training_metadata_creates_skeleton(tmp_path: Path) -> No
     dataset_dir = tmp_path / "datasets" / "ds_a"
     dataset_dir.mkdir(parents=True, exist_ok=True)
 
-    mtm._ensure_initial_training_metadata(
+    ensure_initial_training_metadata(
         model_dir=str(model_dir),
         dataset_path=str(dataset_dir),
         model_version="yolo11x",
@@ -51,7 +51,7 @@ def test_ensure_initial_training_metadata_does_not_overwrite_existing_core_field
         encoding="utf-8",
     )
 
-    mtm._ensure_initial_training_metadata(
+    ensure_initial_training_metadata(
         model_dir=str(model_dir),
         dataset_path=str(tmp_path / "datasets" / "ds_b"),
         model_version="yolo11x",

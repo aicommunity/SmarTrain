@@ -10,7 +10,8 @@ from smartrain.services.train_runtime_helpers import (
     load_batch_from_training_metadata,
     resolve_external_eval_source,
 )
-from smartrain.services.training.train_metadata_io_service import save_training_metadata
+from smartrain.services.testing.model_test_service import sync_test_artifacts_manifest
+from smartrain.services.training.train_metadata_io_service import save_training_metadata as _save_training_metadata_svc
 from smartrain.services.training.train_system_profile_service import collect_system_profile
 from smartrain.services.training.train_yolo_execution_service import test_yolo as _test_yolo
 from smartrain.services.training.train_yolo_execution_service import train_yolo as _train_yolo
@@ -37,11 +38,18 @@ def _train_yolo_with_hooks(**kwargs: Any) -> Any:
     return _train_yolo(**kwargs, hooks=build_train_yolo_hooks())
 
 
+def _save_training_metadata(**kwargs: Any) -> None:
+    _save_training_metadata_svc(
+        **kwargs,
+        sync_test_artifacts_manifest_cb=sync_test_artifacts_manifest,
+    )
+
+
 def build_train_runtime_ops() -> TrainRuntimeOps:
     return TrainRuntimeOps(
         train_yolo=_train_yolo_with_hooks,
         test_yolo=_test_yolo,
-        save_training_metadata=save_training_metadata,
+        save_training_metadata=_save_training_metadata,
         collect_system_profile=collect_system_profile,
         build_run_name=build_run_name,
         resolve_external_eval_source=resolve_external_eval_source,

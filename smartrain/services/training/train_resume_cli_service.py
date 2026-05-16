@@ -1,4 +1,4 @@
-"""Train resume and calc-confidence CLI commands (extracted from model_training_module)."""
+"""Train resume and calc-confidence CLI commands."""
 
 from __future__ import annotations
 

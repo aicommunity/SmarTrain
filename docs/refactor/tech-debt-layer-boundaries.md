@@ -19,10 +19,11 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 | TD-LB-009 | DONE | runtime | Legacy model path fallback | `resolve_run_model` (no rglob) |
 | TD-LB-010 | DONE | LOC | Monolith modules | Analyze report split + `services/reporting/document_export.py` (2026-05-16) |
 | TD-LB-011 | DONE | datasets | workflows/datasets monolith | Logic in `services/datasets/`; thin `workflows/datasets/*` facades (2026-05-16) |
-| TD-LB-012 | DONE | LOC | MTM / model_test_cli | Parsers + resume in `services/training/`; test CLI in `services/testing/model_test_cli_service.py`; MTM ~1k LOC (2026-05-16) |
+| TD-LB-012 | DONE | LOC | train / model_test_cli facades | Parsers + resume in `services/training/`; test CLI in `services/testing/model_test_cli_service.py`; train entry=`train_entry`+`train_wiring` (MTM removed LB-D8, 2026-05-16) |
 | TD-LB-013 | DONE | train/inference delta | LB-D1–D4 execution path | `train_wiring`, `train_cli_main`, `TrainRuntimeOps`, slim `inference_cli` (2026-05-16) |
 | TD-LB-014 | DONE | canonical read | Silent `detection` default | `ModelAdapter` requires provenance; `migrate_model_task_provenance.py` (2026-05-16) |
 | TD-LB-015 | DONE | testing LOC | `format_runners.py` ~2k LOC | Split: `format_runners_support.py`, `format_runners_ultralytics.py`, `format_runners_native.py`, thin facade (2026-05-16) |
+| TD-LB-016 | DONE | train entry | MTM compatibility facade | Removed `model_training_module`; entry=`train_entry`+`train_wiring`+`train_cli_callbacks` (2026-05-16) |
 | TD-LB-099 | DONE | closure | Program audit | Continuation closed 2026-05-16 |
 
 ## Burn-down checklist
@@ -35,6 +36,7 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 - [x] TD-LB-013
 - [x] TD-LB-014
 - [x] TD-LB-015
+- [x] TD-LB-016
 - [x] TD-LB-099
 
 ## Transitional guardrail allowlist
