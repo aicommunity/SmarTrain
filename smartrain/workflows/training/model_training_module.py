@@ -63,7 +63,7 @@ from smartrain.core.training.external_model_ref import parse_external_model_ref,
 from smartrain.external_providers.registry import list_provider_specs
 from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.services.train_service import run_train_after_setup
-from smartrain.workflows.training.training_cli_orchestration_service import (
+from smartrain.services.training.training_cli_orchestration_service import (
     handle_aux_train_commands as _svc_handle_aux_train_commands,
     run_train_cli_pipeline as _svc_run_train_cli_pipeline,
 )
@@ -71,7 +71,7 @@ from smartrain.workflows.training.train_options import (
     prompt_input as _train_prompt_input,
     prompt_train_device as _train_prompt_device,
 )
-from smartrain.workflows.training.train_system_profile_service import (
+from smartrain.services.training.train_system_profile_service import (
     bytes_to_gb as _svc_bytes_to_gb,
     collect_system_profile as _svc_collect_system_profile,
     linux_cpu_model_name as _svc_linux_cpu_model_name,
@@ -80,43 +80,43 @@ from smartrain.workflows.training.train_system_profile_service import (
     linux_physical_core_count as _svc_linux_physical_core_count,
     resolve_mount_point as _svc_resolve_mount_point,
 )
-from smartrain.workflows.training.train_runtime_data_yaml_service import (
+from smartrain.services.training.train_runtime_data_yaml_service import (
     build_runtime_data_yaml as _svc_build_runtime_data_yaml,
     pick_split_relative_dir as _svc_pick_split_relative_dir,
     resolve_training_data_path as _svc_resolve_training_data_path,
     split_dir_from_dataset_yaml as _svc_split_dir_from_dataset_yaml,
 )
-from smartrain.workflows.training.train_metadata_io_service import (
+from smartrain.services.training.train_metadata_io_service import (
     get_relative_path as _svc_get_relative_path,
     relative_to_workspace as _svc_relative_to_workspace,
     write_json_atomic as _svc_write_json_atomic,
 )
-from smartrain.workflows.training.train_resume_backoff_service import (
+from smartrain.services.training.train_resume_backoff_service import (
     complete_missing_test_with_backoff as _svc_complete_missing_test_with_backoff,
     default_resume_test_batch as _svc_default_resume_test_batch,
     is_cuda_oom_error as _svc_is_cuda_oom_error,
     next_backoff_batch as _svc_next_backoff_batch,
 )
-from smartrain.workflows.training.train_cli_paths_service import (
+from smartrain.services.training.train_cli_paths_service import (
     resolve_cli_paths_with_profile as _svc_resolve_cli_paths_with_profile,
 )
-from smartrain.workflows.training.train_config_kwargs_service import (
+from smartrain.services.training.train_config_kwargs_service import (
     finalize_train_kwargs as _svc_finalize_train_kwargs,
     load_ultralytics_yaml as _svc_load_ultralytics_yaml,
 )
-from smartrain.workflows.training.train_model_resolution_service import (
+from smartrain.services.training.train_model_resolution_service import (
     extract_effective_loaded_model as _svc_extract_effective_loaded_model,
     extract_model_family_scale as _svc_extract_model_family_scale,
     normalize_model_spec as _svc_normalize_model_spec,
 )
-from smartrain.workflows.training.train_base_runs_service import (
+from smartrain.services.training.train_base_runs_service import (
     base_run_summary as _svc_base_run_summary,
     collect_available_base_runs as _svc_collect_available_base_runs,
     extract_run_timestamp as _svc_extract_run_timestamp,
     print_available_base_runs as _svc_print_available_base_runs,
     prompt_base_run_args_yaml as _svc_prompt_base_run_args_yaml,
 )
-from smartrain.workflows.training.train_interactive_helpers_service import (
+from smartrain.services.training.train_interactive_helpers_service import (
     apply_external_provider_defaults as _svc_apply_external_provider_defaults,
     format_numbered_columns as _svc_format_numbered_columns,
     get_installed_external_provider_record as _svc_get_installed_external_provider_record,
@@ -128,7 +128,7 @@ from smartrain.workflows.training.train_interactive_helpers_service import (
     prompt_dataset_name as _svc_prompt_dataset_name,
     train_model_picker_options as _svc_train_model_picker_options,
 )
-from smartrain.workflows.training.train_interactive_setup_service import (
+from smartrain.services.training.train_interactive_setup_service import (
     get_interactive_default as _svc_get_interactive_default,
     run_interactive_train_setup as _svc_run_interactive_train_setup,
 )
