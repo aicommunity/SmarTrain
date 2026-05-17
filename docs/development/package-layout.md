@@ -35,18 +35,18 @@ Use-case layer: `analyze/`, `datasets/`, `training/`, `testing/`, `inference_ser
 
 Shared mechanics: `runtime/` (workspace paths, env), `training/` (profiles, catalogs), `workflow_adapters/` (thin facades to workflows for services), `inference/` (shared inference helpers).
 
-## Unified layer (`smartrain/unified/`)
+## Run/model contract (`smartrain/run_model_contract/`)
 
-Run/model contract (schema v2): read legacy layouts, validate, gateway API, optional snapshots.
+Read legacy run & model layouts, validate schema v2, expose payload API via `gateway`, optional snapshots under `.smartrain/unified/`.
 
 | Path | Role |
 |------|------|
-| `unified/gateway.py` | `load_target`, `load_metrics`, `resolve_task_context`, predictions API |
-| `unified/domain/` | DTOs (`UnifiedPayload`, `UnifiedIdentity`) and validation |
-| `unified/io/` | Disk read/write adapters, legacy mapper, snapshot hook |
-| `unified/refs.py` | Resolve model path from run or model directory |
-| `unified/schema.py` | Artifact schema v2 helpers |
-| `unified/env.py` | `SMARTTRAIN_UNIFIED_WRITE` and dual-write mode |
+| `run_model_contract/gateway.py` | `load_target`, `load_metrics`, `resolve_task_context`, predictions API |
+| `run_model_contract/domain/` | DTOs (`UnifiedPayload`, `UnifiedIdentity`) and validation |
+| `run_model_contract/io/` | Disk read/write adapters, legacy mapper, snapshot hook |
+| `run_model_contract/refs.py` | Resolve model path from run or model directory |
+| `run_model_contract/schema.py` | Artifact schema v2 helpers |
+| `run_model_contract/env.py` | `SMARTTRAIN_UNIFIED_WRITE` and dual-write mode |
 
 On-disk snapshots: `{run|model}/.smartrain/unified/` (legacy read fallback: `.smartrain/canonical/`).
 

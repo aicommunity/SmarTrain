@@ -37,7 +37,7 @@ Notes:
 
 ### Opt-in unified snapshot write (G1 hooks)
 
-When `SMARTTRAIN_UNIFIED_WRITE=1` (legacy `SMARTTRAIN_CANONICAL_WRITE=1` still accepted with deprecation warning), a shared helper [`maybe_dual_write_unified_snapshot`](../../smartrain/unified/io/write/snapshot_hook.py) may run after successful steps:
+When `SMARTTRAIN_UNIFIED_WRITE=1` (legacy `SMARTTRAIN_CANONICAL_WRITE=1` still accepted with deprecation warning), a shared helper [`maybe_dual_write_unified_snapshot`](../../smartrain/run_model_contract/io/write/snapshot_hook.py) may run after successful steps:
 
 | Pipeline | Trigger |
 |----------|---------|

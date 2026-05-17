@@ -17,7 +17,7 @@
 | `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `services/training/train_cli_main.py` | `services/train_service.py`, `services/training/*`, `workflows/training/train_wiring.py` (resume) | Профиль: `core/training/train_profile.py` |
 | `test` | → `cli_apps/test_app` | `workflows/testing/model_test_cli.py` | `services/testing/model_test_runner.py`, `services/test_backend_dispatch.py` | Backends: `backends/train_test_registry.py` |
 | `inference` | → `cli_apps/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `workflows/inference/inference_backends.py` | |
-| Подкоманды `analyze` | Typer → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` | `workflows/analyze/analyze_*_service.py`, `services/analyze_*.py` | Метрики / unified: `unified/gateway.py` |
+| Подкоманды `analyze` | Typer → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` | `workflows/analyze/analyze_*_service.py`, `services/analyze_*.py` | Контракт run/model: `run_model_contract/gateway.py` |
 | `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | `datasets_json_former.py` | | Пишет `datasets_info.json` |
 | `fusion` | → `workflows/datasets/dataset_former.py` | тот же модуль | | |
 | `queue` | Typer → `workflows/queue/training_queue_cli.py` (`list`/`add`/…); `queue-run` → `_forward_argparse_command` → `training_queue.py` | `training_queue_cli` / `training_queue` | | Состояние очереди в workspace |
@@ -38,7 +38,7 @@ Typer (`cli.py`, `_forward_argparse_command`) вырезает служебны�
 ### Слои и импорты
 
 - В `smartrain/services/` **запрещены** прямые импорты `smartrain.workflows.*`; доступ к реализациям — через фасады `smartrain/core/workflow_adapters/`. Регрессия: `tests/regression/test_train_service_guardrails.py`.
-- Unified read/write: `smartrain/unified/gateway.py`, `smartrain/unified/`.
+- Контракт run/model: `smartrain/run_model_contract/gateway.py`, `smartrain/run_model_contract/`.
 - Развёрнутое описание слоёв и волн рефакторинга: [../../refactor/13-project-current-state.md](../../refactor/13-project-current-state.md).
 
 ## 1) Верхнеуровневая архитектура

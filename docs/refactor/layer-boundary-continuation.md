@@ -14,10 +14,10 @@
 | G4 | No new path fallbacks | Met | `resolve_run_model` (no rglob) |
 | G5 | Class-based extension | Met | `AnalyzeCommandRegistry`, `CapabilityRegistry` / `BackendRegistry` |
 | G6 | `services` ⊄ `workflows` | Met | `tests/regression/test_layer_import_guardrails.py` + minimal allowlist |
-| G7 | `orchestrators` ⊄ `workflows` | Met | `unified_gateway` → `unified.io.read.metrics_csv` (via `core.analyze.run_metrics_discovery`) |
+| G7 | `run_model_contract` ⊄ `workflows` | Met | `run_model_contract.gateway` → `run_model_contract.io.read.metrics_csv` (via `core.analyze.run_metrics_discovery`) |
 | G8 | `backends` ⊄ `workflows` | Met | `backends/implementations/ultralytics/inference.py` |
 | G9 | Train/test not monoliths in workflows | Met | `train_yolo_execution_service`, `services/testing/backends/{native_eval,format_runners}`; thin workflow facades |
-| G10 | Unified metrics read | Met | `unified/io/read/metrics_csv.py` |
+| G10 | Run/model contract metrics read | Met | `run_model_contract/io/read/metrics_csv.py` |
 
 **Score:** 10 Met, 0 Partial for mandatory continuation items.
 

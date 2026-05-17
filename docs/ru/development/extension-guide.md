@@ -6,7 +6,7 @@
 
 - **CLI / argparse / связка с Typer** → `smartrain/workflows/<область>/` или тонкие обёртки в `smartrain/cli_apps/` (как `train_app.py`). Каталог датасетов и интерактивный выбор: `workflows/datasets/dataset_cli_catalog.py` / `dataset_cli_common.py`.
 - **Переиспользуемая логика без argparse** → `smartrain/services/` (**без** импортов `workflows`; только через `smartrain/core/workflow_adapters/`).
-- **Контракты workspace и unified layer** → `smartrain/core/runtime/`, `smartrain/unified/`.
+- **Контракты workspace и run/model contract** → `smartrain/core/runtime/`, `smartrain/run_model_contract/`.
 
 Карта каталогов: [package-layout.md](../../development/package-layout.md).
 
