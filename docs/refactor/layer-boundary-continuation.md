@@ -10,14 +10,14 @@
 |---|------|--------|----------|
 | G1 | Thin `workflows/` CLI | Met | `results_analyzer.py`, `model_test_backends.py` (~40 LOC facades); argparse in services where noted |
 | G2 | Analyze in `services/analyze/` | Met | 30+ modules under `services/analyze/` |
-| G3 | Unambiguous names | Met | `TaskTypeLabel`, `CanonicalIdentity`, `ultralytics_model_alias_registry` |
+| G3 | Unambiguous names | Met | `TaskTypeLabel`, `UnifiedIdentity`, `ultralytics_model_alias_registry` |
 | G4 | No new path fallbacks | Met | `resolve_run_model` (no rglob) |
 | G5 | Class-based extension | Met | `AnalyzeCommandRegistry`, `CapabilityRegistry` / `BackendRegistry` |
 | G6 | `services` ⊄ `workflows` | Met | `tests/regression/test_layer_import_guardrails.py` + minimal allowlist |
-| G7 | `orchestrators` ⊄ `workflows` | Met | Gateway → `adapters.canonical.read.metrics_csv` |
+| G7 | `orchestrators` ⊄ `workflows` | Met | `unified_gateway` → `unified.io.read.metrics_csv` (via `core.analyze.run_metrics_discovery`) |
 | G8 | `backends` ⊄ `workflows` | Met | `backends/implementations/ultralytics/inference.py` |
 | G9 | Train/test not monoliths in workflows | Met | `train_yolo_execution_service`, `services/testing/backends/{native_eval,format_runners}`; thin workflow facades |
-| G10 | Canonical metrics read | Met | `metrics_csv` adapter |
+| G10 | Unified metrics read | Met | `unified/io/read/metrics_csv.py` |
 
 **Score:** 10 Met, 0 Partial for mandatory continuation items.
 

@@ -37,11 +37,11 @@ Notes:
 
 ### Opt-in unified snapshot write (G1 hooks)
 
-When `SMARTTRAIN_CANONICAL_WRITE=1`, a shared helper [`maybe_dual_write_unified_snapshot`](../../smartrain/adapters/unified/write/snapshot_hook.py) may run after successful steps:
+When `SMARTTRAIN_UNIFIED_WRITE=1` (legacy `SMARTTRAIN_CANONICAL_WRITE=1` still accepted with deprecation warning), a shared helper [`maybe_dual_write_unified_snapshot`](../../smartrain/unified/io/write/snapshot_hook.py) may run after successful steps:
 
 | Pipeline | Trigger |
 |----------|---------|
-| Model test | After `persist_target_test_artifacts_state(..., status="ok")` (existing); dual-write mode: `SMARTTRAIN_CANONICAL_DUAL_WRITE_MODE`. |
+| Model test | After `persist_target_test_artifacts_state(..., status="ok")` (existing); dual-write mode: `SMARTTRAIN_UNIFIED_DUAL_WRITE_MODE` (legacy `SMARTTRAIN_CANONICAL_DUAL_WRITE_MODE` normalized via `unified/env.py`). |
 | Train (builtin) | After successful train + test and `save_training_metadata`. |
 | Train (test-only) | After successful test-only run and metadata save. |
 | Train (external provider) | When external train returns `rc==0` and test phase succeeded. |
