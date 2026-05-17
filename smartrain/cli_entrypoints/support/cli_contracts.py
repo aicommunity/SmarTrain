@@ -4,7 +4,7 @@ import argparse
 from dataclasses import dataclass, field
 from typing import Any
 
-from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 
 
 @dataclass(slots=True)

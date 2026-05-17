@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 import xml.etree.ElementTree as ET
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.services.datasets.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import write_dataset_passport

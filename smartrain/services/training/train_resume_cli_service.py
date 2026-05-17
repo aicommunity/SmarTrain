@@ -6,7 +6,7 @@ import os
 import sys
 from typing import Any, Callable
 
-from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_text
+from smartrain.cli_entrypoints.support.cli_prompts import print_numbered_options, prompt_text
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 from smartrain.core.training.confidence_recommendation import (

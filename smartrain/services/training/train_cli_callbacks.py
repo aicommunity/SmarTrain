@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from smartrain.cli_support.cli_prompts import prompt_choice
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice
 
 from smartrain.core.training.train_profile import (
     dataset_root_from_data_yaml,

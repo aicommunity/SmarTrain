@@ -13,7 +13,7 @@
 
 | Location | API |
 |----------|-----|
-| `smartrain/cli_support/cli_contracts.py` | `emit_replay` → `build_non_interactive_command` |
+| `smartrain/cli_entrypoints/support/cli_contracts.py` | `emit_replay` → `build_non_interactive_command` |
 | `smartrain/workflows/testing/model_test_cli.py` | `emit_replay` |
 | `smartrain/services/model_test_orchestrator.py` | `emit_replay` |
 | `smartrain/services/training/train_cli_main.py` | `emit_replay` via callback |

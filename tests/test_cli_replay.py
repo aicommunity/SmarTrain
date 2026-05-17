@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from smartrain.cli_support.cli_replay import build_non_interactive_command
+from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command
 from smartrain.workflows.datasets.dataset_augment import build_augment_arg_parser
 from smartrain.workflows.datasets.dataset_balance import build_balance_arg_parser
 from smartrain.workflows.datasets.dataset_former import build_dataset_former_arg_parser

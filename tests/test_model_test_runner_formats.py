@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from smartrain.cli_support.cli_replay import build_non_interactive_command
+from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command
 from smartrain.workflows.testing.model_test_cli import build_model_test_arg_parser
 
 

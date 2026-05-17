@@ -1,5 +1,7 @@
 # Run/Model Unified Schema
 
+> Package path: [`smartrain/run_model_contract/`](../../smartrain/run_model_contract/) (import `smartrain.run_model_contract`).
+
 ## Purpose
 
 Unify data access for entities that currently come from either `runs` or `models` layouts.

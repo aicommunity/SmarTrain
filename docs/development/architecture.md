@@ -10,13 +10,13 @@ Sources of truth for this section: `smartrain/cli.py`, `smartrain/workflows/trai
 
 ## Functional navigation
 
-Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_apps/*`). Use this table to find the right module when changing behavior.
+Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_entrypoints/*`). Use this table to find the right module when changing behavior.
 
 | Command / area | Typer entry (`cli.py`) | Argparse / `main` | Orchestration / services | Notes |
 |----------------|------------------------|-------------------|---------------------------|-------|
-| `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `services/training/train_cli_main.py` | `services/train_service.py`, `services/training/*`, `workflows/training/train_wiring.py` (resume) | Profile merge: `core/training/train_profile.py` |
-| `test` | → `cli_apps/test_app` | `workflows/testing/model_test_cli.py` | `services/testing/model_test_runner.py`, `services/test_backend_dispatch.py`, `services/testing/backends/format_runners.py` | Dispatch via `core/workflow_adapters/testing_runtime_api.py` |
-| `inference` | → `cli_apps/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `backends/implementations/ultralytics/inference.py` | |
+| `train` | `_forward_argparse_command` → `smartrain.cli_entrypoints.train_app` | `workflows/training/train_entry.py` → `services/training/train_cli_main.py` | `services/train_service.py`, `services/training/*`, `workflows/training/train_wiring.py` (resume) | Profile merge: `core/training/train_profile.py` |
+| `test` | → `cli_entrypoints/test_app` | `workflows/testing/model_test_cli.py` | `services/testing/model_test_runner.py`, `services/test_backend_dispatch.py`, `services/testing/backends/format_runners.py` | Dispatch via `core/workflow_adapters/testing_runtime_api.py` |
+| `inference` | → `cli_entrypoints/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `backends/implementations/ultralytics/inference.py` | |
 | `analyze` subcommands | Typer subcommands → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` (facade) | `services/analyze/*` | Run/model contract: `run_model_contract/gateway.py` |
 | `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | facade → `services/datasets/datasets_json_former.py` | | Writes `datasets_info.json` |
 | `fusion` | → `workflows/datasets/dataset_former.py` (facade) | `services/datasets/dataset_former.py` | | |
@@ -24,7 +24,7 @@ Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_apps
 
 ## CLI: interactive mode and replay
 
-Typer (`cli.py`, `_forward_argparse_command`) strips Typer-only tokens `--nit` and `--smartrain-replay` (including `--nit=…` / `--smartrain-replay=…` forms) before calling each subcommand’s `main(argv)`. Use `--nit` as a separate token in scripts; `=`-forms are stripped for Typer routing but are not the canonical argparse contract. Legacy `-y` / `--non-interactive` on the forwarded argv still force non-interactive routing (they are not stripped). Environment `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (see `smartrain/cli_support/typer_non_interactive.py`) forces the same policy without argv flags. Replay strings built via `build_non_interactive_command` / `emit_replay` append a single trailing `--nit` so pasted commands match Typer behavior. Details: [../cli/replay-and-non-interactive.md](../cli/replay-and-non-interactive.md).
+Typer (`cli.py`, `_forward_argparse_command`) strips Typer-only tokens `--nit` and `--smartrain-replay` (including `--nit=…` / `--smartrain-replay=…` forms) before calling each subcommand’s `main(argv)`. Use `--nit` as a separate token in scripts; `=`-forms are stripped for Typer routing but are not the canonical argparse contract. Legacy `-y` / `--non-interactive` on the forwarded argv still force non-interactive routing (they are not stripped). Environment `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (see `smartrain/cli_entrypoints/support/typer_non_interactive.py`) forces the same policy without argv flags. Replay strings built via `build_non_interactive_command` / `emit_replay` append a single trailing `--nit` so pasted commands match Typer behavior. Details: [../cli/replay-and-non-interactive.md](../cli/replay-and-non-interactive.md).
 
 | Mode | TTY | `--nit` | Incomplete required args | Behavior |
 |------|-----|---------|--------------------------|----------|

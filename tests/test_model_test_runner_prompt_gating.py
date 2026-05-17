@@ -42,7 +42,7 @@ def test_non_interactive_runs_skips_backend_and_artifact_prompts(monkeypatch: py
         lambda *_a, **_k: True,
     )
     monkeypatch.setattr(
-        "smartrain.cli_support.cli_contracts.emit_replay",
+        "smartrain.cli_entrypoints.support.cli_contracts.emit_replay",
         lambda **_: "smartrain test --nit",
     )
 

@@ -4,7 +4,7 @@ import time
 import argparse
 from pathlib import Path
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.core.runtime.workspace_paths import (
     resolve_workspace_root,
     workspace_queue_path,

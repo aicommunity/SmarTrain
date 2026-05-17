@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from smartrain.cli_support import cli_prompts
+from smartrain.cli_entrypoints.support import cli_prompts
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path
 from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, WorkspaceLayout, deploy_workspace
 from smartrain.services.training import train_cli_callbacks

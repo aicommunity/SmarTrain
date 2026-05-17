@@ -5,7 +5,7 @@
 ## Entry point
 
 - `smartrain/cli.py` — Typer-router command.
-- `smartrain/cli_support/cli_argparse.py` — shared argparse helpers (e.g. `CliArgumentParser`).
+- `smartrain/cli_entrypoints/support/cli_argparse.py` — shared argparse helpers (e.g. `CliArgumentParser`).
 
 ## Basic modules
 

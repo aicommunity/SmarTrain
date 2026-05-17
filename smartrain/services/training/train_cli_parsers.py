@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR
 
 MODEL_VERSION = "yolov8n"

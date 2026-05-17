@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.services.datasets.cvat11_converter import import_cvat11_zip_to_yolo, export_yolo_to_cvat11_zip
 from smartrain.services.datasets.dataset_passport import write_dataset_passport
 

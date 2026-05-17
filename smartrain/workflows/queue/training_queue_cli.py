@@ -9,7 +9,7 @@ import tempfile
 import shutil
 
 import smartrain.workflows.queue.training_queue as tq
-from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 
 
 def _queue_and_status(args):

@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
-from smartrain.cli_support.cli_prompts import prompt_choice, prompt_text
-from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_text
+from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_cli_catalog import (
     EMPTY_DATASETS_INFO_MESSAGE,

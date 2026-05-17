@@ -5,10 +5,10 @@ import atexit
 import os
 import sys
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
-from smartrain.cli_support.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
-from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
-from smartrain.cli_support.cli_contracts import emit_replay, make_command_request
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
+from smartrain.cli_entrypoints.support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect

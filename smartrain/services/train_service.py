@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
-from smartrain.cli_support.cli_contracts import emit_replay
+from smartrain.cli_entrypoints.support.cli_contracts import emit_replay
 from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
 from smartrain.core.workflow_adapters.training_runtime_api import calculate_dataset_hash
 from smartrain.services.training.train_runtime_ops import TrainRuntimeOps, build_train_runtime_ops

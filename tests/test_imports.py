@@ -29,7 +29,7 @@ def test_import_cli_modules() -> None:
         "smartrain.services.analyze.report_writer",
         "smartrain.services.analyze.cache",
         "smartrain.workflows.analyze.plot_creator",
-        "smartrain.cli_support.cli_argparse",
+        "smartrain.cli_entrypoints.support.cli_argparse",
         "smartrain.services.datasets.cvat11_converter",
         "smartrain.workflows.datasets.cvat_cli",
         "smartrain.core.training.train_profile",

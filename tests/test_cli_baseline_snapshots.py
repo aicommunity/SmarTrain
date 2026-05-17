@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from smartrain.cli_support.cli_replay import build_non_interactive_command
+from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 

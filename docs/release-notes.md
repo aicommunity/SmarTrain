@@ -2,10 +2,10 @@
 
 ## 0.0.3 (planned)
 
-### Unified layer package rename
+### Run/model contract package (`run_model_contract`)
 
-- Bounded context `canonical` renamed to **unified**: `smartrain/unified/` (`domain/`, `io/`), `orchestrators/unified_gateway.py`.
-- On-disk snapshots: `.smartrain/unified/` (read fallback for legacy `.smartrain/canonical/`).
+- Python import path: `smartrain/run_model_contract/` (`domain/`, `io/`, `gateway.py`). Replaces `smartrain/unified/` and `smartrain.orchestrators.unified_gateway`.
+- On-disk snapshots unchanged: `.smartrain/unified/` (read fallback for legacy `.smartrain/canonical/`).
 - Environment: `SMARTTRAIN_UNIFIED_WRITE`, `SMARTTRAIN_UNIFIED_DUAL_WRITE_MODE` (legacy `SMARTTRAIN_CANONICAL_*` accepted with deprecation warning).
 - CLI: `smartrain migrate unified` (hidden alias: `migrate canonical`).
 - Run layout helpers renamed: `preferred_run_model_path`, `materialize_preferred_run_model`, `normalize_ultralytics_run_layout`.

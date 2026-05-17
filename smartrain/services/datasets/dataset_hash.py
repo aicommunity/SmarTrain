@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.core.runtime.workspace_paths import (
     DATASETS_INFO_FILE,
     WorkspaceLayout,

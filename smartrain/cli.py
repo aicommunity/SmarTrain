@@ -16,7 +16,7 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 
-from smartrain.cli_support.typer_non_interactive import (
+from smartrain.cli_entrypoints.support.typer_non_interactive import (
     env_forces_non_interactive_cli,
     strip_typer_meta_non_interactive_flags,
 )
@@ -483,11 +483,11 @@ def cmd_train(ctx: typer.Context) -> None:
       - Writes outputs to workspace runs/.
       - Use smartrain analyze scan to inspect completed runs.
     """
-    from smartrain.cli_apps.train_app import build_arg_parser
+    from smartrain.cli_entrypoints.train_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.cli_apps.train_app",
+        module="smartrain.cli_entrypoints.train_app",
         build_parser=build_arg_parser,
         prog="smartrain train",
         empty_args_mode="invoke",
@@ -663,11 +663,11 @@ def cmd_roi(ctx: typer.Context) -> None:
 )
 def cmd_test(ctx: typer.Context) -> None:
     """Complete missing test artifacts for runs/models."""
-    from smartrain.cli_apps.test_app import build_arg_parser
+    from smartrain.cli_entrypoints.test_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.cli_apps.test_app",
+        module="smartrain.cli_entrypoints.test_app",
         build_parser=build_arg_parser,
         prog="smartrain test",
         empty_args_mode="invoke",
@@ -681,11 +681,11 @@ def cmd_test(ctx: typer.Context) -> None:
 )
 def cmd_inference(ctx: typer.Context) -> None:
     """Run inference and save JSON report to workspace inference/."""
-    from smartrain.cli_apps.inference_app import build_arg_parser
+    from smartrain.cli_entrypoints.inference_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.cli_apps.inference_app",
+        module="smartrain.cli_entrypoints.inference_app",
         build_parser=build_arg_parser,
         prog="smartrain inference",
         empty_args_mode="invoke",

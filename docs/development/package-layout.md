@@ -6,7 +6,7 @@ One-line guide to `smartrain/` so you can navigate by **function** without readi
 
 ## Entry points
 
-- `cli.py` — Typer router; forwards to argparse modules or `cli_apps/*`.
+- `cli.py` — Typer router; forwards to argparse modules or `cli_entrypoints/*`.
 - `__main__.py`, `__init__.py` — package entry.
 
 ## workflows/
@@ -65,9 +65,9 @@ Capability contracts, registry, Ultralytics and external provider adapters.
 
 Task-specific metric adapters (detection / classification / segmentation).
 
-## cli_support/
+## cli_entrypoints/
 
-`cli_replay.py`, `cli_contracts.py`, argparse/shared prompts — replay strings and CLI contracts.
+Typer-forwarded thin apps (`train_app.py`, `test_app.py`, …) and `support/` (`cli_replay.py`, `cli_contracts.py`, argparse helpers, `--nit` handling).
 
 ## external_providers/
 

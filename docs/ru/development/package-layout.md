@@ -6,7 +6,7 @@
 
 ## Точки входа
 
-- `cli.py` — маршрутизация Typer; делегирование в argparse-модули или `cli_apps/*`.
+- `cli.py` — маршрутизация Typer; делегирование в argparse-модули или `cli_entrypoints/*`.
 - `__main__.py`, `__init__.py` — вход пакета.
 
 ## workflows/
@@ -52,9 +52,9 @@
 
 Адаптеры метрик по типу задачи (детекция / классификация / сегментация).
 
-## cli_support/
+## cli_entrypoints/
 
-`cli_replay.py`, `cli_contracts.py`, общие промпты argparse.
+Тонкие Typer-приложения и `support/` (`cli_replay.py`, `cli_contracts.py`, argparse, `--nit`).
 
 ## external_providers/
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path
 from smartrain.services.testing.model_test_service import (

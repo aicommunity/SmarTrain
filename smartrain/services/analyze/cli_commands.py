@@ -43,7 +43,7 @@ from smartrain.services.analyze.cache import (
     run_cache_root,
     weights_hash,
 )
-from smartrain.cli_support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.services.analyze.prompts import prompt_choice, prompt_int, prompt_text
 from smartrain.services.analyze.metrics_reader import (
     DEFAULT_MAP_COL,

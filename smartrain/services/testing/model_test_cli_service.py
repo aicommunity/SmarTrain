@@ -11,8 +11,8 @@ from typing import Any
 
 import yaml
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
-from smartrain.cli_support.cli_contracts import emit_replay, make_command_request
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
 from smartrain.core.models import tensorrt_checks as trt_checks
 from smartrain.services.testing import model_test_cli_surface as surf
 from smartrain.services.testing.model_test_service import (

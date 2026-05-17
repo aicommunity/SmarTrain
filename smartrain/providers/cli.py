@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
-from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_choice, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_prompts import print_numbered_options, prompt_choice, prompt_yes_no
 from smartrain.external_providers.installer import install_provider, providers_root, uninstall_provider
 from smartrain.external_providers.probe import probe_provider_repo
 from smartrain.external_providers.registry import list_provider_specs

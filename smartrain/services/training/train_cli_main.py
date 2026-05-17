@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import Any, Callable
 
-from smartrain.cli_support.cli_contracts import emit_replay, make_command_request
+from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
 from smartrain.core.runtime.device_selector import default_device_value, device_display_name, resolve_device_request
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.device_selector import validate_device_available

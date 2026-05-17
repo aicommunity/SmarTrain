@@ -5,7 +5,7 @@
 ## Точка входа
 
 - `smartrain/cli.py` — Typer-роутер команд.
-- `smartrain/cli_support/cli_argparse.py` — общие argparse-хелперы (например `CliArgumentParser`).
+- `smartrain/cli_entrypoints/support/cli_argparse.py` — общие argparse-хелперы (например `CliArgumentParser`).
 
 ## Основные модули
 
