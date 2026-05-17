@@ -24,7 +24,7 @@ def test_apply_run_without_training_metadata(tmp_path: Path) -> None:
         continue_on_error=False,
     )
     assert report["stats"]["migrated"] == 1
-    assert (run_dir / ".smartrain" / "canonical" / "snapshot.json").is_file()
+    assert (run_dir / ".smartrain" / "unified" / "snapshot.json").is_file()
 
 
 def test_apply_partial_training_info(tmp_path: Path) -> None:
@@ -43,7 +43,7 @@ def test_apply_partial_training_info(tmp_path: Path) -> None:
         continue_on_error=False,
     )
     assert report["stats"]["migrated"] == 1
-    assert (run_dir / ".smartrain" / "canonical" / "manifest.json").is_file()
+    assert (run_dir / ".smartrain" / "unified" / "manifest.json").is_file()
 
 
 def test_apply_nested_weights_layout(tmp_path: Path) -> None:

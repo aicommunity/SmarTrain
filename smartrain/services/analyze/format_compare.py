@@ -17,7 +17,7 @@ from smartrain.core.workflow_adapters.analyze_runtime_api import (
     read_test_system_profile_by_format_artifacts,
 )
 from smartrain.core.runtime.run_artifacts import resolve_run_model
-from smartrain.orchestrators.canonical_gateway import load_metrics as canonical_load_metrics
+from smartrain.orchestrators.unified_gateway import load_metrics as unified_load_metrics
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 
@@ -480,7 +480,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
             # migration with file moves; recompute legacy paths after migration.
             metrics_ref_by_raw_path: dict[str, dict[str, Any]] = {}
             canonical_metrics_by_format: dict[str, list[dict[str, str]]] = {}
-            for ref in canonical_load_metrics(run_dir, source_kind="run", split=split_name):
+            for ref in unified_load_metrics(run_dir, source_kind="run", split=split_name):
                 merged = dict(ref.primary_metrics or {})
                 merged.update(dict(ref.secondary_metrics or {}))
                 raw_abs = os.path.abspath(str(ref.raw_path))
@@ -651,7 +651,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                 run_name = os.path.basename(run_dir.rstrip(os.sep))
                 metrics_ref_by_raw_path: dict[str, dict[str, Any]] = {}
                 canonical_metrics_by_format: dict[str, list[dict[str, str]]] = {}
-                for ref in canonical_load_metrics(run_dir, source_kind="run", split=split_name):
+                for ref in unified_load_metrics(run_dir, source_kind="run", split=split_name):
                     merged = dict(ref.primary_metrics or {})
                     merged.update(dict(ref.secondary_metrics or {}))
                     raw_abs = os.path.abspath(str(ref.raw_path))

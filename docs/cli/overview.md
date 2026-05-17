@@ -76,8 +76,8 @@ Model release highlights:
 
 Migration highlights:
 
-- `smartrain migrate canonical --mode dry-run` previews canonical migration without writing files.
-- `smartrain migrate canonical --mode apply` writes canonical snapshots and reports.
+- `smartrain migrate unified --mode dry-run` previews unified migration without writing files.
+- `smartrain migrate unified --mode apply` writes unified snapshots and reports.
 
 Balance and stats additions:
 

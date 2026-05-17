@@ -20,7 +20,7 @@ from ultralytics import YOLO
 from smartrain.services.analyze.metrics_reader import results_csv_path, training_args_yaml_path
 from smartrain.workflows.testing.model_test_service import has_complete_test_artifacts, missing_test_artifacts
 from smartrain.core.runtime.run_artifacts import (
-    canonical_run_model_path,
+    preferred_run_model_path,
     ensure_run_layout,
     resolve_run_model,
     run_tmp_dir,
@@ -218,7 +218,7 @@ def diagnose_run(run_dir: str) -> RunDiagnosis:
     any_last_pt = len(last_pt_candidates) > 0
     resumable_last = resolve_last_checkpoint_path(rd)
     has_last_pt = resumable_last is not None
-    best_pt = canonical_run_model_path(rd, ".pt")
+    best_pt = preferred_run_model_path(rd, ".pt")
     legacy_best = resolve_run_model(rd)
     metadata_path = os.path.join(rd, "training_metadata.json")
     test_dir = os.path.join(rd, "test")

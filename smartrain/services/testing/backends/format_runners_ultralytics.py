@@ -19,7 +19,7 @@ from smartrain.services.testing.backends.format_runners_support import (
     _write_deep_diagnostics_artifacts,
     _write_perf_artifact,
     best_effort_prune_runs_detect_near_run,
-    canonicalize_run_ultralytics_layout,
+    normalize_ultralytics_run_layout,
     datetime,
     ensure_run_layout,
     normalize_eval_params,
@@ -408,7 +408,7 @@ def run_ultralytics_backend(
         )
     finally:
         try:
-            canonicalize_run_ultralytics_layout(root_dir)
+            normalize_ultralytics_run_layout(root_dir)
         except Exception:
             pass
         best_effort_prune_runs_detect_near_run(root_dir)

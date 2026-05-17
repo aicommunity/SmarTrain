@@ -15,12 +15,12 @@ def matches_optional_bool(value: bool | None, expected: bool | None) -> bool:
     return value is expected
 
 
-def build_run_record_canonical(
+def build_run_record_unified(
     run_dir: str,
     *,
     read_test_metrics_for_run_cb: Any,
 ) -> RunRecord:
-    from smartrain.orchestrators.canonical_gateway import load_target
+    from smartrain.orchestrators.unified_gateway import load_target
 
     payload = load_target(run_dir, source_kind="run")
     model_name: str | None = None
@@ -43,7 +43,7 @@ def build_run_record_canonical(
 
 
 def read_test_metrics_for_run(run_dir: str, *, format_name: str = "pt") -> dict[str, Any]:
-    from smartrain.orchestrators.canonical_gateway import load_metrics
+    from smartrain.orchestrators.unified_gateway import load_metrics
 
     metric_refs = load_metrics(run_dir, source_kind="run", format_name=format_name)
     if metric_refs:
@@ -95,7 +95,7 @@ def _system_profile_flat_from_training_metadata(run_dir: str) -> dict[str, Any]:
     }
 
 
-def flat_row_canonical(run_dir: str, *, build_run_record_cb: Any) -> dict[str, Any]:
+def flat_row_unified(run_dir: str, *, build_run_record_cb: Any) -> dict[str, Any]:
     rec = build_run_record_cb(run_dir)
     out: dict[str, Any] = {
         "run_dir": run_dir,

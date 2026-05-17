@@ -7,15 +7,15 @@ import argparse
 import json
 from pathlib import Path
 
-from smartrain.adapters.canonical.read.model_adapter import _infer_task_from_model_name, _load_json
-from smartrain.canonical.refs import canonical_target_from_model_dir
+from smartrain.unified.io.read.model_adapter import _infer_task_from_model_name, _load_json
+from smartrain.unified.refs import unified_target_from_model_dir
 
 SUPPORTED_WEIGHT_EXTS = {".pt", ".onnx", ".engine", ".trt"}
 
 
 def _resolve_weights_path(model_dir: Path) -> Path | None:
     try:
-        target = canonical_target_from_model_dir(model_dir)
+        target = unified_target_from_model_dir(model_dir)
         if target.model_path.is_file():
             return target.model_path
     except Exception:

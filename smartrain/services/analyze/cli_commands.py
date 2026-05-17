@@ -32,8 +32,8 @@ from smartrain.services.analyze.compare import (
 )
 from smartrain.services.analyze.report_writer import write_analysis_report, write_manifest
 from smartrain.core.runtime.run_artifacts import (
-    canonical_run_model_path,
-    materialize_canonical_run_model,
+    preferred_run_model_path,
+    materialize_preferred_run_model,
     run_test_backend_dir,
 )
 from smartrain.services.analyze.cache import (
@@ -119,9 +119,9 @@ def _finalize_all_session_with_replay(**kwargs: Any) -> None:
     kwargs["replay_parser"] = _ANALYZE_ALL_SUBPARSER
     _svc_finalize_all_session(**kwargs)
 from smartrain.services.analyze.run_query import (
-    build_run_record_canonical as _svc_build_run_record_canonical,
+    build_run_record_unified as _svc_build_run_record_unified,
     filtered_run_records as _svc_filtered_run_records,
-    flat_row_canonical as _svc_flat_row_canonical,
+    flat_row_unified as _svc_flat_row_unified,
     matches_optional_bool as _svc_matches_optional_bool,
     read_test_metrics_for_run as _svc_read_test_metrics_for_run,
 )
@@ -166,7 +166,7 @@ METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 _ANALYZE_COMMAND_REGISTRY = AnalyzeCommandRegistry()
 
 
-def _canonical_read_enabled() -> bool:
+def _unified_read_enabled() -> bool:
     return True
 
 
@@ -324,8 +324,8 @@ def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | Non
     return collect_data_yaml_candidates_for_run(
         run_dir,
         workspace_cli,
-        canonical_read_enabled=_canonical_read_enabled(),
-        dataset_name_resolver=lambda rd: _build_run_record_canonical(rd).dataset_name or None,
+        unified_read_enabled=_unified_read_enabled(),
+        dataset_name_resolver=lambda rd: _build_run_record_unified(rd).dataset_name or None,
     )
 
 
@@ -434,8 +434,8 @@ def _recompute_run_test_metrics(
         val_imgsz=val_imgsz,
         val_half=val_half,
         gpu_only=gpu_only,
-        canonical_run_model_path_cb=canonical_run_model_path,
-        materialize_canonical_run_model_cb=materialize_canonical_run_model,
+        preferred_run_model_path_cb=preferred_run_model_path,
+        materialize_preferred_run_model_cb=materialize_preferred_run_model,
         clear_gpu_memory_cb=_clear_gpu_memory,
         resolve_run_val_profile_cb=_resolve_run_val_profile,
         ultralytics_sidecar_dir_cb=ultralytics_sidecar_dir,
@@ -664,8 +664,8 @@ def _matches_optional_bool(value: bool | None, expected: bool | None) -> bool:
     return _svc_matches_optional_bool(value, expected)
 
 
-def _build_run_record_canonical(run_dir: str) -> RunRecord:
-    return _svc_build_run_record_canonical(
+def _build_run_record_unified(run_dir: str) -> RunRecord:
+    return _svc_build_run_record_unified(
         run_dir,
         read_test_metrics_for_run_cb=_read_test_metrics_for_run,
     )
@@ -675,15 +675,15 @@ def _read_test_metrics_for_run(run_dir: str, *, format_name: str = "pt") -> dict
     return _svc_read_test_metrics_for_run(run_dir, format_name=format_name)
 
 
-def _flat_row_canonical(run_dir: str) -> dict[str, Any]:
-    return _svc_flat_row_canonical(run_dir, build_run_record_cb=_build_run_record_canonical)
+def _flat_row_unified(run_dir: str) -> dict[str, Any]:
+    return _svc_flat_row_unified(run_dir, build_run_record_cb=_build_run_record_unified)
 
 def _flat_row_for_run(run_dir: str) -> dict[str, Any]:
-    return _flat_row_canonical(run_dir)
+    return _flat_row_unified(run_dir)
 
 
 def _filtered_run_records(args: argparse.Namespace) -> list[tuple[str, Any]]:
-    return _svc_filtered_run_records(args, build_run_record_cb=_build_run_record_canonical)
+    return _svc_filtered_run_records(args, build_run_record_cb=_build_run_record_unified)
 
 
 def _workflow_attr(name: str):
@@ -753,7 +753,7 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
         weight_quality=float(args.weight_quality),
         weight_speed=float(args.weight_speed),
         weight_stability=float(args.weight_stability),
-        load_run_record=_build_run_record_canonical,
+        load_run_record=_build_run_record_unified,
         read_test_performance_by_format_artifacts=read_test_performance_by_format_artifacts,
         compute_composite_score=compute_composite_score,
     )
@@ -840,7 +840,7 @@ def _collect_missing_metrics_recompute_plan(
         workspace=workspace,
         split=split,
         read_test_metrics_for_run_cb=_read_test_metrics_for_run,
-        canonical_run_model_path_cb=canonical_run_model_path,
+        preferred_run_model_path_cb=preferred_run_model_path,
         resolve_data_yaml_for_run_cb=_resolve_data_yaml_for_run,
         load_recompute_status_cb=_load_recompute_status,
     )
@@ -911,7 +911,7 @@ def _build_abbreviations_for_report(run_dirs: list[str]) -> dict[str, str]:
         if len(run_name) > 22:
             out[run_name] = f"R{idx}"
         try:
-            rec = _build_run_record_canonical(rd)
+            rec = _build_run_record_unified(rd)
             model = str((rec.model or "")).strip()
             dataset_name = str((rec.dataset_name or "")).strip()
         except Exception:
@@ -937,7 +937,7 @@ def _collect_ultralytics_test_artifacts(
         run_dirs,
         abbreviations,
         run_test_backend_dir_cb=run_test_backend_dir,
-        build_run_record_canonical_cb=_build_run_record_canonical,
+        build_run_record_unified_cb=_build_run_record_unified,
     )
 
 
@@ -989,7 +989,7 @@ def cmd_pr_curves(args: argparse.Namespace) -> None:
         prompt_text_cb=prompt_text,
         resolve_selected_run_dirs_cb=_resolve_selected_run_dirs,
         load_dataset_class_names_cb=_load_dataset_class_names,
-        canonical_run_model_path_cb=canonical_run_model_path,
+        preferred_run_model_path_cb=preferred_run_model_path,
         run_cache_root_cb=run_cache_root,
         compute_fingerprint_cb=compute_fingerprint,
         data_yaml_hash_cb=data_yaml_hash,
@@ -1031,7 +1031,7 @@ def cmd_inference_benchmark(args: argparse.Namespace) -> None:
         prompt_text_cb=prompt_text,
         resolve_workspace_root_cb=resolve_workspace_root,
         workspace_layout_cls=WorkspaceLayout,
-        canonical_run_model_path_cb=canonical_run_model_path,
+        preferred_run_model_path_cb=preferred_run_model_path,
         run_cache_root_cb=run_cache_root,
         compute_fingerprint_cb=compute_fingerprint,
         data_yaml_hash_cb=data_yaml_hash,

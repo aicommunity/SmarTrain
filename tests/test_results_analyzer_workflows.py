@@ -91,7 +91,6 @@ def test_scan_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch, c
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     class _M:
         model_id = "demo_model"
@@ -103,7 +102,7 @@ def test_scan_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch, c
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
     ns = argparse.Namespace(models_root=str(tmp_path / "runs"))
     results_analyzer.cmd_scan(ns)
     out = capsys.readouterr().out
@@ -116,7 +115,6 @@ def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
     (run_dir / "test_metrics.csv").write_text("mAP50-95,Box-F1\n0.5,0.6\n", encoding="utf-8")
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     class _M:
         model_id = "canonical_model"
@@ -128,7 +126,7 @@ def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
     ns = argparse.Namespace(
         models_root=str(tmp_path / "runs"),
         filter_dataset=None,
@@ -143,11 +141,10 @@ def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path
     assert rec.dataset_name == "ds_a"
 
 
-def test_build_run_record_canonical_uses_gateway_metrics(tmp_path: Path, monkeypatch) -> None:
+def test_build_run_record_unified_uses_gateway_metrics(tmp_path: Path, monkeypatch) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_metrics_c"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     class _M:
         model_id = "cm"
@@ -163,9 +160,9 @@ def test_build_run_record_canonical_uses_gateway_metrics(tmp_path: Path, monkeyp
         primary_metrics = {"mAP50-95": 0.7}
         secondary_metrics = {"Box-F1": 0.8}
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
-    rec = results_analyzer._build_run_record_canonical(str(run_dir))
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
+    rec = results_analyzer._build_run_record_unified(str(run_dir))
     assert rec.model == "cm"
     assert rec.dataset_name == "ds_a"
     assert rec.test_metrics.get("mAP50-95") == 0.7
@@ -175,13 +172,12 @@ def test_build_run_record_canonical_uses_gateway_metrics(tmp_path: Path, monkeyp
 def test_read_test_metrics_for_run_uses_gateway_in_canonical_mode(tmp_path: Path, monkeypatch) -> None:
     run_dir = tmp_path / "runs" / "ds_a" / "run_m2"
     run_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     class _Metric:
         primary_metrics = {"mAP50-95": 0.55}
         secondary_metrics = {"Box-F1": 0.66}
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
     row = results_analyzer._read_test_metrics_for_run(str(run_dir))
     assert row.get("mAP50-95") == 0.55
     assert row.get("Box-F1") == 0.66
@@ -194,7 +190,6 @@ def test_collect_ultralytics_test_artifacts_uses_canonical_gateway_when_enabled(
     canonical = run_test_backend_dir(str(run_dir), "ultralytics")
     canonical.mkdir(parents=True, exist_ok=True)
     (canonical / "pr.csv").write_text("recall,precision\n0.5,0.6\n", encoding="utf-8")
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     class _M:
         model_id = "canonical_model_c"
@@ -206,7 +201,7 @@ def test_collect_ultralytics_test_artifacts_uses_canonical_gateway_when_enabled(
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
     rows, _arts = results_analyzer._collect_ultralytics_test_artifacts(
         str(tmp_path / "analytics" / "analyze-reports" / "s2"),
         [str(run_dir)],
@@ -222,7 +217,6 @@ def test_export_table_uses_canonical_gateway_when_enabled(tmp_path: Path, monkey
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
     (run_dir / "test_metrics.csv").write_text("mAP50-95,Box-F1\n0.5,0.6\n", encoding="utf-8")
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     class _M:
         model_id = "canonical_model_export"
@@ -234,7 +228,7 @@ def test_export_table_uses_canonical_gateway_when_enabled(tmp_path: Path, monkey
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
     out_csv = tmp_path / "out" / "runs_summary.csv"
     ns = argparse.Namespace(
         models_root=str(tmp_path / "runs"),
@@ -253,7 +247,6 @@ def test_write_system_profile_compare_csv_uses_canonical_gateway_when_enabled(tm
     run_dir = tmp_path / "runs" / "ds_a" / "run_sysprof_c"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     class _M:
         model_id = "canonical_model_sys"
@@ -265,7 +258,7 @@ def test_write_system_profile_compare_csv_uses_canonical_gateway_when_enabled(tm
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
     out_csv = tmp_path / "system_profile_compare.csv"
     written = results_analyzer._write_system_profile_compare_csv([str(run_dir)], str(out_csv))
     assert written is not None
@@ -308,7 +301,6 @@ def test_write_test_system_profile_compare_csv_uses_canonical_gateway_when_enabl
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     class _M:
         model_id = "canonical_model_test_sys"
@@ -320,7 +312,7 @@ def test_write_test_system_profile_compare_csv_uses_canonical_gateway_when_enabl
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
     out_csv = tmp_path / "test_system_profile_compare.csv"
     written = results_analyzer._write_test_system_profile_compare_csv([str(run_dir)], str(out_csv))
     assert written is not None
@@ -346,7 +338,6 @@ def test_collect_data_yaml_candidates_uses_canonical_dataset_name_when_enabled(
     dataset_yaml.parent.mkdir(parents=True, exist_ok=True)
     dataset_yaml.write_text("path: .\ntrain: images/train\nval: images/val\n", encoding="utf-8")
 
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
     out = results_analyzer._collect_data_yaml_candidates_for_run(str(run_dir), str(tmp_path))
     assert any(src == "training_metadata.dataset.name -> workspace/datasets" and Path(path) == dataset_yaml for path, src in out)
 
@@ -1636,8 +1627,8 @@ def test_analyze_report_speed_quality_after_speed_vs_map(tmp_path: Path) -> None
     assert "speed_quality.csv" not in ru_md[q2:f4]
 
 
-def test_flat_row_canonical_merges_training_metadata_system_profile(tmp_path: Path) -> None:
-    from smartrain.services.analyze.run_query import flat_row_canonical
+def test_flat_row_unified_merges_training_metadata_system_profile(tmp_path: Path) -> None:
+    from smartrain.services.analyze.run_query import flat_row_unified
 
     run_dir = tmp_path / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1666,7 +1657,7 @@ def test_flat_row_canonical_merges_training_metadata_system_profile(tmp_path: Pa
             train_last_metrics={},
         )
 
-    row = flat_row_canonical(str(run_dir), build_run_record_cb=_fake_rec)
+    row = flat_row_unified(str(run_dir), build_run_record_cb=_fake_rec)
     assert row.get("sys_cpu_model") == "TestCPU"
     assert row.get("sys_os") == "Linux"
     assert row.get("sys_gpu_0_name") == "RTX"

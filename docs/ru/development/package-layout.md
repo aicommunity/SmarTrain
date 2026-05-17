@@ -37,12 +37,13 @@
 
 ## orchestrators/
 
-- `canonical_gateway.py` — чтение canonical, метрики, контекст задачи.
+- `unified_gateway.py` — unified run/model, метрики, контекст задачи.
 
-## domain/ и adapters/
+## Unified layer (`smartrain/unified/`)
 
-- `domain/canonical/` — модели данных и валидация.
-- `adapters/canonical/` — чтение/запись и снимки.
+- `unified/domain/` — DTO и валидация
+- `unified/io/` — чтение/запись, снимки
+- `unified/refs.py`, `unified/schema.py`, `unified/env.py`
 
 ## backends/
 

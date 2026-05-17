@@ -110,7 +110,7 @@ def run_inference_benchmark(
     prompt_text_cb,
     resolve_workspace_root_cb,
     workspace_layout_cls,
-    canonical_run_model_path_cb,
+    preferred_run_model_path_cb,
     run_cache_root_cb,
     compute_fingerprint_cb,
     data_yaml_hash_cb,
@@ -178,7 +178,7 @@ def run_inference_benchmark(
     cache_stats: list[dict[str, Any]] = []
     for run_dir in run_dirs:
         model_name = os.path.basename(run_dir.rstrip(os.sep))
-        best_pt = canonical_run_model_path_cb(run_dir, ".pt")
+        best_pt = preferred_run_model_path_cb(run_dir, ".pt")
         if not os.path.isfile(best_pt):
             print(f"[WARN] {model_name}: missing run model, skipping")
             continue

@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from smartrain.core.runtime.run_artifacts import (
-    canonical_run_model_path,
+    preferred_run_model_path,
     ensure_run_layout,
-    materialize_canonical_run_model,
+    materialize_preferred_run_model,
     run_test_backend_dir,
     run_test_format_dir,
     run_tests_dir,
@@ -399,17 +399,16 @@ def persist_target_test_artifacts_state(
     _update_run_metadata_after_test(root_dir)
     _update_model_manifest_after_test(root_dir)
     if (status or "").strip().lower() == "ok":
-        from smartrain.adapters.canonical.write.snapshot_hook import maybe_dual_write_canonical_snapshot
+        from smartrain.unified.env import unified_dual_write_mode
+        from smartrain.unified.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 
-        dual_mode = str(os.getenv("SMARTTRAIN_CANONICAL_DUAL_WRITE_MODE", "canonical_only")).strip().lower()
-        if dual_mode not in {"canonical_only", "dual_write_strict", "dual_write_best_effort"}:
-            dual_mode = "canonical_only"
+        dual_mode = unified_dual_write_mode()
         legacy_writer = (
             (lambda: (_update_run_metadata_after_test(root_dir), _update_model_manifest_after_test(root_dir)))
-            if dual_mode != "canonical_only"
+            if dual_mode != "unified_only"
             else None
         )
-        maybe_dual_write_canonical_snapshot(
+        maybe_dual_write_unified_snapshot(
             root_dir,
             status_ok=True,
             legacy_writer=legacy_writer,
@@ -570,8 +569,8 @@ def complete_missing_test_artifacts(
     )
 
     root_dir = os.path.abspath(run_dir)
-    materialized = materialize_canonical_run_model(root_dir, ext=".pt", move=True, normalize_metadata=True)
-    canonical_pt = str(materialized) if materialized is not None else canonical_run_model_path(root_dir, ".pt")
+    materialized = materialize_preferred_run_model(root_dir, ext=".pt", move=True, normalize_metadata=True)
+    canonical_pt = str(materialized) if materialized is not None else preferred_run_model_path(root_dir, ".pt")
     if has_complete_test_artifacts(root_dir, "pt"):
         persist_target_test_artifacts_state(
             root_dir,

@@ -25,8 +25,8 @@ from smartrain.cli_support.cli_replay import build_non_interactive_command, prin
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.workflows.models.model_context import infer_img_size_with_source
 from smartrain.core.runtime.run_artifacts import (
-    canonical_run_model_path,
-    materialize_canonical_run_model,
+    preferred_run_model_path,
+    materialize_preferred_run_model,
     run_models_dir,
     run_tmp_dir,
     write_model_sidecar_metadata,
@@ -244,12 +244,12 @@ def _discover_models(workspace_root: Path, *, allowed_suffixes: tuple[str, ...])
         run_dirs = [Path(p) for p in find_run_directories(str(root))]
         for run_dir in run_dirs:
             for suffix in allowed_suffixes:
-                canonical = Path(canonical_run_model_path(str(run_dir), suffix))
+                canonical = Path(preferred_run_model_path(str(run_dir), suffix))
                 if canonical.is_file():
                     found.append(("runs", canonical))
                     continue
                 # Transparent legacy workspace migration on first discovery.
-                migrated = materialize_canonical_run_model(str(run_dir), ext=suffix, move=True, normalize_metadata=True)
+                migrated = materialize_preferred_run_model(str(run_dir), ext=suffix, move=True, normalize_metadata=True)
                 if migrated is not None and migrated.is_file():
                     found.append(("runs", migrated))
 

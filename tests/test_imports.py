@@ -61,5 +61,9 @@ def test_import_cli_modules() -> None:
         "smartrain.workflows.inference.sahi_cli",
         "smartrain.workflows.inference.heatmap_cli",
         "smartrain.cli",
+        "smartrain.unified.domain",
+        "smartrain.unified.io",
+        "smartrain.unified.refs",
+        "smartrain.orchestrators.unified_gateway",
     ):
         __import__(mod)

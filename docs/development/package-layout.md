@@ -37,15 +37,19 @@ Shared mechanics: `runtime/` (workspace paths, env), `training/` (profiles, cata
 
 ## orchestrators/
 
-- `canonical_gateway.py` — canonical reads, metrics, task context.
+- `unified_gateway.py` — unified run/model reads, metrics, task context.
 
-## Three canonical packages (do not confuse)
+## Unified layer (`smartrain/unified/`)
 
-| Package | Role |
-|---------|------|
-| `smartrain/canonical/` | Schema v2, deprecation policy, refs |
-| `smartrain/domain/canonical/` | DTOs (`CanonicalIdentity`, payloads) |
-| `smartrain/adapters/canonical/` | Disk read/write, legacy mapper |
+| Path | Role |
+|------|------|
+| `unified/domain/` | DTOs (`UnifiedPayload`, `UnifiedIdentity`) and validation |
+| `unified/io/` | Disk read/write adapters, legacy mapper, snapshot hook |
+| `unified/refs.py` | Resolve model path from run or model directory |
+| `unified/schema.py` | Artifact schema v2 helpers |
+| `unified/env.py` | `SMARTTRAIN_UNIFIED_WRITE` and dual-write mode |
+
+On-disk snapshots: `{run|model}/.smartrain/unified/` (legacy read fallback: `.smartrain/canonical/`).
 
 ## Glossary: backend vs model alias
 
@@ -53,11 +57,6 @@ Shared mechanics: `runtime/` (workspace paths, env), `training/` (profiles, cata
 |------|----------|---------|
 | **Execution backend** | `backends/contracts.py` (`TrainBackend`, `TestBackend`, `InferenceBackend`) | Runtime engine (ultralytics, onnxruntime, tensorrt) |
 | **Ultralytics model alias** | `core/training/ultralytics_model_alias_registry.py` | YOLO YAML name aliases (`yolo11n`, …), not ONNX/TRT |
-
-## domain/ and adapters/
-
-- `domain/canonical/` — DTOs and validation.
-- `adapters/canonical/` — read/write adapters and snapshots.
 
 ## backends/
 

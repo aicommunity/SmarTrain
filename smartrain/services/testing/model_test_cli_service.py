@@ -29,7 +29,7 @@ from smartrain.core.workflow_adapters.training_runtime_api import resolve_datase
 from smartrain.core.runtime.run_artifacts import (
     ensure_run_layout,
     is_internal_conversion_artifact,
-    materialize_canonical_run_model,
+    materialize_preferred_run_model,
     scan_run_models,
     run_models_dir,
 )
@@ -125,7 +125,7 @@ def _discover_run_artifact_candidates(root_dir: str, formats: list[str] | None =
         by_fmt.setdefault(fmt, []).append(path)
     for fmt in requested:
         if fmt == "pt":
-            best = surf.canonical_run_model_path(root_dir, ".pt")
+            best = surf.preferred_run_model_path(root_dir, ".pt")
             if os.path.isfile(best):
                 out[fmt] = [best]
             continue
@@ -135,7 +135,7 @@ def _discover_run_artifact_candidates(root_dir: str, formats: list[str] | None =
         try:
             one = surf._resolve_existing_artifact(
                 root_dir=root_dir,
-                primary_path=surf.canonical_run_model_path(root_dir, ".pt"),
+                primary_path=surf.preferred_run_model_path(root_dir, ".pt"),
                 format_name=fmt,
                 target_kind="runs",
             )
@@ -289,7 +289,7 @@ def _resolve_existing_artifact(
     if target_kind == "runs":
         models_dir = run_models_dir(str(root))
         candidates.extend(sorted(models_dir.glob(f"*{ext}")))
-        run_pt = Path(surf.canonical_run_model_path(str(root), ".pt"))
+        run_pt = Path(surf.preferred_run_model_path(str(root), ".pt"))
         candidates.extend(
             [
                 run_pt.with_suffix(ext),
@@ -325,9 +325,9 @@ def _resolve_target(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[
             hint = " Path contains '...'; replace with full real path." if "..." in raw else ""
             raise FileNotFoundError(f"Run directory not found: {run_dir}.{hint}")
         ensure_run_layout(str(run_dir))
-        best_pt = Path(surf.canonical_run_model_path(str(run_dir), ".pt"))
+        best_pt = Path(surf.preferred_run_model_path(str(run_dir), ".pt"))
         if not best_pt.is_file():
-            materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
+            materialized = materialize_preferred_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
             if materialized is not None:
                 best_pt = Path(materialized)
         return str(run_dir), str(best_pt), "runs", run_dir.name
@@ -356,9 +356,9 @@ def _pick_interactive_target(layout: WorkspaceLayout) -> tuple[str, str, str, st
         chosen = surf.prompt_choice("Select run", runs, default=runs[0], show_options=False)
         run_dir = Path(chosen).resolve()
         ensure_run_layout(str(run_dir))
-        run_pt = Path(surf.canonical_run_model_path(str(run_dir), ".pt"))
+        run_pt = Path(surf.preferred_run_model_path(str(run_dir), ".pt"))
         if not run_pt.is_file():
-            materialized = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
+            materialized = materialize_preferred_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
             if materialized is not None:
                 run_pt = Path(materialized)
         return str(run_dir), str(run_pt), "runs", run_dir.name
@@ -464,7 +464,7 @@ def _normalize_task_for_backend(task: str | None) -> str:
 
 
 def _infer_task_from_training_metadata(root_dir: str) -> str | None:
-    from smartrain.orchestrators.canonical_gateway import resolve_task_context
+    from smartrain.orchestrators.unified_gateway import resolve_task_context
 
     ctx = resolve_task_context(root_dir)
     return _normalize_task_for_backend(ctx.task_type)

@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from smartrain.cli_support.cli_argparse import CliArgumentParser
-from smartrain.core.runtime.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
 from smartrain.core.runtime.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.runtime.run_discovery import find_run_directories
@@ -76,9 +76,9 @@ def _cmd_runs_info(ctx: RegistryCliContext, run_path: str) -> None:
     md = load_metadata(run_path)
     ti = md["training_info"]
     print(json.dumps({"run_dir": run_path, "training_info": ti, "timestamps": md["timestamps"]}, ensure_ascii=False, indent=2))
-    best = canonical_run_model_path(run_path, ".pt")
+    best = preferred_run_model_path(run_path, ".pt")
     if not os.path.isfile(best):
-        materialized = materialize_canonical_run_model(run_path, ext=".pt", move=True, normalize_metadata=True)
+        materialized = materialize_preferred_run_model(run_path, ext=".pt", move=True, normalize_metadata=True)
         if materialized is not None:
             best = str(materialized)
     print(f"run model exists: {os.path.isfile(best)}  path: {best}")
@@ -146,9 +146,9 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
     if not os.path.isfile(meta_path):
         print(f"[ERROR] No training_metadata.json: {run_path}", file=sys.stderr)
         sys.exit(1)
-    best = canonical_run_model_path(run_path, ".pt")
+    best = preferred_run_model_path(run_path, ".pt")
     if not os.path.isfile(best):
-        materialized = materialize_canonical_run_model(run_path, ext=".pt", move=True, normalize_metadata=True)
+        materialized = materialize_preferred_run_model(run_path, ext=".pt", move=True, normalize_metadata=True)
         if materialized is not None:
             best = str(materialized)
     if not os.path.isfile(best):

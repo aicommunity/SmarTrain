@@ -40,10 +40,8 @@
 | [`smartrain/core/`](../../smartrain/core/) | Общие утилиты: `runtime/`, `training/`, [`workflow_adapters/`](../../smartrain/core/workflow_adapters/) |
 | [`smartrain/backends/`](../../smartrain/backends/) | Контракты backend, registry, `ultralytics_adapter`, `external_provider_adapter`, `implementations/` |
 | [`smartrain/tasks/`](../../smartrain/tasks/) | Task-aware контракты и адаптеры метрик (detection / classification / segmentation) |
-| [`smartrain/domain/canonical/`](../../smartrain/domain/canonical/) | DTO и валидация канонической модели данных |
-| [`smartrain/adapters/canonical/`](../../smartrain/adapters/canonical/) | Read/write адаптеры, legacy reader/mapper |
-| [`smartrain/orchestrators/`](../../smartrain/orchestrators/) | [`canonical_gateway.py`](../../smartrain/orchestrators/canonical_gateway.py) — единая точка чтения/записи canonical |
-| [`smartrain/canonical/`](../../smartrain/canonical/) | Схемы, policy, refs (облегчённые модули верхнего уровня домена canonical) |
+| [`smartrain/unified/`](../../smartrain/unified/) | Unified layer: `domain/` (DTO), `io/` (read/write), `refs.py`, `schema.py`, `env.py` |
+| [`smartrain/orchestrators/`](../../smartrain/orchestrators/) | [`unified_gateway.py`](../../smartrain/orchestrators/unified_gateway.py) — единая точка чтения/записи run/model |
 
 ---
 
@@ -57,12 +55,12 @@
 
 ---
 
-## Данные, canonical и миграция
+## Данные, unified layer и миграция
 
-- **Чтение:** [`orchestrators/canonical_gateway.py`](../../smartrain/orchestrators/canonical_gateway.py) — `load_target`, `load_metrics`, `resolve_task_context`, predictions API и др.
-- **Запись:** [`adapters/canonical/write/`](../../smartrain/adapters/canonical/write/) — snapshot, manifest (provenance, хеши), [`dual_write.py`](../../smartrain/adapters/canonical/write/dual_write.py) (`canonical_only`, `dual_write_strict`, `dual_write_best_effort`).
+- **Чтение:** [`orchestrators/unified_gateway.py`](../../smartrain/orchestrators/unified_gateway.py) — `load_target`, `load_metrics`, `resolve_task_context`, predictions API и др.
+- **Запись:** [`unified/io/write/`](../../smartrain/unified/io/write/) — snapshot, manifest (provenance, хеши), [`dual_write.py`](../../smartrain/unified/io/write/dual_write.py) (`unified_only`, `dual_write_strict`, `dual_write_best_effort`).
 - **Миграция:** [`workflows/migration/cli_migration.py`](../../smartrain/workflows/migration/cli_migration.py) и связанные модули; режимы dry-run / apply / report-only (см. тесты `tests/migration/`).
-- **Cutover / policy:** аварийный legacy read — только при явных env-флагаx (см. [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md) и регрессии `tests/regression/test_canonical_cutover.py`).
+- **Cutover / policy:** аварийный legacy read — только при явных env-флагаx (см. [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md) и регрессии `tests/regression/test_unified_cutover.py`).
 
 ---
 
@@ -97,7 +95,7 @@
 Краткий список; детали и ссылки на код — в разделе **Operational Limits** [`09-tech-debt.md`](./09-tech-debt.md).
 
 - Внешние провайдеры могут не отдавать полные cls/seg поля; допустим деградированный контракт до расширения провайдеров.
-- **Canonical model read** ([`adapters/canonical/read/model_adapter.py`](../../smartrain/adapters/canonical/read/model_adapter.py)): `task_type` — metadata → подсказка по имени файла; без provenance — ошибка (миграция: [`scripts/migrate_model_task_provenance.py`](../../scripts/migrate_model_task_provenance.py)). `backend_type` — metadata → подсказка по формату весов.
+- **Unified model read** ([`unified/io/read/model_adapter.py`](../../smartrain/unified/io/read/model_adapter.py)): `task_type` — metadata → подсказка по имени файла; без provenance — ошибка (миграция: [`scripts/migrate_model_task_provenance.py`](../../scripts/migrate_model_task_provenance.py)). `backend_type` — metadata → подсказка по формату весов.
 - Крупные композиционные входы: [`train_entry.py`](../../smartrain/workflows/training/train_entry.py) + [`train_wiring.py`](../../smartrain/workflows/training/train_wiring.py) (train CLI/resume в [`services/training/`](../../smartrain/services/training/); MTM удалён LB-D8), [`model_test_cli.py`](../../smartrain/workflows/testing/model_test_cli.py) (фасад → [`model_test_cli_service.py`](../../smartrain/services/testing/model_test_cli_service.py)); артефакты тестов — [`model_test_service.py`](../../smartrain/services/testing/model_test_service.py).
 
 ---

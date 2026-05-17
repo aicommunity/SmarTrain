@@ -106,7 +106,7 @@ def collect_missing_metrics_recompute_plan(
     workspace: str | None = None,
     split: str = "test",
     read_test_metrics_for_run_cb: Callable[[str], dict[str, Any]],
-    canonical_run_model_path_cb: Callable[[str, str], str],
+    preferred_run_model_path_cb: Callable[[str, str], str],
     resolve_data_yaml_for_run_cb: Callable[[str, str | None], tuple[str | None, str | None]],
     load_recompute_status_cb: Callable[[str, str, str, list[str]], dict[str, Any] | None],
 ) -> dict[str, list[dict[str, Any]]]:
@@ -132,7 +132,7 @@ def collect_missing_metrics_recompute_plan(
             )[0]
             if not resolved_yaml:
                 resolved_yaml = data_yaml
-            best_pt = canonical_run_model_path_cb(run_dir, ".pt")
+            best_pt = preferred_run_model_path_cb(run_dir, ".pt")
             if not resolved_yaml:
                 print(
                     "[INFO] "
@@ -219,8 +219,8 @@ def recompute_run_test_metrics(
     val_imgsz: int = 640,
     val_half: bool = True,
     gpu_only: bool = False,
-    canonical_run_model_path_cb: Callable[[str, str], str],
-    materialize_canonical_run_model_cb: Callable[..., str | None],
+    preferred_run_model_path_cb: Callable[[str, str], str],
+    materialize_preferred_run_model_cb: Callable[..., str | None],
     clear_gpu_memory_cb: Callable[[], None],
     resolve_run_val_profile_cb: Callable[..., tuple[int, int, bool]],
     ultralytics_sidecar_dir_cb: Callable[..., str],
@@ -228,9 +228,9 @@ def recompute_run_test_metrics(
 ) -> dict[str, Any]:
     from ultralytics import YOLO
 
-    best_pt = canonical_run_model_path_cb(run_dir, ".pt")
+    best_pt = preferred_run_model_path_cb(run_dir, ".pt")
     if not os.path.isfile(best_pt):
-        materialized = materialize_canonical_run_model_cb(run_dir, ext=".pt", move=True, normalize_metadata=True)
+        materialized = materialize_preferred_run_model_cb(run_dir, ext=".pt", move=True, normalize_metadata=True)
         if materialized is not None:
             best_pt = str(materialized)
     if not os.path.isfile(best_pt):

@@ -1216,12 +1216,12 @@ def cmd_plot(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_migrate(ctx: typer.Context) -> None:
-    """Canonical migration utilities.
+    """Unified migration utilities.
 
     Examples:
-      smartrain migrate canonical --mode dry-run
-      smartrain migrate canonical --mode apply --continue-on-error
-      smartrain migrate canonical --source-kind run --report analytics/migration-reports/run-only.json
+      smartrain migrate unified --mode dry-run
+      smartrain migrate unified --mode apply --continue-on-error
+      smartrain migrate unified --source-kind run --report analytics/migration-reports/run-only.json
     """
     from smartrain.workflows.migration.cli_migration import build_migration_arg_parser
 

@@ -13,8 +13,8 @@ from typing import Any
 import yaml
 from PIL import Image
 
-from smartrain.canonical.refs import canonical_target_from_model_dir
-from smartrain.canonical.schema import wrap_inference_report_v2
+from smartrain.unified.refs import unified_target_from_model_dir
+from smartrain.unified.schema import wrap_inference_report_v2
 from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.core.runtime.run_artifacts import is_internal_conversion_artifact
 from smartrain.core.runtime.run_discovery import find_run_directories
@@ -81,7 +81,7 @@ def resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, s
             if p.is_file():
                 return p, name
 
-    canonical = canonical_target_from_model_dir(mdir)
+    canonical = unified_target_from_model_dir(mdir)
     return canonical.model_path.resolve(), name
 
 
@@ -108,7 +108,7 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
         return p
 
     if args.model_name:
-        from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
+        from smartrain.orchestrators.unified_gateway import load_target, resolve_task_context
 
         mdir = (Path(layout.models) / str(args.model_name).strip()).resolve()
         _ = resolve_task_context(str(mdir), source_kind="model")
@@ -120,7 +120,7 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
         return p, str(model.model_id or mdir.name), "models"
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
-        from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
+        from smartrain.orchestrators.unified_gateway import load_target, resolve_task_context
 
         ctx = resolve_task_context(str(run_dir), source_kind="run")
         payload = load_target(str(run_dir), source_kind="run")

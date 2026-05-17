@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from smartrain.core.runtime.path_portable import relativize_if_under
-from smartrain.core.runtime.run_artifacts import canonical_run_model_path, run_tests_dir
+from smartrain.core.runtime.run_artifacts import preferred_run_model_path, run_tests_dir
 from smartrain.core.training.confidence_recommendation import (
     read_recommendation_file,
     recommendation_file_path,
@@ -265,8 +265,8 @@ def save_training_metadata(
         },
         "paths": {
             "model_directory": ".",
-            "best_model": os.path.basename(canonical_run_model_path(model_dir, ".pt"))
-            if os.path.exists(canonical_run_model_path(model_dir, ".pt"))
+            "best_model": os.path.basename(preferred_run_model_path(model_dir, ".pt"))
+            if os.path.exists(preferred_run_model_path(model_dir, ".pt"))
             else None,
         },
     }

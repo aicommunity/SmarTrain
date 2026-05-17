@@ -14,7 +14,7 @@ def collect_ultralytics_test_artifacts(
     abbreviations: dict[str, str],
     *,
     run_test_backend_dir_cb: Callable[[str, str], str],
-    build_run_record_canonical_cb: Callable[[str], Any],
+    build_run_record_unified_cb: Callable[[str], Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     rows: list[dict[str, Any]] = []
     artifacts: list[dict[str, str]] = []
@@ -37,7 +37,7 @@ def collect_ultralytics_test_artifacts(
             test_dir = root_ultra_dir
         else:
             test_dir = preferred_test_dir
-        rec = build_run_record_canonical_cb(rd)
+        rec = build_run_record_unified_cb(rd)
         row: dict[str, Any] = {
             "run_dir": rd,
             "run_name": run_name,

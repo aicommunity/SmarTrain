@@ -313,9 +313,9 @@ def _run_external_provider_flow(
     except Exception:
         pass
     if int(rc) == 0 and test_success:
-        from smartrain.adapters.canonical.write.snapshot_hook import maybe_dual_write_canonical_snapshot
+        from smartrain.unified.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 
-        maybe_dual_write_canonical_snapshot(external_run_dir, status_ok=True)
+        maybe_dual_write_unified_snapshot(external_run_dir, status_ok=True)
     return rc
 
 
@@ -461,9 +461,9 @@ def _run_builtin_train_and_eval_flow(
             confidence_recommendation_config=_confidence_recommendation_config(args),
         )
         if training_success and test_success:
-            from smartrain.adapters.canonical.write.snapshot_hook import maybe_dual_write_canonical_snapshot
+            from smartrain.unified.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 
-            maybe_dual_write_canonical_snapshot(model_dir, status_ok=True)
+            maybe_dual_write_unified_snapshot(model_dir, status_ok=True)
 
 
 def _run_test_only_flow(
@@ -539,9 +539,9 @@ def _run_test_only_flow(
         confidence_recommendation_config=_confidence_recommendation_config(args),
     )
     if test_success:
-        from smartrain.adapters.canonical.write.snapshot_hook import maybe_dual_write_canonical_snapshot
+        from smartrain.unified.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 
-        maybe_dual_write_canonical_snapshot(str(model_dir), status_ok=True)
+        maybe_dual_write_unified_snapshot(str(model_dir), status_ok=True)
 
 
 def run_train_after_setup(

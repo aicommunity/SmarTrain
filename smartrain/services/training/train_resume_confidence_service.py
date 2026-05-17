@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from smartrain.core.runtime.run_artifacts import canonical_run_model_path
+from smartrain.core.runtime.run_artifacts import preferred_run_model_path
 from smartrain.core.training.confidence_recommendation import (
     read_recommendation_file,
     recommendation_file_path,
@@ -23,7 +23,7 @@ def ensure_resume_confidence_recommendations(
     if recommendations_complete(test_payload) and recommendations_complete(val_payload):
         return
 
-    best_pt = canonical_run_model_path(run_dir, ".pt")
+    best_pt = preferred_run_model_path(run_dir, ".pt")
     if not os.path.isfile(best_pt):
         print(
             "[WARN] Resume post-check: recommendations missing but canonical run model is absent; "

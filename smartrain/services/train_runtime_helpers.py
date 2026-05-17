@@ -10,7 +10,7 @@ from typing import Any
 from datetime import datetime
 
 from smartrain.core.runtime.run_artifacts import (
-    materialize_canonical_run_model,
+    materialize_preferred_run_model,
     resolve_run_model,
     run_test_backend_dir,
     run_tests_dir,
@@ -106,8 +106,8 @@ def normalize_external_run_layout(run_dir: str) -> None:
         entry.rename(target)
 
 
-def _materialize_canonical_run_model(run_dir: str, source_path: str | None = None) -> str | None:
-    target = materialize_canonical_run_model(
+def _materialize_preferred_run_model(run_dir: str, source_path: str | None = None) -> str | None:
+    target = materialize_preferred_run_model(
         run_dir,
         ext=".pt",
         source_path=source_path,
@@ -123,7 +123,7 @@ def _find_external_best_checkpoint(run_dir: str) -> str | None:
 
 
 def ensure_external_best_checkpoint_layout(run_dir: str) -> str | None:
-    return _materialize_canonical_run_model(run_dir, _find_external_best_checkpoint(run_dir))
+    return _materialize_preferred_run_model(run_dir, _find_external_best_checkpoint(run_dir))
 
 
 _EXTERNAL_EVAL_SUBSTITUTE_MODES = frozenset({"external_eval_substitute", "external_infer_fallback"})

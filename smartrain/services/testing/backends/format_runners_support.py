@@ -34,7 +34,7 @@ from smartrain.core.inference.ultralytics_metrics_pr import (
     extract_pr_curve_per_class_from_ultralytics_metrics,
 )
 from smartrain.core.runtime.run_artifacts import (
-    canonicalize_run_ultralytics_layout,
+    normalize_ultralytics_run_layout,
     ensure_run_layout,
     read_model_sidecar_metadata,
     run_tests_dir,
@@ -1058,7 +1058,7 @@ def _ensure_confidence_recommendations_for_explicit_artifact(
             fallback_confidence=float(fallback_confidence),
         )
     try:
-        canonicalize_run_ultralytics_layout(root_dir)
+        normalize_ultralytics_run_layout(root_dir)
     except Exception:
         pass
 

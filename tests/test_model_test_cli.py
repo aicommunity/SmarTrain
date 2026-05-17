@@ -133,20 +133,18 @@ def test_model_test_cli_rejects_public_pt_uni_format(tmp_path: Path) -> None:
 
 def test_infer_task_from_metadata_uses_canonical_gateway_when_enabled(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     class _C:
         task_type = "segmentation"
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.resolve_task_context", lambda *_a, **_k: _C())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.resolve_task_context", lambda *_a, **_k: _C())
     assert _infer_task_from_training_metadata(str(tmp_path)) == "segment"
 
 
 def test_infer_task_from_metadata_falls_back_to_legacy_when_gateway_fails(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
     monkeypatch.setattr(
-        "smartrain.orchestrators.canonical_gateway.resolve_task_context",
+        "smartrain.orchestrators.unified_gateway.resolve_task_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     with pytest.raises(RuntimeError):
@@ -323,7 +321,7 @@ def test_prompt_export_backends_lists_all_formats_and_skips_missing(monkeypatch,
     pt = root / "models" / "m.pt"
     pt.parent.mkdir(parents=True, exist_ok=True)
     pt.write_bytes(b"x")
-    monkeypatch.setattr("smartrain.services.testing.model_test_cli_surface.canonical_run_model_path", lambda _r, _ext=".pt": str(pt))
+    monkeypatch.setattr("smartrain.services.testing.model_test_cli_surface.preferred_run_model_path", lambda _r, _ext=".pt": str(pt))
     monkeypatch.setattr("smartrain.services.testing.model_test_cli_surface.print_numbered_options", lambda *a, **k: None)
     monkeypatch.setattr("smartrain.services.testing.model_test_cli_surface.prompt_text", lambda _p, default="": "1,2,3,4")
     out = _prompt_export_backends_interactive(

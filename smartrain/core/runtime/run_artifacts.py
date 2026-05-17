@@ -223,7 +223,7 @@ def prune_empty_subdirs(run_dir: str) -> None:
         _prune_children(tests)
 
 
-def canonicalize_run_ultralytics_layout(run_dir: str) -> None:
+def normalize_ultralytics_run_layout(run_dir: str) -> None:
     """Idempotent post-process: merge Ultralytics suffix dirs, drop empty legacy shells."""
     root = _normalize_run_root(run_dir)
     if not root.is_dir():
@@ -329,7 +329,7 @@ def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:
     tmp.mkdir(parents=True, exist_ok=True)
     tests.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_run_layout(root)
-    canonicalize_run_ultralytics_layout(str(root))
+    normalize_ultralytics_run_layout(str(root))
     for runtime_name in ("_runtime_data_train.yaml", "_runtime_data_test.yaml"):
         src = root / runtime_name
         dst = tmp / runtime_name
@@ -341,7 +341,7 @@ def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:
     return models, tmp
 
 
-def canonical_run_model_path(run_dir: str, ext: str = ".pt") -> str:
+def preferred_run_model_path(run_dir: str, ext: str = ".pt") -> str:
     root = _normalize_run_root(run_dir)
     models, _tmp = ensure_run_layout(str(root))
     suffix = ext if str(ext).startswith(".") else f".{ext}"
@@ -350,7 +350,7 @@ def canonical_run_model_path(run_dir: str, ext: str = ".pt") -> str:
 
 def resolve_run_model(run_dir: str, ext: str = ".pt") -> Path | None:
     """Resolve weights under canonical run layout (call ensure_run_layout first for migration)."""
-    canonical = Path(canonical_run_model_path(run_dir, ext))
+    canonical = Path(preferred_run_model_path(run_dir, ext))
     if canonical.is_file():
         return canonical
     root = _normalize_run_root(run_dir)
@@ -389,7 +389,7 @@ def normalize_model_references_in_metadata(metadata_path: Path, run_dir: str, ex
     if not isinstance(payload, dict):
         return False
     suffix = ext if str(ext).startswith(".") else f".{ext}"
-    canonical_name = Path(canonical_run_model_path(run_dir, suffix)).name
+    canonical_name = Path(preferred_run_model_path(run_dir, suffix)).name
     changed = False
 
     paths = payload.get("paths")
@@ -414,7 +414,7 @@ def normalize_model_references_in_metadata(metadata_path: Path, run_dir: str, ex
     return True
 
 
-def materialize_canonical_run_model(
+def materialize_preferred_run_model(
     run_dir: str,
     *,
     ext: str = ".pt",
@@ -426,7 +426,7 @@ def materialize_canonical_run_model(
     if not root.is_dir():
         return None
     ensure_run_layout(str(root))
-    canonical = Path(canonical_run_model_path(run_dir, ext))
+    canonical = Path(preferred_run_model_path(run_dir, ext))
     canonical.parent.mkdir(parents=True, exist_ok=True)
     if canonical.is_file():
         if normalize_metadata:

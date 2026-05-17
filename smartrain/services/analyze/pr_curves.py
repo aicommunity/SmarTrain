@@ -37,7 +37,7 @@ def run_pr_curves(
     prompt_text_cb,
     resolve_selected_run_dirs_cb,
     load_dataset_class_names_cb,
-    canonical_run_model_path_cb,
+    preferred_run_model_path_cb,
     run_cache_root_cb,
     compute_fingerprint_cb,
     data_yaml_hash_cb,
@@ -92,7 +92,7 @@ def run_pr_curves(
 
     for run_dir in run_dirs:
         label = os.path.basename(run_dir.rstrip(os.sep))
-        best_pt = canonical_run_model_path_cb(run_dir, ".pt")
+        best_pt = preferred_run_model_path_cb(run_dir, ".pt")
         if not os.path.isfile(best_pt):
             print(f"[WARN] {label}: missing run model, skipping ({best_pt})")
             continue

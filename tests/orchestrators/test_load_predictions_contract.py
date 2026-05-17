@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.orchestrators.canonical_gateway import CanonicalGatewayOptions, load_predictions
+from smartrain.orchestrators.unified_gateway import UnifiedGatewayOptions, load_predictions
 
 
 def _minimal_run(tmp_path: Path) -> Path:
@@ -21,8 +21,8 @@ def _minimal_run(tmp_path: Path) -> Path:
 
 def test_load_predictions_strict_skips_pred_glob_files(tmp_path: Path) -> None:
     run_dir = _minimal_run(tmp_path)
-    loose = load_predictions(str(run_dir), options=CanonicalGatewayOptions(validate=False, predictions_strict=False))
-    strict = load_predictions(str(run_dir), options=CanonicalGatewayOptions(validate=False, predictions_strict=True))
+    loose = load_predictions(str(run_dir), options=UnifiedGatewayOptions(validate=False, predictions_strict=False))
+    strict = load_predictions(str(run_dir), options=UnifiedGatewayOptions(validate=False, predictions_strict=True))
     loose_names = {Path(p.items_path).name for p in loose}
     strict_names = {Path(p.items_path).name for p in strict}
     assert "noise_prediction.json" in loose_names
@@ -35,6 +35,6 @@ def test_load_predictions_finds_deep_diagnostics_jsonl(tmp_path: Path) -> None:
     dd = run_dir / "deep_diagnostics"
     dd.mkdir(parents=True, exist_ok=True)
     (dd / "debug_test.jsonl").write_text("{}\n", encoding="utf-8")
-    strict = load_predictions(str(run_dir), options=CanonicalGatewayOptions(validate=False, predictions_strict=True))
+    strict = load_predictions(str(run_dir), options=UnifiedGatewayOptions(validate=False, predictions_strict=True))
     paths = {p.items_path for p in strict}
     assert any(str(p).endswith("deep_diagnostics/debug_test.jsonl") for p in paths)

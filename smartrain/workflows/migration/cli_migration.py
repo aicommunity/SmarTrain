@@ -9,10 +9,10 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal
 
-from smartrain.adapters.canonical.legacy import map_legacy_payload, read_legacy_target
-from smartrain.adapters.canonical.read.resolvers import infer_source_kind
-from smartrain.adapters.canonical.write.layout import canonical_snapshot_dir
-from smartrain.adapters.canonical.write.writer import write_canonical_snapshot
+from smartrain.unified.io.legacy import map_legacy_payload, read_legacy_target
+from smartrain.unified.io.read.resolvers import infer_source_kind
+from smartrain.unified.io.write.layout import unified_snapshot_dir
+from smartrain.unified.io.write.writer import write_unified_snapshot
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
@@ -64,7 +64,7 @@ def _discover_targets(*, workspace: str, source_kind: str, runs_root: str | None
 
 
 def _existing_snapshot_hash(target_ref: str) -> str | None:
-    snap = canonical_snapshot_dir(target_ref) / "snapshot.json"
+    snap = unified_snapshot_dir(target_ref) / "snapshot.json"
     if not snap.is_file():
         return None
     try:
@@ -121,7 +121,7 @@ def run_migration(
                     )
                 )
                 continue
-            rep = write_canonical_snapshot(payload, ref)
+            rep = write_unified_snapshot(payload, ref)
             items.append(
                 MigrationItem(
                     ref=ref,
@@ -129,7 +129,7 @@ def run_migration(
                     status="migrated",
                     payload_hash_sha256=ph,
                     snapshot_path=rep.snapshot_path,
-                    rollback_hint="Delete .smartrain/canonical/snapshot.json and manifest.json to revert this migrated target.",
+                    rollback_hint="Delete .smartrain/unified/snapshot.json and manifest.json to revert this migrated target.",
                 )
             )
         except Exception as exc:
@@ -161,7 +161,7 @@ def run_migration(
         "stats": stats,
         "operator_guidance": {
             "dry_run": "Use --mode dry-run to preview; no writes occur.",
-            "apply": "Use --mode apply to write canonical snapshots.",
+            "apply": "Use --mode apply to write unified snapshots.",
             "rollback": "Per-target rollback hint is included in each item (rollback_hint).",
         },
         "items": [asdict(x) for x in items],
@@ -170,14 +170,14 @@ def run_migration(
 
 def _default_report_path(workspace: str) -> str:
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return str(Path(workspace) / "analytics" / "migration-reports" / f"canonical-migration-{ts}.json")
+    return str(Path(workspace) / "analytics" / "migration-reports" / f"unified-migration-{ts}.json")
 
 
 def _write_summary_md(report: dict[str, Any], json_path: str) -> str:
     md_path = str(Path(json_path).with_suffix(".md"))
     s = report.get("stats") or {}
     lines = [
-        "# Canonical Migration Report",
+        "# Unified Migration Report",
         "",
         f"- workspace: `{report.get('workspace')}`",
         f"- mode: `{report.get('mode')}`",
@@ -194,17 +194,23 @@ def _write_summary_md(report: dict[str, Any], json_path: str) -> str:
     return md_path
 
 
+def _add_migration_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--workspace", type=str, default=None, help="Workspace root.")
+    parser.add_argument("--source-kind", choices=["run", "model", "all"], default="all")
+    parser.add_argument("--runs-root", type=str, default=None, help="Override runs root.")
+    parser.add_argument("--models-root", type=str, default=None, help="Override models root.")
+    parser.add_argument("--mode", choices=["dry-run", "apply", "report-only"], default="dry-run")
+    parser.add_argument("--report", type=str, default=None, help="JSON report path.")
+    parser.add_argument("--continue-on-error", action="store_true", help="Continue migration after per-target errors.")
+
+
 def build_migration_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="smartrain migrate", description="Canonical migration utilities.")
+    p = argparse.ArgumentParser(prog="smartrain migrate", description="Unified migration utilities.")
     sub = p.add_subparsers(dest="cmd", required=True)
-    p_can = sub.add_parser("canonical", help="Migrate legacy runs/models into canonical snapshots.")
-    p_can.add_argument("--workspace", type=str, default=None, help="Workspace root.")
-    p_can.add_argument("--source-kind", choices=["run", "model", "all"], default="all")
-    p_can.add_argument("--runs-root", type=str, default=None, help="Override runs root.")
-    p_can.add_argument("--models-root", type=str, default=None, help="Override models root.")
-    p_can.add_argument("--mode", choices=["dry-run", "apply", "report-only"], default="dry-run")
-    p_can.add_argument("--report", type=str, default=None, help="JSON report path.")
-    p_can.add_argument("--continue-on-error", action="store_true", help="Continue migration after per-target errors.")
+    p_unified = sub.add_parser("unified", help="Migrate legacy runs/models into unified snapshots.")
+    _add_migration_args(p_unified)
+    p_legacy = sub.add_parser("canonical", help=argparse.SUPPRESS)
+    _add_migration_args(p_legacy)
     return p
 
 

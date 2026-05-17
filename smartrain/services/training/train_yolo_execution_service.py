@@ -15,10 +15,10 @@ configure_matplotlib_before_ultralytics()
 from ultralytics import YOLO  # noqa: E402
 
 from smartrain.core.runtime.run_artifacts import (
-    canonical_run_model_path,
-    canonicalize_run_ultralytics_layout,
+    preferred_run_model_path,
+    normalize_ultralytics_run_layout,
     ensure_run_layout,
-    materialize_canonical_run_model,
+    materialize_preferred_run_model,
     resolve_run_model,
     run_tests_dir,
     run_tmp_dir,
@@ -72,8 +72,8 @@ def model_kw_model(train_kw: dict[str, Any]) -> str:
     return str(train_kw.get("model", ""))
 
 
-def _materialize_canonical_run_model(run_dir: str, source_path: str | None = None) -> str | None:
-    target = materialize_canonical_run_model(
+def _materialize_preferred_run_model(run_dir: str, source_path: str | None = None) -> str | None:
+    target = materialize_preferred_run_model(
         run_dir,
         ext=".pt",
         source_path=source_path,
@@ -164,7 +164,7 @@ def ensure_confidence_recommendations(
         )
         print(f"[WARN] Failed to compute val confidence recommendations: {exc}")
     try:
-        canonicalize_run_ultralytics_layout(model_dir)
+        normalize_ultralytics_run_layout(model_dir)
     except Exception:
         pass
 
@@ -322,7 +322,7 @@ def train_yolo(
         hooks.register_weighted_sampling_callback(model)
 
     training_end_time = None
-    canonical_best_path = canonical_run_model_path(model_dir, ".pt")
+    canonical_best_path = preferred_run_model_path(model_dir, ".pt")
     model_path = canonical_best_path
     try:
         model.train(**train_kw)
@@ -339,13 +339,13 @@ def train_yolo(
             except Exception:
                 pass
         try:
-            canonicalize_run_ultralytics_layout(model_dir)
+            normalize_ultralytics_run_layout(model_dir)
         except Exception:
             pass
 
     try:
         best_src = resolve_run_model(model_dir)
-        materialized = _materialize_canonical_run_model(
+        materialized = _materialize_preferred_run_model(
             model_dir,
             source_path=str(best_src) if best_src is not None else None,
         )
@@ -407,7 +407,7 @@ def test_yolo(
         "matplotlib_runtime": mpl_rt.as_dict(),
     }
 
-    model_path = canonical_run_model_path(model_dir, ".pt")
+    model_path = preferred_run_model_path(model_dir, ".pt")
     if not os.path.isfile(model_path):
         raise FileNotFoundError(f"canonical run model is missing: {model_path}")
     trained_model = YOLO(model_path)
@@ -482,7 +482,7 @@ def test_yolo(
         raise
     finally:
         try:
-            canonicalize_run_ultralytics_layout(model_dir)
+            normalize_ultralytics_run_layout(model_dir)
         except Exception:
             pass
 

@@ -139,7 +139,7 @@ def test_diagnose_run_training_complete_pending_when_results_in_train_ultralytic
 
 
 def test_canonicalize_resolves_suffix_train_results_csv(tmp_path: Path) -> None:
-    from smartrain.core.runtime.run_artifacts import canonicalize_run_ultralytics_layout
+    from smartrain.core.runtime.run_artifacts import normalize_ultralytics_run_layout
     from smartrain.services.analyze.metrics_reader import results_csv_path
 
     run_dir = tmp_path / "runs" / "ds" / "run_suffix_canonicalize"
@@ -148,7 +148,7 @@ def test_canonicalize_resolves_suffix_train_results_csv(tmp_path: Path) -> None:
     (run_dir / "train-ultralytics-2" / "weights").mkdir(parents=True)
     (run_dir / "train-ultralytics-2" / "results.csv").write_text("epoch,mAP\n1,0.1\n", encoding="utf-8")
 
-    canonicalize_run_ultralytics_layout(str(run_dir))
+    normalize_ultralytics_run_layout(str(run_dir))
     csv = results_csv_path(str(run_dir))
     assert csv is not None
     norm = csv.replace("\\", "/")

@@ -6,7 +6,7 @@ import subprocess
 
 from smartrain.cli_support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.run_artifacts import canonical_run_model_path
+from smartrain.core.runtime.run_artifacts import preferred_run_model_path
 from smartrain.services.testing.model_test_service import (
     has_complete_test_artifacts,
     has_matching_test_artifacts,

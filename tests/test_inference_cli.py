@@ -828,7 +828,6 @@ def test_resolve_model_run_prefers_newest_profile_onnx_variant(tmp_path: Path, m
 def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Path, monkeypatch) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     run_dir = tmp_path / "runs" / "ds_a" / "run_c"
     models_dir = run_dir / "models"
@@ -850,8 +849,8 @@ def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Pat
     class _C:
         run_id = "rid"
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.resolve_task_context", lambda *_a, **_k: _C())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.resolve_task_context", lambda *_a, **_k: _C())
     import argparse
     from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
@@ -865,7 +864,6 @@ def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Pat
 def test_resolve_model_falls_back_when_canonical_gateway_fails(tmp_path: Path, monkeypatch) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     run_dir = tmp_path / "runs" / "ds_a" / "run_d"
     models_dir = run_dir / "models"
@@ -875,11 +873,11 @@ def test_resolve_model_falls_back_when_canonical_gateway_fails(tmp_path: Path, m
     (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(
-        "smartrain.orchestrators.canonical_gateway.load_target",
+        "smartrain.orchestrators.unified_gateway.load_target",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     monkeypatch.setattr(
-        "smartrain.orchestrators.canonical_gateway.resolve_task_context",
+        "smartrain.orchestrators.unified_gateway.resolve_task_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     import argparse

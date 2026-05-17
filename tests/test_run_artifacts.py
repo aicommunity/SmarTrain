@@ -6,11 +6,11 @@ from pathlib import Path
 import pytest
 
 from smartrain.core.runtime.run_artifacts import (
-    canonical_run_model_path,
-    canonicalize_run_ultralytics_layout,
+    preferred_run_model_path,
+    normalize_ultralytics_run_layout,
     consolidate_train_backend_dir,
     ensure_run_layout,
-    materialize_canonical_run_model,
+    materialize_preferred_run_model,
     reject_documentation_placeholder_path,
     relocate_or_remove_legacy_val_recs_at_run_root,
     resolve_run_model,
@@ -37,7 +37,7 @@ def test_resolve_run_model_prefers_canonical(tmp_path: Path) -> None:
     (run_dir / "train-ultralytics" / "weights").mkdir(parents=True, exist_ok=True)
     legacy = run_dir / "train-ultralytics" / "weights" / "best.pt"
     legacy.write_bytes(b"legacy")
-    canonical = Path(canonical_run_model_path(str(run_dir), ".pt"))
+    canonical = Path(preferred_run_model_path(str(run_dir), ".pt"))
     canonical.parent.mkdir(parents=True, exist_ok=True)
     canonical.write_bytes(b"canonical")
 
@@ -45,7 +45,7 @@ def test_resolve_run_model_prefers_canonical(tmp_path: Path) -> None:
     assert resolved == canonical
 
 
-def test_materialize_canonical_run_model_moves_legacy_and_normalizes_metadata(tmp_path: Path) -> None:
+def test_materialize_preferred_run_model_moves_legacy_and_normalizes_metadata(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds1" / "run-1"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
     legacy = run_dir / "train" / "weights" / "best.pt"
@@ -61,8 +61,8 @@ def test_materialize_canonical_run_model_moves_legacy_and_normalizes_metadata(tm
         encoding="utf-8",
     )
 
-    canonical = materialize_canonical_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
-    assert canonical == Path(canonical_run_model_path(str(run_dir), ".pt"))
+    canonical = materialize_preferred_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
+    assert canonical == Path(preferred_run_model_path(str(run_dir), ".pt"))
     assert canonical.is_file()
     assert not legacy.exists()
 
@@ -166,7 +166,7 @@ def test_consolidate_test_drops_empty_suffix(tmp_path: Path) -> None:
     (tests / "test-ultralytics" / "pr.csv").write_text("recall,precision\n0.5,0.6\n", encoding="utf-8")
     (tests / "test-ultralytics2").mkdir()
 
-    canonicalize_run_ultralytics_layout(str(run_dir))
+    normalize_ultralytics_run_layout(str(run_dir))
     assert (tests / "test-ultralytics" / "pr.csv").is_file()
     assert not (tests / "test-ultralytics2").exists()
 
@@ -202,7 +202,7 @@ def test_prune_empty_keeps_models_pt(tmp_path: Path) -> None:
     tests.mkdir()
     (tests / "test-ultralytics2").mkdir()
 
-    canonicalize_run_ultralytics_layout(str(run_dir))
+    normalize_ultralytics_run_layout(str(run_dir))
     assert (run_dir / "models" / "run-prune.pt").is_file()
     assert not (tests / "test-ultralytics2").exists()
 
@@ -211,8 +211,8 @@ def test_canonicalize_idempotent(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds1" / "run-idempotent"
     run_dir.mkdir(parents=True)
     (run_dir / "val-recs-pt").mkdir()
-    canonicalize_run_ultralytics_layout(str(run_dir))
-    canonicalize_run_ultralytics_layout(str(run_dir))
+    normalize_ultralytics_run_layout(str(run_dir))
+    normalize_ultralytics_run_layout(str(run_dir))
     assert not (run_dir / "val-recs-pt").exists()
 
 

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 from smartrain.cli_support.cli_argparse import CliArgumentParser
-from smartrain.core.runtime.run_artifacts import canonical_run_model_path, materialize_canonical_run_model
+from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
 
 
 def build_clearml_upload_arg_parser() -> argparse.ArgumentParser:
@@ -47,7 +47,7 @@ def build_clearml_upload_arg_parser() -> argparse.ArgumentParser:
 def _find_train_dir(run_dir: Path, train_subdir: str) -> Path:
     run_dir = run_dir.resolve()
     t = run_dir / train_subdir
-    if (t / "args.yaml").is_file() or Path(canonical_run_model_path(str(run_dir), ".pt")).is_file():
+    if (t / "args.yaml").is_file() or Path(preferred_run_model_path(str(run_dir), ".pt")).is_file():
         return t
     if (run_dir / "args.yaml").is_file():
         return run_dir
@@ -126,9 +126,9 @@ def upload_run(
                 rel = str(file_path.relative_to(rd))
                 task.get_logger().report_image(rel, rel, iteration=0, image=image)
 
-    best_pt = Path(canonical_run_model_path(str(rd), ".pt"))
+    best_pt = Path(preferred_run_model_path(str(rd), ".pt"))
     if not best_pt.is_file():
-        materialized = materialize_canonical_run_model(str(rd), ext=".pt", move=True, normalize_metadata=True)
+        materialized = materialize_preferred_run_model(str(rd), ext=".pt", move=True, normalize_metadata=True)
         if materialized is not None:
             best_pt = Path(materialized)
     if best_pt.is_file():

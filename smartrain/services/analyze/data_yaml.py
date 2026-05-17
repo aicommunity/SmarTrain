@@ -13,7 +13,7 @@ def collect_data_yaml_candidates_for_run(
     run_dir: str,
     workspace_cli: str | None,
     *,
-    canonical_read_enabled: bool,
+    unified_read_enabled: bool,
     dataset_name_resolver: Callable[[str], str | None],
     metadata_loader: Callable[[str], dict[str, Any]] | None = None,
 ) -> list[tuple[str, str]]:
@@ -64,7 +64,7 @@ def collect_data_yaml_candidates_for_run(
             _add(legacy_runtime_yaml, "_runtime_data_train.yaml(legacy)")
 
     dataset_payload: dict[str, Any] = {}
-    if canonical_read_enabled:
+    if unified_read_enabled:
         resolved_name = dataset_name_resolver(rd)
         if resolved_name:
             dataset_payload["name"] = resolved_name
