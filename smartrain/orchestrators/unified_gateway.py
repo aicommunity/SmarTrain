@@ -13,6 +13,7 @@ from smartrain.unified.domain.context import UnifiedIdentity
 from smartrain.unified.domain.models import UnifiedMetricsRef, UnifiedPayload, UnifiedPredictionRef
 from smartrain.unified.domain.types import TaskType
 from smartrain.unified.domain.validators import validate_unified_payload
+from smartrain.unified.validate_backend import validate_unified_model_backends
 from smartrain.unified.io.read.metrics_csv import METRIC_AGG_COLUMNS, read_metrics_by_format_for_split
 from smartrain.tasks.context import TaskExecutionContext
 from smartrain.tasks.metrics import resolve_task_metrics_adapter
@@ -32,6 +33,7 @@ def load_target(ref: str, *, source_kind: str | None = None, options: UnifiedGat
     payload = adapter.read(ref, options={})
     if opts.validate:
         validate_unified_payload(payload)
+        validate_unified_model_backends(payload)
     return payload
 
 

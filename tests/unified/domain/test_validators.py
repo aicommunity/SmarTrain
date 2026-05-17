@@ -12,6 +12,7 @@ from smartrain.unified.domain.models import (
     UnifiedPredictionRef,
 )
 from smartrain.unified.domain.validators import validate_unified_payload
+from smartrain.unified.validate_backend import validate_unified_model_backends
 
 
 def _base_payload() -> UnifiedPayload:
@@ -68,7 +69,7 @@ def test_validate_payload_rejects_backend_format_mismatch() -> None:
     payload = _base_payload()
     payload.models[0] = replace(payload.models[0], backend_type="onnxruntime")
     with pytest.raises(UnifiedCompatibilityError):
-        validate_unified_payload(payload)
+        validate_unified_model_backends(payload)
 
 
 def test_validate_payload_rejects_metrics_namespace_mismatch() -> None:

@@ -10,6 +10,7 @@ _FORBIDDEN_PREFIX_PAIRS: tuple[tuple[str, str], ...] = (
     ("smartrain/domain", "smartrain.workflows"),
     ("smartrain/domain", "smartrain.services"),
     ("smartrain/backends", "smartrain.workflows"),
+    ("smartrain/unified", "smartrain.services"),
 )
 
 # (relative path under repo root, forbidden module prefix)
@@ -23,14 +24,21 @@ def _py_files_under(prefix: str) -> list[Path]:
     return sorted(root.rglob("*.py"))
 
 
-def _imports_from_workflows(path: Path) -> set[str]:
+def _module_matches_forbidden(module: str, forbidden_prefix: str) -> bool:
+    return module == forbidden_prefix or module.startswith(f"{forbidden_prefix}.")
+
+
+def _forbidden_imports(path: Path, forbidden_prefix: str) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or not isinstance(node.module, str):
-            continue
-        if node.module == "smartrain.workflows" or node.module.startswith("smartrain.workflows."):
-            found.add(node.module)
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if _module_matches_forbidden(alias.name, forbidden_prefix):
+                    found.add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and isinstance(node.module, str):
+            if _module_matches_forbidden(node.module, forbidden_prefix):
+                found.add(node.module)
     return found
 
 
@@ -38,7 +46,7 @@ def _check_package(package_prefix: str, forbidden_prefix: str) -> list[str]:
     violations: list[str] = []
     for path in _py_files_under(package_prefix):
         rel = path.as_posix()
-        for mod in sorted(_imports_from_workflows(path)):
+        for mod in sorted(_forbidden_imports(path, forbidden_prefix)):
             if not mod.startswith(forbidden_prefix):
                 continue
             if (rel, mod) in _ALLOWLIST or any(

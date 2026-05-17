@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-from smartrain.backends.train_test_registry import resolve_test_backend
 from smartrain.unified.domain.errors import (
     UnifiedCompatibilityError,
     UnifiedErrorDetails,
@@ -82,28 +81,6 @@ def validate_unified_payload(payload: UnifiedPayload) -> None:
                     hint="Add at least one provenance key/value.",
                 ),
                 "Model provenance is required.",
-            )
-        try:
-            resolved = resolve_test_backend(task_type=model.task_type, model_format=model.format).backend
-        except Exception as exc:
-            raise UnifiedCompatibilityError(
-                UnifiedErrorDetails(
-                    error_code="backend_format_incompatible",
-                    entity=entity,
-                    field="format",
-                    hint="Check task_type/model_format capability matrix.",
-                ),
-                str(exc),
-            ) from exc
-        if resolved != model.backend_type:
-            raise UnifiedCompatibilityError(
-                UnifiedErrorDetails(
-                    error_code="backend_type_mismatch",
-                    entity=entity,
-                    field="backend_type",
-                    hint=f"Expected backend_type={resolved!r} for format={model.format!r}.",
-                ),
-                f"Incompatible backend_type={model.backend_type!r} for format={model.format!r}.",
             )
 
     for idx, metric in enumerate(payload.metrics):

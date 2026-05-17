@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from smartrain.services.analyze.metrics_reader import (
+from smartrain.core.analyze.run_metrics_discovery import (
     read_metrics_by_format_for_split,
     read_metrics_by_format_for_split_artifacts,
+)
+from smartrain.services.analyze.metrics_reader import (
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
