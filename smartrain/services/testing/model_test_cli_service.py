@@ -22,7 +22,7 @@ from smartrain.services.testing.model_test_service import (
     resolve_root_dir_for_target,
 )
 from smartrain.services.inference_runtime_helpers import _resolve_run_ref, resolve_model_from_name
-from smartrain.services.model_test_orchestrator import run_model_test_after_setup
+from smartrain.services.testing.model_test_runner import run_model_test_after_setup
 from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
 from smartrain.core.workflow_adapters.training_runtime_api import resolve_dataset_path_for_resume

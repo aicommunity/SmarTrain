@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from smartrain.services.model_test_orchestrator import run_model_test_after_setup
+from smartrain.services.testing.model_test_runner import run_model_test_after_setup
 
 
 def test_non_interactive_runs_skips_backend_and_artifact_prompts(monkeypatch: pytest.MonkeyPatch) -> None:
