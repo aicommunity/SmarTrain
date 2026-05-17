@@ -476,7 +476,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         issues: list[dict[str, Any]] = []
         for run_dir in run_dirs:
             run_name = os.path.basename(run_dir.rstrip(os.sep))
-            # canonical_gateway.load_metrics can trigger legacy-to-canonical
+            # unified_gateway.load_metrics can trigger legacy-to-unified
             # migration with file moves; recompute legacy paths after migration.
             metrics_ref_by_raw_path: dict[str, dict[str, Any]] = {}
             canonical_metrics_by_format: dict[str, list[dict[str, str]]] = {}
@@ -499,7 +499,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                 if not isinstance(entry, dict):
                     entry = {}
                 fmt_metrics = list(canonical_metrics_by_format.get(fmt) or [])
-                metrics_read_policy = "canonical_gateway"
+                metrics_read_policy = "unified_gateway"
                 if not fmt_metrics:
                     fmt_metrics = list(metrics_artifacts.get(fmt) or [])
                     if fmt_metrics:
@@ -670,7 +670,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                     if not isinstance(entry, dict):
                         entry = {}
                     fmt_metrics = list(canonical_metrics_by_format.get(fmt) or [])
-                    metrics_read_policy = "canonical_gateway"
+                    metrics_read_policy = "unified_gateway"
                     if not fmt_metrics:
                         fmt_metrics = list(metrics_artifacts.get(fmt) or [])
                         if fmt_metrics:

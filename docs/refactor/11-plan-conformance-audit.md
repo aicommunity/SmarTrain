@@ -15,7 +15,7 @@ This baseline confirms:
 ## Baseline findings snapshot
 
 ### Implemented foundations
-- canonical domain and adapters: `smartrain/domain/canonical/*`, `smartrain/adapters/canonical/*`, `smartrain/orchestrators/canonical_gateway.py`;
+- unified layer: `smartrain/unified/` (`domain/`, `io/`), `smartrain/orchestrators/unified_gateway.py`;
 - task-aware contracts and adapters: `smartrain/tasks/*`;
 - backend contracts and capability registry: `smartrain/backends/contracts.py`, `smartrain/backends/registry.py`, `smartrain/backends/train_test_registry.py`;
 - service-level decomposition progress in training and analyze workflows.
