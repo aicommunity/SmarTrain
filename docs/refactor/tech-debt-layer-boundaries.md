@@ -10,7 +10,7 @@ Continuation (closed): [`layer-boundary-continuation.md`](./layer-boundary-conti
 | TD-LB-000 | DONE | baseline | — | LOC baseline + guardrails (2026-05-15) |
 | TD-LB-001 | DONE | naming | Two `TaskContext` types | `TaskTypeLabel`, `CanonicalIdentity` |
 | TD-LB-002 | DONE | naming | `train_backend_registry` vs execution `TrainBackend` | `ultralytics_model_alias_registry` |
-| TD-LB-003 | DONE | orchestrators | `unified_gateway` → workflows | `unified/io/read/metrics_csv` |
+| TD-LB-003 | DONE | run_model_contract | `gateway` → workflows | `run_model_contract/io/read/metrics_csv` via `core.analyze.run_metrics_discovery` |
 | TD-LB-004 | DONE | backends | Adapters proxy workflows | `implementations/ultralytics/inference.py` |
 | TD-LB-005 | DONE | analyze | Split workflows/services | `services/analyze/` |
 | TD-LB-006 | DONE | workflows | Fat CLI | Thin facades; execution in `services/` (2026-05-16) |
