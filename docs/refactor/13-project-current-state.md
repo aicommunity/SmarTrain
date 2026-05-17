@@ -40,8 +40,7 @@
 | [`smartrain/core/`](../../smartrain/core/) | Общие утилиты: `runtime/`, `training/`, [`workflow_adapters/`](../../smartrain/core/workflow_adapters/) |
 | [`smartrain/backends/`](../../smartrain/backends/) | Контракты backend, registry, `ultralytics_adapter`, `external_provider_adapter`, `implementations/` |
 | [`smartrain/tasks/`](../../smartrain/tasks/) | Task-aware контракты и адаптеры метрик (detection / classification / segmentation) |
-| [`smartrain/unified/`](../../smartrain/unified/) | Unified layer: `domain/` (DTO), `io/` (read/write), `refs.py`, `schema.py`, `env.py` |
-| [`smartrain/orchestrators/`](../../smartrain/orchestrators/) | [`unified_gateway.py`](../../smartrain/orchestrators/unified_gateway.py) — единая точка чтения/записи run/model |
+| [`smartrain/unified/`](../../smartrain/unified/) | Run/model contract: [`gateway.py`](../../smartrain/unified/gateway.py), `domain/`, `io/`, `refs.py`, `schema.py`, `env.py` |
 
 ---
 
@@ -49,7 +48,7 @@
 
 - **Правило:** `smartrain/services/**` не импортирует `smartrain.workflows.*`. Доступ к workflow-реализациям — через [`smartrain/core/workflow_adapters/`](../../smartrain/core/workflow_adapters/) и тонкие фасады в `workflows/`.
 - **Регрессии:**
-  - [`tests/regression/test_layer_import_guardrails.py`](../../tests/regression/test_layer_import_guardrails.py) — запрет `services` / `orchestrators` / `domain` / `backends` → `workflows`.
+  - [`tests/regression/test_layer_import_guardrails.py`](../../tests/regression/test_layer_import_guardrails.py) — запрет `services` / `unified` / `domain` / `backends` → `workflows`.
   - [`tests/regression/test_train_service_guardrails.py`](../../tests/regression/test_train_service_guardrails.py) — исторический guard для train service.
 - **Patch surface (тесты):** `services/analyze/workflow_dispatch.py`, `core/workflow_adapters/testing_runtime_api.py`.
 
@@ -57,7 +56,7 @@
 
 ## Данные, unified layer и миграция
 
-- **Чтение:** [`orchestrators/unified_gateway.py`](../../smartrain/orchestrators/unified_gateway.py) — `load_target`, `load_metrics`, `resolve_task_context`, predictions API и др.
+- **Чтение:** [`unified/gateway.py`](../../smartrain/unified/gateway.py) — `load_target`, `load_metrics`, `resolve_task_context`, predictions API и др.
 - **Запись:** [`unified/io/write/`](../../smartrain/unified/io/write/) — snapshot, manifest (provenance, хеши), [`dual_write.py`](../../smartrain/unified/io/write/dual_write.py) (`unified_only`, `dual_write_strict`, `dual_write_best_effort`).
 - **Миграция:** [`workflows/migration/cli_migration.py`](../../smartrain/workflows/migration/cli_migration.py) и связанные модули; режимы dry-run / apply / report-only (см. тесты `tests/migration/`).
 - **Cutover / policy:** аварийный legacy read — только при явных env-флагаx (см. [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md) и регрессии `tests/regression/test_unified_cutover.py`).

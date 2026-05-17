@@ -35,12 +35,11 @@
 
 Общая механика: `runtime/`, `training/`, `workflow_adapters/`, `inference/`.
 
-## orchestrators/
-
-- `unified_gateway.py` — unified run/model, метрики, контекст задачи.
-
 ## Unified layer (`smartrain/unified/`)
 
+Контракт run/model (schema v2): чтение legacy-раскладок, валидация, gateway API, опциональные снимки.
+
+- `unified/gateway.py` — `load_target`, `load_metrics`, `resolve_task_context`, predictions API
 - `unified/domain/` — DTO и валидация
 - `unified/io/` — чтение/запись, снимки
 - `unified/refs.py`, `unified/schema.py`, `unified/env.py`

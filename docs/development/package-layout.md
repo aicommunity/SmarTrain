@@ -35,14 +35,13 @@ Use-case layer: `analyze/`, `datasets/`, `training/`, `testing/`, `inference_ser
 
 Shared mechanics: `runtime/` (workspace paths, env), `training/` (profiles, catalogs), `workflow_adapters/` (thin facades to workflows for services), `inference/` (shared inference helpers).
 
-## orchestrators/
-
-- `unified_gateway.py` — unified run/model reads, metrics, task context.
-
 ## Unified layer (`smartrain/unified/`)
+
+Run/model contract (schema v2): read legacy layouts, validate, gateway API, optional snapshots.
 
 | Path | Role |
 |------|------|
+| `unified/gateway.py` | `load_target`, `load_metrics`, `resolve_task_context`, predictions API |
 | `unified/domain/` | DTOs (`UnifiedPayload`, `UnifiedIdentity`) and validation |
 | `unified/io/` | Disk read/write adapters, legacy mapper, snapshot hook |
 | `unified/refs.py` | Resolve model path from run or model directory |
