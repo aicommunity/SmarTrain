@@ -464,7 +464,7 @@ def _normalize_task_for_backend(task: str | None) -> str:
 
 
 def _infer_task_from_training_metadata(root_dir: str) -> str | None:
-    from smartrain.orchestrators.unified_gateway import resolve_task_context
+    from smartrain.unified.gateway import resolve_task_context
 
     ctx = resolve_task_context(root_dir)
     return _normalize_task_for_backend(ctx.task_type)

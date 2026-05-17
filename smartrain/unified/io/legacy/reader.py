@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from smartrain.unified.domain.models import UnifiedPayload
-from smartrain.orchestrators.unified_gateway import UnifiedGatewayOptions, load_target
+from smartrain.unified.gateway import UnifiedGatewayOptions, load_target
 
 
 def read_legacy_target(ref: str, *, source_kind: str | None = None) -> UnifiedPayload:

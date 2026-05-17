@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.orchestrators.unified_gateway import UnifiedGatewayOptions, load_predictions
+from smartrain.unified.gateway import UnifiedGatewayOptions, load_predictions
 
 
 def _minimal_run(tmp_path: Path) -> Path:

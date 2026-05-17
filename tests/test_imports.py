@@ -64,6 +64,6 @@ def test_import_cli_modules() -> None:
         "smartrain.unified.domain",
         "smartrain.unified.io",
         "smartrain.unified.refs",
-        "smartrain.orchestrators.unified_gateway",
+        "smartrain.unified.gateway",
     ):
         __import__(mod)

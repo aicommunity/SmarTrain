@@ -17,7 +17,7 @@ from smartrain.core.workflow_adapters.analyze_runtime_api import (
     read_test_system_profile_by_format_artifacts,
 )
 from smartrain.core.runtime.run_artifacts import resolve_run_model
-from smartrain.orchestrators.unified_gateway import load_metrics as unified_load_metrics
+from smartrain.unified.gateway import load_metrics as unified_load_metrics
 
 METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
 

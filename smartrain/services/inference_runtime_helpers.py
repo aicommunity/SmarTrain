@@ -108,7 +108,7 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
         return p
 
     if args.model_name:
-        from smartrain.orchestrators.unified_gateway import load_target, resolve_task_context
+        from smartrain.unified.gateway import load_target, resolve_task_context
 
         mdir = (Path(layout.models) / str(args.model_name).strip()).resolve()
         _ = resolve_task_context(str(mdir), source_kind="model")
@@ -120,7 +120,7 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
         return p, str(model.model_id or mdir.name), "models"
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
-        from smartrain.orchestrators.unified_gateway import load_target, resolve_task_context
+        from smartrain.unified.gateway import load_target, resolve_task_context
 
         ctx = resolve_task_context(str(run_dir), source_kind="run")
         payload = load_target(str(run_dir), source_kind="run")

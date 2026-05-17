@@ -102,7 +102,7 @@ def test_scan_uses_canonical_gateway_when_enabled(tmp_path: Path, monkeypatch, c
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.unified.gateway.load_target", lambda *_a, **_k: _P())
     ns = argparse.Namespace(models_root=str(tmp_path / "runs"))
     results_analyzer.cmd_scan(ns)
     out = capsys.readouterr().out
@@ -126,7 +126,7 @@ def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.unified.gateway.load_target", lambda *_a, **_k: _P())
     ns = argparse.Namespace(
         models_root=str(tmp_path / "runs"),
         filter_dataset=None,
@@ -160,8 +160,8 @@ def test_build_run_record_unified_uses_gateway_metrics(tmp_path: Path, monkeypat
         primary_metrics = {"mAP50-95": 0.7}
         secondary_metrics = {"Box-F1": 0.8}
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
+    monkeypatch.setattr("smartrain.unified.gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.unified.gateway.load_metrics", lambda *_a, **_k: [_Metric()])
     rec = results_analyzer._build_run_record_unified(str(run_dir))
     assert rec.model == "cm"
     assert rec.dataset_name == "ds_a"
@@ -177,7 +177,7 @@ def test_read_test_metrics_for_run_uses_gateway_in_canonical_mode(tmp_path: Path
         primary_metrics = {"mAP50-95": 0.55}
         secondary_metrics = {"Box-F1": 0.66}
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
+    monkeypatch.setattr("smartrain.unified.gateway.load_metrics", lambda *_a, **_k: [_Metric()])
     row = results_analyzer._read_test_metrics_for_run(str(run_dir))
     assert row.get("mAP50-95") == 0.55
     assert row.get("Box-F1") == 0.66
@@ -201,7 +201,7 @@ def test_collect_ultralytics_test_artifacts_uses_canonical_gateway_when_enabled(
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.unified.gateway.load_target", lambda *_a, **_k: _P())
     rows, _arts = results_analyzer._collect_ultralytics_test_artifacts(
         str(tmp_path / "analytics" / "analyze-reports" / "s2"),
         [str(run_dir)],
@@ -228,7 +228,7 @@ def test_export_table_uses_canonical_gateway_when_enabled(tmp_path: Path, monkey
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.unified.gateway.load_target", lambda *_a, **_k: _P())
     out_csv = tmp_path / "out" / "runs_summary.csv"
     ns = argparse.Namespace(
         models_root=str(tmp_path / "runs"),
@@ -258,7 +258,7 @@ def test_write_system_profile_compare_csv_uses_canonical_gateway_when_enabled(tm
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.unified.gateway.load_target", lambda *_a, **_k: _P())
     out_csv = tmp_path / "system_profile_compare.csv"
     written = results_analyzer._write_system_profile_compare_csv([str(run_dir)], str(out_csv))
     assert written is not None
@@ -312,7 +312,7 @@ def test_write_test_system_profile_compare_csv_uses_canonical_gateway_when_enabl
         models = [_M()]
         runs = [_R()]
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.unified.gateway.load_target", lambda *_a, **_k: _P())
     out_csv = tmp_path / "test_system_profile_compare.csv"
     written = results_analyzer._write_test_system_profile_compare_csv([str(run_dir)], str(out_csv))
     assert written is not None

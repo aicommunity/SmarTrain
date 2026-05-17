@@ -849,8 +849,8 @@ def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Pat
     class _C:
         run_id = "rid"
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.load_target", lambda *_a, **_k: _P())
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.resolve_task_context", lambda *_a, **_k: _C())
+    monkeypatch.setattr("smartrain.unified.gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.unified.gateway.resolve_task_context", lambda *_a, **_k: _C())
     import argparse
     from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
@@ -873,11 +873,11 @@ def test_resolve_model_falls_back_when_canonical_gateway_fails(tmp_path: Path, m
     (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(
-        "smartrain.orchestrators.unified_gateway.load_target",
+        "smartrain.unified.gateway.load_target",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     monkeypatch.setattr(
-        "smartrain.orchestrators.unified_gateway.resolve_task_context",
+        "smartrain.unified.gateway.resolve_task_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     import argparse

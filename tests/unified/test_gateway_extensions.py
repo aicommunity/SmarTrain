@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from smartrain.unified.domain.validators import validate_unified_payload
-from smartrain.orchestrators.unified_gateway import (
+from smartrain.unified.gateway import (
     load_metrics,
     load_predictions,
     load_target,

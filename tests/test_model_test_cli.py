@@ -137,14 +137,14 @@ def test_infer_task_from_metadata_uses_canonical_gateway_when_enabled(monkeypatc
     class _C:
         task_type = "segmentation"
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.resolve_task_context", lambda *_a, **_k: _C())
+    monkeypatch.setattr("smartrain.unified.gateway.resolve_task_context", lambda *_a, **_k: _C())
     assert _infer_task_from_training_metadata(str(tmp_path)) == "segment"
 
 
 def test_infer_task_from_metadata_falls_back_to_legacy_when_gateway_fails(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setattr(
-        "smartrain.orchestrators.unified_gateway.resolve_task_context",
+        "smartrain.unified.gateway.resolve_task_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     with pytest.raises(RuntimeError):

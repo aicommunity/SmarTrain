@@ -26,7 +26,7 @@ def test_analyze_unified_path_uses_gateway_metrics_and_predictions(tmp_path: Pat
     assert rec.model == "run_an"
     assert rec.dataset_name == "ds_int"
 
-    from smartrain.orchestrators.unified_gateway import load_predictions
+    from smartrain.unified.gateway import load_predictions
 
     preds = load_predictions(str(run_dir), source_kind="run", format_name="onnx")
     assert len(preds) == 1

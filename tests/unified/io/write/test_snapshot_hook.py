@@ -23,7 +23,7 @@ def test_maybe_dual_write_invokes_run_dual_write_when_env_set(tmp_path: Path, mo
 
     payload = RunAdapter().read(str(run_dir))
     with patch("smartrain.unified.io.write.dual_write.run_dual_write", _fake_run_dual_write):
-        with patch("smartrain.orchestrators.unified_gateway.load_target", return_value=payload):
+        with patch("smartrain.unified.gateway.load_target", return_value=payload):
             with patch("smartrain.unified.io.read.resolvers.infer_source_kind", return_value="run"):
                 maybe_dual_write_unified_snapshot(str(run_dir), status_ok=True)
     assert "kwargs" in captured

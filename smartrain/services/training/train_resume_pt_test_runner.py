@@ -8,7 +8,7 @@ from typing import Any
 
 from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path
-from smartrain.orchestrators.unified_gateway import resolve_task_context
+from smartrain.unified.gateway import resolve_task_context
 from smartrain.services.testing.backends.format_runners import run_ultralytics_backend
 from smartrain.services.training.train_runtime_data_yaml_service import build_runtime_data_yaml
 

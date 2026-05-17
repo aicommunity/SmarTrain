@@ -24,5 +24,5 @@ def test_legacy_read_env_vars_are_ignored(monkeypatch, tmp_path: Path) -> None:
         task_type = "segmentation"
         run_id = "r1"
 
-    monkeypatch.setattr("smartrain.orchestrators.unified_gateway.resolve_task_context", lambda *_a, **_k: _Ctx())
+    monkeypatch.setattr("smartrain.unified.gateway.resolve_task_context", lambda *_a, **_k: _Ctx())
     assert _infer_task_from_training_metadata(str(tmp_path)) == "segment"

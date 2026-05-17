@@ -25,7 +25,7 @@ def maybe_dual_write_unified_snapshot(
     try:
         from smartrain.unified.io.read.resolvers import infer_source_kind
         from smartrain.unified.io.write.dual_write import run_dual_write
-        from smartrain.orchestrators.unified_gateway import UnifiedGatewayOptions, load_target
+        from smartrain.unified.gateway import UnifiedGatewayOptions, load_target
 
         dual_mode = unified_dual_write_mode()
         source_kind = infer_source_kind(root_dir)

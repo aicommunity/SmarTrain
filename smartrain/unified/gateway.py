@@ -260,7 +260,7 @@ def load_predictions(
                     task_type=task_type,
                     items_path=ap,
                     schema_version=schema_version,
-                    producer="smartrain.unified_gateway",
+                    producer="smartrain.run_model_contract.gateway",
                     count=int(max(0, cnt)),
                 )
             )
