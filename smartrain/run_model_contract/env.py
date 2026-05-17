@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import warnings
 
-from smartrain.unified.io.write.dual_write import DualWriteMode, normalize_dual_write_mode
+from smartrain.run_model_contract.io.write.dual_write import DualWriteMode, normalize_dual_write_mode
 
 __all__ = ["unified_write_enabled", "unified_dual_write_mode"]
 

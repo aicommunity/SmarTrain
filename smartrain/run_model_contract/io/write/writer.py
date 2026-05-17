@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from smartrain.unified.io.write.layout import unified_snapshot_write_dir
-from smartrain.unified.io.write.manifest import build_manifest
-from smartrain.unified.domain.models import UnifiedPayload
+from smartrain.run_model_contract.io.write.layout import unified_snapshot_write_dir
+from smartrain.run_model_contract.io.write.manifest import build_manifest
+from smartrain.run_model_contract.domain.models import UnifiedPayload
 
 
 @dataclass(frozen=True)

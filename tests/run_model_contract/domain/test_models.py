@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from smartrain.unified.domain.models import (
+from smartrain.run_model_contract.domain.models import (
     UnifiedArtifactRef,
     UnifiedMetricsRef,
     UnifiedModelRef,

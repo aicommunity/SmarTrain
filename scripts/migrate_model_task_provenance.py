@@ -7,8 +7,8 @@ import argparse
 import json
 from pathlib import Path
 
-from smartrain.unified.io.read.model_adapter import _infer_task_from_model_name, _load_json
-from smartrain.unified.refs import unified_target_from_model_dir
+from smartrain.run_model_contract.io.read.model_adapter import _infer_task_from_model_name, _load_json
+from smartrain.run_model_contract.refs import unified_target_from_model_dir
 
 SUPPORTED_WEIGHT_EXTS = {".pt", ".onnx", ".engine", ".trt"}
 

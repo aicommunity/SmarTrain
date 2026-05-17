@@ -4,6 +4,7 @@ Operational execution status and PR-level checkboxes: [`10-implementation-checkl
 
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
+- 2026-05-17: **Package rename (tree):** `smartrain/unified/` → `smartrain/run_model_contract/`; tests → `tests/run_model_contract/`. Disk `.smartrain/unified/` and `SMARTTRAIN_UNIFIED_*` unchanged; public types still `Unified*`.
 - 2026-05-17: **Test runner naming:** `services/model_test_orchestrator.py` → `services/testing/model_test_runner.py`; tests renamed accordingly.
 - 2026-05-17: **Gateway colocation:** `unified_gateway` → `smartrain/unified/gateway.py`; removed `smartrain/orchestrators/`; tests under `tests/unified/test_gateway_*.py`. No change to `.smartrain/unified/` or env flags.
 - 2026-05-16: **Unified layer rename:** `smartrain/unified/` (`domain/`, `io/`), `unified_gateway`, `.smartrain/unified/` snapshots, `smartrain migrate unified`, run helpers `preferred_run_model_path` / `normalize_ultralytics_run_layout`. Register unchanged: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md).

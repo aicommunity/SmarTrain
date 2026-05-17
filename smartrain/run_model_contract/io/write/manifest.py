@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from smartrain.unified.domain.models import UnifiedPayload
+from smartrain.run_model_contract.domain.models import UnifiedPayload
 
 
 def build_manifest(

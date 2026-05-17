@@ -4,8 +4,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from smartrain.unified.domain.validators import validate_unified_payload
-from smartrain.unified.gateway import (
+from smartrain.run_model_contract.domain.validators import validate_unified_payload
+from smartrain.run_model_contract.gateway import (
     load_metrics,
     load_predictions,
     load_target,

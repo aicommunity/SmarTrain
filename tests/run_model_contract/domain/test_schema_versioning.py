@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from smartrain.unified.domain.errors import UnifiedCompatibilityError, UnifiedValidationError
-from smartrain.unified.domain.validators import validate_schema_version
+from smartrain.run_model_contract.domain.errors import UnifiedCompatibilityError, UnifiedValidationError
+from smartrain.run_model_contract.domain.validators import validate_schema_version
 
 
 def test_schema_version_accepts_semver() -> None:

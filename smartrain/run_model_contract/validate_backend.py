@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from smartrain.backends.train_test_registry import resolve_test_backend
-from smartrain.unified.domain.errors import UnifiedCompatibilityError, UnifiedErrorDetails
-from smartrain.unified.domain.models import UnifiedPayload
+from smartrain.run_model_contract.domain.errors import UnifiedCompatibilityError, UnifiedErrorDetails
+from smartrain.run_model_contract.domain.models import UnifiedPayload
 
 
 def validate_unified_model_backends(payload: UnifiedPayload) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from smartrain.unified.domain.types import BackendType, ModelFormat, TaskType
+from smartrain.run_model_contract.domain.types import BackendType, ModelFormat, TaskType
 
 
 @dataclass(frozen=True)

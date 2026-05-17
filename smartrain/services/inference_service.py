@@ -36,7 +36,7 @@ from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_su
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
-from smartrain.unified.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
+from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 from smartrain.services.inference_runtime_helpers import (
     build_report,
     collect_folder_images,

@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.unified.io.read.run_adapter import RunAdapter
-from smartrain.unified.io.write.layout import unified_snapshot_dir
-from smartrain.unified.io.write.writer import write_unified_snapshot
+from smartrain.run_model_contract.io.read.run_adapter import RunAdapter
+from smartrain.run_model_contract.io.write.layout import unified_snapshot_dir
+from smartrain.run_model_contract.io.write.writer import write_unified_snapshot
 
 
 def test_write_unified_snapshot_creates_layout_and_manifest(tmp_path: Path) -> None:

@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from smartrain.unified.io.read.model_adapter import ModelAdapter
+from smartrain.run_model_contract.io.read.model_adapter import ModelAdapter
 
 
 def test_model_adapter_reads_canonical_payload(tmp_path: Path) -> None:

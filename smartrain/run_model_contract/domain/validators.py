@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import re
 
-from smartrain.unified.domain.errors import (
+from smartrain.run_model_contract.domain.errors import (
     UnifiedCompatibilityError,
     UnifiedErrorDetails,
     UnifiedValidationError,
 )
-from smartrain.unified.domain.models import UnifiedPayload
+from smartrain.run_model_contract.domain.models import UnifiedPayload
 from smartrain.tasks.contracts import KNOWN_TASKS
 
 _SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")

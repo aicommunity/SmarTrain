@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from smartrain.unified.io.read.model_adapter import ModelAdapter
-from smartrain.unified.io.read.resolvers import infer_source_kind
-from smartrain.unified.io.read.run_adapter import RunAdapter
+from smartrain.run_model_contract.io.read.model_adapter import ModelAdapter
+from smartrain.run_model_contract.io.read.resolvers import infer_source_kind
+from smartrain.run_model_contract.io.read.run_adapter import RunAdapter
 
 
 class ReadAdapterFactory:

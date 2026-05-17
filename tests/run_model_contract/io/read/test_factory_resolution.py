@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from smartrain.unified.io.read.factory import ReadAdapterFactory
-from smartrain.unified.io.read.model_adapter import ModelAdapter
-from smartrain.unified.io.read.run_adapter import RunAdapter
+from smartrain.run_model_contract.io.read.factory import ReadAdapterFactory
+from smartrain.run_model_contract.io.read.model_adapter import ModelAdapter
+from smartrain.run_model_contract.io.read.run_adapter import RunAdapter
 
 
 def test_factory_resolves_explicit_kinds(tmp_path: Path) -> None:

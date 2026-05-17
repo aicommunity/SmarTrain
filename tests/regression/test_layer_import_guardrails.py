@@ -6,11 +6,11 @@ from pathlib import Path
 # (package_prefix, forbidden_import_prefix)
 _FORBIDDEN_PREFIX_PAIRS: tuple[tuple[str, str], ...] = (
     ("smartrain/services", "smartrain.workflows"),
-    ("smartrain/unified", "smartrain.workflows"),
+    ("smartrain/run_model_contract", "smartrain.workflows"),
     ("smartrain/domain", "smartrain.workflows"),
     ("smartrain/domain", "smartrain.services"),
     ("smartrain/backends", "smartrain.workflows"),
-    ("smartrain/unified", "smartrain.services"),
+    ("smartrain/run_model_contract", "smartrain.services"),
 )
 
 # (relative path under repo root, forbidden module prefix)

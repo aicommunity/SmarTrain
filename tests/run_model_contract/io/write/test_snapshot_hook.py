@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from smartrain.unified.io.read.run_adapter import RunAdapter
-from smartrain.unified.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
+from smartrain.run_model_contract.io.read.run_adapter import RunAdapter
+from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 
 
 def test_maybe_dual_write_invokes_run_dual_write_when_env_set(tmp_path: Path, monkeypatch) -> None:
@@ -22,9 +22,9 @@ def test_maybe_dual_write_invokes_run_dual_write_when_env_set(tmp_path: Path, mo
         return None
 
     payload = RunAdapter().read(str(run_dir))
-    with patch("smartrain.unified.io.write.dual_write.run_dual_write", _fake_run_dual_write):
-        with patch("smartrain.unified.gateway.load_target", return_value=payload):
-            with patch("smartrain.unified.io.read.resolvers.infer_source_kind", return_value="run"):
+    with patch("smartrain.run_model_contract.io.write.dual_write.run_dual_write", _fake_run_dual_write):
+        with patch("smartrain.run_model_contract.gateway.load_target", return_value=payload):
+            with patch("smartrain.run_model_contract.io.read.resolvers.infer_source_kind", return_value="run"):
                 maybe_dual_write_unified_snapshot(str(run_dir), status_ok=True)
     assert "kwargs" in captured
     kw = captured["kwargs"]
@@ -40,7 +40,7 @@ def test_maybe_dual_write_noop_when_env_unset(tmp_path: Path, monkeypatch) -> No
     def _fake_run_dual_write(**kwargs):
         calls.append(kwargs)
 
-    with patch("smartrain.unified.io.write.dual_write.run_dual_write", _fake_run_dual_write):
+    with patch("smartrain.run_model_contract.io.write.dual_write.run_dual_write", _fake_run_dual_write):
         maybe_dual_write_unified_snapshot(str(tmp_path / "missing"), status_ok=True)
     assert calls == []
 
@@ -52,6 +52,6 @@ def test_maybe_dual_write_noop_when_not_ok(tmp_path: Path, monkeypatch) -> None:
     def _fake_run_dual_write(**kwargs):
         calls.append(kwargs)
 
-    with patch("smartrain.unified.io.write.dual_write.run_dual_write", _fake_run_dual_write):
+    with patch("smartrain.run_model_contract.io.write.dual_write.run_dual_write", _fake_run_dual_write):
         maybe_dual_write_unified_snapshot(str(tmp_path), status_ok=False)
     assert calls == []

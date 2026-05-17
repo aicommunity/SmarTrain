@@ -399,8 +399,8 @@ def persist_target_test_artifacts_state(
     _update_run_metadata_after_test(root_dir)
     _update_model_manifest_after_test(root_dir)
     if (status or "").strip().lower() == "ok":
-        from smartrain.unified.env import unified_dual_write_mode
-        from smartrain.unified.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
+        from smartrain.run_model_contract.env import unified_dual_write_mode
+        from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 
         dual_mode = unified_dual_write_mode()
         legacy_writer = (

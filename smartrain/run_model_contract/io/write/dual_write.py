@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Literal
 
-from smartrain.unified.io.write.writer import WriteReport, write_unified_snapshot
-from smartrain.unified.domain.models import UnifiedPayload
+from smartrain.run_model_contract.io.write.writer import WriteReport, write_unified_snapshot
+from smartrain.run_model_contract.domain.models import UnifiedPayload
 
 DualWriteMode = Literal["unified_only", "dual_write_strict", "dual_write_best_effort"]
 

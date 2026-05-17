@@ -1,5 +1,5 @@
-from smartrain.unified.domain.context import UnifiedIdentity
-from smartrain.unified.domain.models import (
+from smartrain.run_model_contract.domain.context import UnifiedIdentity
+from smartrain.run_model_contract.domain.models import (
     UnifiedArtifactRef,
     UnifiedMetricsRef,
     UnifiedModelRef,
@@ -7,7 +7,7 @@ from smartrain.unified.domain.models import (
     UnifiedPredictionRef,
     UnifiedRunRef,
 )
-from smartrain.unified.domain.validators import validate_unified_payload, validate_schema_version
+from smartrain.run_model_contract.domain.validators import validate_unified_payload, validate_schema_version
 
 __all__ = [
     "UnifiedIdentity",

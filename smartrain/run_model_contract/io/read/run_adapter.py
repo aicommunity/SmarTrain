@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from smartrain.unified.refs import unified_target_from_run
-from smartrain.unified.domain.models import UnifiedModelRef, UnifiedPayload, UnifiedRunRef
+from smartrain.run_model_contract.refs import unified_target_from_run
+from smartrain.run_model_contract.domain.models import UnifiedModelRef, UnifiedPayload, UnifiedRunRef
 
 from .normalizers import normalize_backend, normalize_path, normalize_task
 

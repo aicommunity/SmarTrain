@@ -20,7 +20,7 @@ def build_run_record_unified(
     *,
     read_test_metrics_for_run_cb: Any,
 ) -> RunRecord:
-    from smartrain.unified.gateway import load_target
+    from smartrain.run_model_contract.gateway import load_target
 
     payload = load_target(run_dir, source_kind="run")
     model_name: str | None = None
@@ -43,7 +43,7 @@ def build_run_record_unified(
 
 
 def read_test_metrics_for_run(run_dir: str, *, format_name: str = "pt") -> dict[str, Any]:
-    from smartrain.unified.gateway import load_metrics
+    from smartrain.run_model_contract.gateway import load_metrics
 
     metric_refs = load_metrics(run_dir, source_kind="run", format_name=format_name)
     if metric_refs:

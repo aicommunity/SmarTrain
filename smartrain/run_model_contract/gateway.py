@@ -6,15 +6,15 @@ from glob import glob
 from pathlib import Path
 from typing import Any
 
-from smartrain.unified.io.read.factory import ReadAdapterFactory
-from smartrain.unified.io.read.resolvers import infer_source_kind
-from smartrain.unified.io.write.writer import WriteReport, write_unified_snapshot
-from smartrain.unified.domain.context import UnifiedIdentity
-from smartrain.unified.domain.models import UnifiedMetricsRef, UnifiedPayload, UnifiedPredictionRef
-from smartrain.unified.domain.types import TaskType
-from smartrain.unified.domain.validators import validate_unified_payload
-from smartrain.unified.validate_backend import validate_unified_model_backends
-from smartrain.unified.io.read.metrics_csv import METRIC_AGG_COLUMNS, read_metrics_by_format_for_split
+from smartrain.run_model_contract.io.read.factory import ReadAdapterFactory
+from smartrain.run_model_contract.io.read.resolvers import infer_source_kind
+from smartrain.run_model_contract.io.write.writer import WriteReport, write_unified_snapshot
+from smartrain.run_model_contract.domain.context import UnifiedIdentity
+from smartrain.run_model_contract.domain.models import UnifiedMetricsRef, UnifiedPayload, UnifiedPredictionRef
+from smartrain.run_model_contract.domain.types import TaskType
+from smartrain.run_model_contract.domain.validators import validate_unified_payload
+from smartrain.run_model_contract.validate_backend import validate_unified_model_backends
+from smartrain.run_model_contract.io.read.metrics_csv import METRIC_AGG_COLUMNS, read_metrics_by_format_for_split
 from smartrain.tasks.context import TaskExecutionContext
 from smartrain.tasks.metrics import resolve_task_metrics_adapter
 

@@ -4,15 +4,15 @@ from dataclasses import replace
 
 import pytest
 
-from smartrain.unified.domain.errors import UnifiedCompatibilityError, UnifiedValidationError
-from smartrain.unified.domain.models import (
+from smartrain.run_model_contract.domain.errors import UnifiedCompatibilityError, UnifiedValidationError
+from smartrain.run_model_contract.domain.models import (
     UnifiedMetricsRef,
     UnifiedModelRef,
     UnifiedPayload,
     UnifiedPredictionRef,
 )
-from smartrain.unified.domain.validators import validate_unified_payload
-from smartrain.unified.validate_backend import validate_unified_model_backends
+from smartrain.run_model_contract.domain.validators import validate_unified_payload
+from smartrain.run_model_contract.validate_backend import validate_unified_model_backends
 
 
 def _base_payload() -> UnifiedPayload:

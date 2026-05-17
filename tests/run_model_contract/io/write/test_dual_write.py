@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from smartrain.unified.io.read.run_adapter import RunAdapter
-from smartrain.unified.io.write.dual_write import run_dual_write
+from smartrain.run_model_contract.io.read.run_adapter import RunAdapter
+from smartrain.run_model_contract.io.write.dual_write import run_dual_write
 
 
 def test_dual_write_best_effort_warns_on_legacy_failure(tmp_path: Path) -> None:

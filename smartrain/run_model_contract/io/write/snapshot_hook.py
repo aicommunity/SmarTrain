@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from smartrain.unified.env import unified_dual_write_mode, unified_write_enabled
+from smartrain.run_model_contract.env import unified_dual_write_mode, unified_write_enabled
 
 
 def maybe_dual_write_unified_snapshot(
@@ -23,9 +23,9 @@ def maybe_dual_write_unified_snapshot(
     if not status_ok or not unified_write_enabled():
         return
     try:
-        from smartrain.unified.io.read.resolvers import infer_source_kind
-        from smartrain.unified.io.write.dual_write import run_dual_write
-        from smartrain.unified.gateway import UnifiedGatewayOptions, load_target
+        from smartrain.run_model_contract.io.read.resolvers import infer_source_kind
+        from smartrain.run_model_contract.io.write.dual_write import run_dual_write
+        from smartrain.run_model_contract.gateway import UnifiedGatewayOptions, load_target
 
         dual_mode = unified_dual_write_mode()
         source_kind = infer_source_kind(root_dir)

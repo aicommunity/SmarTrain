@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.unified.io.read.model_adapter import ModelAdapter
-from smartrain.unified.io.read.run_adapter import RunAdapter
+from smartrain.run_model_contract.io.read.model_adapter import ModelAdapter
+from smartrain.run_model_contract.io.read.run_adapter import RunAdapter
 
 
 def test_equivalence_run_vs_model_for_same_pt_artifact(tmp_path: Path) -> None:

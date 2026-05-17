@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from smartrain.unified.domain.models import UnifiedPayload
+from smartrain.run_model_contract.domain.models import UnifiedPayload
 
 
 def map_legacy_payload(payload: UnifiedPayload) -> UnifiedPayload:

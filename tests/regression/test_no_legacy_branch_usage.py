@@ -31,8 +31,8 @@ def test_inference_run_path_uses_canonical_branch_by_default(monkeypatch, tmp_pa
     class _C:
         run_id = "r1"
 
-    monkeypatch.setattr("smartrain.unified.gateway.load_target", lambda *_a, **_k: _P())
-    monkeypatch.setattr("smartrain.unified.gateway.resolve_task_context", lambda *_a, **_k: _C())
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.resolve_task_context", lambda *_a, **_k: _C())
 
     import argparse
 
@@ -54,7 +54,7 @@ def test_results_metrics_reader_does_not_call_legacy_by_default(monkeypatch, tmp
         primary_metrics = {"mAP50-95": 0.61}
         secondary_metrics = {"Box-F1": 0.72}
 
-    monkeypatch.setattr("smartrain.unified.gateway.load_metrics", lambda *_a, **_k: [_Metric()])
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.load_metrics", lambda *_a, **_k: [_Metric()])
 
     row = _read_test_metrics_for_run(str(run_dir))
     assert row.get("mAP50-95") == 0.61

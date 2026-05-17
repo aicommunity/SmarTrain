@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from smartrain.unified.domain.types import BackendType, ModelFormat, SourceKind, TaskType
+from smartrain.run_model_contract.domain.types import BackendType, ModelFormat, SourceKind, TaskType
 
 
 @dataclass(frozen=True)
