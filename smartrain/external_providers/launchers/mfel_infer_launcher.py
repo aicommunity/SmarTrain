@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
+
+from smartrain.core.inference.ultralytics_prediction_extract import extract_task_outputs_from_ultralytics_preds
+
+
+def _extract_task_outputs(preds: Any, task_type: str) -> dict[str, Any]:
+    return extract_task_outputs_from_ultralytics_preds(None, preds, task_type=task_type)
 
 
 class MFELConvModuleShim:  # picklable top-level shim for broken forks
@@ -32,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--device", default=None)
     p.add_argument("--project", default=None)
     p.add_argument("--name", default=None)
+    p.add_argument("--result-json", default=None)
+    p.add_argument("--task", default="detection")
     args = p.parse_args(argv)
 
     repo = Path(args.repo).expanduser().resolve()
@@ -63,7 +73,9 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["name"] = str(args.name)
     if args.project or args.name:
         kwargs["exist_ok"] = True
-    model.predict(**kwargs)
+    preds = model.predict(**kwargs)
+    if args.result_json:
+        _write_structured_result(args.result_json, preds, task_type=str(args.task or "detection"))
     return 0
 
 
@@ -88,7 +100,7 @@ def _patch_mfel_missing_symbols() -> None:
         from ultralytics.nn.modules import block as block_mod
     except Exception:
         return
-    if hasattr(block_mod, "ConvModule"):
+    if getattr(block_mod, "ConvModule", None) is not None:
         return
 
     class _PatchedConvModule(MFELConvModuleShim, nn.Module):  # type: ignore[misc]
@@ -98,6 +110,19 @@ def _patch_mfel_missing_symbols() -> None:
     _PatchedConvModule.__qualname__ = "MFELPatchedConvModule"
     globals()["MFELPatchedConvModule"] = _PatchedConvModule
     setattr(block_mod, "ConvModule", _PatchedConvModule)
+
+
+def _write_structured_result(path: str, preds, *, task_type: str) -> None:
+    images: list[dict[str, object]] = []
+    task_outputs = extract_task_outputs_from_ultralytics_preds(
+        None, preds, task_type=str(task_type or "detection").strip().lower()
+    )
+    detections = task_outputs.get("detections")
+    images.append({"detections": detections if isinstance(detections, list) else [], "task_outputs": task_outputs})
+    payload = {"return_code": 0, "images": images}
+    out = Path(path).expanduser().resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 if __name__ == "__main__":

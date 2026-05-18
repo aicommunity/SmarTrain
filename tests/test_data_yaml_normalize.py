@@ -3,7 +3,7 @@ from __future__ import annotations
 import yaml
 from pathlib import Path
 
-from smartrain.data_yaml_normalize import (
+from smartrain.services.datasets.data_yaml_normalize import (
     normalize_data_yaml_file,
     normalize_data_yaml_mapping,
     run_normalize,

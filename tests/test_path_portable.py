@@ -5,9 +5,9 @@ import os
 import zipfile
 from pathlib import Path
 
-from smartrain.dataset_passport import write_dataset_passport
-from smartrain.path_portable import relativize_abs_paths_in_obj, relativize_if_under, resolve_stored_path_under_workspace
-from smartrain.workspace_paths import extract_dataset_zip_to_cache
+from smartrain.services.datasets.dataset_passport import write_dataset_passport
+from smartrain.core.runtime.path_portable import relativize_abs_paths_in_obj, relativize_if_under, resolve_stored_path_under_workspace
+from smartrain.core.runtime.workspace_paths import extract_dataset_zip_to_cache
 
 
 def test_relativize_if_under_inside(tmp_path: Path) -> None:

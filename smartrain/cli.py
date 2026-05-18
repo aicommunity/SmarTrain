@@ -16,11 +16,15 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 
-from smartrain.interactive_contract import INTERACTIVE_ALLOWED_ENV
-from smartrain.train_backend_registry import default_train_provider
-from smartrain.train_model_catalog import TrainModelCatalog
-from smartrain.provider_global_index import list_provider_records
-from smartrain.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.cli_entrypoints.support.typer_non_interactive import (
+    env_forces_non_interactive_cli,
+    strip_typer_meta_non_interactive_flags,
+)
+from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
+from smartrain.core.training.ultralytics_model_alias_registry import default_train_provider
+from smartrain.core.training.train_model_catalog import TrainModelCatalog
+from smartrain.providers.core.global_index import list_provider_records
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 app = typer.Typer(
     name="smartrain",
@@ -97,10 +101,22 @@ Quick examples:
 HELP_MODEL_GROUP = """Model conversion tools.
 
 Quick examples:
+  smartrain model convert
   smartrain model convert --input models/best.pt --format onnx
-  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
-  smartrain model convert --input models/my_model.onnx --format tensorrt
+  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/2026-01-01_00-00-00.pt --format tensorrt-engine --precision fp16
+  smartrain model convert --input models/my_model.onnx --format tensorrt-trt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00
+
+Interactive convert:
+  - choose source model type: pt or onnx
+  - select a file (or enter a manual path)
+  - select one or multiple target models (onnx/engine/trt depending on source; CSV by numbers or values is supported, e.g. 1,3 or onnx,trt)
+  - set batch/imgsz and other export parameters
+  - run sources use canonical artifacts <run_dir>/<run_dir_name>.<ext>; legacy run layouts are canonized automatically
+
+Artifacts:
+  - tensorrt-engine: Ultralytics export to .engine
+  - tensorrt-trt: trtexec export to .trt
 """
 
 HELP_DEPS_GROUP = """Dependency management helpers.
@@ -305,10 +321,16 @@ def _forward_argparse_command(
     prepend_args: list[str] | None = None,
     empty_args_mode: str = "help",
 ) -> None:
-    args = list(prepend_args or []) + list(ctx.args)
-    interactive_allowed = (
-        len(args) == 0 and empty_args_mode in ("invoke", "invoke_if_tty_else_help")
-    )
+    raw = list(prepend_args or []) + list(ctx.args)
+    filtered, meta_stripped = strip_typer_meta_non_interactive_flags(raw)
+    legacy_ni = any(tok in raw for tok in ("-y", "--non-interactive"))
+    if meta_stripped or legacy_ni or env_forces_non_interactive_cli():
+        interactive_allowed = False
+    elif len(filtered) == 0 and empty_args_mode in ("invoke", "invoke_if_tty_else_help"):
+        interactive_allowed = True
+    else:
+        # Allow prompts when the user passed flags (e.g. smartrain test --run ...) from a TTY.
+        interactive_allowed = bool(sys.stdin.isatty())
     def _enhance_parser_help(parser_obj: object) -> None:
         if prog is None:
             return
@@ -319,15 +341,15 @@ def _forward_argparse_command(
             existing = getattr(parser_obj, "epilog", None)
             setattr(parser_obj, "epilog", f"{existing}\n\n{examples}" if existing else examples)
 
-    if not args:
+    if not filtered:
         if empty_args_mode == "invoke":
             with _interactive_flag_env(interactive_allowed):
-                _invoke_module_main(module, args)
+                _invoke_module_main(module, filtered)
             return
         if empty_args_mode == "invoke_if_tty_else_help":
             if sys.stdin.isatty():
                 with _interactive_flag_env(interactive_allowed):
-                    _invoke_module_main(module, args)
+                    _invoke_module_main(module, filtered)
                 return
         if build_parser:
             parser = build_parser()
@@ -338,20 +360,20 @@ def _forward_argparse_command(
                 parser.print_help()
             raise typer.Exit(0)
 
-    if build_parser and any(tok in ("--help", "-h") for tok in args):
+    if build_parser and any(tok in ("--help", "-h") for tok in filtered):
         parser = build_parser()
         if prog is not None and hasattr(parser, "prog"):
             parser.prog = prog
         _enhance_parser_help(parser)
         try:
-            parser.parse_args(args)
+            parser.parse_args(filtered)
         except SystemExit as e:
             code = e.code
             if code is None:
                 code = 0
             raise typer.Exit(code if isinstance(code, int) else 1)
     with _interactive_flag_env(interactive_allowed):
-        _invoke_module_main(module, args)
+        _invoke_module_main(module, filtered)
 
 
 @app.command(
@@ -372,11 +394,11 @@ def cmd_scan(ctx: typer.Context) -> None:
       - Optional: --repair-relative-paths / --repair-relative-paths-dry-run normalize stored paths under the workspace.
       - Use --help to inspect all low-level scan flags.
     """
-    from smartrain.datasets_json_former import build_datasets_json_arg_parser
+    from smartrain.workflows.datasets.datasets_entry import build_datasets_json_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.datasets_json_former",
+        module="smartrain.workflows.datasets.datasets_entry",
         build_parser=build_datasets_json_arg_parser,
         prog="smartrain scan",
         empty_args_mode="invoke_if_tty_else_help",
@@ -396,14 +418,14 @@ def cmd_normalize_data_yaml(ctx: typer.Context) -> None:
       smartrain normalize-data-yaml --workspace /data/MarsSmarTrain
       smartrain normalize-data-yaml --datasets-dir /data/MarsSmarTrain/datasets --dry-run
     """
-    from smartrain.data_yaml_normalize import build_arg_parser
+    from smartrain.services.datasets.data_yaml_normalize import build_arg_parser
 
     parser = build_arg_parser()
     if getattr(ctx, "resilient_parsing", False):
         return
     args = parser.parse_args(list(ctx.args))
-    from smartrain.data_yaml_normalize import run_normalize
-    from smartrain.workspace_paths import WorkspaceLayout, resolve_workspace_root
+    from smartrain.services.datasets.data_yaml_normalize import run_normalize
+    from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
     if args.datasets_dir:
         ddir = os.path.abspath(os.path.expanduser(args.datasets_dir))
@@ -429,13 +451,14 @@ def cmd_fusion(ctx: typer.Context) -> None:
 
     Notes:
       - Produces a new dataset directory under workspace datasets/.
+      - Requires datasets/datasets_info.json and datasets/class_names.json in the selected workspace.
       - Check output data.yaml before training.
     """
-    from smartrain.dataset_former import build_dataset_former_arg_parser
+    from smartrain.workflows.datasets.dataset_former import build_dataset_former_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_former",
+        module="smartrain.workflows.datasets.dataset_former",
         build_parser=build_dataset_former_arg_parser,
         prog="smartrain fusion",
         empty_args_mode="invoke_if_tty_else_help",
@@ -460,12 +483,12 @@ def cmd_train(ctx: typer.Context) -> None:
       - Writes outputs to workspace runs/.
       - Use smartrain analyze scan to inspect completed runs.
     """
-    from smartrain.model_training_module import build_train_arg_parser
+    from smartrain.cli_entrypoints.train_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.model_training_module",
-        build_parser=build_train_arg_parser,
+        module="smartrain.cli_entrypoints.train_app",
+        build_parser=build_arg_parser,
         prog="smartrain train",
         empty_args_mode="invoke",
     )
@@ -484,11 +507,11 @@ def cmd_augment(ctx: typer.Context) -> None:
       smartrain augment --dataset my_dataset --count 2
       smartrain augment --workspace /data/MarsSmarTrain --dataset my_dataset
     """
-    from smartrain.dataset_augment import build_augment_arg_parser
+    from smartrain.workflows.datasets.dataset_augment import build_augment_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_augment",
+        module="smartrain.workflows.datasets.dataset_augment",
         build_parser=build_augment_arg_parser,
         prog="smartrain augment",
         empty_args_mode="invoke_if_tty_else_help",
@@ -508,11 +531,11 @@ def cmd_balance(ctx: typer.Context) -> None:
       smartrain balance --dataset my_dataset --target-per-class 1000
       smartrain balance --workspace /data/MarsSmarTrain --dataset my_dataset
     """
-    from smartrain.dataset_balance import build_balance_arg_parser
+    from smartrain.workflows.datasets.dataset_balance import build_balance_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_balance",
+        module="smartrain.workflows.datasets.dataset_balance",
         build_parser=build_balance_arg_parser,
         prog="smartrain balance",
         empty_args_mode="invoke_if_tty_else_help",
@@ -532,7 +555,7 @@ def cmd_prune(ctx: typer.Context) -> None:
       smartrain prune dedup --dataset my_dataset
       smartrain prune dedup --dataset my_dataset --allow-balanced-dedup
     """
-    from smartrain.dataset_prune import (
+    from smartrain.workflows.datasets.dataset_prune import (
         build_prune_arg_parser,
         build_prune_dedup_arg_parser,
         build_prune_empty_arg_parser,
@@ -549,7 +572,7 @@ def cmd_prune(ctx: typer.Context) -> None:
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_prune",
+        module="smartrain.workflows.datasets.dataset_prune",
         build_parser=parser,
         prog=prog,
         empty_args_mode="invoke_if_tty_else_help",
@@ -572,11 +595,11 @@ def cmd_hash(ctx: typer.Context) -> None:
     Notes:
       - validate exit codes: 0 match, 1 mismatch, 2 error.
     """
-    from smartrain.dataset_hash import build_hash_arg_parser
+    from smartrain.services.datasets.dataset_hash import build_hash_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_hash",
+        module="smartrain.services.datasets.dataset_hash",
         build_parser=build_hash_arg_parser,
         prog="smartrain hash",
     )
@@ -596,13 +619,13 @@ def cmd_stats(ctx: typer.Context) -> None:
       smartrain stats compare --left ds_a --right ds_b
       smartrain stats --workspace /data/MarsSmarTrain
     """
-    from smartrain.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
+    from smartrain.services.datasets.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
 
     parser = build_stats_compare_arg_parser if (ctx.args and ctx.args[0] == "compare") else build_stats_arg_parser
     prog = "smartrain stats compare" if (ctx.args and ctx.args[0] == "compare") else "smartrain stats"
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_stats",
+        module="smartrain.services.datasets.dataset_stats",
         build_parser=parser,
         prog=prog,
         empty_args_mode="invoke_if_tty_else_help",
@@ -622,14 +645,32 @@ def cmd_roi(ctx: typer.Context) -> None:
       smartrain roi --dataset my_dataset --x1 0 --y1 100 --x2 1920 --y2 900
       smartrain roi --workspace /data/MarsSmarTrain --dataset my_dataset
     """
-    from smartrain.dataset_roi_yolo import build_roi_arg_parser
+    from smartrain.workflows.datasets.dataset_roi_yolo import build_roi_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_roi_yolo",
+        module="smartrain.workflows.datasets.dataset_roi_yolo",
         build_parser=build_roi_arg_parser,
         prog="smartrain roi",
         empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@app.command(
+    "test",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_test(ctx: typer.Context) -> None:
+    """Complete missing test artifacts for runs/models."""
+    from smartrain.cli_entrypoints.test_app import build_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.cli_entrypoints.test_app",
+        build_parser=build_arg_parser,
+        prog="smartrain test",
+        empty_args_mode="invoke",
     )
 
 
@@ -640,12 +681,12 @@ def cmd_roi(ctx: typer.Context) -> None:
 )
 def cmd_inference(ctx: typer.Context) -> None:
     """Run inference and save JSON report to workspace inference/."""
-    from smartrain.inference_cli import build_inference_arg_parser
+    from smartrain.cli_entrypoints.inference_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.inference_cli",
-        build_parser=build_inference_arg_parser,
+        module="smartrain.cli_entrypoints.inference_app",
+        build_parser=build_arg_parser,
         prog="smartrain inference",
         empty_args_mode="invoke",
     )
@@ -677,11 +718,11 @@ def cmd_report_dataset(ctx: typer.Context) -> None:
       smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
       smartrain report dataset --workspace /data/MarsSmarTrain --dataset my_dataset --no-pdf
     """
-    from smartrain.dataset_report import build_report_dataset_arg_parser
+    from smartrain.services.datasets.dataset_report import build_report_dataset_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_report",
+        module="smartrain.services.datasets.dataset_report",
         build_parser=build_report_dataset_arg_parser,
         prog="smartrain report dataset",
         empty_args_mode="invoke_if_tty_else_help",
@@ -705,36 +746,36 @@ queue_app = typer.Typer(
 @queue_app.command("list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_list(ctx: typer.Context) -> None:
     """List queued training tasks and statuses."""
-    _invoke_module_main("smartrain.training_queue_cli", ["list", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["list", *list(ctx.args)])
 
 
 @queue_app.command("add", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_add(ctx: typer.Context) -> None:
     """Add a training command to queue."""
-    _invoke_module_main("smartrain.training_queue_cli", ["add", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["add", *list(ctx.args)])
 
 
 @queue_app.command("remove", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_remove(ctx: typer.Context) -> None:
     """Remove a queued task by id."""
-    _invoke_module_main("smartrain.training_queue_cli", ["remove", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["remove", *list(ctx.args)])
 
 
 @queue_app.command("clear", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_clear(ctx: typer.Context) -> None:
     """Remove all tasks from queue."""
-    _invoke_module_main("smartrain.training_queue_cli", ["clear", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["clear", *list(ctx.args)])
 
 
 @queue_app.command("run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_queue_run_sub(ctx: typer.Context) -> None:
     """Run queue executor through queue subcommand."""
-    _invoke_module_main("smartrain.training_queue_cli", ["run", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.queue.training_queue_cli", ["run", *list(ctx.args)])
 
 
 def _queue_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        from smartrain.training_queue_cli import build_queue_cli_arg_parser
+        from smartrain.workflows.queue.training_queue_cli import build_queue_cli_arg_parser
 
         p = build_queue_cli_arg_parser()
         p.prog = "smartrain queue"
@@ -763,11 +804,11 @@ def cmd_queue_run(ctx: typer.Context) -> None:
       smartrain queue-run --no-gui
       smartrain queue-run --workspace /data/MarsSmarTrain
     """
-    from smartrain.training_queue import build_queue_run_arg_parser
+    from smartrain.workflows.queue.training_queue import build_queue_run_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.training_queue",
+        module="smartrain.workflows.queue.training_queue",
         build_parser=build_queue_run_arg_parser,
         prog="smartrain queue-run",
     )
@@ -782,48 +823,48 @@ registry_app = typer.Typer(
 @registry_app.command("runs-list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_runs_list(ctx: typer.Context) -> None:
     """List runs in workspace runs/."""
-    _invoke_module_main("smartrain.registry_cli", ["runs-list", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["runs-list", *list(ctx.args)])
 
 
 @registry_app.command("runs-info", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_runs_info(ctx: typer.Context) -> None:
     """Show training_info and key paths for a run."""
-    _invoke_module_main("smartrain.registry_cli", ["runs-info", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["runs-info", *list(ctx.args)])
 
 
 @registry_app.command("runs-metrics", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_runs_metrics(ctx: typer.Context) -> None:
     """Show metrics files for a run."""
-    _invoke_module_main("smartrain.registry_cli", ["runs-metrics", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["runs-metrics", *list(ctx.args)])
 
 
 @registry_app.command("models-add", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_models_add(ctx: typer.Context) -> None:
     """Promote model artifact from run into models/."""
-    _invoke_module_main("smartrain.registry_cli", ["models-add", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["models-add", *list(ctx.args)])
 
 
 @registry_app.command("models-list", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_models_list(ctx: typer.Context) -> None:
     """List promoted models in models/."""
-    _invoke_module_main("smartrain.registry_cli", ["models-list", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["models-list", *list(ctx.args)])
 
 
 @registry_app.command("models-info", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_models_info(ctx: typer.Context) -> None:
     """Show model manifest for a promoted model."""
-    _invoke_module_main("smartrain.registry_cli", ["models-info", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["models-info", *list(ctx.args)])
 
 
 @registry_app.command("models-remove", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_registry_models_remove(ctx: typer.Context) -> None:
     """Remove a promoted model from models/."""
-    _invoke_module_main("smartrain.registry_cli", ["models-remove", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.registry.registry_cli", ["models-remove", *list(ctx.args)])
 
 
 def _registry_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        from smartrain.registry_cli import build_registry_arg_parser
+        from smartrain.workflows.registry.registry_cli import build_registry_arg_parser
 
         p = build_registry_arg_parser()
         p.prog = "smartrain registry"
@@ -847,27 +888,27 @@ providers_app = typer.Typer(
 
 @providers_app.command("install", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_providers_install(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.providers_cli", ["install", *list(ctx.args)])
+    _invoke_module_main("smartrain.providers.cli", ["install", *list(ctx.args)])
 
 
 @providers_app.command("uninstall", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_providers_uninstall(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.providers_cli", ["uninstall", *list(ctx.args)])
+    _invoke_module_main("smartrain.providers.cli", ["uninstall", *list(ctx.args)])
 
 
 @providers_app.command("status", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_providers_status(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.providers_cli", ["status", *list(ctx.args)])
+    _invoke_module_main("smartrain.providers.cli", ["status", *list(ctx.args)])
 
 
 @providers_app.command("doctor", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def cmd_providers_doctor(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.providers_cli", ["doctor", *list(ctx.args)])
+    _invoke_module_main("smartrain.providers.cli", ["doctor", *list(ctx.args)])
 
 
 def _providers_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        from smartrain.providers_cli import build_providers_arg_parser
+        from smartrain.providers.cli import build_providers_arg_parser
 
         p = build_providers_arg_parser()
         p.prog = "smartrain providers"
@@ -928,7 +969,7 @@ analyze_app = typer.Typer(
 )
 def cmd_analyze_all(ctx: typer.Context) -> None:
     """Run end-to-end analysis session and build report artifacts."""
-    _invoke_module_main("smartrain.results_analyzer", ["all", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["all", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -944,7 +985,7 @@ def cmd_analyze_scan(ctx: typer.Context) -> None:
       smartrain analyze scan --models-root runs
       smartrain analyze scan --workspace /data/MarsSmarTrain
     """
-    _invoke_module_main("smartrain.results_analyzer", ["scan", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["scan", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -960,7 +1001,7 @@ def cmd_analyze_export_table(ctx: typer.Context) -> None:
       smartrain analyze export-table --models-root runs --output-dir analytics
       smartrain analyze export-table --workspace /data/MarsSmarTrain
     """
-    _invoke_module_main("smartrain.results_analyzer", ["export-table", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["export-table", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -976,7 +1017,7 @@ def cmd_analyze_compare(ctx: typer.Context) -> None:
       smartrain analyze compare --baseline runs/ds/2026-01-01_00-00-00 --others runs/ds/2026-01-02_00-00-00 -o compare.csv --out-png compare.png
       smartrain analyze compare --workspace /data/MarsSmarTrain --baseline runs/ds/2026-01-01_00-00-00 --others runs/ds/2026-01-02_00-00-00
     """
-    _invoke_module_main("smartrain.results_analyzer", ["compare", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["compare", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -992,7 +1033,7 @@ def cmd_analyze_pr_curves(ctx: typer.Context) -> None:
       smartrain analyze pr-curves --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml --out-png analytics/pr.png
       smartrain analyze pr-curves --workspace /data/MarsSmarTrain --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml
     """
-    _invoke_module_main("smartrain.results_analyzer", ["pr-curves", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["pr-curves", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -1008,7 +1049,7 @@ def cmd_analyze_inference_benchmark(ctx: typer.Context) -> None:
       smartrain analyze inference-benchmark --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml --split test --frames 200
       smartrain analyze inference-benchmark --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml --device 0 --half
     """
-    _invoke_module_main("smartrain.results_analyzer", ["inference-benchmark", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["inference-benchmark", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -1024,7 +1065,7 @@ def cmd_analyze_inference_plot(ctx: typer.Context) -> None:
       smartrain analyze inference-plot --csv analytics/inference_tests/ds_a.csv --metric avg_total_fps
       smartrain analyze inference-plot --csv analytics/inference_tests/ds_a.csv --out-png analytics/ds_a_speed.png
     """
-    _invoke_module_main("smartrain.results_analyzer", ["inference-plot", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["inference-plot", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -1033,7 +1074,7 @@ def cmd_analyze_inference_plot(ctx: typer.Context) -> None:
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def cmd_analyze_test_metrics_plot(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.results_analyzer", ["test-metrics-plot", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["test-metrics-plot", *list(ctx.args)])
 
 
 @analyze_app.command(
@@ -1049,14 +1090,14 @@ def cmd_analyze_leaderboard(ctx: typer.Context) -> None:
       smartrain analyze leaderboard --quality-metric mAP50-95 --speed-metric avg_inference_fps
       smartrain analyze leaderboard --weight-quality 0.7 --weight-speed 0.2 --weight-stability 0.1
     """
-    _invoke_module_main("smartrain.results_analyzer", ["leaderboard", *list(ctx.args)])
+    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["leaderboard", *list(ctx.args)])
 
 
 def _analyze_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         if sys.stdin.isatty():
             with _interactive_flag_env(True):
-                _invoke_module_main("smartrain.results_analyzer", ["all"])
+                _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["all"])
             raise typer.Exit(0)
         console.print(
             "[red][ERROR][/red] `smartrain analyze` без подкоманды требует интерактивный терминал (TTY). "
@@ -1088,15 +1129,15 @@ def cmd_model_convert(ctx: typer.Context) -> None:
 
     Examples:
       smartrain model convert --input models/best.pt --format onnx
-      smartrain model convert --input runs/my_dataset/2026-01-01_00-00-00/weights/best.pt --format both --precision fp16
-      smartrain model convert --input models/my_model.onnx --format tensorrt
+      smartrain model convert --input runs/my_dataset/2026-01-01_00-00-00/2026-01-01_00-00-00.pt --format tensorrt-engine --precision fp16
+      smartrain model convert --input models/my_model.onnx --format tensorrt-trt
       smartrain model convert
     """
-    from smartrain.model_convert_cli import build_model_convert_arg_parser
+    from smartrain.workflows.models.model_convert_cli import build_model_convert_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.model_convert_cli",
+        module="smartrain.workflows.models.model_convert_cli",
         build_parser=build_model_convert_arg_parser,
         prog="smartrain model convert",
         empty_args_mode="invoke_if_tty_else_help",
@@ -1109,18 +1150,18 @@ def cmd_model_convert(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_model_release(ctx: typer.Context) -> None:
-    """Release run `best.pt` into workspace models catalog.
+    """Release canonical run `.pt` into workspace models catalog.
 
     Examples:
       smartrain model release --run runs/my_dataset/2026-01-01_00-00-00
       smartrain model release --run 1
       smartrain model release
     """
-    from smartrain.model_release_cli import build_model_release_arg_parser
+    from smartrain.workflows.models.model_release_cli import build_model_release_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.model_release_cli",
+        module="smartrain.workflows.models.model_release_cli",
         build_parser=build_model_release_arg_parser,
         prog="smartrain model release",
         empty_args_mode="invoke_if_tty_else_help",
@@ -1159,13 +1200,36 @@ def cmd_plot(ctx: typer.Context) -> None:
     Notes:
       - Prefer `smartrain analyze ...` for new workflows.
     """
-    from smartrain.results_analyzer import build_analyze_arg_parser
+    from smartrain.workflows.analyze.analyze_entry import build_analyze_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.plot_creator",
+        module="smartrain.workflows.analyze.plot_creator",
         build_parser=build_analyze_arg_parser,
         prog="smartrain plot",
+    )
+
+
+@app.command(
+    "migrate",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_migrate(ctx: typer.Context) -> None:
+    """Unified migration utilities.
+
+    Examples:
+      smartrain migrate unified --mode dry-run
+      smartrain migrate unified --mode apply --continue-on-error
+      smartrain migrate unified --source-kind run --report analytics/migration-reports/run-only.json
+    """
+    from smartrain.workflows.migration.cli_migration import build_migration_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.migration.cli_migration",
+        build_parser=build_migration_arg_parser,
+        prog="smartrain migrate",
     )
 
 
@@ -1182,11 +1246,11 @@ def cmd_migrate_models(ctx: typer.Context) -> None:
       smartrain migrate-models --workspace /data/MarsSmarTrain
       smartrain migrate-models --dry-run
     """
-    from smartrain.migrate_models_to_smartrain import build_migrate_models_arg_parser
+    from smartrain.workflows.migration.migrate_models_to_smartrain import build_migrate_models_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.migrate_models_to_smartrain",
+        module="smartrain.workflows.migration.migrate_models_to_smartrain",
         build_parser=build_migrate_models_arg_parser,
         prog="smartrain migrate-models",
     )
@@ -1210,11 +1274,11 @@ def cmd_cvat(ctx: typer.Context) -> None:
       - Subcommands: import, export.
       - Use --tmp-dir to control temporary workspace.
     """
-    from smartrain.cvat_cli import build_cvat_arg_parser
+    from smartrain.workflows.datasets.cvat_cli import build_cvat_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.cvat_cli",
+        module="smartrain.workflows.datasets.cvat_cli",
         build_parser=build_cvat_arg_parser,
         prog="smartrain cvat",
     )
@@ -1236,11 +1300,11 @@ def cmd_clearml_upload(ctx: typer.Context) -> None:
     Notes:
       - Requires ClearML extras: pip install -e ".[clearml]".
     """
-    from smartrain.clearml_upload import build_clearml_upload_arg_parser
+    from smartrain.workflows.analyze.clearml_upload import build_clearml_upload_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.clearml_upload",
+        module="smartrain.workflows.analyze.clearml_upload",
         build_parser=build_clearml_upload_arg_parser,
         prog="smartrain clearml-upload",
     )
@@ -1262,11 +1326,11 @@ def cmd_sahi(ctx: typer.Context) -> None:
     Notes:
       - Requires SAHI extras: pip install -e ".[sahi]".
     """
-    from smartrain.sahi_cli import build_sahi_arg_parser
+    from smartrain.workflows.inference.sahi_cli import build_sahi_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.sahi_cli",
+        module="smartrain.workflows.inference.sahi_cli",
         build_parser=build_sahi_arg_parser,
         prog="smartrain sahi",
     )
@@ -1285,11 +1349,11 @@ def cmd_heatmap(ctx: typer.Context) -> None:
       smartrain heatmap --model models/best.pt --source image.jpg --output heatmap.png
       smartrain heatmap --model models/best.pt --source image.jpg --colormap 12
     """
-    from smartrain.heatmap_cli import build_heatmap_arg_parser
+    from smartrain.workflows.inference.heatmap_cli import build_heatmap_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.heatmap_cli",
+        module="smartrain.workflows.inference.heatmap_cli",
         build_parser=build_heatmap_arg_parser,
         prog="smartrain heatmap",
     )
@@ -1308,11 +1372,11 @@ def cmd_orient(ctx: typer.Context) -> None:
       smartrain orient --dataset my_dataset --angles 0,90,180,270
       smartrain orient --workspace /data/MarsSmarTrain --dataset my_dataset
     """
-    from smartrain.dataset_orient import build_orient_arg_parser
+    from smartrain.workflows.datasets.dataset_orient import build_orient_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.dataset_orient",
+        module="smartrain.workflows.datasets.dataset_orient",
         build_parser=build_orient_arg_parser,
         prog="smartrain orient",
         empty_args_mode="invoke_if_tty_else_help",

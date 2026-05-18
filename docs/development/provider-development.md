@@ -46,13 +46,13 @@ Rules:
 
 ## 4. Provider model catalog and strict validation
 
-File: `smartrain/train_model_catalog.py`
+File: `smartrain/core/training/train_model_catalog.py`
 
 Add provider aliases to `_EXTERNAL_PROVIDER_FALLBACK_ALIASES` and optional dynamic discovery.
 
 Validation path:
 
-- `train`: `model_training_module.py` with `is_supported_external_provider_model(...)`.
+- `train`: `train_cli_callbacks.apply_external_provider_defaults_cb` / `train_interactive_helpers_service` with `is_supported_external_provider_model(...)`.
 - `inference`: `inference_cli.py` with the same strict provider-scoped validation.
 
 If alias is not supported, command must fail with clear error and list of supported aliases.
@@ -64,7 +64,7 @@ Current behavior when `--external-provider` is set and explicit args are missing
 - default model is selected from provider catalog;
 - launcher defaults are applied for missing values: `epochs=70`, `batch=8`, `img_size=640`.
 
-This logic is in `model_training_module.py` (`_apply_external_provider_defaults`).
+This logic is in `services/training/train_interactive_helpers_service.py` (`apply_external_provider_defaults`).
 
 ## 6. Run naming and artifact normalization
 
@@ -76,12 +76,12 @@ Model token must be sanitized from filenames/paths to avoid nested invalid direc
 
 Required normalized output contract per run:
 
-- `train/weights/best.pt`
+- `<run_dir_name>.pt` in run root
 - `test/`
 - `test_metrics.csv`
 - `training_metadata.json`
 
-Normalization helpers are in `model_training_module.py`.
+Normalization helpers are in `services/training/train_model_resolution_service.py`.
 
 ## 7. MFEL-style fallback pattern (custom provider compatibility)
 

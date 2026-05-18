@@ -8,20 +8,48 @@ from pathlib import Path
 
 import pytest
 
-from smartrain import cli_prompts
-from smartrain import model_training_module as mtm
-from smartrain.workspace_paths import DATASETS_INFO_FILE, deploy_workspace
+from smartrain.cli_entrypoints.support import cli_prompts
+from smartrain.core.runtime.run_artifacts import preferred_run_model_path
+from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, WorkspaceLayout, deploy_workspace
+from smartrain.services.training import train_cli_callbacks
+from smartrain.services.training.train_base_runs_service import (
+    collect_available_base_runs,
+    print_available_base_runs,
+)
+from smartrain.services.training.train_cli_parsers import BATCH, EPOCHS, IMG_SIZE, MODEL_VERSION
+from smartrain.workflows.training import train_entry
 
 
 def _patch_train_prompts(monkeypatch: pytest.MonkeyPatch, answers: Iterator[str]) -> None:
-    """Dataset choice uses ``cli_prompts.prompt``; other fields use ``mtm._prompt_input``."""
+    """Dataset choice uses ``cli_prompts.prompt``; free-text uses ``train_cli_callbacks.prompt_input``."""
 
     def _one(*_a, **_k):
         return next(answers)
 
+    def _yes_no(_label, default=False):
+        try:
+            raw = next(answers).strip().lower()
+        except StopIteration:
+            return default
+        if not raw:
+            return default
+        return raw in ("y", "yes", "1", "true")
+
     monkeypatch.setattr(cli_prompts, "prompt", _one)
-    monkeypatch.setattr(mtm, "_prompt_input", _one)
-    monkeypatch.setattr(mtm, "_prompt_train_device", lambda default=None: str(default or "cpu"))
+    monkeypatch.setattr(train_cli_callbacks, "prompt_input", _one)
+    monkeypatch.setattr(train_cli_callbacks, "prompt_int", lambda _label, default: int(default))
+    monkeypatch.setattr(train_cli_callbacks, "prompt_yes_no", _yes_no)
+    monkeypatch.setattr(
+        train_cli_callbacks,
+        "prompt_optional_int",
+        lambda _label, default=None: (int(default) if default is not None else None),
+    )
+    monkeypatch.setattr(
+        train_cli_callbacks,
+        "prompt_optional_float",
+        lambda _label, default=None: (float(default) if default is not None else None),
+    )
+    monkeypatch.setattr(train_cli_callbacks, "prompt_train_device", lambda default=None: str(default or "cpu"))
 
 
 def _base_args(workspace: Path) -> argparse.Namespace:
@@ -31,10 +59,10 @@ def _base_args(workspace: Path) -> argparse.Namespace:
         ultralytics_yaml=None,
         data=None,
         task="detect",
-        model=mtm.MODEL_VERSION,
-        epochs=mtm.EPOCHS,
-        batch=mtm.BATCH,
-        img_size=mtm.IMG_SIZE,
+        model=MODEL_VERSION,
+        epochs=EPOCHS,
+        batch=BATCH,
+        img_size=IMG_SIZE,
         device=None,
         target_path=None,
         model_dir=None,
@@ -44,8 +72,6 @@ def _base_args(workspace: Path) -> argparse.Namespace:
         val_conf=None,
         val_iou=None,
         weighted_sampling=False,
-        export_onnx=False,
-        export_onnx_fp32=False,
         clearml=False,
         clearml_project=None,
     )
@@ -74,20 +100,18 @@ def test_train_interactive_defaults_apply(tmp_path: Path, monkeypatch: pytest.Mo
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
     )
     _patch_train_prompts(monkeypatch, answers)
 
-    assert mtm._run_interactive_train_setup(args) is True
+    assert train_cli_callbacks.run_interactive_train_setup_cb(args) is True
     assert args.data == "ds_a"
-    assert args.model == f"{mtm.MODEL_VERSION}.pt"
-    assert args.epochs == mtm.EPOCHS
-    assert args.batch == mtm.BATCH
-    assert args.img_size == mtm.IMG_SIZE
+    assert args.model == f"{MODEL_VERSION}.pt"
+    assert args.epochs == EPOCHS
+    assert args.batch == BATCH
+    assert args.img_size == IMG_SIZE
     assert args.target_path == str(tmp_path / "runs")
     assert args.test_only is False
 
@@ -124,7 +148,7 @@ def test_train_interactive_prints_available_datasets_like_fusion(
         ]
     )
     _patch_train_prompts(monkeypatch, answers)
-    assert mtm._run_interactive_train_setup(args) is True
+    assert train_cli_callbacks.run_interactive_train_setup_cb(args) is True
 
     out = capsys.readouterr().out
     assert "[INFO] Options for Dataset:" in out
@@ -159,15 +183,32 @@ def test_train_interactive_test_only_requires_model_dir(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
     )
     _patch_train_prompts(monkeypatch, answers)
+    monkeypatch.setattr(
+        train_cli_callbacks,
+        "_pick_model_interactive_cb",
+        lambda _options, default: default.replace(".pt", "") if default.endswith(".pt") else default,
+    )
+    monkeypatch.setattr(
+        train_cli_callbacks,
+        "prompt_yes_no",
+        lambda label, default=False: True if "test-only" in label.lower() else default,
+    )
+    model_dir_attempts = {"count": 0}
 
-    assert mtm._run_interactive_train_setup(args) is True
+    def _prompt_input_model_dir(label, default="", **kwargs):
+        if "model-dir" in label.lower():
+            model_dir_attempts["count"] += 1
+            return "" if model_dir_attempts["count"] == 1 else "/tmp/existing_model"
+        return next(answers)
+
+    monkeypatch.setattr(train_cli_callbacks, "prompt_input", _prompt_input_model_dir)
+
+    assert train_cli_callbacks.run_interactive_train_setup_cb(args) is True
     assert args.test_only is True
     assert args.model_dir == "/tmp/existing_model"
 
@@ -176,7 +217,10 @@ def test_train_main_no_args_enters_interactive(monkeypatch: pytest.MonkeyPatch) 
     called = {"interactive": 0}
     args = argparse.Namespace(config=None)
 
-    monkeypatch.setattr(mtm, "parse_args", lambda argv: args)
+    monkeypatch.setattr(
+        "smartrain.services.training.train_cli_main.parse_train_args",
+        lambda argv: args,
+    )
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
     def _fake_setup(ns):
@@ -184,10 +228,16 @@ def test_train_main_no_args_enters_interactive(monkeypatch: pytest.MonkeyPatch) 
         ns.data = "dummy"
         return True
 
-    monkeypatch.setattr(mtm, "_run_interactive_train_setup", _fake_setup)
-    monkeypatch.setattr(mtm, "_resolve_cli_paths_with_profile", lambda *a, **k: (_ for _ in ()).throw(ValueError("stop")))
+    monkeypatch.setattr(
+        "smartrain.services.training.train_cli_main._default_run_interactive_train_setup_cb",
+        _fake_setup,
+    )
+    monkeypatch.setattr(
+        "smartrain.services.training.train_cli_main._default_resolve_cli_paths_with_profile_cb",
+        lambda *a, **k: (_ for _ in ()).throw(ValueError("stop")),
+    )
 
-    mtm.main([])
+    train_entry.main([])
     assert called["interactive"] == 1
 
 
@@ -205,18 +255,20 @@ def test_train_interactive_skips_prompts_for_values_from_ultralytics_yaml(
         [
             "ds_a",  # dataset
             "/tmp/ultra.yaml",  # ultralytics_yaml
+            "",  # device
             "",  # target_path
             "",  # test_only
             "",  # val_imgsz
             "",  # val_conf
             "",  # val_iou
+            "",  # clearml_project
             "",  # non_interactive
         ]
     )
     _patch_train_prompts(monkeypatch, answers)
     monkeypatch.setattr(
-        mtm,
-        "_load_ultralytics_yaml",
+        train_cli_callbacks,
+        "load_ultralytics_yaml_cb",
         lambda _path: {
             "model": "yolo11s.pt",
             "epochs": 7,
@@ -224,22 +276,18 @@ def test_train_interactive_skips_prompts_for_values_from_ultralytics_yaml(
             "imgsz": 512,
             "task": "segment",
             "weighted_sampling": True,
-            "export_onnx": True,
-            "export_onnx_half": False,
             "clearml": True,
             "clearml_project": "ProjA",
         },
     )
 
-    assert mtm._run_interactive_train_setup(args) is True
+    assert train_cli_callbacks.run_interactive_train_setup_cb(args) is True
     assert args.task == "segment"
     assert args.model == "yolo11s.pt"
     assert args.epochs == 7
     assert args.batch == 4
     assert args.img_size == 512
     assert args.weighted_sampling is True
-    assert args.export_onnx is True
-    assert args.export_onnx_fp32 is True
     assert args.clearml is True
     assert args.clearml_project == "ProjA"
 
@@ -250,7 +298,7 @@ def test_collect_available_base_runs_sorted_historically(tmp_path: Path) -> None
     (tmp_path / "runs" / "ds_a" / "run1" / "train" / "args.yaml").write_text("epochs: 5\n", encoding="utf-8")
     (tmp_path / "runs" / "ds_b" / "run2" / "train").mkdir(parents=True, exist_ok=True)
     (tmp_path / "runs" / "ds_b" / "run2" / "train" / "args.yaml").write_text("epochs: 7\n", encoding="utf-8")
-    runs = mtm._collect_available_base_runs(mtm.WorkspaceLayout(str(tmp_path)), "ds_b")
+    runs = train_cli_callbacks._collect_available_base_runs_cb(WorkspaceLayout(str(tmp_path)), "ds_b")
     assert len(runs) == 2
     assert runs[0]["run_rel"] == "ds_b/run2"
     assert runs[1]["run_rel"] == "ds_a/run1"
@@ -293,15 +341,13 @@ def test_train_interactive_uses_selected_base_run_defaults(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
     )
     _patch_train_prompts(monkeypatch, answers)
 
-    assert mtm._run_interactive_train_setup(args) is True
+    assert train_cli_callbacks.run_interactive_train_setup_cb(args) is True
     assert args.model == "yolo11m.pt"
     assert args.epochs == 42
     assert args.batch == 6
@@ -312,7 +358,7 @@ def test_print_available_base_runs_compact_oldest_first(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     deploy_workspace(str(tmp_path))
-    layout = mtm.WorkspaceLayout(str(tmp_path))
+    layout = WorkspaceLayout(str(tmp_path))
     run_old = tmp_path / "runs" / "ds_a" / "2026-04-01_10-00_old"
     run_new = tmp_path / "runs" / "ds_b" / "2026-04-02_10-00_new"
     (run_old / "train").mkdir(parents=True, exist_ok=True)
@@ -325,8 +371,8 @@ def test_print_available_base_runs_compact_oldest_first(
         "model: yolo11s.pt\nepochs: 9\nbatch: 4\ntask: segment\n",
         encoding="utf-8",
     )
-    runs = mtm._collect_available_base_runs(layout, "ds_a")
-    mtm._print_available_base_runs("ds_a", runs)
+    runs = train_cli_callbacks._collect_available_base_runs_cb(layout, "ds_a")
+    print_available_base_runs("ds_a", runs)
     out = capsys.readouterr().out
     assert "Available base runs (selected dataset first, oldest first)" in out
     assert "1. ds_a/2026-04-01_10-00_old [selected-dataset] | provider:dr-yolo | model:yolov8n.pt | b=2 e=3" in out
@@ -360,14 +406,12 @@ def test_train_interactive_model_manual_entry(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
     )
     _patch_train_prompts(monkeypatch, answers)
-    assert mtm._run_interactive_train_setup(args) is True
+    assert train_cli_callbacks.run_interactive_train_setup_cb(args) is True
     assert args.model == "fork-yolo11s.pt"
 
 
@@ -396,14 +440,12 @@ def test_train_interactive_model_options_filtered_by_task(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
     )
     _patch_train_prompts(monkeypatch, answers)
-    assert mtm._run_interactive_train_setup(args) is True
+    assert train_cli_callbacks.run_interactive_train_setup_cb(args) is True
     assert args.model.endswith("-seg.pt")
     out = capsys.readouterr().out
     assert "[INFO] Model options:" in out
@@ -424,8 +466,7 @@ def test_train_interactive_selects_external_provider_from_prefixed_alias(
     venv_path.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        mtm,
-        "list_provider_records",
+        "smartrain.providers.core.global_index.list_provider_records",
         lambda: [
             {
                 "provider_id": "dr-yolo",
@@ -450,14 +491,12 @@ def test_train_interactive_selects_external_provider_from_prefixed_alias(
             "",  # val_conf
             "",  # val_iou
             "",  # weighted_sampling
-            "",  # export_onnx
-            "",  # export_onnx_fp32
             "",  # clearml
             "",  # non_interactive
         ]
     )
     _patch_train_prompts(monkeypatch, answers)
-    assert mtm._run_interactive_train_setup(args) is True
+    assert train_cli_callbacks.run_interactive_train_setup_cb(args) is True
     assert args.external_provider == "dr-yolo"
     assert args.model == "yolov8n.pt"
 
@@ -480,8 +519,11 @@ def test_train_main_parses_provider_prefixed_model_and_writes_external_marker(
         captured["model"] = kwargs.get("model")
         return 0
 
-    monkeypatch.setattr(mtm, "run_external_train", _fake_run_external_train)
-    rc = mtm.main(
+    monkeypatch.setattr(
+        "smartrain.services.training.train_runtime_ops.run_external_train",
+        _fake_run_external_train,
+    )
+    rc = train_entry.main(
         [
             "--workspace",
             str(tmp_path),
@@ -511,7 +553,7 @@ def test_train_main_unknown_provider_in_model_returns_error(
     dataset_dir = tmp_path / "datasets" / "ds_a"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     (dataset_dir / "data.yaml").write_text("train: train/images\nval: val/images\n", encoding="utf-8")
-    rc = mtm.main(
+    rc = train_entry.main(
         [
             "--workspace",
             str(tmp_path),
@@ -535,7 +577,7 @@ def test_train_main_rejects_unsupported_model_for_external_provider(
     dataset_dir = tmp_path / "datasets" / "ds_a"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     (dataset_dir / "data.yaml").write_text("train: train/images\nval: val/images\n", encoding="utf-8")
-    rc = mtm.main(
+    rc = train_entry.main(
         [
             "--workspace",
             str(tmp_path),
@@ -566,8 +608,14 @@ def test_train_main_external_layout_normalized_to_train_subdir(
     target_root = tmp_path / "target"
     target_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(mtm, "calculate_dataset_hash", lambda _p: "abc12345")
-    monkeypatch.setattr(mtm, "_build_run_name", lambda *a, **k: "run-fixed")
+    monkeypatch.setattr(
+        "smartrain.services.training.train_yolo_execution_service.calculate_dataset_hash",
+        lambda _p: "abc12345",
+    )
+    monkeypatch.setattr(
+        "smartrain.services.training.train_runtime_ops.build_run_name",
+        lambda *a, **k: "run-fixed",
+    )
     called = {"test": False}
 
     def _fake_run_external_train(provider_id: str, repo_path: str, venv_path: str, **kwargs):
@@ -586,9 +634,15 @@ def test_train_main_external_layout_normalized_to_train_subdir(
         now = datetime.now()
         return now, now, {"imgsz": 640, "iou": 0.7}
 
-    monkeypatch.setattr(mtm, "run_external_train", _fake_run_external_train)
-    monkeypatch.setattr(mtm, "test_yolo", _fake_test_yolo)
-    rc = mtm.main(
+    monkeypatch.setattr(
+        "smartrain.services.training.train_runtime_ops.run_external_train",
+        _fake_run_external_train,
+    )
+    monkeypatch.setattr(
+        "smartrain.services.training.train_runtime_ops._test_yolo",
+        _fake_test_yolo,
+    )
+    rc = train_entry.main(
         [
             "--workspace",
             str(tmp_path),
@@ -611,8 +665,8 @@ def test_train_main_external_layout_normalized_to_train_subdir(
     assert rc == 0
     run_dir = target_root / "ds_a" / "run-fixed"
     assert called["test"] is True
-    assert (run_dir / "train" / "args.yaml").is_file()
-    assert (run_dir / "train" / "weights" / "best.pt").is_file()
+    assert (run_dir / "train-ultralytics" / "args.yaml").is_file() or (run_dir / "train" / "args.yaml").is_file()
+    assert Path(preferred_run_model_path(str(run_dir), ".pt")).is_file()
     assert (run_dir / "training_metadata.json").is_file()
     payload = json.loads((run_dir / "training_metadata.json").read_text(encoding="utf-8"))
     assert payload["status"]["testing"]["success"] is True
@@ -627,7 +681,10 @@ def test_train_main_external_best_pt_moved_to_contract_path(
     (dataset_dir / "data.yaml").write_text("train: train/images\nval: val/images\n", encoding="utf-8")
     target_root = tmp_path / "target"
     target_root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(mtm, "_build_run_name", lambda *a, **k: "run-fixed")
+    monkeypatch.setattr(
+        "smartrain.services.training.train_runtime_ops.build_run_name",
+        lambda *a, **k: "run-fixed",
+    )
 
     def _fake_run_external_train(provider_id: str, repo_path: str, venv_path: str, **kwargs):
         run_dir = target_root / "ds_a" / "run-fixed"
@@ -639,9 +696,15 @@ def test_train_main_external_best_pt_moved_to_contract_path(
         now = datetime.now()
         return now, now, {}
 
-    monkeypatch.setattr(mtm, "run_external_train", _fake_run_external_train)
-    monkeypatch.setattr(mtm, "test_yolo", _fake_test_yolo)
-    rc = mtm.main(
+    monkeypatch.setattr(
+        "smartrain.services.training.train_runtime_ops.run_external_train",
+        _fake_run_external_train,
+    )
+    monkeypatch.setattr(
+        "smartrain.services.training.train_runtime_ops._test_yolo",
+        _fake_test_yolo,
+    )
+    rc = train_entry.main(
         [
             "--workspace",
             str(tmp_path),
@@ -663,5 +726,5 @@ def test_train_main_external_best_pt_moved_to_contract_path(
     )
     assert rc == 0
     run_dir = target_root / "ds_a" / "run-fixed"
-    assert (run_dir / "train" / "weights" / "best.pt").is_file()
+    assert Path(preferred_run_model_path(str(run_dir), ".pt")).is_file()
 

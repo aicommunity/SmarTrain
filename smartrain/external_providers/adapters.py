@@ -170,6 +170,8 @@ def build_external_infer_spec(
     device: str | None = None,
     target_dir: str | None = None,
     run_name: str | None = None,
+    result_json: str | None = None,
+    task_type: str | None = None,
 ) -> ExternalRunSpec:
     repo = Path(repo_path).expanduser().resolve()
     pid = provider_id.strip().lower()
@@ -193,6 +195,10 @@ def build_external_infer_spec(
             args += ["--project", str(target_dir)]
         if run_name:
             args += ["--name", str(run_name)]
+        if result_json:
+            args += ["--result-json", str(result_json)]
+        if task_type:
+            args += ["--task", str(task_type)]
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "ssdm-yolo":
@@ -215,6 +221,10 @@ def build_external_infer_spec(
             args += ["--project", str(target_dir)]
         if run_name:
             args += ["--name", str(run_name)]
+        if result_json:
+            args += ["--result-json", str(result_json)]
+        if task_type:
+            args += ["--task", str(task_type)]
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "enhanced-yolov8":
@@ -237,6 +247,10 @@ def build_external_infer_spec(
             args += ["--project", str(target_dir)]
         if run_name:
             args += ["--name", str(run_name)]
+        if result_json:
+            args += ["--result-json", str(result_json)]
+        if task_type:
+            args += ["--task", str(task_type)]
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "mfel-yolo":
@@ -259,6 +273,10 @@ def build_external_infer_spec(
             args += ["--project", str(target_dir)]
         if run_name:
             args += ["--name", str(run_name)]
+        if result_json:
+            args += ["--result-json", str(result_json)]
+        if task_type:
+            args += ["--task", str(task_type)]
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "mp-yolo":
@@ -281,6 +299,10 @@ def build_external_infer_spec(
             args += ["--project", str(target_dir)]
         if run_name:
             args += ["--name", str(run_name)]
+        if result_json:
+            args += ["--result-json", str(result_json)]
+        if task_type:
+            args += ["--task", str(task_type)]
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     raise ValueError(f"Unsupported provider for infer adapter: {provider_id}")

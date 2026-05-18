@@ -15,7 +15,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Register: `registry`
 - Models: `model convert`, `model release`
 - Format tools: `cvat`, `sahi`, `heatmap`
-- Migration: `migrate-models`
+- Migration: `migrate`, `migrate-models`
 
 ## Reference
 
@@ -32,6 +32,13 @@ smartrain analyze inference-benchmark --help
 smartrain model convert --help
 ```
 
+For argparse-forwarded commands exposed by Typer wrappers, use:
+
+```bash
+smartrain <command> -- --help
+smartrain <group> <subcommand> -- --help
+```
+
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
@@ -46,20 +53,37 @@ Most important commands and groups also include `Examples` / `Quick examples` di
 
 Model convert highlights:
 
-- `smartrain model convert` exports `.pt` to `onnx`, `tensorrt`, or `both`, and also supports direct `.onnx -> tensorrt` conversion.
+- `smartrain model convert` exports `.pt` to `onnx`, `tensorrt-engine`, and `tensorrt-trt`, and supports `.onnx -> tensorrt-trt`.
 - Defaults: static batch mode, `--batch 1`, `--precision fp32`.
-- Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows selection by number or manual path input.
+- ONNX export options are configured in `model convert` (`--opset`, `--simplify/--no-simplify`, `--half/--no-half`).
+- Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows source selection by number or manual path input.
+- Target selection is model-based (`onnx`, `engine`, `trt`) with multi-select input (`1,2` or `onnx,trt`), and unavailable targets are shown with reason.
+- For run sources, interactive discovery uses canonical run artifacts (`<run_dir>/<run_dir_name>.<ext>`). Legacy run layouts are canonized automatically on first access.
+
+Inference highlights:
+
+- `smartrain inference` supports local model artifacts `pt`, `onnx`, `engine`, `trt` through unified backend routing, plus external provider references.
+- Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
+- Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
+- Full inference JSON/artifact contract: [`inference.md`](inference.md).
+- `pt_uni` is internal-only and used for PT vs PT-uni comparison table generation (test/val), not as a user-facing inference format. The model-test internal compare path supports detection/classification/segmentation task-aware routing.
 
 Model release highlights:
 
-- `smartrain model release` publishes only `train/weights/best.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
+- `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
 - A sidecar JSON with the same basename is created next to the model file and includes source/training/metrics/classes/io specification.
 - Re-running for the same run with the same source hash performs a no-op skip.
+
+Migration highlights:
+
+- `smartrain migrate unified --mode dry-run` previews unified migration without writing files.
+- `smartrain migrate unified --mode apply` writes unified snapshots and reports.
 
 Balance and stats additions:
 
 - `smartrain balance` supports `weights`, `rfs`, and `hybrid` strategies, plus weight/rfs tuning flags.
-- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` applies tuned defaults for common scenarios.
+- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default,hybrid-aug-tail-budget}` applies tuned defaults for common scenarios.
+- For `--strategy hybrid-aug`, a constrained-growth tail-first mode is enabled by default: `--aug-total-bbox-cap-mult 1.10`, `--aug-budget-tail-first`, `--aug-budget-tail-gamma 1.0`, `--train-head-bbox-undersample median-factor`, `--train-head-bbox-cap-mult 5.0`, plus conservative eval head trimming `--eval-head-bbox-undersample median-factor --eval-head-bbox-cap-mult 8.0 --eval-head-bbox-min-count 30 --eval-head-bbox-max-remove-frac 0.35` (override with explicit flags).
 - `smartrain balance --eval-coverage` (default on) adjusts the balanced train pool so `val`/`test` stay non-empty when possible and missing classes in eval splits are filled from train; `--no-eval-coverage` disables this. Interactive `balance` prompts for the same choice.
 - `smartrain stats --balance-ready` prints imbalance metrics and balancing recommendations.
 - `smartrain prune empty` removes empty image/label pairs into a new `<dataset>_pruned` dataset.

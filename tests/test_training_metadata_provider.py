@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from smartrain.model_training_module import collect_system_profile, save_training_metadata
+from smartrain.services.testing.model_test_service import sync_test_artifacts_manifest
+from smartrain.services.training.train_metadata_io_service import save_training_metadata
+from smartrain.services.training.train_system_profile_service import collect_system_profile
 
 
 def test_training_metadata_contains_provider_block(tmp_path: Path) -> None:
@@ -19,6 +21,7 @@ def test_training_metadata_contains_provider_block(tmp_path: Path) -> None:
         test_success=True,
         training_provider="ultralytics",
         system_profile=collect_system_profile(str(model_dir)),
+        sync_test_artifacts_manifest_cb=sync_test_artifacts_manifest,
     )
     payload = json.loads((model_dir / "training_metadata.json").read_text(encoding="utf-8"))
     assert payload["training_info"]["provider"]["type"] == "builtin"

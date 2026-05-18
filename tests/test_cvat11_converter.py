@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from smartrain.cvat11_converter import import_cvat11_zip_to_yolo, export_yolo_to_cvat11_zip
+from smartrain.services.datasets.cvat11_converter import import_cvat11_zip_to_yolo, export_yolo_to_cvat11_zip
 
 
 def _write_jpg(path: Path, *, size: tuple[int, int] = (100, 80)) -> None:

@@ -10,7 +10,7 @@ __pycache__
 tmp/
 tmp_merge_check/
 models/
-datasets/
+/datasets/
 runs/
-
+dist/
 

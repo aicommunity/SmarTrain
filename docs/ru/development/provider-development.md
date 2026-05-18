@@ -46,13 +46,13 @@
 
 ## 4. Каталог моделей и строгая валидация
 
-Файл: `smartrain/train_model_catalog.py`
+Файл: `smartrain/core/training/train_model_catalog.py`
 
 Добавьте алиасы провайдера в `_EXTERNAL_PROVIDER_FALLBACK_ALIASES` и, при необходимости, динамическое обнаружение.
 
 Путь валидации:
 
-- `train`: `model_training_module.py` через `is_supported_external_provider_model(...)`.
+- `train`: `train_cli_callbacks` / `train_interactive_helpers_service` через `is_supported_external_provider_model(...)`.
 - `inference`: `inference_cli.py` через ту же строгую проверку по каталогу провайдера.
 
 Если алиас не поддерживается, команда должна завершаться ошибкой с перечнем поддерживаемых алиасов.
@@ -64,7 +64,7 @@
 - модель по умолчанию берётся из каталога провайдера;
 - для отсутствующих значений применяются launcher-дефолты: `epochs=70`, `batch=8`, `img_size=640`.
 
-Логика расположена в `model_training_module.py` (`_apply_external_provider_defaults`).
+Логика расположена в `services/training/train_interactive_helpers_service.py` (`apply_external_provider_defaults`).
 
 ## 6. Имена run и нормализация артефактов
 
@@ -76,12 +76,12 @@
 
 Обязательный нормализованный контракт артефактов:
 
-- `train/weights/best.pt`
+- `<run_dir_name>.pt` в корне run
 - `test/`
 - `test_metrics.csv`
 - `training_metadata.json`
 
-Хелперы нормализации находятся в `model_training_module.py`.
+Хелперы нормализации находятся в `services/training/train_model_resolution_service.py`.
 
 ## 7. Паттерн fallback как у MFEL (совместимость кастомных блоков)
 

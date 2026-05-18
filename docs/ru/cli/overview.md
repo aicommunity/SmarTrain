@@ -47,13 +47,16 @@ smartrain model convert --help
 
 Особенности `model convert`:
 
-- `smartrain model convert` экспортирует `.pt` в `onnx`, `tensorrt` или `both`, а также поддерживает прямую конвертацию `.onnx -> tensorrt`.
+- `smartrain model convert` экспортирует `.pt` в `onnx`, `tensorrt-engine` и `tensorrt-trt`, а также поддерживает прямую конвертацию `.onnx -> tensorrt-trt`.
 - По умолчанию: статический batch-режим, `--batch 1`, `--precision fp32`.
-- В интерактивном режиме команда автоматически находит `.pt/.onnx` в `models/` и `runs/` workspace и даёт выбор по номеру или ручной ввод пути.
+- ONNX-параметры настраиваются в `model convert` (`--opset`, `--simplify/--no-simplify`, `--half/--no-half`).
+- В интерактивном режиме команда автоматически находит `.pt/.onnx` в `models/` и `runs/` workspace и даёт выбор источника по номеру или ручной ввод пути.
+- Выходные модели выбираются отдельно (`onnx`, `engine`, `trt`) с мультивыбором (`1,2` или `onnx,trt`), недоступные варианты показываются с причиной.
+- Для run-источников интерактивный выбор использует канонические артефакты (`<run_dir>/<run_dir_name>.<ext>`). Legacy-раскладка run автоматически канонизируется при первом обращении.
 
 Особенности `model release`:
 
-- `smartrain model release` публикует только `train/weights/best.pt` из выбранного run в `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
+- `smartrain model release` публикует canonical run-модель `<run_dir_name>.pt` из выбранного run в `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
 - Рядом создаётся JSON с тем же basename (`.json`) c описанием источника, данных обучения, метрик, классов и `io_spec` модели.
 - Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`).
 
@@ -68,7 +71,8 @@ smartrain model convert --help
 Дополнения для балансировки и статистики:
 
 - `smartrain balance` поддерживает стратегии `weights`, `rfs`, `hybrid` и параметры их настройки.
-- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default}` применяет готовые настройки под типовые сценарии.
+- `smartrain balance --preset {weights-safe,rfs-aggressive,hybrid-default,hybrid-aug-tail-budget}` применяет готовые настройки под типовые сценарии.
+- Для `--strategy hybrid-aug` по умолчанию включён режим контролируемого роста с приоритетом хвоста: `--aug-total-bbox-cap-mult 1.10`, `--aug-budget-tail-first`, `--aug-budget-tail-gamma 1.0`, `--train-head-bbox-undersample median-factor`, `--train-head-bbox-cap-mult 5.0`, а также консервативное прореживание head в eval-сплитах `--eval-head-bbox-undersample median-factor --eval-head-bbox-cap-mult 8.0 --eval-head-bbox-min-count 30 --eval-head-bbox-max-remove-frac 0.35` (явные CLI-флаги имеют приоритет).
 - `smartrain balance --eval-coverage` (по умолчанию включено) подстраивает пул train после балансировки: по возможности не оставлять пустыми `val`/`test` и донаполнять в eval отсутствующие классы из train, при этом один и тот же source-кадр не распределяется между разными сплитами; если уникальных кадров не хватает, `val/test` могут быть заполнены не полностью; отключение — `--no-eval-coverage`. В интерактивном `balance` тот же выбор задаётся вопросом.
 - `smartrain stats --balance-ready` выводит метрики дисбаланса и рекомендации для балансировщика.
 - `smartrain prune empty` удаляет пустые пары image/label в новый датасет `<dataset>_pruned`.

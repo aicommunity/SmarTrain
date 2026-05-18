@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from smartrain import providers_cli
+from smartrain.providers import cli as providers_cli
 
 
 def test_providers_uninstall_non_interactive(monkeypatch) -> None:

@@ -4,9 +4,9 @@ from pathlib import Path
 
 from PIL import Image
 
-from smartrain.dataset_augment import main as augment_main
-from smartrain.datasets_json_former import main as scan_main
-from smartrain.workspace_paths import deploy_workspace
+from smartrain.workflows.datasets.dataset_augment import main as augment_main
+from smartrain.workflows.datasets.datasets_json_former import main as scan_main
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 def _write_jpg(path: Path, color: tuple[int, int, int]) -> None:

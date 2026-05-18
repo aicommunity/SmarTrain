@@ -48,10 +48,23 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
   - optional `report-ru.pdf|odt` and `report-en.pdf|odt`
   - `artifacts/compare|metrics|inference|pr|leaderboard|table|speed_quality`
   - `artifacts/table/system_profile_compare.csv` (hardware profile comparison by run)
+- Report structure updates:
+  - format alias legend and metric calculation settings are placed in section 1 (context/artifacts)
+  - speed analysis is embedded into `4.2` as a nested subsection
+  - leaderboard is rendered in the conclusion section
+- Table rendering updates:
+  - integer-valued fields are rendered as integers (without trailing `.0000`)
+  - table headers are normalized to consistent human-readable names (RU/EN)
+  - ODT post-processing enforces visible table borders, bold centered header row, and tuned column widths
 - Analyze reports are narrative-first (by comparison meaning), including:
   - executive summary, context, quality, speed, per-class analysis, conclusion
   - captions for tables/figures and optional abbreviations glossary for wide tables
 - `session.json` now contains sections: `metric_sources`, `pr_per_class`, `speed_quality`, `tables`, `images`, `cache`, `artifact_scope`.
+- Format comparison reads per-format artifacts from test manifests and supports entries with multiple artifacts per format (`formats.<fmt>.artifacts`), selecting available metrics sources with legacy fallback.
+- For runs produced by external inference in cls/seg modes, degraded-contract payloads are expected when provider runtime lacks `probs/masks`:
+  - classification rows may contain `task_outputs.classification = {}`
+  - segmentation rows may contain `task_outputs.segments = []`
+  - aggregate visibility comes from `summary.task_outputs_total` and `summary.capability_gap_images`
 - `analyze all` supports:
   - `--report-languages` (default `ru,en`)
   - `--scatter-x` / `--scatter-y` for speed-quality scatter axes
@@ -86,8 +99,9 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
   - `training_metadata.json`, or
   - `train/args.yaml`, or
   - `train/results.csv`, or
-  - `train/weights/last.pt` / `train/weights/best.pt`.
+  - `train/weights/last.pt` / `<run_dir_name>.pt` in run root.
 - For summary/metrics extraction, `analyze` still requires readable metadata/metrics files depending on subcommand.
+- Run model artifacts are expected under `runs/<dataset>/<run>/models/` (legacy root paths are still read as fallback).
 - `export-table` reads:
   - `training_metadata.json`
   - latest `test_metrics*.csv` (first row)

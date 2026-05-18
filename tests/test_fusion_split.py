@@ -1,6 +1,6 @@
 import pytest
 
-from smartrain.dataset_former import TRAIN_PART, VAL_PART, TEST_PART, parse_fusion_split_arg
+from smartrain.workflows.datasets.dataset_former import TRAIN_PART, VAL_PART, TEST_PART, parse_fusion_split_arg
 
 
 def test_parse_fusion_split_default() -> None:

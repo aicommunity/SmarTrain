@@ -38,6 +38,24 @@ def test_dr_infer_adapter_uses_launcher() -> None:
     assert "--source" in spec.args
 
 
+def test_dr_infer_adapter_passes_task_and_result_json() -> None:
+    spec = build_external_infer_spec(
+        "dr-yolo",
+        "/tmp/dr",
+        model_path="/tmp/best.pt",
+        source_path="/tmp/images",
+        conf=0.25,
+        imgsz=640,
+        device="cpu",
+        task_type="classification",
+        result_json="/tmp/out/result.json",
+    )
+    assert "--task" in spec.args
+    assert "classification" in spec.args
+    assert "--result-json" in spec.args
+    assert "/tmp/out/result.json" in spec.args
+
+
 def test_ssdm_train_adapter_uses_launcher_args() -> None:
     spec = build_external_train_spec(
         "ssdm-yolo",

@@ -29,6 +29,16 @@ Model selection:
 - External provider aliases are strictly validated against provider catalog; unsupported aliases fail before launch.
 - If `--external-provider` is set and `--model` is not specified, provider default model alias is used automatically.
 
+Device selection:
+
+- `--device` accepts: `cpu`, GPU index (`0`), `cuda:N`, or GPU name token in interactive mode.
+- Default behavior (all commands): `GPU 0` if CUDA is available, otherwise `cpu`.
+- In interactive mode you can select by:
+  - list number,
+  - explicit token (`cpu`, `0`, `cuda:0`),
+  - GPU name (exact/normalized match).
+- The same selection model is used across `train`, `test`, and `inference`.
+
 ## `clearml-upload`
 
 A separate command to load run artifacts into ClearML:

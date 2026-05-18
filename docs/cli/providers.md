@@ -57,7 +57,7 @@ When `--external-provider` is set and explicit values are not passed:
 
 External runs are normalized to the same contract as built-in training:
 
-- `train/weights/best.pt`
+- `<run_dir_name>.pt` in run root
 - `test/` outputs
 - `test_metrics.csv`
 - `training_metadata.json`

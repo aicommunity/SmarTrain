@@ -43,7 +43,7 @@ def tiny_workspace(tmp_path: Path) -> Path:
 def test_dataset_report_markdown_and_assets(tiny_workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SMART_TRAIN_WORKSPACE", str(tiny_workspace))
     out = tiny_workspace / "report_out"
-    from smartrain.dataset_report import main
+    from smartrain.services.datasets.dataset_report import main
 
     main(
         [
@@ -84,7 +84,7 @@ def test_dataset_report_markdown_and_assets(tiny_workspace: Path, monkeypatch: p
 
 def test_dataset_report_default_output_under_analytics(tiny_workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SMART_TRAIN_WORKSPACE", str(tiny_workspace))
-    from smartrain.dataset_report import main
+    from smartrain.services.datasets.dataset_report import main
 
     main(
         [
@@ -116,9 +116,9 @@ def test_report_odt_builtin_and_pdf_fpdf2_without_pandoc(
     pytest.importorskip("fpdf")
     monkeypatch.setenv("SMART_TRAIN_WORKSPACE", str(tiny_workspace))
     out = tiny_workspace / "report_odt_pdf"
-    monkeypatch.setattr("smartrain.dataset_report._try_pandoc_odt", lambda *a, **k: False)
-    monkeypatch.setattr("smartrain.dataset_report._try_pandoc_pdf", lambda *a, **k: False)
-    from smartrain.dataset_report import main
+    monkeypatch.setattr("smartrain.services.datasets.dataset_report._try_pandoc_odt", lambda *a, **k: False)
+    monkeypatch.setattr("smartrain.services.datasets.dataset_report._try_pandoc_pdf", lambda *a, **k: False)
+    from smartrain.services.datasets.dataset_report import main
 
     main(
         [
@@ -145,7 +145,7 @@ def test_dataset_report_requires_dataset_non_interactive(
 ) -> None:
     monkeypatch.setenv("SMART_TRAIN_WORKSPACE", str(tiny_workspace))
     monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
-    from smartrain.dataset_report import main
+    from smartrain.services.datasets.dataset_report import main
 
     main(["--workspace", str(tiny_workspace)])
     out = capsys.readouterr().out + capsys.readouterr().err
