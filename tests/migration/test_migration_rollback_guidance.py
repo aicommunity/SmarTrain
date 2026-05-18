@@ -74,7 +74,7 @@ def test_apply_recovers_from_corrupted_existing_snapshot(tmp_path: Path) -> None
         json.dumps({"training_info": {"dataset": {"name": "ds_a"}}}),
         encoding="utf-8",
     )
-    snap_dir = run_dir / ".smartrain" / "canonical"
+    snap_dir = run_dir / ".smartrain" / "unified"
     snap_dir.mkdir(parents=True, exist_ok=True)
     (snap_dir / "snapshot.json").write_text("{bad-json", encoding="utf-8")
 
@@ -122,5 +122,5 @@ def test_apply_continue_on_error_false_stops_on_first_failure(tmp_path: Path, mo
     )
     assert report["stats"]["failed"] == 1
     assert report["stats"]["total"] == 1
-    assert not (run_second / ".smartrain" / "canonical" / "snapshot.json").exists()
+    assert not (run_second / ".smartrain" / "unified" / "snapshot.json").exists()
 

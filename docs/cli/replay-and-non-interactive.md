@@ -16,7 +16,7 @@
 | `--nit` | Canonical non-interactive meta flag (user-facing and replay suffix). |
 | `--smartrain-replay` | Long synonym; stripped like `--nit`. |
 
-These tokens are removed before `module.main` and never reach argparse parsers. Implementation: `smartrain/cli_support/typer_non_interactive.py`.
+These tokens are removed before `module.main` and never reach argparse parsers. Implementation: `smartrain/cli_entrypoints/support/typer_non_interactive.py`.
 
 **Canonical form:** pass `--nit` as a separate argv token (`store_true` style). Do not rely on `--nit=1` or `--nit=true` in scripts; Typer may forward them as a single token. The stripper still removes `--nit=…` and `--smartrain-replay=…` so Typer routing treats the session as non-interactive, but argparse-only entry points (`python -m …`) may still see unknown options if you pass `=`-forms.
 
@@ -39,7 +39,7 @@ These tokens are removed before `module.main` and never reach argparse parsers. 
 
 ## Replay strings
 
-`build_non_interactive_command` / `emit_replay` (`smartrain/cli_support/cli_replay.py`, `cli_contracts.py`) serialize a resolved `argparse.Namespace` and append a single trailing `--nit` when missing. Always paste the full printed line so Typer strips `--nit` and disables prompts.
+`build_non_interactive_command` / `emit_replay` (`smartrain/cli_entrypoints/support/cli_replay.py`, `cli_contracts.py`) serialize a resolved `argparse.Namespace` and append a single trailing `--nit` when missing. Always paste the full printed line so Typer strips `--nit` and disables prompts.
 
 ### Legacy replay (removed orchestrator heuristic)
 

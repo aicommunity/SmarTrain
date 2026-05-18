@@ -1,6 +1,6 @@
 # Актуальное состояние архитектуры SmarTrain (срез)
 
-**Дата среза:** 2026-05-10  
+**Дата среза:** 2026-05-16  
 **Назначение:** краткий narrative-snapshot структуры пакета, закрытых волн рефакторинга, границ слоёв и известных ограничений. Не заменяет детальные спецификации в `00`–`08`.
 
 **Источник истины по статусу волн и PR:** [`10-implementation-checklist.md`](./10-implementation-checklist.md) (чекбоксы Phase A–F и заметки). Журнал компромиссов и история шагов: [`09-tech-debt.md`](./09-tech-debt.md). Базовый аудит соответствия целевой архитектуре: [`11-plan-conformance-audit.md`](./11-plan-conformance-audit.md). Волна закрытия P0/P1 разрывов: [`12-gap-closure-wave-p0-p1.md`](./12-gap-closure-wave-p0-p1.md).
@@ -20,6 +20,7 @@
 | Root migration | Перенос модулей из корня `smartrain/` в доменные подпакеты | Закрыто (см. начало [`09-tech-debt.md`](./09-tech-debt.md), Historical Log) |
 | Gap closure P0/P1 | Границы services, runtime neutrality, gateway-first analyze, thinning orchestrators | Закрыто (лог 2026-05-08/09 в `09-tech-debt`) |
 | P0-tail / P2 | Запрет `services`→`workflows`, `workflow_adapters`, schema governance analyze | Закрыто (лог 2026-05-09 в `09-tech-debt`) |
+| Layer boundaries (LB-C1–C8) | Analyze/train/test/datasets/backends split, guardrails | Закрыто (лог 2026-05-16 в `09-tech-debt.md`) |
 
 ---
 
@@ -34,35 +35,31 @@
 
 | Подпакет | Роль |
 |----------|------|
-| [`smartrain/services/`](../../smartrain/services/) | Use-case сервисы (train / test / inference / analyze helpers); **не** импортируют `smartrain.workflows` напрямую |
-| [`smartrain/workflows/`](../../smartrain/workflows/) | CLI модули, оркестраторы workflow, datasets, training, testing, inference, analyze, migration, queue, registry |
+| [`smartrain/services/`](../../smartrain/services/) | Use-case сервисы (train / test / inference / analyze / datasets); **не** импортируют `smartrain.workflows` |
+| [`smartrain/workflows/`](../../smartrain/workflows/) | Тонкие CLI-фасады (`*_entry`, `results_analyzer`, `model_test_backends`, `workflows/datasets/*`); argparse + `main(argv)` |
 | [`smartrain/core/`](../../smartrain/core/) | Общие утилиты: `runtime/`, `training/`, [`workflow_adapters/`](../../smartrain/core/workflow_adapters/) |
-| [`smartrain/backends/`](../../smartrain/backends/) | Контракты backend, registry, `ultralytics_adapter`, `external_provider_adapter`, `train_test_registry` |
+| [`smartrain/backends/`](../../smartrain/backends/) | Контракты backend, registry, `ultralytics_adapter`, `external_provider_adapter`, `implementations/` |
 | [`smartrain/tasks/`](../../smartrain/tasks/) | Task-aware контракты и адаптеры метрик (detection / classification / segmentation) |
-| [`smartrain/domain/canonical/`](../../smartrain/domain/canonical/) | DTO и валидация канонической модели данных |
-| [`smartrain/adapters/canonical/`](../../smartrain/adapters/canonical/) | Read/write адаптеры, legacy reader/mapper |
-| [`smartrain/orchestrators/`](../../smartrain/orchestrators/) | [`canonical_gateway.py`](../../smartrain/orchestrators/canonical_gateway.py) — единая точка чтения/записи canonical |
-| [`smartrain/canonical/`](../../smartrain/canonical/) | Схемы, policy, refs (облегчённые модули верхнего уровня домена canonical) |
+| [`smartrain/run_model_contract/`](../../smartrain/run_model_contract/) | Run/model contract: [`gateway.py`](../../smartrain/run_model_contract/gateway.py), `domain/`, `io/`, `refs.py`, `schema.py`, `env.py` |
 
 ---
 
 ## Границы слоёв и guardrails
 
-- **Правило:** модули в `smartrain/services/*.py` не импортируют `smartrain.workflows.*`. Доступ к workflow-реализациям — через фасады [`smartrain/core/workflow_adapters/`](../../smartrain/core/workflow_adapters/):
-  - `training_runtime_api.py`
-  - `testing_runtime_api.py`
-  - `inference_runtime_api.py`
-  - `analyze_runtime_api.py`
-- **Регрессия:** [`tests/regression/test_train_service_guardrails.py`](../../tests/regression/test_train_service_guardrails.py) (strict: новые прямые `services`→`workflows` импорты запрещены).
+- **Правило:** `smartrain/services/**` не импортирует `smartrain.workflows.*`. Доступ к workflow-реализациям — через [`smartrain/core/workflow_adapters/`](../../smartrain/core/workflow_adapters/) и тонкие фасады в `workflows/`.
+- **Регрессии:**
+  - [`tests/regression/test_layer_import_guardrails.py`](../../tests/regression/test_layer_import_guardrails.py) — запрет `services` / `unified` / `domain` / `backends` → `workflows`.
+  - [`tests/regression/test_train_service_guardrails.py`](../../tests/regression/test_train_service_guardrails.py) — исторический guard для train service.
+- **Patch surface (тесты):** `services/analyze/workflow_dispatch.py`, `core/workflow_adapters/testing_runtime_api.py`.
 
 ---
 
-## Данные, canonical и миграция
+## Данные, unified layer и миграция
 
-- **Чтение:** [`orchestrators/canonical_gateway.py`](../../smartrain/orchestrators/canonical_gateway.py) — `load_target`, `load_metrics`, `resolve_task_context`, predictions API и др.
-- **Запись:** [`adapters/canonical/write/`](../../smartrain/adapters/canonical/write/) — snapshot, manifest (provenance, хеши), [`dual_write.py`](../../smartrain/adapters/canonical/write/dual_write.py) (`canonical_only`, `dual_write_strict`, `dual_write_best_effort`).
+- **Чтение:** [`run_model_contract/gateway.py`](../../smartrain/run_model_contract/gateway.py) — `load_target`, `load_metrics`, `resolve_task_context`, predictions API и др.
+- **Запись:** [`run_model_contract/io/write/`](../../smartrain/run_model_contract/io/write/) — snapshot, manifest (provenance, хеши), [`dual_write.py`](../../smartrain/run_model_contract/io/write/dual_write.py) (`unified_only`, `dual_write_strict`, `dual_write_best_effort`).
 - **Миграция:** [`workflows/migration/cli_migration.py`](../../smartrain/workflows/migration/cli_migration.py) и связанные модули; режимы dry-run / apply / report-only (см. тесты `tests/migration/`).
-- **Cutover / policy:** аварийный legacy read — только при явных env-флагаx (см. [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md) и регрессии `tests/regression/test_canonical_cutover.py`).
+- **Cutover / policy:** аварийный legacy read — только при явных env-флагаx (см. [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md) и регрессии `tests/regression/test_unified_cutover.py`).
 
 ---
 
@@ -70,8 +67,8 @@
 
 - Контракты: [`tasks/contracts.py`](../../smartrain/tasks/contracts.py); нормализация метрик: [`tasks/metrics.py`](../../smartrain/tasks/metrics.py) и подпакеты `detection/`, `classification/`, `segmentation/`.
 - Gateway подключает task-aware нормализацию при загрузке метрик (см. Phase E в `10-implementation-checklist.md`).
-- **Inference:** `--task` / hint пробрасывается в capability resolution и runtime backend; отчёты поддерживают task-aware outputs (в т.ч. cls/seg), с деградацией для внешних провайдеров при отсутствии полей.
-- **Model test / `pt_uni`:** внутреннее сравнение **`pt_uni`** включено для **detection**, **classification** и **segmentation** (проброс `task_type` в Ultralytics `val`); контракт — [`14-pt-uni-compare-contract.md`](./14-pt-uni-compare-contract.md).
+- **Inference:** [`services/inference_service.py`](../../smartrain/services/inference_service.py); CLI — [`workflows/inference/inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py); external provider — [`backends/implementations/ultralytics/inference.py`](../../smartrain/backends/implementations/ultralytics/inference.py).
+- **Model test / `pt_uni`:** внутреннее сравнение **`pt_uni`** для **detection**, **classification** и **segmentation**; runners — [`services/testing/backends/format_runners.py`](../../smartrain/services/testing/backends/format_runners.py); контракт — [`14-pt-uni-compare-contract.md`](./14-pt-uni-compare-contract.md).
 
 ---
 
@@ -84,11 +81,11 @@
 
 ---
 
-## Analyze и отчёты
+## Analyze, datasets и отчёты
 
-- Чтение метрик в canonical-режиме: преимущественно через gateway; legacy fallback — **явный**, policy-gated, с диагностикой (например `metrics_read_policy` в [`services/analyze_format_compare_service.py`](../../smartrain/services/analyze_format_compare_service.py)).
-- **Schema governance:** [`workflows/analyze/analyze_schema_contracts.py`](../../smartrain/workflows/analyze/analyze_schema_contracts.py) — версии схем, валидация session manifest и format-compare index на write-path ([`analyze_report.py`](../../smartrain/workflows/analyze/analyze_report.py), finalize/compare).
-- Крупные фасады (с делегированием в сервисы): [`workflows/analyze/results_analyzer.py`](../../smartrain/workflows/analyze/results_analyzer.py), множество `analyze_*_service.py`.
+- **Analyze:** логика в [`services/analyze/`](../../smartrain/services/analyze/); CLI-фасад [`workflows/analyze/results_analyzer.py`](../../smartrain/workflows/analyze/results_analyzer.py); отчёты — `report_{markdown,odt,writer}.py`, экспорт — [`services/reporting/document_export.py`](../../smartrain/services/reporting/document_export.py).
+- **Datasets:** логика в [`services/datasets/`](../../smartrain/services/datasets/); CLI-фасады [`workflows/datasets/*.py`](../../smartrain/workflows/datasets/).
+- **Schema governance:** [`services/analyze/schema_contracts.py`](../../smartrain/services/analyze/schema_contracts.py) (session manifest, format-compare index).
 
 ---
 
@@ -97,21 +94,27 @@
 Краткий список; детали и ссылки на код — в разделе **Operational Limits** [`09-tech-debt.md`](./09-tech-debt.md).
 
 - Внешние провайдеры могут не отдавать полные cls/seg поля; допустим деградированный контракт до расширения провайдеров.
-- Внутренний **`pt_uni` compare** в model test — только **detection**.
-- **Canonical model read** ([`adapters/canonical/read/model_adapter.py`](../../smartrain/adapters/canonical/read/model_adapter.py)): разрешение `task_type` — metadata → подсказка по имени файла → последний резерв `detection`; `backend_type` — metadata → подсказка по формату весов (`onnx` → onnxruntime, `engine`/`trt` → tensorrt, иначе ultralytics).
-- Крупные модули [`model_training_module.py`](../../smartrain/workflows/training/model_training_module.py) и [`cli.py`](../../smartrain/cli.py) остаются композиционными «толстыми» входами; логика вынесена в соседние `*_service` модули.
+- **Unified model read** ([`run_model_contract/io/read/model_adapter.py`](../../smartrain/run_model_contract/io/read/model_adapter.py)): `task_type` — metadata → подсказка по имени файла; без provenance — ошибка (миграция: [`scripts/migrate_model_task_provenance.py`](../../scripts/migrate_model_task_provenance.py)). `backend_type` — metadata → подсказка по формату весов.
+- Крупные композиционные входы: [`train_entry.py`](../../smartrain/workflows/training/train_entry.py) + [`train_wiring.py`](../../smartrain/workflows/training/train_wiring.py) (train CLI/resume в [`services/training/`](../../smartrain/services/training/); MTM удалён LB-D8), [`model_test_cli.py`](../../smartrain/workflows/testing/model_test_cli.py) (фасад → [`model_test_cli_service.py`](../../smartrain/services/testing/model_test_cli_service.py)); артефакты тестов — [`model_test_service.py`](../../smartrain/services/testing/model_test_service.py).
+
+---
+
+## Layer boundary refactor (закрыт 2026-05-16)
+
+**Status:** Waves 0–8 и continuation LB-C1–C8 **закрыты**. Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md). Итог: [`layer-boundary-continuation.md`](./layer-boundary-continuation.md) (10/10 Met).
+
+**Guardrails:** [`tests/regression/test_layer_import_guardrails.py`](../../tests/regression/test_layer_import_guardrails.py) (allowlist пуст).
 
 ---
 
 ## Следующий горизонт (backlog, без обязательства срока)
 
-1. **Расширение `pt_uni` / internal compare на classification и segmentation:** спроектировать контракт метрик и артефактов сравнения (аналог текущего detection-only пути), затем снять guard в orchestrator и добавить регрессионные тесты.
-2. **Дальнейшее утончение фасадов** при росте функциональности (по мере боли в ревью): точечный перенос оставшихся блоков из `results_analyzer` / `model_training_module` без изменения CLI.
+1. **Train CLI (опционально):** дальнейшее утоньшение [`inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py) (LB-D4 LOC) и косметика wiring — основной train path уже в [`train_cli_main`](../../smartrain/services/training/train_cli_main.py) + [`train_wiring`](../../smartrain/workflows/training/train_wiring.py); MTM удалён (LB-D8).
+2. **Документация RU:** синхронизация [`../ru/development/architecture.md`](../ru/development/architecture.md) с EN-срезом datasets/services.
 
 ---
 
 ## Связанные документы
 
-- Refactor: [`00-scope.md`](./00-scope.md) … [`08-rollout-checklist.md`](./08-rollout-checklist.md), [`09-tech-debt.md`](./09-tech-debt.md), [`10-implementation-checklist.md`](./10-implementation-checklist.md), [`11-plan-conformance-audit.md`](./11-plan-conformance-audit.md), [`12-gap-closure-wave-p0-p1.md`](./12-gap-closure-wave-p0-p1.md).
-- Детализированный план рефакторинга (Cursor): `.cursor/plans/рефакторинг_cli_и_ml_ядра_798a9741.plan.md` — операционный статус по чекбоксам вести в `10-implementation-checklist.md`.
-- Обзор для разработчиков: [`../development/architecture.md`](../development/architecture.md), [`../development/extension-guide.md`](../development/extension-guide.md).
+- Refactor: [`00-scope.md`](./00-scope.md) … [`08-rollout-checklist.md`](./08-rollout-checklist.md), [`09-tech-debt.md`](./09-tech-debt.md), [`10-implementation-checklist.md`](./10-implementation-checklist.md), [`11-plan-conformance-audit.md`](./11-plan-conformance-audit.md), [`12-gap-closure-wave-p0-p1.md`](./12-gap-closure-wave-p0-p1.md), [`layer-boundary-continuation.md`](./layer-boundary-continuation.md).
+- Обзор для разработчиков: [`../development/architecture.md`](../development/architecture.md), [`../development/package-layout.md`](../development/package-layout.md).

@@ -13,9 +13,8 @@ from typing import Any
 import yaml
 from PIL import Image
 
-from smartrain.canonical.policy import emit_legacy_read_deprecation_warnings
-from smartrain.canonical.refs import canonical_target_from_model_dir
-from smartrain.canonical.schema import wrap_inference_report_v2
+from smartrain.run_model_contract.refs import unified_target_from_model_dir
+from smartrain.run_model_contract.schema import wrap_inference_report_v2
 from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.core.runtime.run_artifacts import is_internal_conversion_artifact
 from smartrain.core.runtime.run_discovery import find_run_directories
@@ -30,13 +29,12 @@ from smartrain.core.workflow_adapters.inference_runtime_api import (
     _full_image_crop,
     _select_roi_boxes,
 )
+from smartrain.services.datasets.dataset_roi_yolo import ON_EMPTY_MODES, ROI_POLICIES
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
 SUPPORTED_INFERENCE_EXTS = {".pt", ".onnx", ".engine", ".trt"}
 DATA_MODES = ("folder", "dataset-split")
-ROI_POLICIES = ("largest", "highest_conf")
-ON_EMPTY_MODES = ("skip", "full", "fail")
 
 
 def sanitize_segment(value: str) -> str:
@@ -57,6 +55,34 @@ def _parse_roi_class_ids(raw: str | None) -> list[int] | None:
             continue
         out.append(int(p))
     return out or None
+
+
+def resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, str]:
+    """Resolve promoted model directory name into a resolved weights path."""
+    models_root = Path(layout.models).resolve()
+    candidate_rel = Path(name)
+    if candidate_rel.suffix.lower() in SUPPORTED_INFERENCE_EXTS and not candidate_rel.is_absolute():
+        file_path = (models_root / candidate_rel).resolve()
+        if file_path.is_file():
+            parts = candidate_rel.as_posix().split("/")
+            model_dir_name = parts[0] if parts else file_path.stem
+            return file_path, model_dir_name
+
+    mdir = (Path(layout.models) / name).resolve()
+    if not mdir.is_dir():
+        raise FileNotFoundError(f"Model directory not found: {mdir}")
+
+    manifest = mdir / MANIFEST_NAME
+    if manifest.is_file():
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        wf = payload.get("weights_file")
+        if isinstance(wf, str) and wf.strip():
+            p = (mdir / wf).resolve()
+            if p.is_file():
+                return p, name
+
+    canonical = unified_target_from_model_dir(mdir)
+    return canonical.model_path.resolve(), name
 
 
 def _resolve_run_ref(layout: WorkspaceLayout, ref: str) -> Path:
@@ -81,9 +107,8 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
             raise FileNotFoundError(f"Unsupported canonical weights format: {p.suffix}")
         return p
 
-    emit_legacy_read_deprecation_warnings()
     if args.model_name:
-        from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
+        from smartrain.run_model_contract.gateway import load_target, resolve_task_context
 
         mdir = (Path(layout.models) / str(args.model_name).strip()).resolve()
         _ = resolve_task_context(str(mdir), source_kind="model")
@@ -95,7 +120,7 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
         return p, str(model.model_id or mdir.name), "models"
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
-        from smartrain.orchestrators.canonical_gateway import load_target, resolve_task_context
+        from smartrain.run_model_contract.gateway import load_target, resolve_task_context
 
         ctx = resolve_task_context(str(run_dir), source_kind="run")
         payload = load_target(str(run_dir), source_kind="run")
@@ -121,7 +146,30 @@ def infer_img_size_from_model_context_safe(model_path: Path) -> int | None:
     return infer_img_size_from_model_context(model_path)
 
 
-def _load_catalog(layout: WorkspaceLayout) -> dict[str, Any]:
+def discover_model_entries(layout: WorkspaceLayout) -> list[tuple[str, str, str]]:
+    """Return tuples: (display_label, model_name_arg_value, model_dir_name)."""
+    root = Path(layout.models)
+    if not root.is_dir():
+        return []
+    out: list[tuple[str, str, str]] = []
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        files = sorted(
+            p
+            for p in d.rglob("*")
+            if p.is_file()
+            and p.suffix.lower() in SUPPORTED_INFERENCE_EXTS
+            and not is_internal_conversion_artifact(p)
+        )
+        if not files:
+            out.append((f"{d.name}/(no model files)", d.name, d.name))
+            continue
+        for fp in files:
+            rel = fp.relative_to(root).as_posix()
+            out.append((rel, rel, d.name))
+    return out
+
+
+def load_catalog(layout: WorkspaceLayout) -> dict[str, Any]:
     path = Path(layout.work_datasets_info_path())
     if not path.is_file():
         return {}
@@ -149,7 +197,7 @@ def collect_folder_images(source_dir: str, limit: int) -> list[str]:
 def collect_split_images_for_dataset(
     layout: WorkspaceLayout, dataset: str, split: str, limit: int
 ) -> tuple[list[str], str]:
-    catalog = _load_catalog(layout)
+    catalog = load_catalog(layout)
     if dataset not in catalog:
         raise KeyError(f"Dataset {dataset!r} not found in {layout.work_datasets_info_path()}")
     entry = catalog[dataset]

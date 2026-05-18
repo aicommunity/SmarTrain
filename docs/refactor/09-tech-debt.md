@@ -4,6 +4,15 @@ Operational execution status and PR-level checkboxes: [`10-implementation-checkl
 
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
+- 2026-05-17: **CLI package layout:** `cli_apps/` → `cli_entrypoints/`; `cli_support/` → `cli_entrypoints/support/`. Entry point `smartrain.cli:main` unchanged.
+- 2026-05-17: **Package rename (imports/docs):** all code imports `smartrain.run_model_contract`; docs/release-notes updated. Legacy on-disk `/.smartrain/unified/` and env `SMARTTRAIN_UNIFIED_*` intentionally unchanged.
+- 2026-05-17: **Package rename (tree):** `smartrain/unified/` → `smartrain/run_model_contract/`; tests → `tests/run_model_contract/`. Disk `.smartrain/unified/` and `SMARTTRAIN_UNIFIED_*` unchanged; public types still `Unified*`.
+- 2026-05-17: **Test runner naming:** `services/model_test_orchestrator.py` → `services/testing/model_test_runner.py`; tests renamed accordingly.
+- 2026-05-17: **Gateway colocation:** `unified_gateway` → `smartrain/unified/gateway.py`; removed `smartrain/orchestrators/`; tests under `tests/unified/test_gateway_*.py`. No change to `.smartrain/unified/` or env flags.
+- 2026-05-16: **Unified layer rename:** `smartrain/unified/` (`domain/`, `io/`), `unified_gateway`, `.smartrain/unified/` snapshots, `smartrain migrate unified`, run helpers `preferred_run_model_path` / `normalize_ultralytics_run_layout`. Register unchanged: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md).
+- 2026-05-16: Layer-boundary continuation **closed**. Train/test execution in `services/training` and `services/testing/backends`; workflow facades for analyze, test, and datasets. TD-LB-012 **done**; TD-LB-016 **done**: `model_training_module` removed — train entry=`train_entry`+`train_wiring`+`train_cli_callbacks`. Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md).
+- 2026-05-15: Layer-boundary refactor waves 0–8 closed. Register: [`tech-debt-layer-boundaries.md`](./tech-debt-layer-boundaries.md).
+
 - 2026-05-06: Root-package migration plan started (`root-package-structure-migration`). Inventory lock fixed for Batch 1 candidates:
   - moved `smartrain/provider_install_state.py` -> `smartrain/providers/core/provider_install_state.py`
   - moved `smartrain/environment_profile.py` -> `smartrain/core/runtime/environment_profile.py`

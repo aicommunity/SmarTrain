@@ -14,7 +14,25 @@ LEGACY_RUN_ROOT_VAL_RECS_PREFIX = "val-recs-"
 _PROTECTED_RUN_ROOT_DIR_NAMES = frozenset({"models", "tmp", ".smartrain", ".smartrain_cache"})
 
 
+def reject_documentation_placeholder_path(path: str | Path, *, kind: str = "path") -> None:
+    """Reject literal ``...`` used as a docs/CLI placeholder (not a filesystem parent dir)."""
+    raw = str(path or "").strip()
+    if not raw:
+        return
+    if raw == "..." or "..." in raw.split("/") or "..." in raw.split("\\"):
+        raise ValueError(
+            f"Invalid {kind}: {raw!r} contains '...' as a path segment. "
+            "Replace with the full real directory path (see docs), not an ellipsis placeholder."
+        )
+    if Path(raw).expanduser().name == "...":
+        raise ValueError(
+            f"Invalid {kind}: {raw!r} resolves to a directory named '...'. "
+            "Use the full run or workspace path."
+        )
+
+
 def _normalize_run_root(run_dir: str | Path) -> Path:
+    reject_documentation_placeholder_path(run_dir, kind="run_dir")
     root = Path(run_dir).expanduser().resolve()
     # Defensive normalization: callers may accidentally pass runs/<run>/models
     # or runs/<run>/tmp/tests/train-* instead of runs/<run>.
@@ -205,7 +223,7 @@ def prune_empty_subdirs(run_dir: str) -> None:
         _prune_children(tests)
 
 
-def canonicalize_run_ultralytics_layout(run_dir: str) -> None:
+def normalize_ultralytics_run_layout(run_dir: str) -> None:
     """Idempotent post-process: merge Ultralytics suffix dirs, drop empty legacy shells."""
     root = _normalize_run_root(run_dir)
     if not root.is_dir():
@@ -311,7 +329,7 @@ def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:
     tmp.mkdir(parents=True, exist_ok=True)
     tests.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_run_layout(root)
-    canonicalize_run_ultralytics_layout(str(root))
+    normalize_ultralytics_run_layout(str(root))
     for runtime_name in ("_runtime_data_train.yaml", "_runtime_data_test.yaml"):
         src = root / runtime_name
         dst = tmp / runtime_name
@@ -323,59 +341,30 @@ def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:
     return models, tmp
 
 
-def canonical_run_model_path(run_dir: str, ext: str = ".pt") -> str:
+def preferred_run_model_path(run_dir: str, ext: str = ".pt") -> str:
     root = _normalize_run_root(run_dir)
     models, _tmp = ensure_run_layout(str(root))
     suffix = ext if str(ext).startswith(".") else f".{ext}"
     return str(models / f"{root.name}{suffix}")
 
 
-def _legacy_run_model_candidates(run_dir: str, ext: str = ".pt") -> list[Path]:
-    root = _normalize_run_root(run_dir)
-    suffix = ext if str(ext).startswith(".") else f".{ext}"
-    suffix_l = suffix.lower()
-    candidates = [
-        root / "train-ultralytics" / "weights" / f"best{suffix}",
-        root / "train-ultralytics" / f"best{suffix}",
-        root / "train" / "weights" / f"best{suffix}",
-        root / "weights" / f"best{suffix}",
-        root / "train" / f"best{suffix}",
-        root / f"best{suffix}",
-    ]
-    out: list[Path] = []
-    seen: set[Path] = set()
-    for cand in candidates:
-        rc = cand.resolve()
-        if rc in seen:
-            continue
-        seen.add(rc)
-        if cand.is_file():
-            out.append(cand)
-    for cand in root.rglob(f"best{suffix}"):
-        if not cand.is_file():
-            continue
-        if cand.suffix.lower() != suffix_l:
-            continue
-        rc = cand.resolve()
-        if rc in seen:
-            continue
-        seen.add(rc)
-        out.append(cand)
-    return out
-
-
-def resolve_run_model_with_legacy_fallback(run_dir: str, ext: str = ".pt") -> Path | None:
-    canonical = Path(canonical_run_model_path(run_dir, ext))
+def resolve_run_model(run_dir: str, ext: str = ".pt") -> Path | None:
+    """Resolve weights under canonical run layout (call ensure_run_layout first for migration)."""
+    canonical = Path(preferred_run_model_path(run_dir, ext))
     if canonical.is_file():
         return canonical
     root = _normalize_run_root(run_dir)
     suffix = ext if str(ext).startswith(".") else f".{ext}"
-    legacy_canonical = root / f"{root.name}{suffix}"
-    if legacy_canonical.is_file():
-        return legacy_canonical
-    for cand in _legacy_run_model_candidates(run_dir, ext):
+    for rel in (
+        f"train-ultralytics/weights/best{suffix}",
+        f"train-ultralytics/best{suffix}",
+    ):
+        cand = root / rel
         if cand.is_file():
             return cand
+    root_named = root / f"{root.name}{suffix}"
+    if root_named.is_file():
+        return root_named
     return None
 
 
@@ -400,7 +389,7 @@ def normalize_model_references_in_metadata(metadata_path: Path, run_dir: str, ex
     if not isinstance(payload, dict):
         return False
     suffix = ext if str(ext).startswith(".") else f".{ext}"
-    canonical_name = Path(canonical_run_model_path(run_dir, suffix)).name
+    canonical_name = Path(preferred_run_model_path(run_dir, suffix)).name
     changed = False
 
     paths = payload.get("paths")
@@ -425,7 +414,7 @@ def normalize_model_references_in_metadata(metadata_path: Path, run_dir: str, ex
     return True
 
 
-def materialize_canonical_run_model(
+def materialize_preferred_run_model(
     run_dir: str,
     *,
     ext: str = ".pt",
@@ -437,7 +426,7 @@ def materialize_canonical_run_model(
     if not root.is_dir():
         return None
     ensure_run_layout(str(root))
-    canonical = Path(canonical_run_model_path(run_dir, ext))
+    canonical = Path(preferred_run_model_path(run_dir, ext))
     canonical.parent.mkdir(parents=True, exist_ok=True)
     if canonical.is_file():
         if normalize_metadata:
@@ -450,7 +439,7 @@ def materialize_canonical_run_model(
         if cand.is_file():
             source = cand
     if source is None:
-        source = resolve_run_model_with_legacy_fallback(run_dir, ext)
+        source = resolve_run_model(run_dir, ext)
     if source is None:
         return None
     if source.resolve() == canonical.resolve():

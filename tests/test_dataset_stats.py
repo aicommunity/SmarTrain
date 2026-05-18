@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.workflows.datasets.dataset_stats import _scan_one_dataset, main as stats_main
+from smartrain.services.datasets.dataset_stats import _scan_one_dataset, main as stats_main
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
@@ -192,7 +192,7 @@ def test_stats_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         args.check_near_duplicates = False
         args.export_issues = False
 
-    monkeypatch.setattr("smartrain.workflows.datasets.dataset_stats._prompt_interactive_datasets", _fake_prompt)
+    monkeypatch.setattr("smartrain.services.datasets.dataset_stats._prompt_interactive_datasets", _fake_prompt)
     with pytest.raises(SystemExit) as e:
         stats_main([])
     assert e.value.code == 0
@@ -217,7 +217,7 @@ def test_stats_interactive_prints_datasets_and_classes_list(
         args.check_near_duplicates = False
         args.export_issues = False
 
-    monkeypatch.setattr("smartrain.workflows.datasets.dataset_stats._prompt_interactive_datasets", _fake_prompt)
+    monkeypatch.setattr("smartrain.services.datasets.dataset_stats._prompt_interactive_datasets", _fake_prompt)
     with pytest.raises(SystemExit) as e:
         stats_main([])
     assert e.value.code == 0
@@ -244,7 +244,7 @@ def test_stats_interactive_with_dataset_prompt(tmp_path: Path, monkeypatch: pyte
         args.check_near_duplicates = False
         args.export_issues = False
 
-    monkeypatch.setattr("smartrain.workflows.datasets.dataset_stats._prompt_interactive_datasets", _fake_prompt)
+    monkeypatch.setattr("smartrain.services.datasets.dataset_stats._prompt_interactive_datasets", _fake_prompt)
     with pytest.raises(SystemExit) as e:
         stats_main([])
     assert e.value.code == 0

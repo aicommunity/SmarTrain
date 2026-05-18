@@ -8,7 +8,7 @@ import pandas as pd
 
 
 def test_subsection_intro_after_context_dataset_heading(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "metrics").mkdir(parents=True, exist_ok=True)
     rs = tmp_path / "artifacts" / "metrics" / "runs_summary.csv"
@@ -41,7 +41,7 @@ def test_subsection_intro_after_context_dataset_heading(tmp_path: Path) -> None:
 
 
 def test_table_preamble_before_first_table_and_runs_summary_takeaways(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "metrics").mkdir(parents=True, exist_ok=True)
     rs = tmp_path / "artifacts" / "metrics" / "runs_summary.csv"

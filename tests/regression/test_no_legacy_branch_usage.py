@@ -9,7 +9,6 @@ from smartrain.core.runtime.workspace_paths import WorkspaceLayout, deploy_works
 
 def test_inference_run_path_uses_canonical_branch_by_default(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
-    monkeypatch.delenv("SMARTTRAIN_CANONICAL_READ", raising=False)
     monkeypatch.delenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", raising=False)
 
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
@@ -32,8 +31,8 @@ def test_inference_run_path_uses_canonical_branch_by_default(monkeypatch, tmp_pa
     class _C:
         run_id = "r1"
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.resolve_task_context", lambda *_a, **_k: _C())
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.resolve_task_context", lambda *_a, **_k: _C())
 
     import argparse
 
@@ -46,7 +45,6 @@ def test_inference_run_path_uses_canonical_branch_by_default(monkeypatch, tmp_pa
 
 def test_results_metrics_reader_does_not_call_legacy_by_default(monkeypatch, tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
-    monkeypatch.delenv("SMARTTRAIN_CANONICAL_READ", raising=False)
     monkeypatch.delenv("SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK", raising=False)
 
     run_dir = tmp_path / "runs" / "ds_a" / "run_b"
@@ -56,7 +54,7 @@ def test_results_metrics_reader_does_not_call_legacy_by_default(monkeypatch, tmp
         primary_metrics = {"mAP50-95": 0.61}
         secondary_metrics = {"Box-F1": 0.72}
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_metrics", lambda *_a, **_k: [_Metric()])
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.load_metrics", lambda *_a, **_k: [_Metric()])
 
     row = _read_test_metrics_for_run(str(run_dir))
     assert row.get("mAP50-95") == 0.61

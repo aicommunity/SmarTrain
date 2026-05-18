@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from smartrain.tasks.classification.adapter import normalize_classification_metrics
-from smartrain.tasks.contracts import TASK_CLASSIFICATION, TASK_DETECTION, TASK_SEGMENTATION, TaskContext
+from smartrain.tasks.contracts import (
+    TASK_CLASSIFICATION,
+    TASK_DETECTION,
+    TASK_SEGMENTATION,
+    normalize_task_type,
+)
 from smartrain.tasks.detection.adapter import normalize_detection_metrics
 from smartrain.tasks.segmentation.adapter import normalize_segmentation_metrics
 
@@ -36,5 +41,5 @@ _ADAPTERS: dict[str, TaskMetricsAdapter] = {
 
 
 def resolve_task_metrics_adapter(task_type: str) -> TaskMetricsAdapter:
-    normalized = TaskContext(task_type=task_type).normalized()
+    normalized = normalize_task_type(task_type)
     return _ADAPTERS.get(normalized, _ADAPTERS[TASK_DETECTION])

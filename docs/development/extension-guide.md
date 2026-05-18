@@ -4,9 +4,9 @@
 
 ## Where to put code
 
-- **CLI argparse / Typer glue / command scripts** → `smartrain/workflows/<domain>/` (or `smartrain/cli_apps/` for thin wrappers such as `train_app.py`). Dataset catalog + interactive dataset pick: `workflows/datasets/dataset_cli_catalog.py` / `dataset_cli_common.py`.
+- **CLI argparse / Typer glue / command scripts** → `smartrain/workflows/<domain>/` (or `smartrain/cli_entrypoints/` for thin wrappers such as `train_app.py`). Dataset catalog + interactive dataset pick: `workflows/datasets/dataset_cli_catalog.py` / `dataset_cli_common.py`.
 - **Reusable logic without argparse** → `smartrain/services/` (must not import `workflows`; use `smartrain/core/workflow_adapters/`).
-- **Workspace file contracts and canonical types** → `smartrain/core/runtime/`, `smartrain/domain/canonical/`, `smartrain/adapters/canonical/`.
+- **Workspace file contracts and run/model contract** → `smartrain/core/runtime/`, `smartrain/run_model_contract/` (`gateway.py`, `domain/`, `io/`).
 
 Folder map: [package-layout.md](package-layout.md).
 

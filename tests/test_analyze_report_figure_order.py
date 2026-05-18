@@ -8,7 +8,7 @@ import pandas as pd
 
 
 def test_analyze_report_figure_one_before_table_eleven(tmp_path: Path) -> None:
-    from smartrain.workflows.analyze.analyze_report import write_analysis_report
+    from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "compare").mkdir(parents=True, exist_ok=True)
     (tmp_path / "artifacts" / "metrics").mkdir(parents=True, exist_ok=True)

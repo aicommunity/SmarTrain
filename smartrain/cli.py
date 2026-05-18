@@ -16,12 +16,12 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 
-from smartrain.cli_support.typer_non_interactive import (
+from smartrain.cli_entrypoints.support.typer_non_interactive import (
     env_forces_non_interactive_cli,
     strip_typer_meta_non_interactive_flags,
 )
 from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
-from smartrain.core.training.train_backend_registry import default_train_provider
+from smartrain.core.training.ultralytics_model_alias_registry import default_train_provider
 from smartrain.core.training.train_model_catalog import TrainModelCatalog
 from smartrain.providers.core.global_index import list_provider_records
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
@@ -418,13 +418,13 @@ def cmd_normalize_data_yaml(ctx: typer.Context) -> None:
       smartrain normalize-data-yaml --workspace /data/MarsSmarTrain
       smartrain normalize-data-yaml --datasets-dir /data/MarsSmarTrain/datasets --dry-run
     """
-    from smartrain.workflows.datasets.data_yaml_normalize import build_arg_parser
+    from smartrain.services.datasets.data_yaml_normalize import build_arg_parser
 
     parser = build_arg_parser()
     if getattr(ctx, "resilient_parsing", False):
         return
     args = parser.parse_args(list(ctx.args))
-    from smartrain.workflows.datasets.data_yaml_normalize import run_normalize
+    from smartrain.services.datasets.data_yaml_normalize import run_normalize
     from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
     if args.datasets_dir:
@@ -483,11 +483,11 @@ def cmd_train(ctx: typer.Context) -> None:
       - Writes outputs to workspace runs/.
       - Use smartrain analyze scan to inspect completed runs.
     """
-    from smartrain.cli_apps.train_app import build_arg_parser
+    from smartrain.cli_entrypoints.train_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.cli_apps.train_app",
+        module="smartrain.cli_entrypoints.train_app",
         build_parser=build_arg_parser,
         prog="smartrain train",
         empty_args_mode="invoke",
@@ -595,11 +595,11 @@ def cmd_hash(ctx: typer.Context) -> None:
     Notes:
       - validate exit codes: 0 match, 1 mismatch, 2 error.
     """
-    from smartrain.workflows.datasets.dataset_hash import build_hash_arg_parser
+    from smartrain.services.datasets.dataset_hash import build_hash_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.workflows.datasets.dataset_hash",
+        module="smartrain.services.datasets.dataset_hash",
         build_parser=build_hash_arg_parser,
         prog="smartrain hash",
     )
@@ -619,13 +619,13 @@ def cmd_stats(ctx: typer.Context) -> None:
       smartrain stats compare --left ds_a --right ds_b
       smartrain stats --workspace /data/MarsSmarTrain
     """
-    from smartrain.workflows.datasets.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
+    from smartrain.services.datasets.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
 
     parser = build_stats_compare_arg_parser if (ctx.args and ctx.args[0] == "compare") else build_stats_arg_parser
     prog = "smartrain stats compare" if (ctx.args and ctx.args[0] == "compare") else "smartrain stats"
     _forward_argparse_command(
         ctx,
-        module="smartrain.workflows.datasets.dataset_stats",
+        module="smartrain.services.datasets.dataset_stats",
         build_parser=parser,
         prog=prog,
         empty_args_mode="invoke_if_tty_else_help",
@@ -663,11 +663,11 @@ def cmd_roi(ctx: typer.Context) -> None:
 )
 def cmd_test(ctx: typer.Context) -> None:
     """Complete missing test artifacts for runs/models."""
-    from smartrain.cli_apps.test_app import build_arg_parser
+    from smartrain.cli_entrypoints.test_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.cli_apps.test_app",
+        module="smartrain.cli_entrypoints.test_app",
         build_parser=build_arg_parser,
         prog="smartrain test",
         empty_args_mode="invoke",
@@ -681,11 +681,11 @@ def cmd_test(ctx: typer.Context) -> None:
 )
 def cmd_inference(ctx: typer.Context) -> None:
     """Run inference and save JSON report to workspace inference/."""
-    from smartrain.cli_apps.inference_app import build_arg_parser
+    from smartrain.cli_entrypoints.inference_app import build_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.cli_apps.inference_app",
+        module="smartrain.cli_entrypoints.inference_app",
         build_parser=build_arg_parser,
         prog="smartrain inference",
         empty_args_mode="invoke",
@@ -718,11 +718,11 @@ def cmd_report_dataset(ctx: typer.Context) -> None:
       smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
       smartrain report dataset --workspace /data/MarsSmarTrain --dataset my_dataset --no-pdf
     """
-    from smartrain.workflows.datasets.dataset_report import build_report_dataset_arg_parser
+    from smartrain.services.datasets.dataset_report import build_report_dataset_arg_parser
 
     _forward_argparse_command(
         ctx,
-        module="smartrain.workflows.datasets.dataset_report",
+        module="smartrain.services.datasets.dataset_report",
         build_parser=build_report_dataset_arg_parser,
         prog="smartrain report dataset",
         empty_args_mode="invoke_if_tty_else_help",
@@ -1216,12 +1216,12 @@ def cmd_plot(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_migrate(ctx: typer.Context) -> None:
-    """Canonical migration utilities.
+    """Unified migration utilities.
 
     Examples:
-      smartrain migrate canonical --mode dry-run
-      smartrain migrate canonical --mode apply --continue-on-error
-      smartrain migrate canonical --source-kind run --report analytics/migration-reports/run-only.json
+      smartrain migrate unified --mode dry-run
+      smartrain migrate unified --mode apply --continue-on-error
+      smartrain migrate unified --source-kind run --report analytics/migration-reports/run-only.json
     """
     from smartrain.workflows.migration.cli_migration import build_migration_arg_parser
 

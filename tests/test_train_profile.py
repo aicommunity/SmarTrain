@@ -1,7 +1,8 @@
 """YAML + CLI training profile merge tests."""
 import argparse
 
-from smartrain.workflows.training import model_training_module as mtm
+from smartrain.services.training.train_config_kwargs_service import finalize_train_kwargs
+from smartrain.services.training.train_config_merge_service import merge_sources_with_priority
 from smartrain.core.training.train_profile import (
     extract_smartrain_options,
     merge_cli_into_ultralytics_cfg,
@@ -72,7 +73,7 @@ def test_task_to_metadata_task_type():
 
 def test_merge_sources_priority_cli_over_ultralytics_yaml_over_config():
     args = argparse.Namespace(model=None, epochs=10, batch=None, img_size=None, task=None)
-    u_cfg, _sm_opts = mtm._merge_sources_with_priority(
+    u_cfg, _sm_opts = merge_sources_with_priority(
         config_profile={"model": "cfg.pt", "epochs": 100, "batch": 32},
         ultralytics_profile={"model": "ultra.pt", "epochs": 20, "batch": 8, "imgsz": 960},
         args=args,
@@ -95,7 +96,7 @@ def test_merge_sources_priority_cli_over_ultralytics_yaml_over_config():
 
 def test_merge_sources_ignores_forced_keys_from_ultralytics_yaml(capsys):
     args = argparse.Namespace(model=None, epochs=None, batch=None, img_size=None, task=None)
-    u_cfg, _sm_opts = mtm._merge_sources_with_priority(
+    u_cfg, _sm_opts = merge_sources_with_priority(
         config_profile={},
         ultralytics_profile={"data": "/tmp/data.yaml", "project": "/tmp/runs", "name": "x", "exist_ok": True, "epochs": 25},
         args=args,
@@ -109,7 +110,7 @@ def test_merge_sources_ignores_forced_keys_from_ultralytics_yaml(capsys):
 
 def test_merge_sources_ignores_cfg_key_from_ultralytics_yaml():
     args = argparse.Namespace(model=None, epochs=None, batch=None, img_size=None, task=None)
-    u_cfg, _sm_opts = mtm._merge_sources_with_priority(
+    u_cfg, _sm_opts = merge_sources_with_priority(
         config_profile={},
         ultralytics_profile={"cfg": "/missing/args_mars.yaml", "device": "0,1,2", "epochs": 25},
         args=args,
@@ -120,7 +121,7 @@ def test_merge_sources_ignores_cfg_key_from_ultralytics_yaml():
 
 
 def test_finalize_train_kwargs_forces_dataset_and_run_paths():
-    out = mtm._finalize_train_kwargs(
+    out = finalize_train_kwargs(
         {"data": "/tmp/from_yaml.yaml", "project": "/tmp/proj", "name": "custom", "exist_ok": True, "epochs": 2},
         data_yaml="/dataset/data.yaml",
         model_dir="/runs/out",
@@ -130,6 +131,15 @@ def test_finalize_train_kwargs_forces_dataset_and_run_paths():
     assert out["name"] == "train-ultralytics"
     assert out["exist_ok"] is True
     assert out["epochs"] == 2
+
+
+def test_test_yolo_val_kwargs_use_exist_ok_true() -> None:
+    import inspect
+
+    from smartrain.services.training import train_yolo_execution_service as train_exec
+
+    source = inspect.getsource(train_exec.test_yolo)
+    assert '"exist_ok": True' in source or "'exist_ok': True" in source
 
 
 def test_merge_cli_sets_default_device_when_missing():

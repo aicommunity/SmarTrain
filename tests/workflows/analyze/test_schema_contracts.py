@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from smartrain.workflows.analyze.analyze_schema_contracts import (
+from smartrain.services.analyze.schema_contracts import (
     ANALYZE_SESSION_SCHEMA_VERSION,
     FORMAT_COMPARE_SCHEMA_VERSION,
     ensure_analyze_session_manifest,

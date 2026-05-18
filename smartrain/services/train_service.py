@@ -12,13 +12,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
-from smartrain.cli_support.cli_contracts import emit_replay
+from smartrain.cli_entrypoints.support.cli_contracts import emit_replay
 from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
-from smartrain.core.workflow_adapters.training_runtime_api import (
-    calculate_dataset_hash,
-    get_training_module_api,
-)
-from smartrain.external_providers.runner import run_external_infer, run_external_train
+from smartrain.core.workflow_adapters.training_runtime_api import calculate_dataset_hash
+from smartrain.services.training.train_runtime_ops import TrainRuntimeOps, build_train_runtime_ops
 from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.providers.core.global_index import get_provider_location, list_provider_records, reconcile_stale_provider_paths
 from smartrain.core.runtime.run_artifacts import run_test_backend_dir, run_tests_dir
@@ -29,7 +26,7 @@ from smartrain.services.train_runtime_helpers import (
     load_batch_from_training_metadata,
     maybe_free_cuda_memory,
     normalize_external_run_layout,
-    run_mfel_external_val_fallback,
+    run_mfel_external_eval_substitute,
     resolve_external_eval_source,
     write_external_fallback_metrics,
 )
@@ -77,68 +74,9 @@ def _get_installed_external_provider_record(provider_id: str) -> dict[str, Any] 
     return None
 
 
-class _MtmRuntimeOps:
-    """Runtime operations bundle for train/test execution."""
-
-    def __init__(
-        self,
-        *,
-        train_yolo_fn: Callable[..., Any],
-        test_yolo_fn: Callable[..., Any],
-        save_training_metadata_fn: Callable[..., Any],
-        collect_system_profile_fn: Callable[..., Any],
-        build_run_name_fn: Callable[..., Any] | None = None,
-        resolve_external_eval_source_fn: Callable[..., Any] | None = None,
-        json_safe_train_summary_fn: Callable[..., Any] | None = None,
-        load_batch_from_training_metadata_fn: Callable[..., Any] | None = None,
-        run_external_train_fn: Callable[..., Any] | None = None,
-        run_external_infer_fn: Callable[..., Any] | None = None,
-    ) -> None:
-        self._train_yolo_fn = train_yolo_fn
-        self._test_yolo_fn = test_yolo_fn
-        self._save_training_metadata_fn = save_training_metadata_fn
-        self._collect_system_profile_fn = collect_system_profile_fn
-        self._build_run_name_fn = build_run_name_fn or build_run_name
-        self._resolve_external_eval_source_fn = resolve_external_eval_source_fn or resolve_external_eval_source
-        self._json_safe_train_summary_fn = json_safe_train_summary_fn or json_safe_train_summary
-        self._load_batch_from_training_metadata_fn = load_batch_from_training_metadata_fn or load_batch_from_training_metadata
-        self._run_external_train_fn = run_external_train_fn or run_external_train
-        self._run_external_infer_fn = run_external_infer_fn or run_external_infer
-
-    def train_yolo(self, **kwargs: Any) -> Any:
-        return self._train_yolo_fn(**kwargs)
-
-    def test_yolo(self, *args: Any, **kwargs: Any) -> Any:
-        return self._test_yolo_fn(*args, **kwargs)
-
-    def save_training_metadata(self, **kwargs: Any) -> Any:
-        return self._save_training_metadata_fn(**kwargs)
-
-    def collect_system_profile(self, model_dir: str) -> dict[str, Any]:
-        return self._collect_system_profile_fn(model_dir)
-
-    def build_run_name(self, *args: Any, **kwargs: Any) -> str:
-        return self._build_run_name_fn(*args, **kwargs)
-
-    def resolve_external_eval_source(self, dataset_path: str) -> str:
-        return self._resolve_external_eval_source_fn(dataset_path)
-
-    def json_safe_train_summary(self, train_kw: dict[str, Any] | None) -> dict[str, Any] | None:
-        return self._json_safe_train_summary_fn(train_kw)
-
-    def load_batch_from_training_metadata(self, model_dir: str) -> int | None:
-        return self._load_batch_from_training_metadata_fn(model_dir)
-
-    def run_external_train(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_external_train_fn(*args, **kwargs)
-
-    def run_external_infer(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_external_infer_fn(*args, **kwargs)
-
-
 def _run_external_provider_flow(
     *,
-    runtime_ops: _MtmRuntimeOps,
+    runtime_ops: TrainRuntimeOps,
     args: argparse.Namespace,
     u_cfg: dict[str, Any],
     workspace_root: str,
@@ -252,7 +190,7 @@ def _run_external_provider_flow(
                 fallback_conf = float(args.val_conf) if args.val_conf is not None else 0.25
                 fallback_imgsz = int(args.val_imgsz) if args.val_imgsz is not None else int(img_size)
                 if external_provider == "mfel-yolo":
-                    fallback_rc = run_mfel_external_val_fallback(
+                    fallback_rc = run_mfel_external_eval_substitute(
                         repo_path=repo_path,
                         venv_path=venv_path,
                         model_path=best_model,
@@ -297,7 +235,7 @@ def _run_external_provider_flow(
                     inference_info = {
                         "imgsz": fallback_imgsz,
                         "conf": fallback_conf,
-                        "mode": "external_infer_fallback",
+                        "mode": "external_eval_substitute",
                     }
                     reason = "external_fallback_without_ultralytics_val_metrics"
                     write_not_available_recommendations(
@@ -375,15 +313,15 @@ def _run_external_provider_flow(
     except Exception:
         pass
     if int(rc) == 0 and test_success:
-        from smartrain.adapters.canonical.write.snapshot_hook import maybe_dual_write_canonical_snapshot
+        from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 
-        maybe_dual_write_canonical_snapshot(external_run_dir, status_ok=True)
+        maybe_dual_write_unified_snapshot(external_run_dir, status_ok=True)
     return rc
 
 
 def _run_builtin_train_and_eval_flow(
     *,
-    runtime_ops: _MtmRuntimeOps,
+    runtime_ops: TrainRuntimeOps,
     args: argparse.Namespace,
     u_cfg: dict[str, Any],
     sm_opts: dict[str, Any],
@@ -523,14 +461,14 @@ def _run_builtin_train_and_eval_flow(
             confidence_recommendation_config=_confidence_recommendation_config(args),
         )
         if training_success and test_success:
-            from smartrain.adapters.canonical.write.snapshot_hook import maybe_dual_write_canonical_snapshot
+            from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 
-            maybe_dual_write_canonical_snapshot(model_dir, status_ok=True)
+            maybe_dual_write_unified_snapshot(model_dir, status_ok=True)
 
 
 def _run_test_only_flow(
     *,
-    runtime_ops: _MtmRuntimeOps,
+    runtime_ops: TrainRuntimeOps,
     args: argparse.Namespace,
     u_cfg: dict[str, Any],
     workspace_root: str,
@@ -601,9 +539,9 @@ def _run_test_only_flow(
         confidence_recommendation_config=_confidence_recommendation_config(args),
     )
     if test_success:
-        from smartrain.adapters.canonical.write.snapshot_hook import maybe_dual_write_canonical_snapshot
+        from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 
-        maybe_dual_write_canonical_snapshot(str(model_dir), status_ok=True)
+        maybe_dual_write_unified_snapshot(str(model_dir), status_ok=True)
 
 
 def run_train_after_setup(
@@ -621,22 +559,10 @@ def run_train_after_setup(
     batch: int,
     img_size: int,
     replay_cmd: str | None,
+    runtime_ops: TrainRuntimeOps | None = None,
 ) -> int | None:
     """Runs training+test (local or external), writes metadata, returns exit code."""
-    mtm = get_training_module_api()
-    # Keep behavior identical while localizing mtm wiring in one composition root.
-    runtime_ops = _MtmRuntimeOps(
-        train_yolo_fn=mtm.train_yolo,
-        test_yolo_fn=mtm.test_yolo,
-        save_training_metadata_fn=mtm.save_training_metadata,
-        collect_system_profile_fn=mtm.collect_system_profile,
-        build_run_name_fn=mtm.build_run_name,
-        resolve_external_eval_source_fn=mtm.resolve_external_eval_source,
-        json_safe_train_summary_fn=mtm.json_safe_train_summary,
-        load_batch_from_training_metadata_fn=mtm.load_batch_from_training_metadata,
-        run_external_train_fn=getattr(mtm, "run_external_train", None),
-        run_external_infer_fn=getattr(mtm, "run_external_infer", None),
-    )
+    runtime_ops = runtime_ops or build_train_runtime_ops()
     task_type = task_to_metadata_task_type(u_cfg.get("task"))
 
     external_provider = str(getattr(args, "external_provider", "") or "").strip()

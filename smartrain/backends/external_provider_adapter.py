@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from smartrain.backends.contracts import BackendExecutionResult, InferenceBackend
-from smartrain.workflows.inference.inference_backends import ExternalProviderBackend
+from smartrain.backends.implementations.ultralytics.inference import ExternalProviderBackend
 from smartrain.external_providers.runner import run_external_train
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 

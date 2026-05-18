@@ -7,7 +7,7 @@ from smartrain.workflows.migration.cli_migration import run_migration
 from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
-def test_dry_run_does_not_write_canonical_snapshot(tmp_path: Path) -> None:
+def test_dry_run_does_not_write_unified_snapshot(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     run_dir = tmp_path / "runs" / "ds_a" / "run_b"
     (run_dir / "train" / "weights").mkdir(parents=True, exist_ok=True)
@@ -25,7 +25,7 @@ def test_dry_run_does_not_write_canonical_snapshot(tmp_path: Path) -> None:
         continue_on_error=False,
     )
     assert report["stats"]["planned"] == 1
-    assert not (run_dir / ".smartrain" / "canonical" / "snapshot.json").exists()
+    assert not (run_dir / ".smartrain" / "unified" / "snapshot.json").exists()
 
 
 def test_report_only_marks_planned_and_sets_rollback_hint(tmp_path: Path) -> None:
@@ -50,7 +50,7 @@ def test_report_only_marks_planned_and_sets_rollback_hint(tmp_path: Path) -> Non
     item = report["items"][0]
     assert item["status"] == "planned"
     assert item.get("rollback_hint")
-    assert not (run_dir / ".smartrain" / "canonical" / "snapshot.json").exists()
+    assert not (run_dir / ".smartrain" / "unified" / "snapshot.json").exists()
 
 
 def test_dry_run_respects_runs_root_scope(tmp_path: Path) -> None:

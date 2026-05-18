@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import shlex
 
-from smartrain.cli_support.typer_non_interactive import TYPER_META_NON_INTERACTIVE_FLAGS
-from smartrain.cli_support.cli_replay import build_non_interactive_command
+from smartrain.cli_entrypoints.support.typer_non_interactive import TYPER_META_NON_INTERACTIVE_FLAGS
+from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command
 from smartrain.workflows.analyze.results_analyzer import build_analyze_arg_parser
 
 

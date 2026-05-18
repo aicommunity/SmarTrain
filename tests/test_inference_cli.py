@@ -79,7 +79,7 @@ def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -123,7 +123,7 @@ def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monke
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -154,7 +154,7 @@ def test_inference_dataset_split(tmp_path: Path, monkeypatch) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -229,7 +229,7 @@ def test_inference_passes_task_hint_to_capability_resolution(tmp_path: Path, mon
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -277,7 +277,7 @@ def test_inference_passes_task_hint_to_runtime_backend_predict(tmp_path: Path, m
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -328,7 +328,7 @@ def test_inference_writes_classification_task_outputs(tmp_path: Path, monkeypatc
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -387,7 +387,7 @@ def test_inference_writes_segmentation_task_outputs(tmp_path: Path, monkeypatch)
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -452,7 +452,7 @@ def test_inference_fails_on_backend_capability_mismatch(tmp_path: Path, monkeypa
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "raw_images"
@@ -501,7 +501,7 @@ def test_inference_interactive_replay(monkeypatch, tmp_path: Path) -> None:
     model_dir.mkdir(parents=True, exist_ok=True)
     (model_dir / "demo_model.pt").write_bytes(b"fake")
     (model_dir / "model_manifest.json").write_text(
-        json.dumps({"weights_file": "demo_model.pt"}, ensure_ascii=False, indent=2),
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     src = tmp_path / "images"
@@ -547,7 +547,7 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
         captured["model_path"] = kwargs.get("model_path")
         return 0
 
-    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -603,7 +603,7 @@ def test_inference_external_provider_accepts_task_outputs_payload(monkeypatch, t
             ],
         }
 
-    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -649,7 +649,7 @@ def test_inference_external_provider_classification_empty_payload_normalized(mon
             ],
         }
 
-    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -698,7 +698,7 @@ def test_inference_external_provider_segmentation_empty_payload_normalized(monke
             ],
         }
 
-    monkeypatch.setattr("smartrain.workflows.inference.inference_backends.run_external_infer", _fake_run_external_infer)
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
     with pytest.raises(SystemExit) as ex:
         inference_main(
             [
@@ -828,7 +828,6 @@ def test_resolve_model_run_prefers_newest_profile_onnx_variant(tmp_path: Path, m
 def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Path, monkeypatch) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     run_dir = tmp_path / "runs" / "ds_a" / "run_c"
     models_dir = run_dir / "models"
@@ -850,8 +849,8 @@ def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Pat
     class _C:
         run_id = "rid"
 
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.load_target", lambda *_a, **_k: _P())
-    monkeypatch.setattr("smartrain.orchestrators.canonical_gateway.resolve_task_context", lambda *_a, **_k: _C())
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.resolve_task_context", lambda *_a, **_k: _C())
     import argparse
     from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
@@ -865,7 +864,6 @@ def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Pat
 def test_resolve_model_falls_back_when_canonical_gateway_fails(tmp_path: Path, monkeypatch) -> None:
     deploy_workspace(str(tmp_path))
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
-    monkeypatch.setenv("SMARTTRAIN_CANONICAL_READ", "1")
 
     run_dir = tmp_path / "runs" / "ds_a" / "run_d"
     models_dir = run_dir / "models"
@@ -875,11 +873,11 @@ def test_resolve_model_falls_back_when_canonical_gateway_fails(tmp_path: Path, m
     (run_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(
-        "smartrain.orchestrators.canonical_gateway.load_target",
+        "smartrain.run_model_contract.gateway.load_target",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     monkeypatch.setattr(
-        "smartrain.orchestrators.canonical_gateway.resolve_task_context",
+        "smartrain.run_model_contract.gateway.resolve_task_context",
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     import argparse

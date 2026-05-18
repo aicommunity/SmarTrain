@@ -5,13 +5,13 @@
 ## Entry point
 
 - `smartrain/cli.py` — Typer-router command.
-- `smartrain/cli_support/cli_argparse.py` — shared argparse helpers (e.g. `CliArgumentParser`).
+- `smartrain/cli_entrypoints/support/cli_argparse.py` — shared argparse helpers (e.g. `CliArgumentParser`).
 
 ## Basic modules
 
 - `smartrain/workflows/datasets/datasets_json_former.py` — `scan`.
 - `smartrain/workflows/datasets/dataset_former.py` — `fusion`.
-- `smartrain/workflows/training/model_training_module.py` — `train`.
+- `smartrain/workflows/training/train_entry.py` — `train`.
 - `smartrain/workflows/queue/training_queue_cli.py` and `smartrain/workflows/queue/training_queue.py` — queue (`queue` subcommands and `queue-run`).
 - `smartrain/workflows/analyze/results_analyzer.py` — `analyze`.
 - `smartrain/workflows/registry/registry_cli.py` — `registry`.
@@ -37,7 +37,7 @@
 | `smartrain orient` | `smartrain/workflows/datasets/dataset_orient.py` |
 | `smartrain stats` | `smartrain/workflows/datasets/dataset_stats.py` |
 | `smartrain hash` | `smartrain/workflows/datasets/dataset_hash.py` |
-| `smartrain train` | `smartrain/workflows/training/model_training_module.py` |
+| `smartrain train` | `smartrain/workflows/training/train_entry.py` (`train_wiring.py`; CLI in `services/training/train_cli_main.py`) |
 | `smartrain inference` | `smartrain/workflows/inference/inference_cli.py` |
 | `smartrain report dataset` | `smartrain/workflows/datasets/dataset_report.py` |
 | `smartrain analyze` | `smartrain/workflows/analyze/results_analyzer.py` |
@@ -63,7 +63,7 @@
 flowchart LR
     cliRouter["smartrain/cli.py"]
     cliRouter --> datasetsBlock["workflows/datasets/*"]
-    cliRouter --> trainBlock["model_training_module.py"]
+    cliRouter --> trainBlock["train_entry.py"]
     cliRouter --> analyzeBlock["results_analyzer.py"]
     cliRouter --> queueBlock["workflows/queue/training_queue_cli.py + training_queue.py"]
     cliRouter --> registryBlock["workflows/registry/registry_cli.py"]

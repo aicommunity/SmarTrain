@@ -6,7 +6,7 @@ from smartrain.tasks.contracts import (
     TASK_CLASSIFICATION,
     TASK_DETECTION,
     TASK_SEGMENTATION,
-    TaskContext,
+    normalize_task_type,
 )
 
 
@@ -17,7 +17,7 @@ class TaskExecutionContext:
     split: str = "test"
 
     def normalized_task_type(self) -> str:
-        return TaskContext(task_type=self.task_type).normalized()
+        return normalize_task_type(self.task_type)
 
     def metrics_namespace(self, *, format_name: str) -> str:
         task = self.normalized_task_type()

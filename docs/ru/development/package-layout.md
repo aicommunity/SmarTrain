@@ -6,7 +6,7 @@
 
 ## Точки входа
 
-- `cli.py` — маршрутизация Typer; делегирование в argparse-модули или `cli_apps/*`.
+- `cli.py` — маршрутизация Typer; делегирование в argparse-модули или `cli_entrypoints/*`.
 - `__main__.py`, `__init__.py` — вход пакета.
 
 ## workflows/
@@ -15,7 +15,7 @@
 
 Подпакеты:
 
-- `training/` — обучение (`train_entry`, `model_training_module`, `train_*_service`).
+- `training/` — обучение (`train_entry`, `train_wiring`, `train_*_service`).
 - `datasets/` — scan, fusion, augment, balance, prune, orient, отчёты, CVAT; `dataset_access.py` для работы с файловой структурой; `dataset_cli_catalog.py` / `dataset_cli_common.py` для каталога и интерактивного выбора датасета.
 - `testing/` — CLI и backend-и model test.
 - `inference/` — inference CLI, backends, SAHI/heatmap.
@@ -35,14 +35,14 @@
 
 Общая механика: `runtime/`, `training/`, `workflow_adapters/`, `inference/`.
 
-## orchestrators/
+## Контракт run/model (`smartrain/run_model_contract/`)
 
-- `canonical_gateway.py` — чтение canonical, метрики, контекст задачи.
+Чтение legacy-раскладок, schema v2, gateway API, снимки в `.smartrain/unified/`.
 
-## domain/ и adapters/
-
-- `domain/canonical/` — модели данных и валидация.
-- `adapters/canonical/` — чтение/запись и снимки.
+- `run_model_contract/gateway.py` — `load_target`, `load_metrics`, `resolve_task_context`, predictions API
+- `run_model_contract/domain/` — DTO и валидация
+- `run_model_contract/io/` — чтение/запись, снимки
+- `run_model_contract/refs.py`, `schema.py`, `env.py`
 
 ## backends/
 
@@ -52,9 +52,9 @@
 
 Адаптеры метрик по типу задачи (детекция / классификация / сегментация).
 
-## cli_support/
+## cli_entrypoints/
 
-`cli_replay.py`, `cli_contracts.py`, общие промпты argparse.
+Тонкие Typer-приложения и `support/` (`cli_replay.py`, `cli_contracts.py`, argparse, `--nit`).
 
 ## external_providers/
 

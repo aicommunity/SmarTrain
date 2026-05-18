@@ -36,7 +36,7 @@ from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_su
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
-from smartrain.adapters.canonical.write.snapshot_hook import maybe_dual_write_canonical_snapshot
+from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 from smartrain.services.inference_runtime_helpers import (
     build_report,
     collect_folder_images,
@@ -501,7 +501,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         }
         write_report(report_path, external_report)
         print(f"[OK] External inference report: {report_path}")
-        maybe_dual_write_canonical_snapshot(out_root, status_ok=True)
+        maybe_dual_write_unified_snapshot(out_root, status_ok=True)
         return int(rc), True
 
     model_format = str(model_path.suffix).lower().lstrip(".")
@@ -682,5 +682,5 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
 
     print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")
     print(f"[OK] Report: {report_path}")
-    maybe_dual_write_canonical_snapshot(out_root, status_ok=True)
+    maybe_dual_write_unified_snapshot(out_root, status_ok=True)
     return 0, False

@@ -4,27 +4,27 @@
 
 This document captures real code flows and helps you quickly locate where to make changes.
 
-Sources of truth for this section: `smartrain/cli.py`, `smartrain/workflows/training/model_training_module.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/workflows/queue/training_queue.py`, `smartrain/workflows/queue/training_queue_cli.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
+Sources of truth for this section: `smartrain/cli.py`, `smartrain/workflows/training/train_entry.py`, `smartrain/workflows/training/train_wiring.py`, `smartrain/workflows/analyze/results_analyzer.py`, `smartrain/workflows/queue/training_queue.py`, `smartrain/workflows/queue/training_queue_cli.py`, `smartrain/core/runtime/workspace_paths.py`, `smartrain/providers/cli.py`, `smartrain/providers/core/global_index.py`.
 
 **Package layout** (folder map): [package-layout.md](package-layout.md).
 
 ## Functional navigation
 
-Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_apps/*`). Use this table to find the right module when changing behavior.
+Typer routes commands in `cli.py` (see `_forward_argparse_command` and `cli_entrypoints/*`). Use this table to find the right module when changing behavior.
 
 | Command / area | Typer entry (`cli.py`) | Argparse / `main` | Orchestration / services | Notes |
 |----------------|------------------------|-------------------|---------------------------|-------|
-| `train` | `_forward_argparse_command` → `smartrain.cli_apps.train_app` | `workflows/training/train_entry.py` → `model_training_module` | `services/train_service.py`, `workflows/training/*_service.py` | Profile merge: `core/training/train_profile.py` |
-| `test` | → `cli_apps/test_app` | `workflows/testing/model_test_cli.py` | `services/model_test_orchestrator.py`, `services/test_backend_dispatch.py` | Backends: `backends/train_test_registry.py` |
-| `inference` | → `cli_apps/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `workflows/inference/inference_backends.py` | |
-| `analyze` subcommands | Typer subcommands → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` | `workflows/analyze/analyze_*_service.py`, `services/analyze_*.py` | Metrics / canonical: `orchestrators/canonical_gateway.py` |
-| `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | `datasets_json_former.py` | | Writes `datasets_info.json` |
-| `fusion` | → `workflows/datasets/dataset_former.py` | same module | | |
+| `train` | `_forward_argparse_command` → `smartrain.cli_entrypoints.train_app` | `workflows/training/train_entry.py` → `services/training/train_cli_main.py` | `services/train_service.py`, `services/training/*`, `workflows/training/train_wiring.py` (resume) | Profile merge: `core/training/train_profile.py` |
+| `test` | → `cli_entrypoints/test_app` | `workflows/testing/model_test_cli.py` | `services/testing/model_test_runner.py`, `services/test_backend_dispatch.py`, `services/testing/backends/format_runners.py` | Dispatch via `core/workflow_adapters/testing_runtime_api.py` |
+| `inference` | → `cli_entrypoints/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `backends/implementations/ultralytics/inference.py` | |
+| `analyze` subcommands | Typer subcommands → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` (facade) | `services/analyze/*` | Run/model contract: `run_model_contract/gateway.py` |
+| `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | facade → `services/datasets/datasets_json_former.py` | | Writes `datasets_info.json` |
+| `fusion` | → `workflows/datasets/dataset_former.py` (facade) | `services/datasets/dataset_former.py` | | |
 | `queue` | Typer → `workflows/queue/training_queue_cli.py` (`list`/`add`/…); `queue-run` → `_forward_argparse_command` → `training_queue.py` | `training_queue_cli` / `training_queue` | | Queue state under workspace |
 
 ## CLI: interactive mode and replay
 
-Typer (`cli.py`, `_forward_argparse_command`) strips Typer-only tokens `--nit` and `--smartrain-replay` (including `--nit=…` / `--smartrain-replay=…` forms) before calling each subcommand’s `main(argv)`. Use `--nit` as a separate token in scripts; `=`-forms are stripped for Typer routing but are not the canonical argparse contract. Legacy `-y` / `--non-interactive` on the forwarded argv still force non-interactive routing (they are not stripped). Environment `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (see `smartrain/cli_support/typer_non_interactive.py`) forces the same policy without argv flags. Replay strings built via `build_non_interactive_command` / `emit_replay` append a single trailing `--nit` so pasted commands match Typer behavior. Details: [../cli/replay-and-non-interactive.md](../cli/replay-and-non-interactive.md).
+Typer (`cli.py`, `_forward_argparse_command`) strips Typer-only tokens `--nit` and `--smartrain-replay` (including `--nit=…` / `--smartrain-replay=…` forms) before calling each subcommand’s `main(argv)`. Use `--nit` as a separate token in scripts; `=`-forms are stripped for Typer routing but are not the canonical argparse contract. Legacy `-y` / `--non-interactive` on the forwarded argv still force non-interactive routing (they are not stripped). Environment `SMART_TRAIN_FORCE_NON_INTERACTIVE=1` (see `smartrain/cli_entrypoints/support/typer_non_interactive.py`) forces the same policy without argv flags. Replay strings built via `build_non_interactive_command` / `emit_replay` append a single trailing `--nit` so pasted commands match Typer behavior. Details: [../cli/replay-and-non-interactive.md](../cli/replay-and-non-interactive.md).
 
 | Mode | TTY | `--nit` | Incomplete required args | Behavior |
 |------|-----|---------|--------------------------|----------|
@@ -38,7 +38,7 @@ Typer (`cli.py`, `_forward_argparse_command`) strips Typer-only tokens `--nit` a
 ### Layers and imports
 
 - Modules under `smartrain/services/` must **not** import `smartrain.workflows.*`; they call workflow code through facades in `smartrain/core/workflow_adapters/`. Regression: `tests/regression/test_train_service_guardrails.py`.
-- Canonical read/write and gateway behavior: `orchestrators/canonical_gateway.py`, `domain/canonical/`, `adapters/canonical/`.
+- Run/model contract: `smartrain/run_model_contract/gateway.py`, `smartrain/run_model_contract/` (`domain/`, `io/`).
 - Narrative snapshot of layers and refactor waves (not duplicated here): [../refactor/13-project-current-state.md](../refactor/13-project-current-state.md).
 
 ## 1) Top-level architecture
@@ -65,13 +65,15 @@ Practical takeaway: changes to file contracts affect multiple commands at once.
 sequenceDiagram
   participant User
   participant CLI as cli.py
-  participant Train as model_training_module.py
+  participant Train as train_entry.py
+  participant CliMain as train_cli_main.py
   participant Profile as core/training/train_profile.py
   participant YOLO as ultralytics.YOLO
   User->>CLI: smartrain train ...
   CLI->>Train: main(argv)
-  Train->>Profile: merge parameters
-  Train->>Train: resolve dataset and runtime data.yaml
+  Train->>CliMain: run_train_cli_pipeline
+  CliMain->>Profile: merge parameters
+  CliMain->>CliMain: resolve dataset and runtime data.yaml
   Train->>YOLO: train()
   Train->>YOLO: val()
   Train->>Train: write metrics and training_metadata.json

@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from smartrain.cli_support.cli_argparse import CliArgumentParser
-from smartrain.cli_support.cli_prompts import (
+from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_prompts import (
     print_numbered_options,
     prompt_choice,
     prompt_int,
@@ -21,12 +21,12 @@ from smartrain.cli_support.cli_prompts import (
     prompt_text,
     prompt_yes_no,
 )
-from smartrain.cli_support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.workflows.models.model_context import infer_img_size_with_source
 from smartrain.core.runtime.run_artifacts import (
-    canonical_run_model_path,
-    materialize_canonical_run_model,
+    preferred_run_model_path,
+    materialize_preferred_run_model,
     run_models_dir,
     run_tmp_dir,
     write_model_sidecar_metadata,
@@ -244,12 +244,12 @@ def _discover_models(workspace_root: Path, *, allowed_suffixes: tuple[str, ...])
         run_dirs = [Path(p) for p in find_run_directories(str(root))]
         for run_dir in run_dirs:
             for suffix in allowed_suffixes:
-                canonical = Path(canonical_run_model_path(str(run_dir), suffix))
+                canonical = Path(preferred_run_model_path(str(run_dir), suffix))
                 if canonical.is_file():
                     found.append(("runs", canonical))
                     continue
                 # Transparent legacy workspace migration on first discovery.
-                migrated = materialize_canonical_run_model(str(run_dir), ext=suffix, move=True, normalize_metadata=True)
+                migrated = materialize_preferred_run_model(str(run_dir), ext=suffix, move=True, normalize_metadata=True)
                 if migrated is not None and migrated.is_file():
                     found.append(("runs", migrated))
 
@@ -432,6 +432,29 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
             )
             stats.skipped += 1
             stats.artifacts_skipped += 1
+            if not session_onnx.exists() and public_onnx.exists():
+                run_root = _guess_run_root_for_path(source_path)
+                onnx_params = {
+                    "imgsz": _format_imgsz(ctx.onnx_imgsz),
+                    "batch": ctx.onnx_batch,
+                    "dynamic": bool(ctx.onnx_dynamic),
+                    "opset": ctx.opset,
+                    "simplify": bool(ctx.simplify),
+                    "half": bool(ctx.half),
+                    "nms": bool(ctx.nms),
+                }
+                ok_cache, cache_reason = _ensure_dedicated_onnx_cache(
+                    public_onnx=public_onnx,
+                    dedicated_onnx=session_onnx,
+                    expected_sig=expected_sig,
+                    source_path=source_path,
+                    out_dir=out_dir,
+                    onnx_params=onnx_params,
+                )
+                if not ok_cache:
+                    print(f"[ERROR] Failed to prepare dedicated ONNX cache for TRT: {cache_reason}")
+                    stats.failed += 1
+                    return result
         else:
             _cleanup_trtprep_artifacts(out_dir, source_path.stem)
             ok_onnx, onnx_reason = _export_named_onnx_from_pt(
@@ -485,9 +508,12 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 print(f"[OK] Public ONNX: {public_onnx}")
             stats.ok += 1
             stats.artifacts_ok += 1
-        result.session_onnx = session_onnx
+        if session_onnx.exists():
+            result.session_onnx = session_onnx
 
-    if ctx.source_kind == "pt" and (ctx.target_engine or ctx.target_trt) and session_onnx is None:
+    if ctx.source_kind == "pt" and (ctx.target_engine or ctx.target_trt) and (
+        session_onnx is None or not session_onnx.exists()
+    ):
         if (not ctx.target_engine or (engine_target.exists() and not ctx.force_engine)) and (
             not ctx.target_trt or (trt_target.exists() and not ctx.force_trt)
         ):
@@ -637,6 +663,31 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
             stats.artifacts_skipped += 1
         else:
             trt_input = session_onnx if (ctx.source_kind == "pt") else source_path
+            if ctx.source_kind == "pt" and (trt_input is None or not trt_input.exists()):
+                run_root = _guess_run_root_for_path(source_path)
+                onnx_params = {
+                    "imgsz": _format_imgsz(ctx.onnx_imgsz),
+                    "batch": ctx.onnx_batch,
+                    "dynamic": bool(ctx.onnx_dynamic),
+                    "opset": ctx.opset,
+                    "simplify": bool(ctx.simplify),
+                    "half": bool(ctx.half),
+                    "nms": bool(ctx.nms),
+                }
+                ok_cache, cache_reason = _ensure_dedicated_onnx_cache(
+                    public_onnx=public_onnx_target,
+                    dedicated_onnx=session_onnx_target,
+                    expected_sig=expected_sig,
+                    source_path=source_path,
+                    out_dir=out_dir,
+                    onnx_params=onnx_params,
+                )
+                if not ok_cache:
+                    print(f"[ERROR] TensorRT trt requires ONNX cache but preparation failed: {cache_reason}")
+                    stats.failed += 1
+                    stats.artifacts_failed += 1
+                    return result
+                trt_input = session_onnx_target
             if trt_input is None:
                 print("[ERROR] Internal error: trt requested but session ONNX is missing.")
                 stats.failed += 1
@@ -1302,6 +1353,46 @@ def _resolve_interactive_variant_targets(
     return public_onnx, dedicated_onnx, engine_target, trt_target
 
 
+def _ensure_dedicated_onnx_cache(
+    *,
+    public_onnx: Path,
+    dedicated_onnx: Path,
+    expected_sig: dict[str, Any],
+    source_path: Path,
+    out_dir: Path,
+    onnx_params: dict[str, Any],
+) -> tuple[bool, str]:
+    """Materialize dedicated *_trtprep.onnx from an existing public ONNX when signatures match."""
+    if dedicated_onnx.exists():
+        return True, ""
+    if not public_onnx.exists():
+        return False, "public ONNX is missing"
+    existing_sig = _extract_onnx_signature(public_onnx)
+    sig_ok, mismatches, warnings = _compare_onnx_signature(existing_sig, expected_sig)
+    if not sig_ok:
+        details = "; ".join(mismatches[:8])
+        if len(mismatches) > 8:
+            details += f"; ... (+{len(mismatches) - 8} more)"
+        return False, f"public ONNX signature mismatch: {details}"
+    if warnings:
+        print(f"[WARN] Existing ONNX has incomplete metadata: {'; '.join(warnings[:8])}")
+    if dedicated_onnx.resolve() == public_onnx.resolve():
+        return True, ""
+    _cleanup_trtprep_artifacts(out_dir, source_path.stem)
+    run_root = _guess_run_root_for_path(source_path)
+    ok_cache, cache_reason = _sync_onnx_artifact(
+        public_onnx,
+        dedicated_onnx,
+        force=True,
+        source_path_for_meta=source_path,
+        run_root=run_root,
+        params=onnx_params,
+    )
+    if ok_cache:
+        print(f"[OK] Dedicated ONNX cache: {dedicated_onnx}")
+    return ok_cache, cache_reason
+
+
 def _sync_onnx_artifact(
     source_onnx: Path,
     target_onnx: Path,
@@ -1483,6 +1574,27 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
             print(f"[WARN] Skip ONNX (exists): {public_onnx}. Use --force to rebuild.")
             skipped_any = True
             artifacts_skipped += 1
+            if dedicated_onnx.resolve() != public_onnx.resolve():
+                ok_cache, cache_reason = _ensure_dedicated_onnx_cache(
+                    public_onnx=public_onnx,
+                    dedicated_onnx=dedicated_onnx,
+                    expected_sig=expected,
+                    source_path=source_path,
+                    out_dir=out_dir,
+                    onnx_params={
+                        "imgsz": _format_imgsz(imgsz),
+                        "batch": int(args.batch),
+                        "dynamic": bool(args.dynamic),
+                        "opset": int(args.opset),
+                        "simplify": bool(getattr(args, "simplify", True)),
+                        "half": bool(getattr(args, "half", False)),
+                        "nms": bool(getattr(args, "nms", False)),
+                    },
+                )
+                if not ok_cache:
+                    print(f"[ERROR] Failed to prepare dedicated ONNX cache: {cache_reason}")
+                    failed_any = True
+                    artifacts_failed += 1
         else:
             onnx_kw = {
                 **base_common,

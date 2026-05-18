@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from smartrain.cli_support.typer_non_interactive import (
+from smartrain.cli_entrypoints.support.typer_non_interactive import (
     FORCE_NON_INTERACTIVE_ENV,
     env_forces_non_interactive_cli,
     strip_typer_meta_non_interactive_flags,
