@@ -496,6 +496,74 @@ def test_interactive_onnx_engine_trt_exports_onnx_once(monkeypatch, tmp_path: Pa
     assert (tmp_path / "m.trt").exists()
 
 
+def test_interactive_onnx_skip_syncs_trtprep_for_trt(monkeypatch, tmp_path: Path):
+    source_pt = tmp_path / "m.pt"
+    source_pt.write_text("pt", encoding="utf-8")
+    public = tmp_path / "m.onnx"
+    public.write_text("public-onnx", encoding="utf-8")
+
+    used_onnx: list[Path] = []
+    monkeypatch.setattr(
+        mcc,
+        "_extract_onnx_signature",
+        lambda _p: {"opset": 17, "batch": 1, "h": 640, "w": 640, "dynamic": False, "half": False, "simplify": True, "nms": False},
+    )
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            self.path = _path
+
+        def export(self, **_kwargs):
+            raise AssertionError("ONNX export must not run when public ONNX already exists")
+
+    import ultralytics
+
+    monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
+
+    def _fake_trtexec(onnx_path, engine_target, _args, _imgsz):
+        used_onnx.append(Path(onnx_path))
+        engine_target.write_text("trt", encoding="utf-8")
+        return True, "ok"
+
+    monkeypatch.setattr(mcc, "_trtexec_export_from_onnx", _fake_trtexec)
+
+    ctx = mcc.InteractiveContext(
+        source_kind="pt",
+        source_path=source_pt,
+        target_onnx=True,
+        target_engine=False,
+        target_trt=True,
+        output_dir=tmp_path,
+        force=False,
+        force_onnx=False,
+        force_engine=False,
+        force_trt=True,
+        onnx_imgsz=640,
+        onnx_imgsz_source="cli",
+        onnx_batch=1,
+        onnx_dynamic=False,
+        device=None,
+        engine_precision="fp32",
+        engine_workspace_gib=None,
+        trt_precision="fp32",
+        trt_workspace_gib=None,
+        data=None,
+        fraction=1.0,
+        opset=17,
+        simplify=True,
+        half=False,
+        nms=False,
+    )
+    result = mcc._run_interactive_pipeline(ctx)
+    assert result.stats.failed == 0
+    dedicated = sorted(tmp_path.glob("*_trtprep.onnx"))
+    assert dedicated, "dedicated trtprep ONNX must be created from existing public ONNX"
+    assert dedicated[0].read_text(encoding="utf-8") == "public-onnx"
+    assert len(used_onnx) == 1
+    assert used_onnx[0].name.endswith("_trtprep.onnx")
+    assert (tmp_path / "m.trt").exists()
+
+
 def test_interactive_onnx_decline_overwrite_skips_export(monkeypatch, tmp_path: Path):
     source_pt = tmp_path / "m.pt"
     source_pt.write_text("pt", encoding="utf-8")
