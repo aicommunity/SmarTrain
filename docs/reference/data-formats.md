@@ -7,7 +7,7 @@
 - `datasets/datasets_info.json` — dataset directory.
 - `datasets/class_names.json` — normalization of class names.
 - `datasets/datasets_scan_summary.json` - summary of changes since `scan`.
-- `datasets/<dataset>/dataset_passport.json` — passport of transformations.
+- `datasets/<dataset>/dataset_passport.json` — passport of transformations (e.g. `augment`, `orient`, `rotate` with `fixed_rotation_cw` and `angle` 90/180/270).
 - `runs/.../training_metadata.json` — training metadata.
 - `queue.txt` and `tmp/status.txt` — queue and its statuses.
 

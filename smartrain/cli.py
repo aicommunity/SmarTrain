@@ -141,6 +141,12 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "  smartrain cvat from-cvsdcldet --source-dir raw_data/my_det --output-dir converted_raw_data/my_det --zip\n"
         "  smartrain cvat from-cvsdcldet --source-dir raw_data/my_det --rename-classes white_line line\n"
     ),
+    "smartrain rotate": (
+        "Examples:\n"
+        "  smartrain rotate\n"
+        "  smartrain rotate --dataset my_dataset --angle 90\n"
+        "  smartrain rotate --dataset my_dataset --angle 270 --output-name my_dataset_rot270\n"
+    ),
     "smartrain sahi": (
         "Examples:\n"
         "  smartrain sahi --model models/best.pt --source images/\n"
@@ -1384,6 +1390,31 @@ def cmd_orient(ctx: typer.Context) -> None:
         module="smartrain.workflows.datasets.dataset_orient",
         build_parser=build_orient_arg_parser,
         prog="smartrain orient",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@app.command(
+    "rotate",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_rotate(ctx: typer.Context) -> None:
+    """Rotate a dataset by a fixed angle (90/180/270 degrees clockwise).
+
+    Examples:
+      smartrain rotate
+      smartrain rotate --dataset my_dataset --angle 90
+      smartrain rotate --dataset my_dataset --angle 270 --output-name my_dataset_rot270
+      smartrain rotate --workspace /data/MarsSmarTrain --dataset my_dataset --angle 180
+    """
+    from smartrain.workflows.datasets.dataset_rotate import build_rotate_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.datasets.dataset_rotate",
+        build_parser=build_rotate_arg_parser,
+        prog="smartrain rotate",
         empty_args_mode="invoke_if_tty_else_help",
     )
 

@@ -6,7 +6,7 @@
 
 ## Группы команд
 
-- Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `inference`, `hash`, `stats`, `report dataset`
+- Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`
 - Обучение: `train`, `clearml-upload`
 - Провайдеры: `providers`
 - Инфо: `info`
@@ -36,7 +36,7 @@ smartrain model convert --help
 
 - интерактив включается только при запуске команды без аргументов (TTY обязателен);
 - выбор датасета(ов): сразу нумерованный список; ввод по имени или по номеру (несколько датасетов — через CSV номеров или имён);
-- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `report dataset`, `model convert`, `model release` пустой вызов запускает интерактивный режим;
+- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `report dataset`, `model convert`, `model release` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
 

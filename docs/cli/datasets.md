@@ -24,7 +24,7 @@ Collects a new dataset from several sources:
 - class management: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
 - crash: `--fusion-split train,val,test`.
 
-## `augment`, `balance`, `orient`, `roi`
+## `augment`, `balance`, `orient`, `rotate`, `roi`
 
 - `augment` — autonomous augmentations with recording of a new dataset; **`--aug-class-aware-geo`** / **`--aug-total-bbox-cap-mult`** match `balance` hybrid-aug (same literature refs as above; standalone default for class-aware is **off** for backward compatibility). With a bbox cap, **`--aug-budget-tail-first`** (default **on**) processes train frames in descending tail priority `max_c (n_max/n_c)^γ` before spending slack on head-like frames; **`--aug-budget-tail-gamma`** (default `1.0`) sets γ; disable priority ordering with **`--no-aug-budget-tail-first`**;
 - `balance` — class balancing; after balancing, `--eval-coverage` (default) can rebalance items across `train`/`val`/`test` so eval splits are non-empty when possible and rare classes appear in `val`/`test`; `--no-eval-coverage` turns this off;
@@ -34,6 +34,7 @@ Collects a new dataset from several sources:
   - optional **head bbox undersampling** after sampling: `--train-head-bbox-undersample median-factor` with `--train-head-bbox-cap-mult` (default `5.0`) drops excess YOLO label lines for classes above `floor(cap_mult * median bbox count per class)` using stratified round-robin; see `balance_manifest.json` key `head_bbox_undersample` when used;
   - background: long-tailed learning taxonomy [arXiv:2110.04596](https://arxiv.org/abs/2110.04596), detection/long-tail surveys [arXiv:2408.00483](https://arxiv.org/abs/2408.00483); combining rebalancing with offline augmentation follows common practice on skewed benchmarks (e.g. COCO-ZIPF-style studies such as [arXiv:2403.07113](https://arxiv.org/abs/2403.07113)).
 - `orient` — frame rotation correction;
+- `rotate` — fixed clockwise rotation of the whole dataset by `90`, `180`, or `270` degrees into `datasets/<name>_rot<angle>` (interactive by default);
 - `roi` — crop according to the ROI-model.
 
 All of the above commands form `dataset_passport.json` in the new dataset directory.

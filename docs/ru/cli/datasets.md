@@ -25,7 +25,7 @@
 - управление классами: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
 - разбиение: `--fusion-split train,val,test`.
 
-## `augment`, `balance`, `orient`, `roi`
+## `augment`, `balance`, `orient`, `rotate`, `roi`
 
 - `augment` — автономные аугментации с записью нового датасета; флаги **`--aug-class-aware-geo`** и **`--aug-total-bbox-cap-mult`** те же, что для `balance` hybrid-aug (ссылки на DODA/CUDA — см. выше; в одиночном `augment` class-aware по умолчанию **выкл.** для совместимости). При включённом капе по bbox **`--aug-budget-tail-first`** (по умолчанию **вкл.**) задаёт порядок обхода train: сначала кадры с большим хвостовым приоритетом `max_c (n_max/n_c)^γ`, затем head; **`--aug-budget-tail-gamma`** — показатель γ (по умолчанию `1.0`); отключить упорядочивание — **`--no-aug-budget-tail-first`**;
 - `balance` — балансировка классов; после балансировки по умолчанию действует `--eval-coverage` — при необходимости перераспределяет элементы между `train`/`val`/`test`, чтобы поддержать eval и покрытие классов, но не допускает попадания одного и того же source-изображения в разные сплиты; если уникальных кадров недостаточно, `val/test` могут остаться частично недозаполненными; отключить — `--no-eval-coverage`;
@@ -35,6 +35,7 @@
   - опциональное **прореживание head по bbox**: `--train-head-bbox-undersample median-factor` и `--train-head-bbox-cap-mult` (по умолчанию `5.0`) убирают лишние строки разметки YOLO для классов выше `floor(mult * медиана числа bbox на класс)` со стратифицированным round-robin; при использовании смотрите в `balance_manifest.json` ключ `head_bbox_undersample`;
   - контекст: таксономия long-tailed learning [arXiv:2110.04596](https://arxiv.org/abs/2110.04596), обзоры по detection/long-tail [arXiv:2408.00483](https://arxiv.org/abs/2408.00483); сочетание rebalance и офлайн-аугментации согласуется с практикой на перекошенных бенчмарках (в т.ч. линия COCO-ZIPF: [arXiv:2403.07113](https://arxiv.org/abs/2403.07113)).
 - `orient` — коррекция поворота кадров;
+- `rotate` — фиксированный поворот всего датасета на `90`, `180` или `270`° по часовой стрелке в `datasets/<name>_rot<angle>` (интерактивный режим по умолчанию);
 - `roi` — кроп по ROI-модели.
 
 Все перечисленные команды формируют `dataset_passport.json` в новом каталоге датасета.

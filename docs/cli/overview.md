@@ -6,7 +6,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 
 ## Command groups
 
-- Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`, `inference`, `hash`, `stats`, `report dataset`
+- Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`
 - Training: `train`, `clearml-upload`
 - Providers: `providers`
 - Info: `info`
@@ -42,7 +42,7 @@ smartrain <group> <subcommand> -- --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `report dataset`, `model convert`, `model release`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `report dataset`, `model convert`, `model release`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 

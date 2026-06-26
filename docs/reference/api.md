@@ -35,6 +35,7 @@
 | `smartrain prune` | `smartrain/workflows/datasets/dataset_prune.py` |
 | `smartrain roi` | `smartrain/workflows/datasets/dataset_roi_yolo.py` |
 | `smartrain orient` | `smartrain/workflows/datasets/dataset_orient.py` |
+| `smartrain rotate` | `smartrain/workflows/datasets/dataset_rotate.py` |
 | `smartrain stats` | `smartrain/workflows/datasets/dataset_stats.py` |
 | `smartrain hash` | `smartrain/workflows/datasets/dataset_hash.py` |
 | `smartrain train` | `smartrain/workflows/training/train_entry.py` (`train_wiring.py`; CLI in `services/training/train_cli_main.py`) |

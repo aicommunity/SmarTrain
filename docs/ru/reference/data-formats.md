@@ -7,7 +7,7 @@
 - `datasets/datasets_info.json` — каталог датасетов.
 - `datasets/class_names.json` — нормализация имён классов.
 - `datasets/datasets_scan_summary.json` — сводка изменений после `scan`.
-- `datasets/<dataset>/dataset_passport.json` — паспорт преобразований.
+- `datasets/<dataset>/dataset_passport.json` — паспорт преобразований (например `augment`, `orient`, `rotate` с `fixed_rotation_cw` и углом 90/180/270).
 - `runs/.../training_metadata.json` — метаданные обучения.
 - `queue.txt` и `tmp/status.txt` — очередь и её статусы.
 
