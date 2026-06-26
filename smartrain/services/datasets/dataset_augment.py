@@ -1041,6 +1041,45 @@ def _list_workspace_detector_models(workspace_root: str) -> list[str]:
     return out
 
 
+def _augment_roi_prompt_label(*, enable_center_rotate: bool, enable_bbox_copy: bool) -> str:
+    if enable_center_rotate and enable_bbox_copy:
+        return "Placement mode for rotation pivot and bbox_copy paste area (--placement-mode)"
+    if enable_center_rotate:
+        return "Rotation pivot (--placement-mode)"
+    return "Paste area for bbox_copy (--placement-mode)"
+
+
+def _print_augment_placement_mode_help(*, enable_center_rotate: bool, enable_bbox_copy: bool) -> None:
+    if enable_center_rotate and enable_bbox_copy:
+        print("[INFO] Shared placement mode for rotation and bbox_copy:")
+    elif enable_center_rotate:
+        print("[INFO] Where to take the rotation axis from (not always the image center):")
+    else:
+        print("[INFO] Where bbox_copy may place pasted objects:")
+    print("  none     - image center; simple ±rotation, no ROI detector needed")
+    print("  bbox     - center of YOLO boxes on the frame")
+    print("  detector - center/region from ROI detector (--roi-model), e.g. belt or conveyor zone")
+
+
+def _default_placement_mode_for_interactive(*, enable_center_rotate: bool, enable_bbox_copy: bool, current: str) -> str:
+    cur = str(current or "detector")
+    if cur in {"none", "bbox", "detector"}:
+        stored = cur
+    else:
+        stored = "detector"
+    if enable_center_rotate and not enable_bbox_copy:
+        return "none"
+    return stored
+
+
+def _augment_balancing_block_title(*, enable_center_rotate: bool, enable_bbox_copy: bool) -> str:
+    if enable_center_rotate and enable_bbox_copy:
+        return "[INFO] Block: Balancing/Variety (center rotation and bbox_copy)"
+    if enable_center_rotate:
+        return "[INFO] Block: Balancing/Variety (center rotation)"
+    return "[INFO] Block: Balancing/Variety (bbox_copy)"
+
+
 def _interactive_fill(args, dataset_names: list[str], classes: list[str], workspace_root: str) -> None:
     print("[INFO] Interactive augment mode")
     print("[INFO] Available classes:")
@@ -1072,7 +1111,14 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
     print("[INFO] Block: photometric/conveyor")
     args.enable_photometric = prompt_yes_no("Enable brightness/contrast?", default=bool(args.enable_photometric))
     args.enable_conveyor = prompt_yes_no("Enable conveyor noise/blur/shift/rotate?", default=bool(args.enable_conveyor))
-    args.enable_center_rotate = prompt_yes_no("Enable frame rotation around the center?", default=bool(args.enable_center_rotate))
+    args.enable_center_rotate = prompt_yes_no(
+        "Enable frame rotation augmentation (--enable-center-rotate)?",
+        default=bool(args.enable_center_rotate),
+    )
+    args.enable_bbox_copy = prompt_yes_no(
+        "Enable bbox_copy paste augmentation (--enable-bbox-copy)?",
+        default=bool(args.enable_bbox_copy),
+    )
     if args.enable_center_rotate:
         print("[INFO] Block: center-rotate")
         args.center_rotate_deg = float(
@@ -1083,14 +1129,22 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             prompt_text("Number of rotate-options per frame (--rotate-copies)", default=str(getattr(args, "rotate_copies", 1))).strip()
             or str(getattr(args, "rotate_copies", 1))
         )
-    args.enable_bbox_copy = prompt_yes_no("Enable bbox_copy?", default=bool(args.enable_bbox_copy))
     if args.enable_center_rotate or args.enable_bbox_copy:
-        print("[INFO] Block: ROI source (general)")
-        roi_mode_default = "detector" if str(getattr(args, "placement_mode", "detector")) == "detector" else (
-            "bbox" if str(getattr(args, "placement_mode", "detector")) == "bbox" else "none"
+        print("[INFO] Block: placement / ROI")
+        _print_augment_placement_mode_help(
+            enable_center_rotate=bool(args.enable_center_rotate),
+            enable_bbox_copy=bool(args.enable_bbox_copy),
+        )
+        roi_mode_default = _default_placement_mode_for_interactive(
+            enable_center_rotate=bool(args.enable_center_rotate),
+            enable_bbox_copy=bool(args.enable_bbox_copy),
+            current=str(getattr(args, "placement_mode", "detector")),
         )
         roi_mode = prompt_choice(
-            "ROI mode to rotate/bbox_copy (--placement-mode)",
+            _augment_roi_prompt_label(
+                enable_center_rotate=bool(args.enable_center_rotate),
+                enable_bbox_copy=bool(args.enable_bbox_copy),
+            ),
             ["none", "bbox", "detector"],
             default=roi_mode_default,
         )
@@ -1115,9 +1169,11 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
                 prompt_text("ROI class ids CSV (--roi-class-ids, empty=all)", default=str(getattr(args, "roi_class_ids", "") or "")).strip()
                 or None
             )
-    # The soft-balance and diversity options are only relevant to rotate/bbox_copy.
     if args.enable_center_rotate or args.enable_bbox_copy:
-        print("[INFO] Block: Balancing/Variety")
+        print(_augment_balancing_block_title(
+            enable_center_rotate=bool(args.enable_center_rotate),
+            enable_bbox_copy=bool(args.enable_bbox_copy),
+        ))
         args.imbalance_mode = prompt_choice(
             "Class balancing (--imbalance-mode)",
             ["off", "soft"],
