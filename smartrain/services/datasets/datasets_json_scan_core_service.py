@@ -3,8 +3,14 @@ from __future__ import annotations
 import os
 import yaml
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import List, Optional
 
+from smartrain.services.datasets.cvsdcldet_converter import (
+    collect_cvsdcldet_class_names,
+    collect_cvsdcldet_pairs,
+    is_cvsdcldet_dir,
+)
 from smartrain.services.datasets.dataset_scan import (
     find_obj_data_file,
     find_obj_names_file,
@@ -173,6 +179,9 @@ def detect_structure(folder_path: str) -> str:
     if os.path.exists(obj_train_data_path) and (obj_names_path or obj_data_path):
         return "darknet"
 
+    if is_cvsdcldet_dir(folder_path):
+        return "cvsdcldet"
+
     cvat_xml = _find_cvat_annotations_xml(folder_path)
     if cvat_xml and _cvat_has_images_dir_near_xml(cvat_xml) and _is_cvat11_images_xml(cvat_xml):
         return "cvat11"
@@ -321,6 +330,11 @@ def count_elements(folder_path: str, structure: str):
         else:
             return None
 
+    elif structure == "cvsdcldet":
+        pairs = collect_cvsdcldet_pairs(Path(folder_path))
+        images_count = len(pairs)
+        labels_count = images_count
+
     else:
         return None
 
@@ -371,6 +385,12 @@ def process_dataset(folder_path: str, folder_name: str):
                 return None
         else:
             print(f"[WARNING] CVAT 1.1: annotations.xml not found - skipping")
+            return None
+
+    if not names and structure == "cvsdcldet":
+        names = collect_cvsdcldet_class_names(Path(folder_path))
+        if not names:
+            print(f"[WARNING] CvsDclDet: no class names found in {folder_name} - skip")
             return None
 
     if not names:

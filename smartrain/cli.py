@@ -137,6 +137,9 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "  smartrain cvat import --cvat-zip task.zip --output-dir datasets/task_yolo\n"
         "  smartrain cvat export --dataset-dir datasets/task_yolo --zip-path task.cvat11.zip\n"
         "  smartrain cvat export --dataset-dir datasets/task_yolo --task-name task42 --names class_a,class_b\n"
+        "  smartrain cvat from-cvsdcldet\n"
+        "  smartrain cvat from-cvsdcldet --source-dir raw_data/my_det --output-dir converted_raw_data/my_det --zip\n"
+        "  smartrain cvat from-cvsdcldet --source-dir raw_data/my_det --rename-classes white_line line\n"
     ),
     "smartrain sahi": (
         "Examples:\n"
@@ -1262,16 +1265,18 @@ def cmd_migrate_models(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_cvat(ctx: typer.Context) -> None:
-    """Convert datasets between CVAT 1.1 and YOLO formats.
+    """Convert datasets between CVAT 1.1, YOLO, and CvsDclDet formats.
 
     Examples:
       smartrain cvat import --cvat-zip task.zip --output-dir datasets/task_yolo
       smartrain cvat export --dataset-dir datasets/task_yolo --zip-path task.cvat11.zip
       smartrain cvat export --dataset-dir datasets/task_yolo --task-name task42 --names class_a,class_b
+      smartrain cvat from-cvsdcldet
+      smartrain cvat from-cvsdcldet --source-dir raw_data/my_det --output-dir converted_raw_data/my_det --zip
       smartrain cvat --help
 
     Notes:
-      - Subcommands: import, export.
+      - Subcommands: import, export, from-cvsdcldet.
       - Use --tmp-dir to control temporary workspace.
     """
     from smartrain.workflows.datasets.cvat_cli import build_cvat_arg_parser

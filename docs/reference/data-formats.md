@@ -52,10 +52,15 @@ These IDs are stable project contracts and are intentionally not renamed.
   - Typical shape: `annotations.xml` + `images/` (CVAT for images 1.1 export)
   - Notes: in SmarTrain this format is consumed through the internal `cvat11` structure identifier.
 
+- Official name: **CvsDclDet detection export layout** (SmarTrain term)
+  - Internal ID: `cvsdcldet`
+  - Typical shape: flat folder with paired `*.jpg` (or other image) + `*.json`; JSON contains `detections[]` with `class_name`, `x`, `y`, `width`, `height` in pixels
+  - Notes: convert to CVAT 1.1 with `smartrain cvat from-cvsdcldet`; output is usually placed under `converted_raw_data/`.
+
 ## Terminology policy
 
 - Use **official format names** in user-facing documentation whenever possible (for example, "CVAT for images 1.1 layout", "Darknet YOLO dataset layout").
-- Use **internal IDs** (`split`, `flat`, `subset_flat`, `nested_split`, `darknet`, `cvat11`) only when referring to code behavior, metadata contracts, or `datasets_info.json`.
+- Use **internal IDs** (`split`, `flat`, `subset_flat`, `nested_split`, `darknet`, `cvat11`, `cvsdcldet`) only when referring to code behavior, metadata contracts, or `datasets_info.json`.
 - When a term is SmarTrain-specific (`subset_flat`, `nested_split`), always provide:
   - closest common format;
   - one-line key difference from that common format.

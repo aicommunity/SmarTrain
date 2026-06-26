@@ -52,10 +52,15 @@
   - Типовая структура: `annotations.xml` + `images/` (экспорт CVAT for images 1.1)
   - Примечание: в SmarTrain этот формат обрабатывается через внутренний идентификатор структуры `cvat11`.
 
+- Официальное название: **CvsDclDet detection export layout** (термин SmarTrain)
+  - Internal ID: `cvsdcldet`
+  - Типовая структура: плоская папка с парами `*.jpg` (или другой образ) + `*.json`; в JSON — `detections[]` с `class_name`, `x`, `y`, `width`, `height` в пикселях
+  - Примечание: конвертация в CVAT 1.1 — `smartrain cvat from-cvsdcldet`; результат обычно кладётся в `converted_raw_data/`.
+
 ## Terminology policy
 
 - В пользовательской документации по возможности используйте **официальные названия форматов** (например, "CVAT for images 1.1 layout", "Darknet YOLO dataset layout").
-- **Internal IDs** (`split`, `flat`, `subset_flat`, `nested_split`, `darknet`, `cvat11`) используйте только там, где речь о поведении кода, контрактах метаданных или `datasets_info.json`.
+- **Internal IDs** (`split`, `flat`, `subset_flat`, `nested_split`, `darknet`, `cvat11`, `cvsdcldet`) используйте только там, где речь о поведении кода, контрактах метаданных или `datasets_info.json`.
 - Для SmarTrain-специфичных терминов (`subset_flat`, `nested_split`) всегда добавляйте:
   - ближайший общепринятый формат;
   - ключевое отличие в одну строку.
