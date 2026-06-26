@@ -13,7 +13,7 @@
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
-- Модели: `model convert`, `model release`
+- Модели: `model convert`, `model release`, `model rename`
 - Инструменты форматов: `cvat`, `sahi`, `heatmap`
 - Миграция: `migrate-models`
 
@@ -36,7 +36,7 @@ smartrain model convert --help
 
 - интерактив включается только при запуске команды без аргументов (TTY обязателен);
 - выбор датасета(ов): сразу нумерованный список; ввод по имени или по номеру (несколько датасетов — через CSV номеров или имён);
-- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `report dataset`, `model convert`, `model release` пустой вызов запускает интерактивный режим;
+- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `report dataset`, `model convert`, `model release`, `model rename` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
 
@@ -59,6 +59,12 @@ smartrain model convert --help
 - `smartrain model release` публикует canonical run-модель `<run_dir_name>.pt` из выбранного run в `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
 - Рядом создаётся JSON с тем же basename (`.json`) c описанием источника, данных обучения, метрик, классов и `io_spec` модели.
 - Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`).
+
+Особенности `model rename`:
+
+- `smartrain model rename` переименовывает release-модель в `models/<dataset>/`: меняется stem (`.pt`, sidecar `.json`, каталог артефактов release и конвертированные ONNX/engine/trt с тем же префиксом).
+- Registry-бандлы (`model_manifest.json`) и модели в `runs/` не затрагиваются.
+- В интерактивном режиме показывается список release-моделей, текущий stem подставляется в поле ввода для редактирования.
 
 Особенности `train` (контроль модели):
 

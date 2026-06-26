@@ -765,6 +765,7 @@ def test_docs_cli_group_subcommand_parity_has_key_entries() -> None:
         "smartrain analyze leaderboard",
         "smartrain model convert",
         "smartrain model release",
+        "smartrain model rename",
         "smartrain migrate unified",
     ]
     missing = [entry for entry in expected_entries if entry not in combined]

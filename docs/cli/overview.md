@@ -13,7 +13,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
-- Models: `model convert`, `model release`
+- Models: `model convert`, `model release`, `model rename`
 - Format tools: `cvat`, `sahi`, `heatmap`
 - Migration: `migrate`, `migrate-models`
 
@@ -42,7 +42,7 @@ smartrain <group> <subcommand> -- --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `report dataset`, `model convert`, `model release`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `report dataset`, `model convert`, `model release`, `model rename`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -73,6 +73,12 @@ Model release highlights:
 - `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
 - A sidecar JSON with the same basename is created next to the model file and includes source/training/metrics/classes/io specification.
 - Re-running for the same run with the same source hash performs a no-op skip.
+
+Model rename highlights:
+
+- `smartrain model rename` renames a released model in `models/<dataset>/` by changing the release stem (`.pt`, sidecar `.json`, release artifact directory, and converted ONNX/engine/trt files with matching prefix).
+- Registry-promoted bundles (`model_manifest.json`) and run models under `runs/` are not affected.
+- Interactive mode lists released models and pre-fills the current stem for editing.
 
 Migration highlights:
 

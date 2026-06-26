@@ -106,6 +106,7 @@ Quick examples:
   smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/2026-01-01_00-00-00.pt --format tensorrt-engine --precision fp16
   smartrain model convert --input models/my_model.onnx --format tensorrt-trt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00
+  smartrain model rename --release models/my_ds/detect_yolov8n_20260115_120000.pt --new-name my_detector_v2
 
 Interactive convert:
   - choose source model type: pt or onnx
@@ -1177,11 +1178,36 @@ def cmd_model_release(ctx: typer.Context) -> None:
     )
 
 
+@model_app.command(
+    "rename",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_model_rename(ctx: typer.Context) -> None:
+    """Rename a released workspace model and related artifacts.
+
+    Examples:
+      smartrain model rename --release models/my_ds/detect_yolov8n_20260115_120000.pt --new-name my_detector_v2
+      smartrain model rename --release 1 --new-name detect_yolov8s_20260115_120000
+      smartrain model rename
+    """
+    from smartrain.workflows.models.model_rename_cli import build_model_rename_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.models.model_rename_cli",
+        build_parser=build_model_rename_arg_parser,
+        prog="smartrain model rename",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
 def _model_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         console.print(HELP_MODEL_GROUP)
         console.print("Run: [cyan]smartrain model convert --help[/cyan]")
         console.print("Run: [cyan]smartrain model release --help[/cyan]")
+        console.print("Run: [cyan]smartrain model rename --help[/cyan]")
         raise typer.Exit(0)
 
 
