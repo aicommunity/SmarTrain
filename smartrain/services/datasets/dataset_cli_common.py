@@ -42,12 +42,13 @@ def update_datasets_sidecar(
     class_map: dict[str, int],
     target_dir: str,
     output_hash: str,
+    structure: str = "split",
 ) -> None:
     os.makedirs(layout.datasets, exist_ok=True)
     rel = os.path.relpath(os.path.abspath(target_dir), layout.root)
     entry = {
         "classes": {str(k): int(v) for k, v in sorted(class_map.items(), key=lambda kv: int(kv[1]))},
-        "structure": "split",
+        "structure": str(structure),
         "elements_count": None,
         "data_path": rel,
         "dataset_hash": output_hash,

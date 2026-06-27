@@ -8,8 +8,18 @@
 
 ```bash
 smartrain train --data my_dataset -y
+smartrain train --data my_seg_dataset --task segment --model yolo11s-seg.pt -y
 smartrain train --test-only --model-dir /path/to/run --data /path/to/dataset
 ```
+
+### Instance segmentation
+
+- `--task segment` и модель `*-seg.pt` (например `yolo11s-seg.pt`).
+- Разметка — YOLO-полигоны. См. [форматы данных](../reference/data-formats.md).
+- В интерактиве при task=segment предлагаются модели с `-seg`.
+- Полный набор графиков после обучения: `smartrain test --formats pt --task segment`.
+- Native ONNX/engine/TRT test для segmentation по умолчанию пропускается.
+- Экспериментально: `smartrain test --formats onnx --task segment --force-native-seg-test` (bbox-native eval; mask-метрики ненадёжны).
 
 Источники параметров и приоритет:
 

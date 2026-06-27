@@ -107,6 +107,22 @@
 
 ---
 
+## Instance segmentation rollout (closed 2026-06-27)
+
+**Статус:** волна SEG-0…SEG-8 закрыта. Регистр: [`tech-debt-instance-segmentation.md`](./tech-debt-instance-segmentation.md).
+
+- [x] **SEG-0** Инфраструктура TD: register TD-SEG-001…010, checklist sync, capability matrix update.
+- [x] **SEG-1** Safety net: unit-тесты YoloSegment (yolo_labels, rotate, orient, ROI, dataset_report).
+- [x] **SEG-2** Docs + guards: EN/RU CLI limits; native ONNX/TRT test skip для segmentation.
+- [x] **SEG-3** Segmentation metrics adapter: CSV mapping, unit tests, Mask plots contract decision.
+- [x] **SEG-4** Polygon-aware augment: flip/rotate/photometric; reject bbox-copy для seg datasets.
+- [x] **SEG-5** Balance/stats/CVAT: polygon counts, enclosing-bbox balance, CVAT polygon import/export.
+- [x] **SEG-6** Analyze reports: task-aware `METRIC_AGG_COLUMNS`, format_compare, report_markdown.
+- [x] **SEG-7** Inference overlay: `--save-overlay` + viz service + tests.
+- [x] **SEG-8** Multi-framework: external `--task segment`, weighted sampling, E2E smoke, final TD burn-down.
+
+---
+
 ## Следующий горизонт (backlog, без обязательства срока)
 
 1. **Train CLI (опционально):** дальнейшее утоньшение [`inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py) (LB-D4 LOC) и косметика wiring — основной train path уже в [`train_cli_main`](../../smartrain/services/training/train_cli_main.py) + [`train_wiring`](../../smartrain/workflows/training/train_wiring.py); MTM удалён (LB-D8).

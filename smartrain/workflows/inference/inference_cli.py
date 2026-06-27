@@ -81,6 +81,11 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
         choices=["detect", "segment", "classify", "detection", "segmentation", "classification"],
         help="Task type hint for task-aware backend routing (default: detection).",
     )
+    p.add_argument(
+        "--save-overlay",
+        action="store_true",
+        help="For segmentation runs, save polygon overlay images next to inference_results.json.",
+    )
     return p
 
 

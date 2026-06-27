@@ -9,18 +9,26 @@ from smartrain.core.training.ultralytics_model_alias_registry import (
 )
 
 
+def _with_seg_aliases(aliases: tuple[str, ...]) -> tuple[str, ...]:
+    out: list[str] = list(aliases)
+    for alias in aliases:
+        low = alias.lower()
+        if any(marker in low for marker in ("-seg", "-cls", "-pose", "-obb")):
+            continue
+        seg_alias = f"{alias}-seg"
+        if seg_alias not in out:
+            out.append(seg_alias)
+    return tuple(out)
+
+
 _EXTERNAL_PROVIDER_FALLBACK_ALIASES: dict[str, tuple[str, ...]] = {
     # Integration-safe aliases supported by current provider launchers/runtime.
-    "dr-yolo": ("yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"),
-    "leaf-yolo": ("yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"),
-    "mp-yolo": ("yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"),
-    "ssdm-yolo": ("yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"),
-    "enhanced-yolov8": (
-        "yolov8n",
-        "yolov8s",
-        "yolov8m",
-        "yolov8l",
-        "yolov8x",
+    "dr-yolo": _with_seg_aliases(("yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x")),
+    "leaf-yolo": _with_seg_aliases(("yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x")),
+    "mp-yolo": _with_seg_aliases(("yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x")),
+    "ssdm-yolo": _with_seg_aliases(("yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x")),
+    "enhanced-yolov8": _with_seg_aliases(
+        ("yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"),
     ),
     # MFEL models can be read from ultralytics/cfg/MFEL-YOLO/*.yaml when repo is available.
     "mfel-yolo": ("mfel-yolo", "e_pan+"),

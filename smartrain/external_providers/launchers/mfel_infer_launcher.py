@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from smartrain.core.inference.ultralytics_prediction_extract import extract_task_outputs_from_ultralytics_preds
+from smartrain.external_providers.task_alias import ultralytics_task_alias
 
 
 def _extract_task_outputs(preds: Any, task_type: str) -> dict[str, Any]:
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         raise
     _patch_mfel_missing_symbols()
 
-    model = YOLO(args.model, task="detect")
+    model = YOLO(args.model, task=ultralytics_task_alias(args.task))
     resolved_device = _resolve_mfel_predict_device(args.device)
     kwargs = {"source": args.source, "conf": float(args.conf), "imgsz": int(args.imgsz), "save": True}
     if resolved_device:

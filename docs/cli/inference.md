@@ -2,14 +2,15 @@
 
 # CLI: inference
 
-`smartrain inference` runs object detection inference on either a folder or a dataset split.
+`smartrain inference` runs inference on a folder or a dataset split (detection, instance segmentation, classification depending on model/task).
 
 It writes:
 
 - `inference_results.json` (main report)
 - `environment_profile.json` (machine/runtime profile)
+- optional polygon overlay images when `--save-overlay` is set (instance segmentation)
 
-Both files are saved under:
+Both primary JSON files are saved under:
 
 - `workspace/inference/<model>/<timestamp-source>/`
 
@@ -46,6 +47,15 @@ Note: `pt_uni` is an internal metrics-comparison mode (PT vs PT-uni, test/val) a
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
 smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mode folder --source-dir ./images
 smartrain inference --weights dr-yolo:yolov8n --external-repo /opt/dr-yolo --data-mode folder --source-dir ./images
+smartrain inference --weights yolo11s-seg.pt --data-mode folder --source-dir ./images --save-overlay
+```
+
+### Instance segmentation overlay
+
+For `*-seg.pt` models, inference JSON includes per-image `segments` (polygon vertices). Use `--save-overlay` to write RGB preview images with GT-style polygon outlines next to the JSON report (under the same `workspace/inference/...` output directory).
+
+```bash
+smartrain inference --weights runs/ds/run_seg/models/best-seg.pt --data-mode folder --source-dir ./images --save-overlay
 ```
 
 ## Device selection

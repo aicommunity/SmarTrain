@@ -21,7 +21,9 @@ __all__ = [
     "read_test_metrics_by_format_artifacts",
 ]
 
-METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
+from smartrain.tasks.metric_columns import metric_agg_columns
+
+METRIC_AGG_COLUMNS = metric_agg_columns("detection")
 
 
 def iter_test_formats(include_internal: bool = False) -> tuple[str, ...]:

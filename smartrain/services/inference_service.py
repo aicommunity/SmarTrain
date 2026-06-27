@@ -682,5 +682,11 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
 
     print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")
     print(f"[OK] Report: {report_path}")
+    if bool(getattr(args, "save_overlay", False)):
+        from smartrain.services.inference_segmentation_viz import save_inference_segment_overlays
+
+        overlays = save_inference_segment_overlays(report_path)
+        if overlays:
+            print(f"[OK] Saved {len(overlays)} segmentation overlay image(s)")
     maybe_dual_write_unified_snapshot(out_root, status_ok=True)
     return 0, False

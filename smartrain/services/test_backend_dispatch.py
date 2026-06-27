@@ -18,6 +18,32 @@ class TestBackendDispatchContext:
     onnx_provider_policy: str
 
 
+from smartrain.tasks.contracts import TASK_SEGMENTATION, normalize_task_type
+
+
+_NATIVE_NON_PT_FORMATS = frozenset({"onnx", "engine", "trt"})
+
+
+def _segmentation_native_skip_reason(ctx: TestBackendDispatchContext) -> str | None:
+    """Native ONNX/TRT/engine eval is detection-shaped; skip for segmentation unless forced."""
+    try:
+        task = normalize_task_type(str(ctx.task_type or ""))
+    except ValueError:
+        task = str(ctx.task_type or "").strip().lower()
+    if task != TASK_SEGMENTATION:
+        return None
+    fmt = str(ctx.fmt or "").strip().lower()
+    if fmt not in _NATIVE_NON_PT_FORMATS:
+        return None
+    if bool(getattr(ctx.args, "force_native_seg_test", False)):
+        return None
+    return (
+        "capability_gap: native format test for segmentation uses detection-shaped bbox eval only; "
+        "skipped. Use PT format (`smartrain test --formats pt`) or pass --force-native-seg-test "
+        "(experimental, metrics not mask-aware)."
+    )
+
+
 def _dispatch_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
     from smartrain.core.workflow_adapters import testing_runtime_api as mtr
 
@@ -84,6 +110,21 @@ def _dispatch_pt_uni(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
 def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
     from smartrain.core.workflow_adapters import testing_runtime_api as mtr
     from smartrain.backends.train_test_registry import resolve_test_backend
+
+    skip_reason = _segmentation_native_skip_reason(ctx)
+    if skip_reason:
+        print(f"[WARN] {ctx.fmt}: {skip_reason}")
+        backend = resolve_test_backend(task_type=ctx.task_type, model_format=ctx.fmt).backend
+        mtr.persist_target_test_artifacts_state(
+            ctx.root_dir,
+            format_name=ctx.fmt,
+            target_path=ctx.artifact_path,
+            dataset_yaml=ctx.data_yaml,
+            backend=backend,
+            status="skipped",
+            error=skip_reason,
+        )
+        return True, None
 
     def _backend_for(local_fmt: str) -> str:
         return resolve_test_backend(task_type=ctx.task_type, model_format=local_fmt).backend

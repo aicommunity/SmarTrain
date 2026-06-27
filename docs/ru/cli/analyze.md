@@ -41,6 +41,7 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
   - заголовки колонок нормализуются в читаемые и единообразные названия
   - для ODT автоматически выставляются рамки таблиц, полужирные центрированные заголовки и более удобные ширины колонок
 - `export-table` формирует сводный CSV по найденным прогонам.
+- **Метрики segmentation в analyze:** для `task_type=segmentation` в таблицах сравнения используются mask-колонки (`mask_mAP50-95`, `Mask-F1`, …); при их отсутствии — fallback на box-метрики. `test-metrics-plot` подбирает дефолтные метрики по task и заголовкам CSV.
 - `compare` может создавать таблицу сравнения и PNG-графики.
 - `pr-curves` строит `test/pr.csv` для каждого run и общий PR-график.
 - `inference-benchmark` формирует CSV с измерениями инференса.

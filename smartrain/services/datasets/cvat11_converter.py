@@ -12,6 +12,8 @@ import xml.etree.ElementTree as ET
 
 from PIL import Image
 
+from smartrain.services.datasets.yolo_labels import YoloBBox, YoloSegment, read_yolo_labels, serialize_yolo_labels
+
 YOLO_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 
@@ -22,6 +24,69 @@ class CvatBox:
     ytl: float
     xbr: float
     ybr: float
+
+
+@dataclass(frozen=True)
+class CvatPolygon:
+    label: str
+    points: Tuple[Tuple[float, float], ...]
+
+
+def collect_cvat11_meta_label_names(root: ET.Element) -> List[str]:
+    """Read label names from CVAT meta (task export or job export)."""
+    out: List[str] = []
+    seen: set[str] = set()
+    for xpath in ("./meta/task/labels/label/name", "./meta/job/labels/label/name"):
+        for lb in root.findall(xpath):
+            if lb is not None and lb.text:
+                name = lb.text.strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    out.append(name)
+    return out
+
+
+def collect_cvat11_shape_label_names(root: ET.Element) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for tag in ("box", "polygon", "polyline"):
+        for el in root.findall(f"./image/{tag}"):
+            label = str(el.attrib.get("label", "")).strip()
+            if label and label not in seen:
+                seen.add(label)
+                out.append(label)
+    return sorted(out)
+
+
+def load_cvat11_label_names_from_xml(xml_path: str | Path) -> List[str]:
+    try:
+        tree = ET.parse(str(xml_path))
+        root = tree.getroot()
+    except Exception:
+        return []
+    meta = collect_cvat11_meta_label_names(root)
+    if meta:
+        return meta
+    return collect_cvat11_shape_label_names(root)
+
+
+def _parse_cvat_points_shape(el: ET.Element) -> Optional[CvatPolygon]:
+    label = str(el.attrib.get("label", "")).strip()
+    if not label:
+        return None
+    pts: list[tuple[float, float]] = []
+    for token in str(el.attrib.get("points", "")).split(";"):
+        token = token.strip()
+        if not token or "," not in token:
+            continue
+        xs, ys = token.split(",", 1)
+        try:
+            pts.append((float(xs), float(ys)))
+        except ValueError:
+            continue
+    if len(pts) < 3:
+        return None
+    return CvatPolygon(label=label, points=tuple(pts))
 
 
 def find_cvat_annotations_and_images_dir(extracted_root: Path) -> Tuple[Path, Path]:
@@ -166,6 +231,16 @@ def generate_temp_yolo_labels_from_cvat11_extracted(
             if yolo:
                 lines.append(yolo)
 
+        for poly in img.get("polygons", []):
+            if not isinstance(poly, CvatPolygon):
+                continue
+            class_id = class_name_to_id.get(poly.label)
+            if class_id is None:
+                continue
+            yolo = _cvat_polygon_to_yolo_line(poly, class_id=class_id, img_w=img_w, img_h=img_h)
+            if yolo:
+                lines.append(yolo)
+
         label_rel = _cvat_xml_name_to_label_rel(cvat_image_name, use_nested=use_nested)
         label_path = labels_out_dir / label_rel.with_suffix(".txt")
         if not _label_path_contained_in_dir(label_path, labels_out_dir):
@@ -200,11 +275,12 @@ def load_cvat11_images_and_labels(xml_path: Path) -> Tuple[str, List[str], List[
     meta_task_name = root.find("./meta/task/name")
     if meta_task_name is not None and meta_task_name.text:
         task_name = meta_task_name.text.strip()
+    if not task_name:
+        job_id = root.find("./meta/job/id")
+        if job_id is not None and job_id.text and job_id.text.strip():
+            task_name = f"job_{job_id.text.strip()}"
 
-    labels_in_meta: List[str] = []
-    for lb in root.findall("./meta/task/labels/label/name"):
-        if lb is not None and lb.text and lb.text.strip():
-            labels_in_meta.append(lb.text.strip())
+    labels_in_meta = collect_cvat11_meta_label_names(root)
 
     images: List[Dict] = []
     for img_el in root.findall("./image"):
@@ -213,6 +289,7 @@ def load_cvat11_images_and_labels(xml_path: Path) -> Tuple[str, List[str], List[
         h = _safe_int_from_xml_attr(img_el.attrib.get("height", ""))
 
         boxes: List[CvatBox] = []
+        polygons: List[CvatPolygon] = []
         for box_el in img_el.findall("./box"):
             label = box_el.attrib.get("label", "")
             if not label:
@@ -226,7 +303,13 @@ def load_cvat11_images_and_labels(xml_path: Path) -> Tuple[str, List[str], List[
                 continue
             boxes.append(CvatBox(label=label, xtl=xtl, ytl=ytl, xbr=xbr, ybr=ybr))
 
-        images.append({"name": name, "width": w, "height": h, "boxes": boxes})
+        for shape_tag in ("polygon", "polyline"):
+            for poly_el in img_el.findall(f"./{shape_tag}"):
+                parsed = _parse_cvat_points_shape(poly_el)
+                if parsed is not None:
+                    polygons.append(parsed)
+
+        images.append({"name": name, "width": w, "height": h, "boxes": boxes, "polygons": polygons})
 
     return task_name, labels_in_meta, images
 
@@ -273,6 +356,18 @@ def _cvat_box_to_yolo_line(box: CvatBox, *, class_id: int, img_w: int, img_h: in
     nw = _clamp(nw, 0.0, 1.0)
     nh = _clamp(nh, 0.0, 1.0)
     return f"{class_id} {cx:.8f} {cy:.8f} {nw:.8f} {nh:.8f}"
+
+
+def _cvat_polygon_to_yolo_line(poly: CvatPolygon, *, class_id: int, img_w: int, img_h: int) -> Optional[str]:
+    if img_w <= 0 or img_h <= 0 or len(poly.points) < 3:
+        return None
+    coords: list[str] = []
+    for x, y in poly.points:
+        nx = _clamp(float(x) / float(img_w), 0.0, 1.0)
+        ny = _clamp(float(y) / float(img_h), 0.0, 1.0)
+        coords.append(f"{nx:.6f}")
+        coords.append(f"{ny:.6f}")
+    return f"{class_id} " + " ".join(coords)
 
 
 def import_cvat11_zip_to_yolo(
@@ -380,6 +475,15 @@ def import_cvat11_zip_to_yolo(
                 yolo = _cvat_box_to_yolo_line(b, class_id=class_id, img_w=img_w, img_h=img_h)
                 if yolo:
                     lines.append(yolo)
+            for poly in img.get("polygons", []):
+                if not isinstance(poly, CvatPolygon):
+                    continue
+                class_id = name_to_id.get(poly.label)
+                if class_id is None:
+                    continue
+                yolo = _cvat_polygon_to_yolo_line(poly, class_id=class_id, img_w=img_w, img_h=img_h)
+                if yolo:
+                    lines.append(yolo)
 
             label_path = labels_out / f"{Path(dst_name).stem}.txt"
             label_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
@@ -422,22 +526,8 @@ def _iter_yolo_pairs_flat(images_dir: Path, labels_dir: Path) -> Iterable[Tuple[
         yield img, lbl
 
 
-def _parse_yolo_label_file(label_path: Path) -> List[Tuple[int, float, float, float, float]]:
-    out: List[Tuple[int, float, float, float, float]] = []
-    for raw in label_path.read_text(encoding="utf-8").splitlines():
-        parts = raw.strip().split()
-        if len(parts) != 5:
-            continue
-        try:
-            cid = int(parts[0])
-            cx = float(parts[1])
-            cy = float(parts[2])
-            w = float(parts[3])
-            h = float(parts[4])
-        except Exception:
-            continue
-        out.append((cid, cx, cy, w, h))
-    return out
+def _parse_yolo_label_file(label_path: Path) -> list[YoloBBox | YoloSegment]:
+    return read_yolo_labels(str(label_path))
 
 
 def _yolo_box_to_cvat_bbox(
@@ -520,7 +610,12 @@ def build_cvat11_annotations_xml(
   </meta>"""
 
     image_xml_parts: List[str] = []
-    for image_id, (image_name, w, h, boxes) in enumerate(images):
+    for image_id, item in enumerate(images):
+        if len(item) == 4:
+            image_name, w, h, boxes = item
+            polygons: List[Tuple[str, List[Tuple[float, float]]]] = []
+        else:
+            image_name, w, h, boxes, polygons = item
         box_parts: List[str] = []
         for z, (label, (xtl, ytl, xbr, ybr)) in enumerate(boxes):
             box_parts.append(
@@ -534,9 +629,20 @@ def build_cvat11_annotations_xml(
                 f'z_order="{z}">'
                 "</box>"
             )
-        box_xml = "\n".join(box_parts)
+        poly_parts: List[str] = []
+        for z, (label, pts) in enumerate(polygons):
+            pts_str = ";".join(f"{_fmt_float(x)},{_fmt_float(y)}" for x, y in pts)
+            poly_parts.append(
+                "    <polygon "
+                f'label="{html.escape(label, quote=True)}" '
+                f'points="{pts_str}" '
+                'occluded="0" '
+                f'z_order="{z + len(boxes)}">'
+                "</polygon>"
+            )
+        ann_xml = "\n".join(box_parts + poly_parts)
         image_xml_parts.append(
-            f'  <image id="{image_id}" name="{html.escape(image_name, quote=True)}" width="{w}" height="{h}">\n{box_xml}\n  </image>'
+            f'  <image id="{image_id}" name="{html.escape(image_name, quote=True)}" width="{w}" height="{h}">\n{ann_xml}\n  </image>'
         )
 
     return (
@@ -562,7 +668,7 @@ def export_yolo_to_cvat11_zip(
 ) -> Dict:
     """
     Export flat YOLO dataset (images/ + labels/) to CVAT 1.1 zip.
-    This exporter is intentionally strict/small-scope for v1: Images + bbox only.
+    Supports YOLO bbox and polygon labels.
     """
     dataset_dir = Path(dataset_dir)
     output_zip_path = Path(output_zip_path)
@@ -575,7 +681,9 @@ def export_yolo_to_cvat11_zip(
     id_to_name = {i: str(n) for i, n in enumerate(list(names))}
     effective_task_name = (task_name or dataset_dir.name).strip() or "yolo_task"
 
-    cvat_images: List[Tuple[str, int, int, List[Tuple[str, Tuple[float, float, float, float]]]]] = []
+    cvat_images: List[
+        Tuple[str, int, int, List[Tuple[str, Tuple[float, float, float, float]]], List[Tuple[str, List[Tuple[float, float]]]]]
+    ] = []
     all_labels: List[str] = []
 
     for img_path, lbl_path in _iter_yolo_pairs_flat(images_dir, labels_dir):
@@ -585,17 +693,24 @@ def export_yolo_to_cvat11_zip(
         img_h = int(img_h)
 
         boxes: List[Tuple[str, Tuple[float, float, float, float]]] = []
-        for cid, cx, cy, w, h in _parse_yolo_label_file(lbl_path):
-            label = id_to_name.get(cid)
+        polygons: List[Tuple[str, List[Tuple[float, float]]]] = []
+        for lb in _parse_yolo_label_file(lbl_path):
+            label = id_to_name.get(int(lb.cls_id))
             if not label:
                 continue
-            bb = _yolo_box_to_cvat_bbox(cx=cx, cy=cy, w=w, h=h, img_w=img_w, img_h=img_h)
-            if bb is None:
-                continue
-            boxes.append((label, bb))
-            all_labels.append(label)
+            if isinstance(lb, YoloBBox):
+                bb = _yolo_box_to_cvat_bbox(cx=lb.cx, cy=lb.cy, w=lb.w, h=lb.h, img_w=img_w, img_h=img_h)
+                if bb is None:
+                    continue
+                boxes.append((label, bb))
+                all_labels.append(label)
+            elif isinstance(lb, YoloSegment):
+                pts = [(float(x) * img_w, float(y) * img_h) for x, y in lb.points]
+                if len(pts) >= 3:
+                    polygons.append((label, pts))
+                    all_labels.append(label)
 
-        cvat_images.append((img_path.name, img_w, img_h, boxes))
+        cvat_images.append((img_path.name, img_w, img_h, boxes, polygons))
 
     annotations_xml = build_cvat11_annotations_xml(
         task_name=effective_task_name,

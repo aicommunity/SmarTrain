@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+from smartrain.external_providers.task_alias import ultralytics_task_alias
+
 
 def _write_val_results_csv(result, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -80,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--device", default=None)
     p.add_argument("--project", default=None)
     p.add_argument("--name", default="test")
+    p.add_argument("--task", default="detection")
     args = p.parse_args(argv)
 
     repo = Path(args.repo).expanduser().resolve()
@@ -100,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         raise
     _patch_mfel_missing_symbols()
 
-    model = YOLO(args.model, task="detect")
+    model = YOLO(args.model, task=ultralytics_task_alias(getattr(args, "task", "detection")))
     kwargs = {
         "data": args.data,
         "split": "test",

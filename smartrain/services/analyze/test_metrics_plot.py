@@ -11,6 +11,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from smartrain.tasks.metric_columns import metric_agg_columns_with_fallback, read_run_task_type
+
+
+def _default_metrics_for_run_dirs(
+    run_dirs: list[str],
+    latest_test_metrics_path_cb,
+) -> list[str]:
+    for run_dir in run_dirs:
+        task_type = read_run_task_type(run_dir)
+        tm = latest_test_metrics_path_cb(run_dir)
+        if tm:
+            try:
+                df = pd.read_csv(tm)
+                cols = {str(c).strip() for c in df.columns}
+                picked = list(metric_agg_columns_with_fallback(task_type, cols))
+                if picked:
+                    return picked[:2] if len(picked) >= 2 else picked
+            except Exception:
+                pass
+        picked = list(metric_agg_columns_with_fallback(task_type, set()))
+        if picked:
+            return picked[:2] if len(picked) >= 2 else picked
+    return ["mAP50-95", "Box-F1"]
 
 def resolve_test_metrics_plot_png(
     workspace_cli: str | None,
@@ -60,7 +83,10 @@ def run_test_metrics_plot(
 ) -> None:
     if (not getattr(args, "runs_group_dir", None) or not getattr(args, "metrics", None)) and sys.stdin.isatty():
         args.runs_group_dir = prompt_text_cb("Runs group dir", default=str(args.models_root)).strip() or str(args.models_root)
-        raw_metrics = prompt_text_cb("Metrics (comma separated)", default="mAP50-95,Box-F1").strip()
+        runs_group_dir = os.path.abspath(os.path.expanduser(args.runs_group_dir))
+        run_dirs_preview = resolve_selected_run_dirs_cb(runs_group_dir, getattr(args, "selected_run_dirs", None))
+        default_metrics = ",".join(_default_metrics_for_run_dirs(run_dirs_preview, latest_test_metrics_path_cb))
+        raw_metrics = prompt_text_cb("Metrics (comma separated)", default=default_metrics).strip()
         args.metrics = [m.strip() for m in raw_metrics.split(",") if m.strip()]
     if not getattr(args, "runs_group_dir", None) or not getattr(args, "metrics", None):
         print("[ERROR] Incomplete arguments: --runs-group-dir and --metrics are required.", file=sys.stderr)

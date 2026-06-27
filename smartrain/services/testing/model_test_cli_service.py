@@ -59,6 +59,11 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--missing-only", action="store_true", help="Only build artifacts that are currently missing.")
     p.add_argument("--force", action="store_true", help="Force re-test even if matching artifacts already exist.")
+    p.add_argument(
+        "--force-native-seg-test",
+        action="store_true",
+        help="Allow native ONNX/engine/TRT test for segmentation (experimental; bbox-only eval, not mask metrics).",
+    )
     p.add_argument("--imgsz", type=int, default=None, help="Validation image size.")
     p.add_argument("--conf", type=float, default=None, help="Validation confidence threshold.")
     p.add_argument("--iou", type=float, default=None, help="Validation IoU threshold.")

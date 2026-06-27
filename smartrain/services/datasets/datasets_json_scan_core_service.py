@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Optional
 
+from smartrain.services.datasets.cvat11_converter import load_cvat11_label_names_from_xml
 from smartrain.services.datasets.cvsdcldet_converter import (
     collect_cvsdcldet_class_names,
     collect_cvsdcldet_pairs,
@@ -75,39 +76,9 @@ def _is_cvat11_images_xml(xml_path: str) -> bool:
 def _load_cvat11_label_names(xml_path: str) -> list[str]:
     """
     CVAT 1.1 (Images task) labels.
-    Prefer meta/task/labels/label/name; fallback to unique box/@label values.
+    Supports meta/task and meta/job exports; fallback to shape @label values.
     """
-    try:
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
-    except Exception:
-        return []
-
-    meta_names: list[str] = []
-    try:
-        for lb in root.findall("./meta/task/labels/label/name"):
-            if lb is not None and lb.text and lb.text.strip():
-                meta_names.append(lb.text.strip())
-    except Exception:
-        meta_names = []
-
-    if meta_names:
-        out: list[str] = []
-        seen = set()
-        for n in meta_names:
-            if n not in seen:
-                seen.add(n)
-                out.append(n)
-        return out
-
-    seen = set()
-    out: list[str] = []
-    for box in root.findall("./image/box"):
-        label = box.attrib.get("label", "")
-        if label and label not in seen:
-            seen.add(label)
-            out.append(label)
-    return sorted(out)
+    return load_cvat11_label_names_from_xml(xml_path)
 
 
 def _is_split_name(dir_name: str) -> bool:

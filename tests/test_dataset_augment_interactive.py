@@ -26,6 +26,7 @@ def test_interactive_skips_bbox_copy_block_when_disabled(capsys) -> None:
         dataset=None,
         classes=None,
         output_name=None,
+        label_type="segment",
         enable_flip=False,
         flip="horizontal",
         flip_prob=0.5,
@@ -116,3 +117,8 @@ def test_interactive_skips_bbox_copy_block_when_disabled(capsys) -> None:
     assert "image center; simple" in out
     assert "Block: Balancing/Variety (center rotation)" in out
     assert args.placement_mode == "none"
+
+
+def test_interactive_preserves_segment_label_type() -> None:
+    args = argparse.Namespace(label_type="segment")
+    assert args.label_type == "segment"

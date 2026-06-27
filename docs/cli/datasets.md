@@ -26,6 +26,25 @@ Collects a new dataset from several sources:
 
 ## `augment`, `balance`, `orient`, `rotate`, `roi`
 
+### Instance segmentation (YOLO polygons)
+
+Labels use `class_id x1 y1 x2 y2 ...` (normalized polygon vertices). See [data formats](../reference/data-formats.md).
+
+**Supported today:** `rotate`, `orient`, `roi --mode yolo_segment`, `report` (GT polygon preview), `fusion` (class filter pass-through).
+
+**Limitations (see also [tech debt register](../refactor/tech-debt-instance-segmentation.md)):**
+
+- `augment` — geometric modes require polygon-aware labels; use `--label-type segment` when your dataset has polygons. Bbox copy-paste (`--enable-bbox-copy`) is **not** supported for polygon datasets.
+- `balance` — head undersampling uses the **enclosing bbox** of each polygon (approximation).
+- CVAT import/export — polygon support is being extended; bbox-only CVAT tasks remain bbox-only.
+- Native ONNX/engine/TRT **model test** for segmentation is skipped by default; use PT test (`smartrain test --formats pt --task segment`).
+
+**ROI example:**
+
+```bash
+smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
+```
+
 - `augment` — autonomous augmentations with recording of a new dataset; conveyor effects can be toggled individually: **`--enable-conveyor-rotate`**, **`--enable-conveyor-scale`**, **`--enable-conveyor-blur`**, **`--enable-conveyor-shift`**, **`--enable-conveyor-noise`** (umbrella **`--enable-conveyor`** enables all five); interactive mode asks for each effect separately (noise defaults to off); **`--aug-class-aware-geo`** / **`--aug-total-bbox-cap-mult`** match `balance` hybrid-aug (same literature refs as above; standalone default for class-aware is **off** for backward compatibility). With a bbox cap, **`--aug-budget-tail-first`** (default **on**) processes train frames in descending tail priority `max_c (n_max/n_c)^γ` before spending slack on head-like frames; **`--aug-budget-tail-gamma`** (default `1.0`) sets γ; disable priority ordering with **`--no-aug-budget-tail-first`**;
 - `balance` — class balancing; after balancing, `--eval-coverage` (default) can rebalance items across `train`/`val`/`test` so eval splits are non-empty when possible and rare classes appear in `val`/`test`; `--no-eval-coverage` turns this off;
   - class priority tuning: `--class-weight-multiplier "other:0.6,tear_up:1.1"` multiplies class weights after base weighting;

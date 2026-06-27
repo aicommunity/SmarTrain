@@ -48,7 +48,7 @@ def test_default_output_name() -> None:
 
 def test_rotate_dataset_90_swaps_dimensions(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
-    src = _write_flat_dataset(tmp_path)
+    _write_flat_dataset(tmp_path)
     scan_main(["--workspace", str(tmp_path)])
     src_root = tmp_path / "datasets" / "ds_r"
     from smartrain.services.datasets.dataset_access import iter_image_label_buckets
@@ -98,3 +98,49 @@ def test_rotate_cli_creates_rot180_dataset(tmp_path: Path, monkeypatch) -> None:
     passport = json.loads((out / "dataset_passport.json").read_text(encoding="utf-8"))
     assert passport["command"] == "rotate"
     assert passport["transformations"][0]["angle"] == 180
+
+
+def _write_flat_polygon_dataset(root: Path, name: str = "ds_seg") -> Path:
+    ds = root / "raw_data" / name
+    images = ds / "images"
+    labels = ds / "labels"
+    images.mkdir(parents=True, exist_ok=True)
+    labels.mkdir(parents=True, exist_ok=True)
+    img_path = images / "img001.jpg"
+    Image.new("RGB", (100, 80), color=(30, 40, 50)).save(img_path, format="JPEG", quality=90)
+    (labels / "img001.txt").write_text(
+        "0 0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75\n",
+        encoding="utf-8",
+    )
+    (ds / "data.yaml").write_text("nc: 1\nnames: ['obj']\n", encoding="utf-8")
+    return ds
+
+
+def test_rotate_dataset_polygon_90_preserves_segment(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    _write_flat_polygon_dataset(tmp_path)
+    scan_main(["--workspace", str(tmp_path)])
+    src_root = tmp_path / "datasets" / "ds_seg"
+    from smartrain.services.datasets.dataset_access import iter_image_label_buckets
+    from smartrain.services.datasets.yolo_labels import YoloSegment
+
+    buckets = list(
+        iter_image_label_buckets(
+            str(src_root),
+            "flat",
+            {"classes": {"obj": 0}, "structure": "flat"},
+            dataset_name="ds_seg",
+            temp_root=str(tmp_path / "tmp"),
+            exclude_test=False,
+        )
+    )
+    out_dir = tmp_path / "datasets" / "ds_seg_rot90"
+    stats = rotate_dataset(src_root=str(src_root), out_dir=str(out_dir), k=1, buckets=buckets, no_legend=True)
+    assert stats["processed"] == 1
+    labels = read_yolo_labels(str(out_dir / "labels" / "img001.txt"))
+    assert len(labels) == 1
+    assert isinstance(labels[0], YoloSegment)
+    assert len(labels[0].points) == 4
+    for x, y in labels[0].points:
+        assert 0.0 <= x <= 1.0
+        assert 0.0 <= y <= 1.0

@@ -23,6 +23,7 @@ def run_external_train(
     device: str | None = None,
     target_dir: str | None = None,
     run_name: str | None = None,
+    task_type: str | None = None,
 ) -> int:
     spec = build_external_train_spec(
         provider_id,
@@ -35,6 +36,7 @@ def run_external_train(
         device=device,
         target_dir=target_dir,
         run_name=run_name,
+        task_type=task_type,
     )
     return _run_python_script(spec.script_path, repo_path, venv_path, spec.args, spec.env_overrides)
 

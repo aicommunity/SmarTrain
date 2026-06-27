@@ -62,6 +62,14 @@ Launch modes:
 smartrain train --data my_dataset --model yolo11n.pt -y
 ```
 
+**Instance segmentation (optional):**
+
+```bash
+smartrain train --data my_seg_dataset --task segment --model yolo11s-seg.pt -y
+smartrain test --run <run> --formats pt --task segment
+smartrain inference --model <best.pt> --source images/ --task segment
+```
+
 5. **Build dataset report**
    Generates visual/text report for dataset quality and class coverage.
 

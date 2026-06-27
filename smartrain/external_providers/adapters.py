@@ -32,10 +32,12 @@ def build_external_train_spec(
     device: str | None = None,
     target_dir: str | None = None,
     run_name: str | None = None,
+    task_type: str | None = None,
 ) -> ExternalRunSpec:
     repo = Path(repo_path).expanduser().resolve()
     pid = provider_id.strip().lower()
     project_dir = _external_project_dir(target_dir, dataset_path)
+    task_args = ["--task", str(task_type or "detection")]
     if pid in ("dr-yolo", "leaf-yolo"):
         launcher = Path(__file__).resolve().parent / "launchers" / "mp_train_launcher.py"
         args = [
@@ -58,6 +60,7 @@ def build_external_train_spec(
             args += ["--name", str(run_name)]
         if device:
             args += ["--device", str(device)]
+        args += task_args
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "ssdm-yolo":
@@ -82,6 +85,7 @@ def build_external_train_spec(
             args += ["--name", str(run_name)]
         if device:
             args += ["--device", str(device)]
+        args += task_args
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "enhanced-yolov8":
@@ -106,6 +110,7 @@ def build_external_train_spec(
             args += ["--name", str(run_name)]
         if device:
             args += ["--device", str(device)]
+        args += task_args
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "mfel-yolo":
@@ -130,6 +135,7 @@ def build_external_train_spec(
             args += ["--name", str(run_name)]
         if device:
             args += ["--device", str(device)]
+        args += task_args
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     if pid == "mp-yolo":
@@ -154,6 +160,7 @@ def build_external_train_spec(
             args += ["--name", str(run_name)]
         if device:
             args += ["--device", str(device)]
+        args += task_args
         return ExternalRunSpec(script_path=str(launcher), args=args, env_overrides={})
 
     raise ValueError(f"Unsupported provider for train adapter: {provider_id}")

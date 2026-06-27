@@ -11,6 +11,13 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+from smartrain.tasks.metric_columns import (
+    compare_delta_column_names,
+    detect_task_type_from_columns,
+    format_metrics_table_column_names,
+    primary_quality_columns,
+    runs_summary_test_column_names,
+)
 from smartrain.services.analyze.schema_contracts import ensure_analyze_session_manifest
 
 def _read_template(lang: str) -> dict[str, str]:
@@ -49,11 +56,26 @@ def _column_display_name(name: str, is_ru: bool) -> str:
         "delta_mAP50": "Дельта mAP50" if is_ru else "Delta mAP50",
         "delta_Box-P": "Дельта Box-P" if is_ru else "Delta Box-P",
         "delta_Box-R": "Дельта Box-R" if is_ru else "Delta Box-R",
+        "delta_mask_mAP50-95": "Дельта mask mAP50-95" if is_ru else "Delta mask mAP50-95",
+        "delta_mask_mAP50": "Дельта mask mAP50" if is_ru else "Delta mask mAP50",
+        "delta_Mask-F1": "Дельта Mask-F1" if is_ru else "Delta Mask-F1",
+        "delta_Mask-P": "Дельта Mask-P" if is_ru else "Delta Mask-P",
+        "delta_Mask-R": "Дельта Mask-R" if is_ru else "Delta Mask-R",
         "test_mAP50-95": "test mAP50-95" if is_ru else "test mAP50-95",
         "test_mAP50": "test mAP50" if is_ru else "test mAP50",
         "test_Box-F1": "test Box-F1" if is_ru else "test Box-F1",
         "test_Box-P": "test Box-P" if is_ru else "test Box-P",
         "test_Box-R": "test Box-R" if is_ru else "test Box-R",
+        "test_mask_mAP50-95": "test mask mAP50-95" if is_ru else "test mask mAP50-95",
+        "test_mask_mAP50": "test mask mAP50" if is_ru else "test mask mAP50",
+        "test_Mask-F1": "test Mask-F1" if is_ru else "test Mask-F1",
+        "test_Mask-P": "test Mask-P" if is_ru else "test Mask-P",
+        "test_Mask-R": "test Mask-R" if is_ru else "test Mask-R",
+        "mask_mAP50-95": "mask mAP50-95" if is_ru else "mask mAP50-95",
+        "mask_mAP50": "mask mAP50" if is_ru else "mask mAP50",
+        "Mask-F1": "Mask-F1",
+        "Mask-P": "Mask-P",
+        "Mask-R": "Mask-R",
         "backend_status": "Бэкенд" if is_ru else "Backend",
         "eval_imgsz": "Размер изображения" if is_ru else "Image size",
         "eval_conf": "Порог confidence" if is_ru else "Confidence threshold",
@@ -274,11 +296,7 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
         preferred = [
             "baseline",
             "other",
-            "delta_mAP50-95",
-            "delta_Box-F1",
-            "delta_mAP50",
-            "delta_Box-P",
-            "delta_Box-R",
+            *compare_delta_column_names(),
         ]
     elif "leaderboard" in lower:
         preferred = [
@@ -304,11 +322,7 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "split",
             "format",
             "backend_status",
-            "mAP50-95",
-            "mAP50",
-            "Box-F1",
-            "Box-P",
-            "Box-R",
+            *format_metrics_table_column_names(),
         ]
     elif "format_performance_compare" in lower:
         preferred = [
@@ -378,11 +392,7 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "train_image_size",
             "val_imgsz",
             "train_last_metrics/mAP50-95(B)",
-            "test_mAP50-95",
-            "test_mAP50",
-            "test_Box-F1",
-            "test_Box-P",
-            "test_Box-R",
+            *runs_summary_test_column_names(),
         ]
     elif "test_system_profile" in lower:
         preferred = [
@@ -510,8 +520,27 @@ def _system_profile_text_summary(df: pd.DataFrame, is_ru: bool) -> list[str]:
     return lines
 
 
+def _pick_test_metric_columns(df: pd.DataFrame) -> list[str]:
+    seg_cols = [
+        c
+        for c in runs_summary_test_column_names()
+        if c.startswith("test_mask_") or c.startswith("test_Mask-")
+    ]
+    if any(c in df.columns for c in seg_cols):
+        return [c for c in seg_cols if c in df.columns]
+    det_cols = [
+        c
+        for c in runs_summary_test_column_names()
+        if c.startswith("test_mAP") or c.startswith("test_Box")
+    ]
+    present = [c for c in det_cols if c in df.columns]
+    if present:
+        return present
+    return [c for c in ("test_top1_acc", "test_top5_acc") if c in df.columns]
+
+
 def _build_test_metrics_summary(df: pd.DataFrame, abbreviations: dict[str, str]) -> pd.DataFrame:
-    metric_cols = ["test_mAP50-95", "test_mAP50", "test_Box-F1", "test_Box-P", "test_Box-R"]
+    metric_cols = _pick_test_metric_columns(df)
     present = [c for c in metric_cols if c in df.columns]
     if not present:
         return pd.DataFrame()
@@ -721,7 +750,8 @@ def _format_metrics_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
     lines: list[str] = []
     if df is None or len(df) == 0:
         return lines
-    for col in ("mAP50-95", "Box-F1", "mAP50"):
+    task_type = detect_task_type_from_columns(df.columns) or "detection"
+    for col in primary_quality_columns(task_type):
         if col not in df.columns:
             continue
         s = pd.to_numeric(df[col], errors="coerce")

@@ -65,6 +65,7 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
   - classification rows may contain `task_outputs.classification = {}`
   - segmentation rows may contain `task_outputs.segments = []`
   - aggregate visibility comes from `summary.task_outputs_total` and `summary.capability_gap_images`
+- **Segmentation metrics in analyze:** runs with `training_metadata.json` → `task_type=segmentation` expose mask columns (`mask_mAP50-95`, `Mask-F1`, …) in `format_metrics_compare_*.csv`, `compare_delta.csv`, and `runs_summary.csv` (`test_mask_*` prefixes). When mask columns are absent in a CSV, analyze falls back to box metrics (`mAP50-95`, `Box-F1`, …). `test-metrics-plot` picks defaults from the first run's task and CSV headers.
 - `analyze all` supports:
   - `--report-languages` (default `ru,en`)
   - `--scatter-x` / `--scatter-y` for speed-quality scatter axes

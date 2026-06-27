@@ -17,6 +17,7 @@ from smartrain.core.analyze.run_metrics_discovery import (
     read_metrics_by_format_for_split_artifacts,
     read_test_metrics_by_format,
 )
+from smartrain.tasks.metric_columns import metric_agg_columns_with_fallback, read_run_task_type
 from smartrain.core.testing.artifact_paths import (
     format_metrics_path,
     format_test_dir,
@@ -309,7 +310,9 @@ def read_test_metrics_row(run_dir: str, format_name: str | None = "pt") -> dict[
     # If metrics are per-class without an "all" row, build macro-average.
     if "Class" in df.columns and len(df) > 1:
         out: dict[str, Any] = {}
-        for col in METRIC_AGG_COLUMNS:
+        task_type = read_run_task_type(run_dir)
+        agg_cols = metric_agg_columns_with_fallback(task_type, set(df.columns))
+        for col in agg_cols:
             if col in df.columns:
                 out[col] = pd.to_numeric(df[col], errors="coerce").mean()
         if out:

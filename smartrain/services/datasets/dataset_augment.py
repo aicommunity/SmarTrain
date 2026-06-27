@@ -28,6 +28,18 @@ from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_c
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
+from smartrain.services.datasets.yolo_augment_geom import (
+    apply_albumentations_to_labels,
+    count_label_instances,
+    infer_label_kind,
+    labels_to_legacy_tuples,
+    legacy_tuples_to_serialized,
+    read_augment_label_file,
+    resolve_label_kind,
+    rotate_labels_with_matrix,
+    write_augment_label_file,
+)
+from smartrain.services.datasets.yolo_labels import YoloLabel, read_yolo_labels, serialize_yolo_labels
 from smartrain.services.datasets.dataset_cli_catalog import (
     EMPTY_DATASETS_INFO_MESSAGE,
     load_datasets_catalog,
@@ -52,6 +64,12 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(description="Offline augmentation of a dataset into a new datasets/<name>")
     p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
     p.add_argument("--dataset", type=str, default=None, help="Name of source dataset from datasets_info.json")
+    p.add_argument(
+        "--label-type",
+        choices=("auto", "bbox", "segment"),
+        default="auto",
+        help="Label interpretation for augment: auto-detect, force bbox, or force segment (polygons).",
+    )
     p.add_argument("--output-name", type=str, default=None, help="Name of output dataset (default <dataset>_aug)")
     p.add_argument("--enable-flip", action="store_true", help="Enable flip augmentation")
     p.add_argument("--flip-prob", type=float, default=0.5, help="Probability of creating a flip variant per frame [0..1]")
@@ -199,22 +217,11 @@ def _read_yolo_classes(label_path: str) -> set[int]:
 
 
 def _parse_yolo_labels(label_path: str) -> list[tuple[int, float, float, float, float]]:
-    out: list[tuple[int, float, float, float, float]] = []
-    if not os.path.isfile(label_path):
-        return out
-    for raw in Path(label_path).read_text(encoding="utf-8").splitlines():
-        parts = raw.split()
-        if len(parts) < 5:
-            continue
-        try:
-            out.append((int(float(parts[0])), float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])))
-        except ValueError:
-            continue
-    return out
+    return labels_to_legacy_tuples(read_augment_label_file(label_path))
 
 
 def _serialize_yolo_labels(labels: list[tuple[int, float, float, float, float]]) -> str:
-    return "".join(f"{cls} {x:.8f} {y:.8f} {w:.8f} {h:.8f}\n" for cls, x, y, w, h in labels)
+    return legacy_tuples_to_serialized(labels)
 
 
 def _conveyor_any(args) -> bool:
@@ -279,7 +286,7 @@ def _append_conveyor_transforms(t: list[A.BasicTransform], args) -> None:
         t.append(A.MotionBlur(blur_limit=3, p=0.15))
 
 
-def _compose_for_basic(args) -> A.Compose:
+def _compose_for_basic(args, *, with_bboxes: bool = True, with_keypoints: bool = False) -> A.Compose:
     t: list[A.BasicTransform] = []
     if args.enable_flip:
         if args.flip == "horizontal":
@@ -300,10 +307,14 @@ def _compose_for_basic(args) -> A.Compose:
         )
     if args.enable_center_rotate:
         t.append(A.Affine(rotate=(-float(args.center_rotate_deg), float(args.center_rotate_deg)), p=1.0))
-    return A.Compose(
-        t,
-        bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"], clip=True),
-    )
+    if not t:
+        return A.Compose([])
+    params: dict = {}
+    if with_bboxes:
+        params["bbox_params"] = A.BboxParams(format="yolo", label_fields=["class_labels"], clip=True)
+    if with_keypoints:
+        params["keypoint_params"] = A.KeypointParams(format="xy", remove_invisible=False)
+    return A.Compose(t, **params)
 
 
 def _sanitize_yolo_box(
@@ -404,15 +415,8 @@ def _scaled_copies(base: int, image_weight: float, args) -> int:
 
 
 def count_yolo_bbox_lines(lbl_path: str) -> int:
-    """Number of bbox lines (non-empty) in a YOLO label file."""
-    if not os.path.isfile(lbl_path):
-        return 0
-    n = 0
-    with open(lbl_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip().split():
-                n += 1
-    return n
+    """Number of label instances (bbox or polygon lines) in a YOLO label file."""
+    return count_label_instances(lbl_path)
 
 
 def _train_split_class_bbox_counts(items: list[dict[str, str]]) -> dict[int, int]:
@@ -518,16 +522,18 @@ def _aug_extra_budget_allow(extra_used: int, delta: int, extra_budget: int | Non
 
 
 def sum_train_bbox_disk(dataset_root: str) -> int:
-    """Sum bbox lines across train/labels/*.txt under dataset_root."""
-    lbl_dir = os.path.join(dataset_root, "train", "labels")
-    if not os.path.isdir(lbl_dir):
-        return 0
-    s = 0
-    for name in os.listdir(lbl_dir):
-        if not name.endswith(".txt"):
+    """Sum bbox lines across train labels (split layout) or root labels/ (flat layout)."""
+    for rel in ("train/labels", "labels"):
+        lbl_dir = os.path.join(dataset_root, rel)
+        if not os.path.isdir(lbl_dir):
             continue
-        s += count_yolo_bbox_lines(os.path.join(lbl_dir, name))
-    return s
+        s = 0
+        for name in os.listdir(lbl_dir):
+            if not name.endswith(".txt"):
+                continue
+            s += count_yolo_bbox_lines(os.path.join(lbl_dir, name))
+        return s
+    return 0
 
 
 def _to_xyxy(box: tuple[int, float, float, float, float], w: int, h: int) -> tuple[int, int, int, int]:
@@ -718,10 +724,7 @@ def _apply_geom_aug(
     enable_center_rotate: bool | None = None,
 ) -> list[tuple[int, float, float, float, float]]:
     image = np.array(Image.open(image_path).convert("RGB"))
-    raw_labels = _parse_yolo_labels(label_path)
-    labels = [x for x in (_sanitize_yolo_box(lb) for lb in raw_labels) if x is not None]
-    bboxes = [(x, y, w, h) for _, x, y, w, h in labels]
-    class_labels = [cls for cls, *_ in labels]
+    raw_labels = read_augment_label_file(label_path)
     # Locally disable/enable individual blocks without mutating the main args.
     class _LocalArgs:
         pass
@@ -738,18 +741,22 @@ def _apply_geom_aug(
     if enable_center_rotate is not None:
         local.enable_center_rotate = bool(enable_center_rotate)
 
-    pipeline = _compose_for_basic(local)
-    transformed = pipeline(image=image, bboxes=bboxes, class_labels=class_labels)
-    new_img = transformed["image"]
-    new_labels_raw = [
-        (int(cls), float(x), float(y), float(w), float(h))
-        for cls, (x, y, w, h) in zip(transformed["class_labels"], transformed["bboxes"])
-    ]
-    new_labels = [x for x in (_sanitize_yolo_box(lb) for lb in new_labels_raw) if x is not None]
+    kind = infer_label_kind(raw_labels)
+    pipeline = _compose_for_basic(
+        local,
+        with_bboxes=kind in {"bbox", "mixed"},
+        with_keypoints=kind in {"segment", "mixed"},
+    )
+    if not list(getattr(pipeline, "transforms", []) or []):
+        shutil.copy2(image_path, out_img)
+        shutil.copy2(label_path, out_lbl)
+        return _parse_yolo_labels(out_lbl)
+    new_img, new_label_objs = apply_albumentations_to_labels(image, raw_labels, pipeline)
+    new_labels = labels_to_legacy_tuples(new_label_objs)
     os.makedirs(os.path.dirname(out_img), exist_ok=True)
     os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
     Image.fromarray(new_img).save(out_img)
-    Path(out_lbl).write_text(_serialize_yolo_labels(new_labels), encoding="utf-8")
+    write_augment_label_file(out_lbl, new_label_objs)
     return new_labels
 
 
@@ -765,12 +772,12 @@ def _apply_exact_center_rotate(
 ) -> list[tuple[int, float, float, float, float]] | None:
     img = Image.open(image_path).convert("RGB")
     w, h = img.size
-    labels = _parse_yolo_labels(label_path)
+    labels = read_augment_label_file(label_path)
     rotate_anchor = str(getattr(args, "center_rotate_anchor", "detector"))
     rotate_use_roi = rotate_anchor in ("bbox", "detector")
     roi: tuple[int, int, int, int] | None = None
     if rotate_use_roi and rotate_anchor == "bbox":
-        roi = _roi_from_labels(labels, w, h)
+        roi = _roi_from_labels(_parse_yolo_labels(label_path), w, h)
     elif rotate_use_roi and rotate_anchor == "detector":
         roi = detector_roi
     if rotate_use_roi and roi is None:
@@ -784,23 +791,12 @@ def _apply_exact_center_rotate(
     m = cv2.getRotationMatrix2D((cx, cy), float(angle), 1.0)
     src = np.array(img.convert("RGB"))
     dst = cv2.warpAffine(src, m, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    new_labels: list[tuple[int, float, float, float, float]] = []
-    for lb in labels:
-        cls, *_ = lb
-        x1, y1, x2, y2 = _to_xyxy(lb, w, h)
-        corners = np.array([[x1, y1, 1.0], [x2, y1, 1.0], [x2, y2, 1.0], [x1, y2, 1.0]], dtype=np.float32)
-        tr = (m @ corners.T).T
-        nx1 = max(0, min(w, int(np.floor(np.min(tr[:, 0])))))
-        ny1 = max(0, min(h, int(np.floor(np.min(tr[:, 1])))))
-        nx2 = max(0, min(w, int(np.ceil(np.max(tr[:, 0])))))
-        ny2 = max(0, min(h, int(np.ceil(np.max(tr[:, 1])))))
-        if nx2 <= nx1 or ny2 <= ny1:
-            continue
-        new_labels.append(_to_yolo(int(cls), (nx1, ny1, nx2, ny2), w, h))
+    new_label_objs = rotate_labels_with_matrix(labels, m, w=w, h=h)
+    new_labels = labels_to_legacy_tuples(new_label_objs)
     os.makedirs(os.path.dirname(out_img), exist_ok=True)
     os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
     Image.fromarray(dst).save(out_img)
-    Path(out_lbl).write_text(_serialize_yolo_labels(new_labels), encoding="utf-8")
+    write_augment_label_file(out_lbl, new_label_objs)
     return new_labels
 
 
@@ -1061,11 +1057,112 @@ def _apply_copy_paste(
     return True, labels
 
 
-def _write_data_yaml(out_dir: str, names: list[str]) -> None:
+def _split_images_rel(out_dir: str, split: str) -> str | None:
+    base = Path(out_dir)
+    for rel in (f"{split}/images", f"images/{split}", split):
+        p = base / rel
+        if p.is_dir() and any(p.iterdir()):
+            return rel
+    return None
+
+
+_AUGMENT_FLAT_SOURCE_STRUCTURES = frozenset({"cvat11", "flat"})
+
+
+def augment_output_structure(source_structure: str) -> str:
+    """Map datasets_info structure to on-disk layout produced by augment."""
+    s = str(source_structure).strip().lower()
+    if s in _AUGMENT_FLAT_SOURCE_STRUCTURES:
+        return "flat"
+    if s in ("subset_flat", "nested_split", "split"):
+        return s
+    return "split"
+
+
+def _swap_images_labels_rel(rel_path: str) -> str:
+    rel = rel_path.replace("\\", "/")
+    parts = rel.split("/")
+    for i, part in enumerate(parts):
+        if part == "images":
+            parts[i] = "labels"
+            return "/".join(parts)
+    return os.path.join("labels", os.path.basename(rel_path))
+
+
+def _augment_ensure_base_dirs(out_dir: str, structure: str, splits_present: list[str]) -> None:
+    base = Path(out_dir)
+    if structure in ("flat", "subset_flat"):
+        (base / "images").mkdir(parents=True, exist_ok=True)
+        (base / "labels").mkdir(parents=True, exist_ok=True)
+        return
+    if structure == "nested_split":
+        for split in splits_present:
+            (base / "images" / split).mkdir(parents=True, exist_ok=True)
+            (base / "labels" / split).mkdir(parents=True, exist_ok=True)
+        return
+    for split in splits_present:
+        (base / split / "images").mkdir(parents=True, exist_ok=True)
+        (base / split / "labels").mkdir(parents=True, exist_ok=True)
+
+
+def _augment_output_paths(
+    out_dir: str,
+    structure: str,
+    src_root: str,
+    img_src: str,
+    lbl_src: str,
+    stem: str,
+    ext: str,
+) -> tuple[str, str]:
+    if structure == "flat":
+        return (
+            os.path.join(out_dir, "images", f"{stem}{ext}"),
+            os.path.join(out_dir, "labels", f"{stem}.txt"),
+        )
+    rel_img = os.path.relpath(img_src, src_root)
+    rel_img_dir = os.path.dirname(rel_img)
+    dst_img = (
+        os.path.join(out_dir, rel_img_dir, f"{stem}{ext}")
+        if rel_img_dir
+        else os.path.join(out_dir, f"{stem}{ext}")
+    )
+    if structure == "subset_flat":
+        rel_lbl = _swap_images_labels_rel(rel_img)
+        rel_lbl_dir = os.path.dirname(rel_lbl)
+        dst_lbl = (
+            os.path.join(out_dir, rel_lbl_dir, f"{stem}.txt")
+            if rel_lbl_dir
+            else os.path.join(out_dir, f"{stem}.txt")
+        )
+        return dst_img, dst_lbl
+    try:
+        rel_lbl = os.path.relpath(lbl_src, src_root)
+    except ValueError:
+        rel_lbl = _swap_images_labels_rel(rel_img)
+    rel_lbl_dir = os.path.dirname(rel_lbl)
+    dst_lbl = (
+        os.path.join(out_dir, rel_lbl_dir, f"{stem}.txt")
+        if rel_lbl_dir
+        else os.path.join(out_dir, f"{stem}.txt")
+    )
+    return dst_img, dst_lbl
+
+
+def _write_data_yaml(out_dir: str, names: list[str], *, structure: str) -> None:
+    out_structure = augment_output_structure(structure)
+    if out_structure in ("flat", "subset_flat"):
+        train_rel = val_rel = test_rel = "images"
+    elif out_structure == "nested_split":
+        train_rel = _split_images_rel(out_dir, "train") or "images/train"
+        val_rel = _split_images_rel(out_dir, "val") or _split_images_rel(out_dir, "valid") or train_rel
+        test_rel = _split_images_rel(out_dir, "test") or val_rel
+    else:
+        train_rel = _split_images_rel(out_dir, "train") or "train/images"
+        val_rel = _split_images_rel(out_dir, "val") or _split_images_rel(out_dir, "valid") or train_rel
+        test_rel = _split_images_rel(out_dir, "test") or val_rel
     p = Path(out_dir) / "data.yaml"
-    val_rel = "valid/images" if (Path(out_dir) / "valid" / "images").is_dir() else "val/images"
     p.write_text(
-        f"train: train/images\nval: {val_rel}\ntest: test/images\n\n"
+        f"train: {train_rel}\nval: {val_rel}\ntest: {test_rel}\n\n"
         f"nc: {len(names)}\n"
         f"names: {names}\n",
         encoding="utf-8",
@@ -1078,6 +1175,7 @@ def _update_datasets_sidecar(
     class_map: dict[str, int],
     target_dir: str,
     output_hash: str,
+    structure: str,
 ) -> None:
     update_datasets_sidecar(
         layout=layout,
@@ -1085,6 +1183,7 @@ def _update_datasets_sidecar(
         class_map=class_map,
         target_dir=target_dir,
         output_hash=output_hash,
+        structure=structure,
     )
 
 
@@ -1384,6 +1483,8 @@ def main(argv=None):
         temp_root=os.path.join(layout.root, "tmp"),
         exclude_test=False,
     )
+    source_structure = str(entry.get("structure", "split"))
+    output_structure = augment_output_structure(source_structure)
     copied = 0
     augmented = 0
     skipped_roi_missing = 0
@@ -1403,11 +1504,25 @@ def main(argv=None):
                     "lbl": os.path.join(labels_path, f"{stem}.txt"),
                 }
             )
+    if not items:
+        print("[ERROR] No images found for augment.")
+        return
+    label_kinds: set[str] = set()
+    for it in items:
+        kind = resolve_label_kind(it["lbl"], label_type=str(getattr(args, "label_type", "auto")))
+        if kind != "empty":
+            label_kinds.add(kind)
+    if "segment" in label_kinds or "mixed" in label_kinds:
+        if bool(args.enable_bbox_copy):
+            print("[ERROR] --enable-bbox-copy is not supported for polygon (segmentation) label files.")
+            return
+        if "mixed" in label_kinds:
+            print(
+                "[WARN] Mixed bbox and polygon labels detected; geometric augment applies both bbox and keypoint transforms."
+            )
     if not args.dry_run:
         splits_present = sorted({str(it["split"]) for it in items}) or ["train", "val", "test"]
-        for split in splits_present:
-            os.makedirs(os.path.join(out_dir, split, "images"), exist_ok=True)
-            os.makedirs(os.path.join(out_dir, split, "labels"), exist_ok=True)
+        _augment_ensure_base_dirs(out_dir, output_structure, splits_present)
     donors = _build_donor_pool(items, args) if args.enable_bbox_copy else []
     detector_roi_cache: dict[str, tuple[int, int, int, int] | None] = {}
     need_detector_for_rotate = bool(args.enable_center_rotate) and str(
@@ -1462,8 +1577,11 @@ def main(argv=None):
             continue
         bi = count_yolo_bbox_lines(lbl_src)
         if not args.dry_run:
-            dst_img = os.path.join(out_dir, split, "images", f"{stem}{ext}")
-            dst_lbl = os.path.join(out_dir, split, "labels", f"{stem}.txt")
+            dst_img, dst_lbl = _augment_output_paths(
+                out_dir, output_structure, src_root, img_src, lbl_src, stem, ext
+            )
+            os.makedirs(os.path.dirname(dst_img), exist_ok=True)
+            os.makedirs(os.path.dirname(dst_lbl), exist_ok=True)
             shutil.copy2(img_src, dst_img)
             if os.path.isfile(lbl_src):
                 shutil.copy2(lbl_src, dst_lbl)
@@ -1496,8 +1614,11 @@ def main(argv=None):
         if args.enable_flip and flip_rng.random() <= flip_p and _budget_ok(bi):
             aug_stem = _aug_stem(stem, args, 1, "f")
             if not args.dry_run:
-                out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                out_img, out_lbl = _augment_output_paths(
+                    out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
+                )
+                os.makedirs(os.path.dirname(out_img), exist_ok=True)
+                os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
                 new_labels = _apply_geom_aug(
                     img_src,
                     lbl_src,
@@ -1522,8 +1643,11 @@ def main(argv=None):
             aug_stem = _aug_stem(stem, args, 1, geom_mode)
             if _budget_ok(bi):
                 if not args.dry_run:
-                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                    out_img, out_lbl = _augment_output_paths(
+                        out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
+                    )
+                    os.makedirs(os.path.dirname(out_img), exist_ok=True)
+                    os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
                     new_labels = _apply_geom_aug(
                         img_src,
                         lbl_src,
@@ -1571,8 +1695,11 @@ def main(argv=None):
                 used_angles.append(angle)
                 aug_stem = _aug_stem(stem, args, rot_saved + 1, "r")
                 if not args.dry_run:
-                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                    out_img, out_lbl = _augment_output_paths(
+                        out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
+                    )
+                    os.makedirs(os.path.dirname(out_img), exist_ok=True)
+                    os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
                     new_labels = _apply_exact_center_rotate(
                         img_src,
                         lbl_src,
@@ -1619,8 +1746,11 @@ def main(argv=None):
             for i in range(cp_copies):
                 aug_stem = _aug_stem(stem, args, i + 1, "p")
                 if not args.dry_run:
-                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                    out_img, out_lbl = _augment_output_paths(
+                        out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
+                    )
+                    os.makedirs(os.path.dirname(out_img), exist_ok=True)
+                    os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
                     ok, new_labels = _apply_copy_paste(
                         img_src,
                         lbl_src,
@@ -1676,9 +1806,16 @@ def main(argv=None):
         return
 
     all_names = [str(x) for _, x in sorted(names_by_id.items())]
-    _write_data_yaml(out_dir, all_names)
+    _write_data_yaml(out_dir, all_names, structure=source_structure)
     out_hash = calculate_dataset_hash(out_dir)
-    _update_datasets_sidecar(layout, out_name, class_map if isinstance(class_map, dict) else {}, out_dir, out_hash)
+    _update_datasets_sidecar(
+        layout,
+        out_name,
+        class_map if isinstance(class_map, dict) else {},
+        out_dir,
+        out_hash,
+        output_structure,
+    )
     passport_path = write_dataset_passport(
         output_dataset_dir=out_dir,
         command="augment",

@@ -75,6 +75,15 @@ Basic YOLO bbox format:
 
 Segmentation polygons in `class_id x1 y1 x2 y2 ...` format are also supported.
 
+Example polygon label file (`labels/img001.txt`):
+
+```
+0 0.10 0.20 0.90 0.20 0.90 0.80 0.10 0.80
+1 0.30 0.30 0.50 0.30 0.50 0.50 0.30 0.50
+```
+
+Coordinates are normalized to `[0, 1]` relative to image width/height.
+
 ## Queue and statuses
 
 - Queue file in workspace: `queue.txt` (one command per line).

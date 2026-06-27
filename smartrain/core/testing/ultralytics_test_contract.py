@@ -42,6 +42,22 @@ def ultralytics_pt_rich_files_required(task_type: str | None) -> tuple[str, ...]
         return base
     if t in {"segmentation", "segment", "seg"}:
         return base + detect_style
+
+
+# Recommended but not required for completeness (Ultralytics version-dependent).
+ULTRALYTICS_PT_MASK_PLOTS_OPTIONAL: tuple[str, ...] = (
+    "MaskPR_curve.png",
+    "MaskF1_curve.png",
+    "MaskP_curve.png",
+    "MaskR_curve.png",
+)
+
+
+def ultralytics_pt_mask_plots_optional(task_type: str | None) -> tuple[str, ...]:
+    t = (task_type or "detect").strip().lower()
+    if t in {"segmentation", "segment", "seg"}:
+        return ULTRALYTICS_PT_MASK_PLOTS_OPTIONAL
+    return ()
     return base + detect_style
 
 

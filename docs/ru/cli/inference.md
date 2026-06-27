@@ -2,14 +2,15 @@
 
 # CLI: inference
 
-`smartrain inference` запускает инференс детекции объектов по папке или по split датасета.
+`smartrain inference` запускает инференс по папке или split датасета (детекция, instance segmentation, классификация — в зависимости от модели/task).
 
 Команда пишет:
 
 - `inference_results.json` (основной отчет)
 - `environment_profile.json` (профиль окружения машины и рантайма)
+- опционально overlay-изображения с полигонами при `--save-overlay` (instance segmentation)
 
-Оба файла сохраняются в:
+Основные JSON сохраняются в:
 
 - `workspace/inference/<model>/<timestamp-source>/`
 
@@ -34,7 +35,12 @@
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
 smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mode folder --source-dir ./images
 smartrain inference --weights dr-yolo:yolov8n --external-repo /opt/dr-yolo --data-mode folder --source-dir ./images
+smartrain inference --weights yolo11s-seg.pt --data-mode folder --source-dir ./images --save-overlay
 ```
+
+### Instance segmentation overlay
+
+Для моделей `*-seg.pt` в JSON есть `segments` (полигоны). Флаг `--save-overlay` сохраняет RGB-превью с контурами полигонов рядом с отчётом.
 
 ## Выбор устройства
 

@@ -77,3 +77,24 @@ def test_load_metrics_uses_task_specific_metrics_adapter(tmp_path: Path) -> None
     assert metrics[0].namespace == "classification/test_onnx"
     assert metrics[0].primary_metrics.get("top1") == 0.8
     assert metrics[0].primary_metrics.get("top5") == 0.95
+
+
+def test_load_metrics_segmentation_namespace(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run_seg"
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "best-seg.pt").write_bytes(b"x")
+    (run_dir / "training_metadata.json").write_text(
+        json.dumps({"training_info": {"task_type": "segmentation", "dataset": {"name": "ds"}}}),
+        encoding="utf-8",
+    )
+    (run_dir / "test_metrics.csv").write_text(
+        "mask_mAP50-95,Mask-F1,metrics/mAP50-95(M)\n0.44,0.61,0.44\n",
+        encoding="utf-8",
+    )
+
+    metrics = load_metrics(str(run_dir), source_kind="run")
+    assert metrics
+    seg_rows = [m for m in metrics if m.namespace.startswith("segmentation/")]
+    assert seg_rows
+    assert seg_rows[0].primary_metrics.get("mask_mAP50-95") == 0.44
+    assert seg_rows[0].primary_metrics.get("Mask-F1") == 0.61

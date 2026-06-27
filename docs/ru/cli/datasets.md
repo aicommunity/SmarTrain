@@ -27,6 +27,22 @@
 
 ## `augment`, `balance`, `orient`, `rotate`, `roi`
 
+### Instance segmentation (полигоны YOLO)
+
+Разметка: `class_id x1 y1 x2 y2 ...` (нормализованные вершины). См. [форматы данных](../reference/data-formats.md).
+
+**Поддерживается:** `rotate`, `orient`, `roi --mode yolo_segment`, `report`, `fusion` (фильтрация классов).
+
+**Ограничения:**
+
+- `augment` — для полигонов используйте `--label-type segment`; copy-paste bbox (`--enable-bbox-copy`) для polygon-датасетов не поддерживается.
+- `balance` — head-undersampling по **описывающему bbox** полигона (приближение).
+- Native ONNX/engine/TRT **test** для segmentation по умолчанию пропускается; используйте PT test.
+
+```bash
+smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
+```
+
 - `augment` — автономные аугментации с записью нового датасета; conveyor-эффекты включаются по отдельности: **`--enable-conveyor-rotate`**, **`--enable-conveyor-scale`**, **`--enable-conveyor-blur`**, **`--enable-conveyor-shift`**, **`--enable-conveyor-noise`** (зонтик **`--enable-conveyor`** включает все пять); в интерактиве каждый эффект спрашивается отдельно (noise по умолчанию выкл.); флаги **`--aug-class-aware-geo`** и **`--aug-total-bbox-cap-mult`** те же, что для `balance` hybrid-aug (ссылки на DODA/CUDA — см. выше; в одиночном `augment` class-aware по умолчанию **выкл.** для совместимости). При включённом капе по bbox **`--aug-budget-tail-first`** (по умолчанию **вкл.**) задаёт порядок обхода train: сначала кадры с большим хвостовым приоритетом `max_c (n_max/n_c)^γ`, затем head; **`--aug-budget-tail-gamma`** — показатель γ (по умолчанию `1.0`); отключить упорядочивание — **`--no-aug-budget-tail-first`**;
 - `balance` — балансировка классов; после балансировки по умолчанию действует `--eval-coverage` — при необходимости перераспределяет элементы между `train`/`val`/`test`, чтобы поддержать eval и покрытие классов, но не допускает попадания одного и того же source-изображения в разные сплиты; если уникальных кадров недостаточно, `val/test` могут остаться частично недозаполненными; отключить — `--no-eval-coverage`;
   - ручная настройка приоритетов классов: `--class-weight-multiplier "other:0.6,tear_up:1.1"` применяет множители после базового вычисления class weights;

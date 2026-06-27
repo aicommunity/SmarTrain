@@ -161,3 +161,19 @@ Sync note:
 - [x] **G6** Утончение фасада: `cmd_scan` → `run_scan_command` в `analyze_table_service` (2026-05-10).
 - [x] **G7** Prediction bundle: `predictions_strict` в gateway + тесты контракта (2026-05-10).
 - [x] **G8** Таблица capability gaps в `docs/cli/inference.md` + `capability_gap_reason` в отчёте (2026-05-10).
+
+---
+
+## Instance Segmentation Rollout
+
+Register and burn-down: [`tech-debt-instance-segmentation.md`](./tech-debt-instance-segmentation.md).
+
+- [x] **SEG-0** Инфраструктура TD: register TD-SEG-001…010, checklist sync, capability matrix update.
+- [x] **SEG-1** Safety net: unit-тесты YoloSegment (yolo_labels, rotate, orient, ROI, dataset_report).
+- [x] **SEG-2** Docs + guards: EN/RU CLI limits; native ONNX/TRT test skip для segmentation.
+- [x] **SEG-3** Segmentation metrics adapter: CSV mapping, unit tests, Mask plots contract decision.
+- [x] **SEG-4** Polygon-aware augment: flip/rotate/photometric; reject bbox-copy для seg datasets.
+- [x] **SEG-5** Balance/stats/CVAT: polygon counts, enclosing-bbox balance, CVAT polygon import/export.
+- [x] **SEG-6** Analyze reports: task-aware `METRIC_AGG_COLUMNS`, format_compare, report_markdown.
+- [x] **SEG-7** Inference overlay: `--save-overlay` + viz service + tests.
+- [x] **SEG-8** Multi-framework: external `--task segment`, weighted sampling, E2E smoke, final TD burn-down.

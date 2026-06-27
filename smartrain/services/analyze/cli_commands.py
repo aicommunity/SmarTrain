@@ -160,8 +160,9 @@ from smartrain.services.analyze.leaderboard import (
     write_leaderboard_csv,
 )
 from smartrain.services.analyze.commands.registry import AnalyzeCommandRegistry
+from smartrain.tasks.metric_columns import metric_agg_columns
 
-METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
+METRIC_AGG_COLUMNS = metric_agg_columns("detection")
 
 _ANALYZE_COMMAND_REGISTRY = AnalyzeCommandRegistry()
 

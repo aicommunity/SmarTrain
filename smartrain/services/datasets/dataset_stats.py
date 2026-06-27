@@ -11,10 +11,13 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 import yaml
 from rich.console import Console
 from rich.table import Table
+
+from smartrain.services.datasets.yolo_labels import YoloBBox, YoloSegment, read_yolo_labels
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
@@ -44,6 +47,8 @@ class DatasetStats:
     duplicate_cross_split_groups: int = 0
     near_duplicate_groups: int = 0
     near_duplicate_cross_split_groups: int = 0
+    bbox_instances: int = 0
+    polygon_instances: int = 0
 
     @property
     def images_total(self) -> int:
@@ -107,34 +112,19 @@ def _resolve_label_path(labels_dir: str, stem: str) -> str:
     return os.path.join(labels_dir, f"{stem}.txt")
 
 
-def _parse_label_file(path: str) -> tuple[int, int, list[int]]:
+def _parse_label_file(path: str) -> tuple[int, int, list[int], int, int]:
     if not os.path.isfile(path):
-        return 0, 0, []
-    valid = 0
-    broken = 0
-    ids: list[int] = []
+        return 0, 0, [], 0, 0
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+        raw_lines = [ln.strip() for ln in Path(path).read_text(encoding="utf-8").splitlines() if ln.strip()]
     except Exception:
-        return 0, 1, []
-    for raw in lines:
-        line = raw.strip()
-        if not line:
-            continue
-        parts = line.split()
-        if len(parts) < 5:
-            broken += 1
-            continue
-        try:
-            class_id = int(float(parts[0]))
-            _ = [float(x) for x in parts[1:5]]
-        except ValueError:
-            broken += 1
-            continue
-        valid += 1
-        ids.append(class_id)
-    return valid, broken, ids
+        return 0, 1, [], 0, 0
+    labels = read_yolo_labels(path)
+    broken = max(0, len(raw_lines) - len(labels))
+    ids = [int(lb.cls_id) for lb in labels]
+    bbox_n = sum(1 for lb in labels if isinstance(lb, YoloBBox))
+    poly_n = sum(1 for lb in labels if isinstance(lb, YoloSegment))
+    return len(labels), broken, ids, bbox_n, poly_n
 
 
 def _file_md5(path: str) -> str:
@@ -178,9 +168,12 @@ def _scan_one_dataset(dataset_dir: str, name: str) -> DatasetStats:
     orphan_images = 0
     orphan_labels = 0
     empty_images = 0
+    bbox_instances = 0
+    polygon_instances = 0
 
     def _scan_pair(images_dir: str, labels_dir: str, split: str) -> None:
         nonlocal broken_label_lines, unknown_class_ids, orphan_images, orphan_labels, empty_images
+        nonlocal bbox_instances, polygon_instances
         image_stems = _list_stems(images_dir, image_mode=True)
         label_stems = _list_stems(labels_dir, image_mode=False)
 
@@ -190,8 +183,10 @@ def _scan_one_dataset(dataset_dir: str, name: str) -> DatasetStats:
 
         for stem in image_stems:
             label_path = _resolve_label_path(labels_dir, stem)
-            valid, broken, ids = _parse_label_file(label_path)
+            valid, broken, ids, bbox_n, poly_n = _parse_label_file(label_path)
             broken_label_lines += broken
+            bbox_instances += bbox_n
+            polygon_instances += poly_n
             split_instances[split] += valid
             if valid == 0:
                 empty_images += 1
@@ -278,6 +273,8 @@ def _scan_one_dataset(dataset_dir: str, name: str) -> DatasetStats:
         orphan_images=orphan_images,
         orphan_labels=orphan_labels,
         empty_images=empty_images,
+        bbox_instances=bbox_instances,
+        polygon_instances=polygon_instances,
     )
 
 
@@ -813,6 +810,7 @@ def _render_datasets_table(
 ) -> None:
     rows = []
     issues_rows: list[dict[str, str]] = []
+    has_polygons = any(scanned[name].polygon_instances > 0 for name in selected_names)
     for name in selected_names:
         ds = scanned[name]
         class_totals = {
@@ -846,6 +844,9 @@ def _render_datasets_table(
             "near_dup": ds.near_duplicate_groups,
             "near_dup_cross": ds.near_duplicate_cross_split_groups,
         }
+        if has_polygons:
+            row["bbox_inst"] = ds.bbox_instances
+            row["poly_inst"] = ds.polygon_instances
         rows.append(row)
         issues_rows.append(
             {

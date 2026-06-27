@@ -414,6 +414,10 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 
 - **Model test / internal `pt_uni` compare:** для **`detection`**, **`classification`** и **`segmentation`** запускается внутренний проход `pt_uni` с пробросом `task_type` в Ultralytics `val` (см. [`14-pt-uni-compare-contract.md`](./14-pt-uni-compare-contract.md)). Иные задачи по-прежнему пропускаются с информационным сообщением.
 
+- **Model test / native ONNX/engine/TRT для segmentation:** native eval использует detection-shaped bbox pipeline; для `task_type=segmentation` форматы `onnx`/`engine`/`trt` **пропускаются** по умолчанию (`status=skipped`, `capability_gap` в manifest). Используйте PT test или `--force-native-seg-test` (экспериментально). Регистр: [`tech-debt-instance-segmentation.md`](./tech-debt-instance-segmentation.md) TD-SEG-002.
+
+- 2026-06-27: **Instance segmentation rollout (SEG-0…SEG-8) closed.** Register: [`tech-debt-instance-segmentation.md`](./tech-debt-instance-segmentation.md). Polygon augment, native test guard, metrics adapter, analyze mask columns, inference overlay, CVAT polygon, external `--task` propagation.
+
 - **Canonical model read (`ModelAdapter`):** порядок вывода `task_type` — поля `manifest` / `training_metadata.training_info.task_type` / `training_info.ultralytics_train.task` (если заданы) → эвристика по имени файла весов (`-cls`/`-seg` и т.д.) → **последний резерв `detection`**. Порядок `backend_type` — metadata/provider → эвристика по расширению веса (`onnx` → onnxruntime, `engine`/`trt` → tensorrt, иначе ultralytics). При «немых» артефактах без метаданных и без подсказок в имени возможна неверная интерпретация задачи до явного исправления provenance.
 
 - Резюме архитектуры и ограничений для онбординга: [`13-project-current-state.md`](./13-project-current-state.md).

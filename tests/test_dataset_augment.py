@@ -253,3 +253,155 @@ def test_augment_preserves_valid_split_and_data_yaml_points_to_valid(tmp_path: P
     data_yaml = (out / "data.yaml").read_text(encoding="utf-8")
     assert "val: valid/images" in data_yaml
 
+
+def _prepare_polygon_workspace(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    raw = tmp_path / "raw_data" / "ds_seg"
+    (raw / "train" / "images").mkdir(parents=True, exist_ok=True)
+    (raw / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    _write_jpg(raw / "train" / "images" / "a.jpg")
+    (raw / "train" / "labels" / "a.txt").write_text(
+        "0 0.20 0.20 0.80 0.20 0.80 0.80 0.20 0.80\n",
+        encoding="utf-8",
+    )
+    (raw / "data.yaml").write_text("nc: 1\nnames: ['obj']\n", encoding="utf-8")
+    scan_main(["--workspace", str(tmp_path)])
+
+
+def _prepare_flat_workspace(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    raw = tmp_path / "raw_data" / "ds_flat"
+    (raw / "images").mkdir(parents=True, exist_ok=True)
+    (raw / "labels").mkdir(parents=True, exist_ok=True)
+    _write_jpg(raw / "images" / "a.jpg")
+    (raw / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (raw / "data.yaml").write_text(
+        "train: images\nval: images\ntest: images\nnc: 1\nnames: ['cat']\n",
+        encoding="utf-8",
+    )
+    scan_main(["--workspace", str(tmp_path)])
+
+
+def test_augment_preserves_flat_structure(tmp_path: Path) -> None:
+    _prepare_flat_workspace(tmp_path)
+    augment_main(["--workspace", str(tmp_path), "--dataset", "ds_flat"])
+    out = tmp_path / "datasets" / "ds_flat_aug"
+    assert (out / "images" / "a.jpg").is_file()
+    assert not (out / "train").exists()
+    aug_labels = list((out / "labels").glob("*__a-*.txt"))
+    assert aug_labels
+    data_yaml = (out / "data.yaml").read_text(encoding="utf-8")
+    assert "train: images" in data_yaml
+    assert "val: images" in data_yaml
+    assert "test: images" in data_yaml
+    info = json.loads((tmp_path / "datasets" / "datasets_info.json").read_text(encoding="utf-8"))
+    assert info["ds_flat_aug"]["structure"] == "flat"
+
+
+def test_augment_data_yaml_train_only_uses_train_for_val_test(tmp_path: Path) -> None:
+    from smartrain.services.datasets.dataset_augment import _write_data_yaml
+
+    out = tmp_path / "ds_aug"
+    (out / "train" / "images").mkdir(parents=True)
+    _write_jpg(out / "train" / "images" / "a.jpg")
+    _write_data_yaml(str(out), ["belt_side"], structure="split")
+    text = (out / "data.yaml").read_text(encoding="utf-8")
+    assert "train: train/images" in text
+    assert "val: train/images" in text
+    assert "test: train/images" in text
+
+
+def test_augment_polygon_horizontal_flip(tmp_path: Path) -> None:
+    _prepare_polygon_workspace(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_seg",
+            "--enable-flip",
+            "--flip",
+            "horizontal",
+            "--flip-prob",
+            "1",
+            "--label-type",
+            "segment",
+            "--no-legend",
+        ]
+    )
+    out_lbl = tmp_path / "datasets" / "ds_seg_aug" / "train" / "labels"
+    flipped = list(out_lbl.glob("*__a-f*.txt"))
+    assert flipped
+    from smartrain.services.datasets.yolo_labels import YoloSegment, read_yolo_labels
+
+    labels = read_yolo_labels(str(flipped[0]))
+    assert len(labels) == 1
+    assert isinstance(labels[0], YoloSegment)
+    for x, _y in labels[0].points:
+        assert 0.0 <= x <= 1.0
+
+
+def test_augment_polygon_rejects_bbox_copy(tmp_path: Path, capsys) -> None:
+    _prepare_polygon_workspace(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_seg",
+            "--enable-bbox-copy",
+            "--no-legend",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert "not supported for polygon" in captured.out
+    assert not (tmp_path / "datasets" / "ds_seg_aug").exists()
+
+
+def test_augment_polygon_center_rotate(tmp_path: Path) -> None:
+    _prepare_polygon_workspace(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_seg",
+            "--enable-center-rotate",
+            "--center-rotate-deg",
+            "15",
+            "--rotate-copies",
+            "1",
+            "--label-type",
+            "segment",
+            "--no-legend",
+        ]
+    )
+    out_lbl = tmp_path / "datasets" / "ds_seg_aug" / "train" / "labels"
+    rotated = list(out_lbl.glob("*__a-r*.txt"))
+    assert rotated
+    from smartrain.services.datasets.yolo_labels import YoloSegment, read_yolo_labels
+
+    labels = read_yolo_labels(str(rotated[0]))
+    assert len(labels) == 1
+    assert isinstance(labels[0], YoloSegment)
+
+
+def test_augment_polygon_photometric(tmp_path: Path) -> None:
+    _prepare_polygon_workspace(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_seg",
+            "--enable-photometric",
+            "--label-type",
+            "segment",
+            "--no-legend",
+        ]
+    )
+    out_img = tmp_path / "datasets" / "ds_seg_aug" / "train" / "images"
+    assert any(out_img.glob("*__a*.jpg"))
+    out_lbl = tmp_path / "datasets" / "ds_seg_aug" / "train" / "labels"
+    assert any(out_lbl.glob("*__a*.txt"))
+
