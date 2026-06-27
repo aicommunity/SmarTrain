@@ -32,8 +32,8 @@ def prepare_all_selection(
             sys.exit(2)
         selection_prompts_used = True
         indexed = filtered_run_records_cb(args)
-        if len(indexed) < 2:
-            print("[ERROR] Need at least two runs for full analysis.")
+        if len(indexed) < 1:
+            print("[ERROR] Need at least one run for full analysis.")
             sys.exit(1)
         runs_root = os.path.abspath(str(args.models_root))
 
@@ -54,18 +54,30 @@ def prepare_all_selection(
                 f"{i:4d}  {str(rec.model or '?')[:14]:<14}  "
                 + f"{str(rec.dataset_name or '?')[:24]:<24}  {_display_run_dir(rd)}"
             )
-        baseline_idx = prompt_int_cb("Baseline run number", default=1)
-        others_raw = prompt_text_cb("Other run numbers (comma-separated)", default="").strip()
-        try:
-            others_idx = [int(x.strip()) for x in others_raw.split(",") if x.strip()]
-        except ValueError:
-            print("[ERROR] Invalid run numbers.")
-            sys.exit(1)
-        if baseline_idx < 1 or baseline_idx > len(indexed):
-            print("[ERROR] Baseline index out of range.")
-            sys.exit(1)
-        baseline = indexed[baseline_idx - 1][0]
-        others = [indexed[i - 1][0] for i in others_idx if 1 <= i <= len(indexed) and indexed[i - 1][0] != baseline]
+        if len(indexed) == 1:
+            baseline = indexed[0][0]
+            others = []
+            print("[INFO] Single run in workspace: using it as baseline (baseline-only report).")
+        else:
+            baseline_idx = prompt_int_cb("Baseline run number", default=1)
+            others_raw = prompt_text_cb(
+                "Other run numbers (comma-separated, leave empty for baseline-only report)",
+                default="",
+            ).strip()
+            try:
+                others_idx = [int(x.strip()) for x in others_raw.split(",") if x.strip()]
+            except ValueError:
+                print("[ERROR] Invalid run numbers.")
+                sys.exit(1)
+            if baseline_idx < 1 or baseline_idx > len(indexed):
+                print("[ERROR] Baseline index out of range.")
+                sys.exit(1)
+            baseline = indexed[baseline_idx - 1][0]
+            others = [
+                indexed[i - 1][0]
+                for i in others_idx
+                if 1 <= i <= len(indexed) and indexed[i - 1][0] != baseline
+            ]
         profile = prompt_choice_cb("Profile", ["quality", "speed", "full"], default="full")
         # So replay (`build_non_interactive_command`) sees the resolved selection.
         setattr(args, "baseline", baseline)

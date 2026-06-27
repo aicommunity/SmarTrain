@@ -90,6 +90,8 @@ def run_all_command(
         )
 
     selected_labels = [os.path.basename(x.rstrip(os.sep)) for x in selected_run_dirs]
+    if not others:
+        print("[INFO] Single-run report mode: cross-run compare artifacts will be skipped.")
     print("[INFO] Selected compare runs:")
     for idx, (run_dir, label) in enumerate(zip(selected_run_dirs, selected_labels), start=1):
         role = "baseline" if idx == 1 else "other"

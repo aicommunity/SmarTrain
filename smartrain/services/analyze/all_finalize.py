@@ -87,11 +87,13 @@ def finalize_all_session(
                 }
             )
 
+    single_run_mode = not others
     manifest = {
         "session_name": os.path.basename(session_root),
         "profile": profile,
         "baseline": baseline,
         "others": others,
+        "single_run_mode": single_run_mode,
         "artifacts": artifacts,
         "images": [a["path"] for a in artifacts if a["path"].endswith(".png")],
         "tables": [a["path"] for a in artifacts if a["path"].endswith(".csv")],

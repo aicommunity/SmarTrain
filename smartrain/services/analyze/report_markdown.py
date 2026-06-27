@@ -1610,6 +1610,18 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     else:
         lines.append(f"- {('Базовый' if is_ru else 'Baseline')}: `{baseline_display}`")
     others = manifest.get("others") or []
+    single_run_mode = bool(manifest.get("single_run_mode")) or (
+        isinstance(others, list) and len(others) == 0 and bool(baseline)
+    )
+    if single_run_mode:
+        lines.append(
+            "- "
+            + (
+                "Режим: отчёт по одному run (без сравнения с кандидатами)."
+                if is_ru
+                else "Mode: single-run report (no candidate comparison)."
+            )
+        )
     if isinstance(others, list):
         for item in others:
             item_s = str(item)

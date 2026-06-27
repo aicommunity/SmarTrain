@@ -39,6 +39,29 @@ smartrain analyze inference-plot --csv benchmark.csv --out-png benchmark.png
 smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 mAP50-95 Box-F1
 ```
 
+### Baseline-only report (`analyze all`)
+
+`analyze all` can build a full report from a **single baseline run** without `--others`:
+
+```bash
+# Non-interactive: baseline + profile required; --others is optional
+smartrain analyze all \
+  --baseline runs/ds_a/my_run \
+  --profile full \
+  --data-yaml datasets/ds_a/data.yaml
+
+# Interactive (TTY): with one run in workspace, it is auto-selected as baseline;
+# leave "Other run numbers" empty for baseline-only mode
+smartrain analyze all
+```
+
+In baseline-only mode (`single_run_mode` in `session.json`):
+
+- **Included:** metrics recompute, format comparison (pt/onnx/engine within the run), PR curves, inference benchmark, Ultralytics test artifacts, markdown/PDF/ODT report.
+- **Skipped (needs 2+ runs):** cross-run `compare` delta/curves, speed-vs-quality scatter, multi-run test-metrics bar charts.
+
+`analyze compare` still requires at least one candidate run in `--others`.
+
 ## Artifacts
 
 - Default root for new analyze sessions: `workspace/analytics/analyze-reports/<session>/`.
