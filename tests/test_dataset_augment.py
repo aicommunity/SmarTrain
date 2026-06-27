@@ -112,6 +112,91 @@ def test_augment_enable_conveyor_uses_conveyor_tag(tmp_path: Path) -> None:
     assert "__a-c" in aug_file.stem
 
 
+def test_augment_conveyor_rotate_only_uses_conveyor_tag(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_a",
+            "--enable-conveyor-rotate",
+            "--disable-center-rotate",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
+    aug_file = next(out.glob("*__a-*.txt"))
+    assert "__a-c" in aug_file.stem
+
+
+def test_compose_conveyor_rotate_only_excludes_noise() -> None:
+    import argparse
+
+    from smartrain.services.datasets.dataset_augment import (
+        _compose_for_basic,
+        _sync_conveyor_flags,
+    )
+
+    args = argparse.Namespace(
+        enable_flip=False,
+        flip="horizontal",
+        enable_conveyor=False,
+        enable_conveyor_rotate=True,
+        enable_conveyor_scale=False,
+        enable_conveyor_blur=False,
+        enable_conveyor_shift=False,
+        enable_conveyor_noise=False,
+        enable_photometric=False,
+        enable_center_rotate=False,
+        brightness_limit=0.1,
+        contrast_limit=0.1,
+        center_rotate_deg=5.0,
+    )
+    _sync_conveyor_flags(args)
+    compose = _compose_for_basic(args)
+    names = {type(tr).__name__ for tr in compose.transforms}
+    assert "Affine" in names
+    assert "GaussNoise" not in names
+    assert "MotionBlur" not in names
+
+
+def test_sync_conveyor_umbrella_enables_all_subflags() -> None:
+    import argparse
+
+    from smartrain.services.datasets.dataset_augment import _conveyor_any, _sync_conveyor_flags
+
+    args = argparse.Namespace(enable_conveyor=True)
+    _sync_conveyor_flags(args, argv=["--enable-conveyor"])
+    assert args.enable_conveyor_rotate is True
+    assert args.enable_conveyor_scale is True
+    assert args.enable_conveyor_blur is True
+    assert args.enable_conveyor_shift is True
+    assert args.enable_conveyor_noise is True
+    assert _conveyor_any(args) is True
+
+
+def test_sync_conveyor_aggregate_does_not_force_noise() -> None:
+    import argparse
+
+    from smartrain.services.datasets.dataset_augment import _conveyor_any, _sync_conveyor_flags
+
+    args = argparse.Namespace(
+        enable_conveyor_rotate=True,
+        enable_conveyor_scale=False,
+        enable_conveyor_blur=True,
+        enable_conveyor_shift=False,
+        enable_conveyor_noise=False,
+    )
+    args.enable_conveyor = _conveyor_any(args)
+    assert args.enable_conveyor is True
+
+    _sync_conveyor_flags(args)
+
+    assert args.enable_conveyor_noise is False
+    assert args.enable_conveyor_rotate is True
+    assert args.enable_conveyor_blur is True
+    assert _conveyor_any(args) is True
+
 def test_augment_flip_prob_zero_skips_flip_variant(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
     augment_main(

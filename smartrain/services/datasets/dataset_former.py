@@ -737,7 +737,9 @@ def _union_label_objects(
 
 def _write_label_objects(path: str, objs: list[tuple[int, tuple[float, ...]]]) -> bool:
     if not objs:
-        return False
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("")
+        return True
     lines = []
     for cls_id, coords in sorted(objs):
         if coords:
@@ -1194,7 +1196,7 @@ def main(argv=None):
                                 selected_classes,
                                 normalized_to_output_name,
                             )
-                            if not objs:
+                            if not objs and args.drop_empty_images:
                                 pbar.update(1)
                                 continue
                             img_hash = _image_content_hash(image_src)

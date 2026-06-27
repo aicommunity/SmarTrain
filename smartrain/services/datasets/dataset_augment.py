@@ -56,7 +56,16 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--enable-flip", action="store_true", help="Enable flip augmentation")
     p.add_argument("--flip-prob", type=float, default=0.5, help="Probability of creating a flip variant per frame [0..1]")
     p.add_argument("--enable-photometric", action="store_true", help="Enable brightness/contrast")
-    p.add_argument("--enable-conveyor", action="store_true", help="Enable pipeline noise/blur/shift/rotate")
+    p.add_argument(
+        "--enable-conveyor",
+        action="store_true",
+        help="Enable all conveyor effects (rotate, scale, blur, shift, noise); alias for all --enable-conveyor-* flags",
+    )
+    p.add_argument("--enable-conveyor-rotate", action="store_true", help="Conveyor Affine rotate (±5°)")
+    p.add_argument("--enable-conveyor-scale", action="store_true", help="Conveyor Affine scale (0.95–1.05)")
+    p.add_argument("--enable-conveyor-blur", action="store_true", help="Conveyor motion blur")
+    p.add_argument("--enable-conveyor-shift", action="store_true", help="Conveyor Affine shift (±3% translate)")
+    p.add_argument("--enable-conveyor-noise", action="store_true", help="Conveyor Gauss noise")
     p.add_argument("--enable-center-rotate", action="store_true", dest="enable_center_rotate", help="Enable frame rotation around the center")
     p.add_argument("--disable-center-rotate", action="store_false", dest="enable_center_rotate", help="Disable frame rotation around center")
     p.set_defaults(enable_center_rotate=True)
@@ -208,6 +217,68 @@ def _serialize_yolo_labels(labels: list[tuple[int, float, float, float, float]])
     return "".join(f"{cls} {x:.8f} {y:.8f} {w:.8f} {h:.8f}\n" for cls, x, y, w, h in labels)
 
 
+def _conveyor_any(args) -> bool:
+    return any(
+        bool(getattr(args, name, False))
+        for name in (
+            "enable_conveyor_rotate",
+            "enable_conveyor_scale",
+            "enable_conveyor_blur",
+            "enable_conveyor_shift",
+            "enable_conveyor_noise",
+        )
+    )
+
+
+def _sync_conveyor_flags(args, *, argv: list[str] | None = None) -> None:
+    if argv is not None and "--enable-conveyor" in argv:
+        args.enable_conveyor_rotate = True
+        args.enable_conveyor_scale = True
+        args.enable_conveyor_blur = True
+        args.enable_conveyor_shift = True
+        args.enable_conveyor_noise = True
+    args.enable_conveyor = _conveyor_any(args)
+
+
+def _set_conveyor_enabled(args, enabled: bool) -> None:
+    args.enable_conveyor = bool(enabled)
+    if not enabled:
+        args.enable_conveyor_rotate = False
+        args.enable_conveyor_scale = False
+        args.enable_conveyor_blur = False
+        args.enable_conveyor_shift = False
+        args.enable_conveyor_noise = False
+
+
+def _append_conveyor_transforms(t: list[A.BasicTransform], args) -> None:
+    geo = (
+        bool(getattr(args, "enable_conveyor_rotate", False))
+        or bool(getattr(args, "enable_conveyor_scale", False))
+        or bool(getattr(args, "enable_conveyor_shift", False))
+    )
+    if geo:
+        rotate = (-5, 5) if bool(getattr(args, "enable_conveyor_rotate", False)) else 0
+        translate = (
+            {"x": (-0.03, 0.03), "y": (-0.03, 0.03)}
+            if bool(getattr(args, "enable_conveyor_shift", False))
+            else {"x": (0, 0), "y": (0, 0)}
+        )
+        scale = (0.95, 1.05) if bool(getattr(args, "enable_conveyor_scale", False)) else (1.0, 1.0)
+        t.append(
+            A.Affine(
+                translate_percent=translate,
+                scale=scale,
+                rotate=rotate,
+                border_mode=0,
+                p=0.8,
+            )
+        )
+    if bool(getattr(args, "enable_conveyor_noise", False)):
+        t.append(A.GaussNoise(p=0.3))
+    if bool(getattr(args, "enable_conveyor_blur", False)):
+        t.append(A.MotionBlur(blur_limit=3, p=0.15))
+
+
 def _compose_for_basic(args) -> A.Compose:
     t: list[A.BasicTransform] = []
     if args.enable_flip:
@@ -217,20 +288,8 @@ def _compose_for_basic(args) -> A.Compose:
             t.append(A.VerticalFlip(p=1.0))
         elif args.flip == "both":
             t.append(A.Compose([A.HorizontalFlip(p=1.0), A.VerticalFlip(p=1.0)]))
-    if args.enable_conveyor:
-        t.extend(
-            [
-                A.Affine(
-                    translate_percent={"x": (-0.03, 0.03), "y": (-0.03, 0.03)},
-                    scale=(0.95, 1.05),
-                    rotate=(-5, 5),
-                    border_mode=0,
-                    p=0.8,
-                ),
-                A.GaussNoise(p=0.3),
-                A.MotionBlur(blur_limit=3, p=0.15),
-            ]
-        )
+    if _conveyor_any(args):
+        _append_conveyor_transforms(t, args)
     if args.enable_photometric:
         t.append(
             A.RandomBrightnessContrast(
@@ -282,7 +341,7 @@ def _base36(num: int) -> str:
 
 
 def _variant_code(args) -> str:
-    if args.enable_conveyor:
+    if _conveyor_any(args):
         return "s"
     if args.enable_photometric:
         return "l"
@@ -675,7 +734,7 @@ def _apply_geom_aug(
     if enable_photometric is not None:
         local.enable_photometric = bool(enable_photometric)
     if enable_conveyor is not None:
-        local.enable_conveyor = bool(enable_conveyor)
+        _set_conveyor_enabled(local, bool(enable_conveyor))
     if enable_center_rotate is not None:
         local.enable_center_rotate = bool(enable_center_rotate)
 
@@ -1110,7 +1169,27 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
         )
     print("[INFO] Block: photometric/conveyor")
     args.enable_photometric = prompt_yes_no("Enable brightness/contrast?", default=bool(args.enable_photometric))
-    args.enable_conveyor = prompt_yes_no("Enable conveyor noise/blur/shift/rotate?", default=bool(args.enable_conveyor))
+    args.enable_conveyor_rotate = prompt_yes_no(
+        "Enable conveyor rotate (±5°)?",
+        default=bool(getattr(args, "enable_conveyor_rotate", False)),
+    )
+    args.enable_conveyor_scale = prompt_yes_no(
+        "Enable conveyor scale (0.95–1.05)?",
+        default=bool(getattr(args, "enable_conveyor_scale", False)),
+    )
+    args.enable_conveyor_blur = prompt_yes_no(
+        "Enable conveyor motion blur?",
+        default=bool(getattr(args, "enable_conveyor_blur", False)),
+    )
+    args.enable_conveyor_shift = prompt_yes_no(
+        "Enable conveyor shift (±3% translate)?",
+        default=bool(getattr(args, "enable_conveyor_shift", False)),
+    )
+    args.enable_conveyor_noise = prompt_yes_no(
+        "Enable conveyor noise?",
+        default=False,
+    )
+    args.enable_conveyor = _conveyor_any(args)
     args.enable_center_rotate = prompt_yes_no(
         "Enable frame rotation augmentation (--enable-center-rotate)?",
         default=bool(args.enable_center_rotate),
@@ -1236,6 +1315,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = build_augment_arg_parser()
     args = parser.parse_args(argv)
+    _sync_conveyor_flags(args, argv=argv)
     interactive_allowed = is_interactive_allowed(argv)
     if args.dataset is None and not interactive_allowed:
         print("[ERROR] Incomplete arguments: specify --dataset.")
@@ -1259,6 +1339,7 @@ def main(argv=None):
             layout.root,
         ),
     )
+    _sync_conveyor_flags(args)
 
     if not args.dataset:
         print("[ERROR] Incomplete arguments: specify --dataset.")
@@ -1617,6 +1698,11 @@ def main(argv=None):
                 "flip": args.flip,
                 "enable_photometric": bool(args.enable_photometric),
                 "enable_conveyor": bool(args.enable_conveyor),
+                "enable_conveyor_rotate": bool(getattr(args, "enable_conveyor_rotate", False)),
+                "enable_conveyor_scale": bool(getattr(args, "enable_conveyor_scale", False)),
+                "enable_conveyor_blur": bool(getattr(args, "enable_conveyor_blur", False)),
+                "enable_conveyor_shift": bool(getattr(args, "enable_conveyor_shift", False)),
+                "enable_conveyor_noise": bool(getattr(args, "enable_conveyor_noise", False)),
                 "enable_center_rotate": bool(args.enable_center_rotate),
                 "center_rotate_deg": float(getattr(args, "center_rotate_deg", 5.0)),
                 "rotate_copies": int(getattr(args, "rotate_copies", 1)),

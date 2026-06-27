@@ -378,6 +378,75 @@ def test_fusion_dedup_same_image_and_equivalent_labels_keeps_one(tmp_path: Path)
     assert labels[0].read_text(encoding="utf-8").count("\n") == 1
 
 
+def test_fusion_preserves_empty_label_pairs_by_default(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds = sd / "ds_bg"
+    _write_jpg(ds / "train" / "images" / "bg.jpg", color=(30, 30, 30))
+    _write_jpg(ds / "train" / "images" / "obj.jpg", color=(60, 60, 60))
+    (ds / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "labels" / "bg.txt").write_text("", encoding="utf-8")
+    (ds / "train" / "labels" / "obj.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps({"ds_bg": {"classes": {"cat": 0}, "structure": "split"}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(json.dumps({"cat": "cat"}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_with_bg",
+            "--dataset",
+            "ds_bg",
+            "--classes",
+            "cat",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "merged_with_bg"
+    labels = list(out.glob("*/labels/*.txt"))
+    assert len(labels) == 2
+    assert sum(1 for p in labels if p.stat().st_size == 0) == 1
+
+
+def test_fusion_drop_empty_images_removes_background_pairs(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds = sd / "ds_bg"
+    _write_jpg(ds / "train" / "images" / "bg.jpg", color=(30, 30, 30))
+    _write_jpg(ds / "train" / "images" / "obj.jpg", color=(60, 60, 60))
+    (ds / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "labels" / "bg.txt").write_text("", encoding="utf-8")
+    (ds / "train" / "labels" / "obj.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps({"ds_bg": {"classes": {"cat": 0}, "structure": "split"}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(json.dumps({"cat": "cat"}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_no_bg",
+            "--dataset",
+            "ds_bg",
+            "--classes",
+            "cat",
+            "--drop-empty-images",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "merged_no_bg"
+    labels = list(out.glob("*/labels/*.txt"))
+    assert len(labels) == 1
+    assert labels[0].read_text(encoding="utf-8").strip() != ""
+
+
 def test_fusion_dedup_different_image_same_labels_keeps_both(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     sd = tmp_path / "datasets"
