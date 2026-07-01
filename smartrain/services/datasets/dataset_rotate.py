@@ -22,6 +22,7 @@ from smartrain.services.datasets.dataset_cli_catalog import (
 )
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
+from smartrain.services.datasets.yolo_image_rotate import rotate_image_k
 from smartrain.services.datasets.yolo_labels import read_yolo_labels, rotate_yolo_labels_90cw_k, write_yolo_labels
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
@@ -62,17 +63,6 @@ def angle_to_k(angle: int) -> int:
 
 def default_output_name(dataset: str, angle: int) -> str:
     return f"{dataset}_rot{int(angle)}"
-
-
-def _rot_img_k(img, k: int):
-    kk = int(k) % 4
-    if kk == 0:
-        return img
-    if kk == 1:
-        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-    if kk == 2:
-        return cv2.rotate(img, cv2.ROTATE_180)
-    return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
 
 def _copy_data_yaml_if_exists(src_root: str, dst_root: str) -> None:
@@ -175,7 +165,7 @@ def rotate_dataset(
                 skipped += 1
                 progress.update(1)
                 continue
-            rbgr = _rot_img_k(bgr, k)
+            rbgr = rotate_image_k(bgr, k)
             labels = read_yolo_labels(lbl_path)
             rotated_labels, _new_w, _new_h = rotate_yolo_labels_90cw_k(
                 labels,

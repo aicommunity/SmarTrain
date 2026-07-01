@@ -405,3 +405,78 @@ def test_augment_polygon_photometric(tmp_path: Path) -> None:
     out_lbl = tmp_path / "datasets" / "ds_seg_aug" / "train" / "labels"
     assert any(out_lbl.glob("*__a*.txt"))
 
+
+def test_augment_orthogonal_exhaustive_creates_two_variants(tmp_path: Path) -> None:
+    _prepare_workspace_two_images(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_a",
+            "--disable-center-rotate",
+            "--enable-orthogonal-rotate",
+            "--orthogonal-rotate-sampling",
+            "exhaustive",
+            "--min-diversity-iou",
+            "1.1",
+            "--no-legend",
+        ]
+    )
+    out_lbl = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
+    orth = list(out_lbl.glob("*__a-o*.txt"))
+    assert len(orth) >= 4
+
+
+def test_augment_flip_exhaustive_horizontal(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    augment_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_a",
+            "--disable-center-rotate",
+            "--enable-flip",
+            "--flip",
+            "horizontal",
+            "--flip-sampling",
+            "exhaustive",
+            "--no-legend",
+        ]
+    )
+    out_lbl = tmp_path / "datasets" / "ds_a_aug" / "train" / "labels"
+    flip = list(out_lbl.glob("*__a-fh*.txt"))
+    assert flip
+
+
+def test_compose_conveyor_noise_uses_shot_only() -> None:
+    import argparse
+
+    from smartrain.services.datasets.dataset_augment import _compose_for_basic, _sync_conveyor_flags
+    from smartrain.services.datasets.noise_augment import flatten_compose_transforms
+
+    args = argparse.Namespace(
+        enable_flip=False,
+        flip="horizontal",
+        enable_conveyor_noise=True,
+        conveyor_noise_types="shot",
+        conveyor_noise_intensity=0.5,
+        conveyor_noise_selection="random",
+        enable_conveyor_rotate=False,
+        enable_conveyor_scale=False,
+        enable_conveyor_blur=False,
+        enable_conveyor_shift=False,
+        enable_photometric=False,
+        enable_center_rotate=False,
+        brightness_limit=0.1,
+        contrast_limit=0.1,
+        center_rotate_deg=5.0,
+    )
+    _sync_conveyor_flags(args)
+    compose = _compose_for_basic(args)
+    names = {type(tr).__name__ for tr in flatten_compose_transforms(compose.transforms[0] if compose.transforms else None)}
+    for tr in compose.transforms:
+        names.update(type(t).__name__ for t in flatten_compose_transforms(tr))
+    assert "ShotNoise" in names
+

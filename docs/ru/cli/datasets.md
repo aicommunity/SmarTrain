@@ -43,7 +43,7 @@
 smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
 ```
 
-- `augment` — автономные аугментации с записью нового датасета; conveyor-эффекты включаются по отдельности: **`--enable-conveyor-rotate`**, **`--enable-conveyor-scale`**, **`--enable-conveyor-blur`**, **`--enable-conveyor-shift`**, **`--enable-conveyor-noise`** (зонтик **`--enable-conveyor`** включает все пять); в интерактиве каждый эффект спрашивается отдельно (noise по умолчанию выкл.); флаги **`--aug-class-aware-geo`** и **`--aug-total-bbox-cap-mult`** те же, что для `balance` hybrid-aug (ссылки на DODA/CUDA — см. выше; в одиночном `augment` class-aware по умолчанию **выкл.** для совместимости). При включённом капе по bbox **`--aug-budget-tail-first`** (по умолчанию **вкл.**) задаёт порядок обхода train: сначала кадры с большим хвостовым приоритетом `max_c (n_max/n_c)^γ`, затем head; **`--aug-budget-tail-gamma`** — показатель γ (по умолчанию `1.0`); отключить упорядочивание — **`--no-aug-budget-tail-first`**;
+- `augment` — автономные аугментации; выборка flip **`--flip-sampling`**; опциональный orthogonal ±90° **`--enable-orthogonal-rotate`**; conveyor-эффекты по отдельности, шум с **`--conveyor-noise-types`** / **`--conveyor-noise-intensity`** / **`--conveyor-noise-selection`** (зонтик **`--enable-conveyor`** включает все пять); в интерактиве каждый эффект спрашивается отдельно (noise по умолчанию выкл.); флаги **`--aug-class-aware-geo`** и **`--aug-total-bbox-cap-mult`** те же, что для `balance` hybrid-aug (ссылки на DODA/CUDA — см. выше; в одиночном `augment` class-aware по умолчанию **выкл.** для совместимости). При включённом капе по bbox **`--aug-budget-tail-first`** (по умолчанию **вкл.**) задаёт порядок обхода train: сначала кадры с большим хвостовым приоритетом `max_c (n_max/n_c)^γ`, затем head; **`--aug-budget-tail-gamma`** — показатель γ (по умолчанию `1.0`); отключить упорядочивание — **`--no-aug-budget-tail-first`**;
 - `balance` — балансировка классов; после балансировки по умолчанию действует `--eval-coverage` — при необходимости перераспределяет элементы между `train`/`val`/`test`, чтобы поддержать eval и покрытие классов, но не допускает попадания одного и того же source-изображения в разные сплиты; если уникальных кадров недостаточно, `val/test` могут остаться частично недозаполненными; отключить — `--no-eval-coverage`;
   - ручная настройка приоритетов классов: `--class-weight-multiplier "other:0.6,tear_up:1.1"` применяет множители после базового вычисления class weights;
   - авто-ограничение head-классов включено по умолчанию (`--auto-head-cap`): инструмент автоматически рассчитывает рекомендованные множители ослабления для слишком крупных классов по train-статистике; отключить — `--no-auto-head-cap`;
@@ -53,6 +53,22 @@ smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
 - `orient` — коррекция поворота кадров;
 - `rotate` — фиксированный поворот всего датасета на `90`, `180` или `270`° по часовой стрелке в `datasets/<name>_rot<angle>` (интерактивный режим по умолчанию);
 - `roi` — кроп по ROI-модели.
+
+#### `augment`: сколько вариантов на кадр
+
+Для каждого исходного кадра в `--splits` (по умолчанию `train`) всегда создаётся **копия оригинала**. Дополнительные файлы по типам аугментации независимы (не все комбинации):
+
+| Тип | По умолчанию | Вариантов на кадр | Случайность |
+|-----|--------------|-------------------|-------------|
+| Flip (`--enable-flip`) | выкл. | 0–1 (`probabilistic`) или все для `--flip` (`exhaustive`) | `--flip-prob`; `--flip-sampling` |
+| Orthogonal ±90° (`--enable-orthogonal-rotate`) | выкл. | 0–1 или оба направления (`exhaustive`) | `--orthogonal-rotate-prob`, `--orthogonal-rotate-direction` |
+| Photometric / conveyor | выкл. | 0–1 общий файл | опционально class-aware geo |
+| Center-rotate | **вкл.** | до `--rotate-copies` | случайный угол ±`--center-rotate-deg` |
+| Bbox copy | выкл. | до `--bbox-copy-copies` | детерминированно по seed |
+
+Режимы flip: `horizontal`, `vertical`, `both` (один проход H+V), `h-and-v` (два отдельных файла). В отличие от `smartrain rotate`, orthogonal augment добавляет опциональные ±90° варианты только для выбранных сплитов.
+
+Шум conveyor (`--enable-conveyor-noise`): типы **`--conveyor-noise-types`** (по умолчанию `iso,shot,gaussian`), сила **`--conveyor-noise-intensity`**, выбор **`--conveyor-noise-selection`** `random` или `stack`.
 
 Все перечисленные команды формируют `dataset_passport.json` в новом каталоге датасета.
 

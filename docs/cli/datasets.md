@@ -45,7 +45,7 @@ Labels use `class_id x1 y1 x2 y2 ...` (normalized polygon vertices). See [data f
 smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
 ```
 
-- `augment` — autonomous augmentations with recording of a new dataset; conveyor effects can be toggled individually: **`--enable-conveyor-rotate`**, **`--enable-conveyor-scale`**, **`--enable-conveyor-blur`**, **`--enable-conveyor-shift`**, **`--enable-conveyor-noise`** (umbrella **`--enable-conveyor`** enables all five); interactive mode asks for each effect separately (noise defaults to off); **`--aug-class-aware-geo`** / **`--aug-total-bbox-cap-mult`** match `balance` hybrid-aug (same literature refs as above; standalone default for class-aware is **off** for backward compatibility). With a bbox cap, **`--aug-budget-tail-first`** (default **on**) processes train frames in descending tail priority `max_c (n_max/n_c)^γ` before spending slack on head-like frames; **`--aug-budget-tail-gamma`** (default `1.0`) sets γ; disable priority ordering with **`--no-aug-budget-tail-first`**;
+- `augment` — autonomous augmentations with recording of a new dataset; flip sampling **`--flip-sampling`** (`probabilistic`/`exhaustive`); optional orthogonal ±90° **`--enable-orthogonal-rotate`**; conveyor effects can be toggled individually: **`--enable-conveyor-rotate`**, **`--enable-conveyor-scale`**, **`--enable-conveyor-blur`**, **`--enable-conveyor-shift`**, **`--enable-conveyor-noise`** with **`--conveyor-noise-types`**, **`--conveyor-noise-intensity`**, **`--conveyor-noise-selection`** (umbrella **`--enable-conveyor`** enables all five); interactive mode asks for each effect separately (noise defaults to off); **`--aug-class-aware-geo`** / **`--aug-total-bbox-cap-mult`** match `balance` hybrid-aug (same literature refs as above; standalone default for class-aware is **off** for backward compatibility). With a bbox cap, **`--aug-budget-tail-first`** (default **on**) processes train frames in descending tail priority `max_c (n_max/n_c)^γ` before spending slack on head-like frames; **`--aug-budget-tail-gamma`** (default `1.0`) sets γ; disable priority ordering with **`--no-aug-budget-tail-first`**;
 - `balance` — class balancing; after balancing, `--eval-coverage` (default) can rebalance items across `train`/`val`/`test` so eval splits are non-empty when possible and rare classes appear in `val`/`test`; `--no-eval-coverage` turns this off;
   - class priority tuning: `--class-weight-multiplier "other:0.6,tear_up:1.1"` multiplies class weights after base weighting;
   - auto head-class dampening is enabled by default (`--auto-head-cap`): the tool computes recommended dampening multipliers for overrepresented classes from train statistics; disable via `--no-auto-head-cap`;
@@ -55,6 +55,22 @@ smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
 - `orient` — frame rotation correction;
 - `rotate` — fixed clockwise rotation of the whole dataset by `90`, `180`, or `270` degrees into `datasets/<name>_rot<angle>` (interactive by default);
 - `roi` — crop according to the ROI-model.
+
+#### `augment`: variants per frame
+
+Each source frame in `--splits` (default `train`) always gets one **original copy**. Extra files are independent per augmentation type (not all combinations):
+
+| Type | Default | Variants per frame | Randomness |
+|------|---------|-------------------|------------|
+| Flip (`--enable-flip`) | off | 0–1 (`probabilistic`) or all for `--flip` (`exhaustive`) | `--flip-prob`; `--flip-sampling probabilistic\|exhaustive` |
+| Orthogonal ±90° (`--enable-orthogonal-rotate`) | off | 0–1 or both directions (`exhaustive`) | `--orthogonal-rotate-prob`, `--orthogonal-rotate-direction` |
+| Photometric / conveyor | off | 0–1 combined file | class-aware geo optional |
+| Center-rotate | **on** | up to `--rotate-copies` | random angle ±`--center-rotate-deg` |
+| Bbox copy | off | up to `--bbox-copy-copies` | deterministic per seed |
+
+Flip modes: `horizontal`, `vertical`, `both` (single H+V pass), `h-and-v` (two separate files). Unlike `smartrain rotate`, orthogonal augment adds optional per-frame ±90° variants only on selected splits.
+
+Conveyor noise (`--enable-conveyor-noise`): types via **`--conveyor-noise-types`** (`gaussian`, `iso`, `shot`, `poisson-gaussian`, `multiplicative`, `impulse`; default `iso,shot,gaussian`), strength **`--conveyor-noise-intensity`** [0..1], selection **`--conveyor-noise-selection`** `random` (one type) or `stack` (all types).
 
 All of the above commands form `dataset_passport.json` in the new dataset directory.
 

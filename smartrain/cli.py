@@ -513,8 +513,8 @@ def cmd_augment(ctx: typer.Context) -> None:
     """Run offline augmentation and save as a new dataset.
 
     Examples:
-      smartrain augment --dataset my_dataset --name my_dataset_aug
-      smartrain augment --dataset my_dataset --count 2
+      smartrain augment --dataset my_dataset --output-name my_dataset_aug
+      smartrain augment --dataset my_dataset --enable-flip --flip-sampling exhaustive
       smartrain augment --workspace /data/MarsSmarTrain --dataset my_dataset
     """
     from smartrain.workflows.datasets.dataset_augment import build_augment_arg_parser
