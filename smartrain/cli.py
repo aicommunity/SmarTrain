@@ -13,48 +13,40 @@ from pathlib import Path
 from typing import Annotated, Callable, Optional
 
 import typer
-from rich.console import Console
-from rich.markdown import Markdown
 
+from smartrain.cli_entrypoints.grouped_help import plain_sub_typer, plain_typer
 from smartrain.cli_entrypoints.support.typer_non_interactive import (
     env_forces_non_interactive_cli,
     strip_typer_meta_non_interactive_flags,
 )
 from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
-from smartrain.core.training.ultralytics_model_alias_registry import default_train_provider
-from smartrain.core.training.train_model_catalog import TrainModelCatalog
-from smartrain.providers.core.global_index import list_provider_records
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
-app = typer.Typer(
+app = plain_typer(
     name="smartrain",
     add_completion=True,
-    no_args_is_help=True,
     help="YOLO datasets, training, queue, run analysis. Work from the workspace root.",
 )
-console = Console()
 
 
 def _print_en_quick_start() -> None:
-    """Print formatted EN quick start in terminal."""
+    """Print getting-started guide as plain text."""
     quickstart_path = Path(__file__).resolve().parent.parent / "docs" / "getting-started" / "quickstart.md"
     fallback = (
-        "# Quick start\n\n"
+        "Quick start\n\n"
         "Run from workspace root:\n\n"
-        "```bash\n"
-        "smartrain deploy\n"
-        "smartrain scan\n"
-        "smartrain train --data my_dataset --model yolo11n.pt -y\n"
-        "smartrain report dataset --dataset my_dataset -n 6 --languages en,ru\n"
-        "smartrain analyze scan\n"
-        "smartrain analyze all --report-languages en,ru\n"
-        "```\n"
+        "  smartrain deploy\n"
+        "  smartrain scan\n"
+        "  smartrain train --data my_dataset --model yolo11n.pt -y\n"
+        "  smartrain report dataset --dataset my_dataset -n 6 --languages en,ru\n"
+        "  smartrain analyze scan\n"
+        "  smartrain analyze all --report-languages en,ru\n"
     )
     try:
         text = quickstart_path.read_text(encoding="utf-8")
     except OSError:
         text = fallback
-    console.print(Markdown(text))
+    typer.echo(text)
 
 HELP_ANALYZE_GROUP = """Analyze training runs: summary tables, comparisons, PR curves, and inference speed.
 
@@ -213,27 +205,38 @@ def cmd_deploy(
     """Create workspace and empty datasets_info.json directories if missing."""
     root = os.path.abspath(os.path.expanduser(target or os.getcwd()))
     info = deploy_workspace(root)
-    console.print(f"[blue]Deployment:[/blue] {info['root']}")
+    typer.echo(f"Deployment: {info['root']}")
     for name in info["created_dirs"]:
-        console.print(f"[green]+ directory[/green] {name}")
+        typer.echo(f"+ directory {name}")
     for name in info["created_files"]:
-        console.print(f"[green] + file[/green] {name}")
+        typer.echo(f"+ file {name}")
     for s in info["skipped"]:
-        console.print(f"[yellow]∟ already exists:[/yellow] {s}")
-    console.print("[green]Done.[/green]")
+        typer.echo(f"already exists: {s}")
+    typer.echo("Done.")
+
+
+@app.command("quickstart")
+def cmd_quickstart() -> None:
+    """Print step-by-step getting-started workflow guide."""
+    _print_en_quick_start()
 
 
 @app.command("info")
 def cmd_info(
     provider: Annotated[
-        str,
+        Optional[str],
         typer.Option(
             "--provider",
             help="Training provider key for supported aliases.",
         ),
-    ] = default_train_provider(),
+    ] = None,
 ) -> None:
     """Show product info and supported train model aliases."""
+    from smartrain.core.training.train_model_catalog import TrainModelCatalog
+    from smartrain.core.training.ultralytics_model_alias_registry import default_train_provider
+    from smartrain.providers.core.global_index import list_provider_records
+
+    provider = (provider or default_train_provider()).strip()
     try:
         catalog = TrainModelCatalog(provider=provider)
         aliases = tuple(a for a in catalog.supported_aliases() if _is_detection_model_alias(a))
@@ -754,7 +757,7 @@ def cmd_inference(ctx: typer.Context) -> None:
     )
 
 
-report_app = typer.Typer(
+report_app = plain_sub_typer(
     help=HELP_REPORT_GROUP,
     invoke_without_command=True,
 )
@@ -762,8 +765,8 @@ report_app = typer.Typer(
 
 def _report_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        console.print(HELP_REPORT_GROUP)
-        console.print("Run: [cyan]smartrain report dataset --help[/cyan]")
+        typer.echo(HELP_REPORT_GROUP)
+        typer.echo("Run: smartrain report dataset -- --help")
         raise typer.Exit(0)
 
 
@@ -800,7 +803,7 @@ app.add_typer(
 )
 
 
-queue_app = typer.Typer(
+queue_app = plain_sub_typer(
     help=HELP_QUEUE_GROUP,
     invoke_without_command=True,
 )
@@ -877,7 +880,7 @@ def cmd_queue_run(ctx: typer.Context) -> None:
     )
 
 
-registry_app = typer.Typer(
+registry_app = plain_sub_typer(
     help=HELP_REGISTRY_GROUP,
     invoke_without_command=True,
 )
@@ -943,7 +946,7 @@ app.add_typer(
 )
 
 
-providers_app = typer.Typer(
+providers_app = plain_sub_typer(
     invoke_without_command=True,
     help="Install/uninstall/status for external providers.",
 )
@@ -987,7 +990,7 @@ app.add_typer(
 )
 
 
-deps_app = typer.Typer(
+deps_app = plain_sub_typer(
     invoke_without_command=True,
     help=HELP_DEPS_GROUP,
 )
@@ -1019,7 +1022,7 @@ app.add_typer(
 )
 
 
-analyze_app = typer.Typer(
+analyze_app = plain_sub_typer(
     help=HELP_ANALYZE_GROUP,
     invoke_without_command=True,
 )
@@ -1162,9 +1165,9 @@ def _analyze_group_callback(ctx: typer.Context) -> None:
             with _interactive_flag_env(True):
                 _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["all"])
             raise typer.Exit(0)
-        console.print(
-            "[red][ERROR][/red] `smartrain analyze` без подкоманды требует интерактивный терминал (TTY). "
-            "Используйте явную подкоманду, например `smartrain analyze scan`."
+        typer.echo(
+            "[ERROR] `smartrain analyze` without a subcommand requires an interactive terminal (TTY). "
+            "Use an explicit subcommand, e.g. `smartrain analyze scan`."
         )
         raise typer.Exit(2)
 
@@ -1176,7 +1179,7 @@ app.add_typer(
     callback=_analyze_group_callback,
 )
 
-model_app = typer.Typer(
+model_app = plain_sub_typer(
     help=HELP_MODEL_GROUP,
     invoke_without_command=True,
 )
@@ -1257,10 +1260,10 @@ def cmd_model_rename(ctx: typer.Context) -> None:
 
 def _model_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        console.print(HELP_MODEL_GROUP)
-        console.print("Run: [cyan]smartrain model convert --help[/cyan]")
-        console.print("Run: [cyan]smartrain model release --help[/cyan]")
-        console.print("Run: [cyan]smartrain model rename --help[/cyan]")
+        typer.echo(HELP_MODEL_GROUP)
+        typer.echo("Run: smartrain model convert -- --help")
+        typer.echo("Run: smartrain model release -- --help")
+        typer.echo("Run: smartrain model rename -- --help")
         raise typer.Exit(0)
 
 
@@ -1501,9 +1504,6 @@ def cmd_rotate(ctx: typer.Context) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) == 1:
-        _print_en_quick_start()
-        return
     app()
 
 

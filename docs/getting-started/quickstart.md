@@ -4,6 +4,8 @@
 
 This guide assumes `smartrain` is already installed and you run commands from the workspace root.
 
+Run `smartrain` or `smartrain --help` for a grouped command reference. This guide is also available as `smartrain quickstart`.
+
 ## Main path: train on your dataset and build reports
 
 1. **Create a workspace directory (if it does not exist yet)**

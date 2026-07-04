@@ -69,27 +69,31 @@ def _discover_ultralytics_supported_aliases() -> tuple[str, ...]:
     return aliases
 
 
-_ULTRALYTICS_SPEC: Final[UltralyticsModelAliasSpec] = UltralyticsModelAliasSpec(
-    provider="ultralytics",
-    supported_aliases=_discover_ultralytics_supported_aliases(),
-)
+@lru_cache(maxsize=1)
+def _ultralytics_spec() -> UltralyticsModelAliasSpec:
+    return UltralyticsModelAliasSpec(
+        provider="ultralytics",
+        supported_aliases=_discover_ultralytics_supported_aliases(),
+    )
 
-_ALIAS_REGISTRY: Final[dict[str, UltralyticsModelAliasSpec]] = {
-    _ULTRALYTICS_SPEC.provider: _ULTRALYTICS_SPEC,
-}
+
+def _alias_registry() -> dict[str, UltralyticsModelAliasSpec]:
+    spec = _ultralytics_spec()
+    return {spec.provider: spec}
 
 
 def default_train_provider() -> str:
-    return _ULTRALYTICS_SPEC.provider
+    return _ultralytics_spec().provider
 
 
 def get_ultralytics_model_alias_spec(provider: str | None = None) -> UltralyticsModelAliasSpec:
+    registry = _alias_registry()
     key = (provider or default_train_provider()).strip().lower()
-    if key not in _ALIAS_REGISTRY:
-        known = ", ".join(sorted(_ALIAS_REGISTRY.keys()))
+    if key not in registry:
+        known = ", ".join(sorted(registry.keys()))
         raise ValueError(f"Unknown training provider: {provider!r}. Known providers: {known}")
-    return _ALIAS_REGISTRY[key]
+    return registry[key]
 
 
 def list_train_providers() -> tuple[str, ...]:
-    return tuple(sorted(_ALIAS_REGISTRY.keys()))
+    return tuple(sorted(_alias_registry().keys()))

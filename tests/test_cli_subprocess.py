@@ -17,6 +17,7 @@ from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_wor
 
 HELP_MATRIX: list[list[str]] = [
     ["--help"],
+    ["quickstart"],
     ["deploy", "--help"],
     ["info", "--help"],
     ["scan", "--", "--help"],
@@ -80,6 +81,8 @@ HELP_MATRIX: list[list[str]] = [
     ["model", "--help"],
     ["model", "convert", "--", "--help"],
     ["model", "release", "--", "--help"],
+    ["model", "rename", "--", "--help"],
+    ["rotate", "--", "--help"],
 ]
 
 NO_ARGS_USAGE_CASES: list[str] = [
@@ -137,6 +140,8 @@ def test_smartrain_help_matrix(
     assert r.returncode in (0, 2), f"argv={argv}\nstderr:\n{r.stderr}\nstdout:\n{r.stdout}"
     if argv == ["deps", "--help"]:
         assert "Usage:" in out or "usage:" in out.lower()
+    elif argv == ["quickstart"]:
+        assert "Quick start" in out or "smartrain deploy" in out
     else:
         assert "usage:" in out.lower() or "examples:" in out.lower(), f"argv={argv}\n{out}"
     assert "traceback" not in out.lower(), f"argv={argv}\n{out}"
@@ -147,15 +152,48 @@ def test_smartrain_top_level_help(subprocess_env: dict[str, str], tmp_path: Path
     assert r.returncode in (0, 2)
     out = (r.stdout or "") + (r.stderr or "")
     assert "deploy" in out
+    assert "Workspace:" in out
+    assert "Dataset catalog and preparation:" in out
+    assert "Training:" in out
+    assert "quickstart" in out
 
 
-def test_smartrain_without_args_prints_quick_start(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+def test_smartrain_without_args_shows_grouped_help(subprocess_env: dict[str, str], tmp_path: Path) -> None:
     r = _run([], cwd=tmp_path, env=subprocess_env)
     out = (r.stdout or "") + (r.stderr or "")
     assert r.returncode == 0, out
-    assert "Quick start" in out
+    assert "Usage:" in out or "usage:" in out.lower()
+    assert "Workspace:" in out
+    assert "train" in out
+    assert "Quick start" not in out
+
+
+def test_smartrain_shell_completion_lists_commands(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    env = dict(subprocess_env)
+    env["_SMARTRAIN_COMPLETE"] = "complete_bash"
+    env["COMP_WORDS"] = "smartrain "
+    env["COMP_CWORD"] = "1"
+    r = subprocess.run(
+        [sys.executable, "-m", "smartrain"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "train" in out
+    assert "scan" in out
+    assert "Quick start" not in out
+
+
+def test_smartrain_quickstart_prints_guide(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    r = _run(["quickstart"], cwd=tmp_path, env=subprocess_env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "Quick start" in out or "smartrain deploy" in out
     assert "smartrain report dataset" in out
-    assert "usage:" not in out.lower()
 
 
 def test_smartrain_deploy_twice(subprocess_env: dict[str, str], tmp_path: Path) -> None:
@@ -553,12 +591,12 @@ raise SystemExit(0)
 @pytest.mark.parametrize(
     "cmd,required_error,forbidden_phrase",
     [
-        (["fusion", "--", "--workspace", "."], "incomplete arguments", "interactive"),
-        (["split", "--", "--workspace", "."], "incomplete arguments", "interactive"),
-        (["augment", "--", "--workspace", "."], "incomplete arguments", "interactive augment mode"),
-        (["balance", "--", "--workspace", "."], "incomplete arguments", "interactive balance mode"),
-        (["orient", "--", "--workspace", "."], "incomplete arguments", "interactive"),
-        (["roi", "--", "--workspace", "."], "incomplete arguments", "interactive roi mode"),
+        (["fusion", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive"),
+        (["split", "--", "--no-auto-scan", "--workspace", "."], "datasets_info.json", "interactive"),
+        (["augment", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive augment mode"),
+        (["balance", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive balance mode"),
+        (["orient", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive"),
+        (["roi", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive roi mode"),
         (["inference", "--", "--workspace", ".", "--data-mode", "folder"], "incomplete arguments", "interactive inference mode"),
         (["stats", "compare", "--left", "foo"], "incomplete arguments", "interactive mode stats compare"),
     ],
