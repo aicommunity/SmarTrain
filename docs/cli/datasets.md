@@ -9,6 +9,7 @@ Updates the dataset index and synchronizes sources in the workspace.
 - Output files: `datasets_info.json`, `class_names.json`, `datasets_scan_summary.json`.
 - Supports sources from `raw_data/`, `--dataset`, `--datasets-list`.
 - Useful modes: `--mode refresh`, `--purge-processed-raw`.
+- **`--strip-unused-classes`** (default off): for **newly added** datasets, after copy to `datasets/` and format normalization (e.g. CVAT 1.1 → YOLO), removes class names with zero label instances from `data.yaml` / `obj.names` and remaps annotation `class_id` values. Supports all scan structure IDs (`split`, `flat`, `darknet`, `cvat11`, `cvsdcldet`, …).
 
 ## `normalize-data-yaml`
 
@@ -22,7 +23,20 @@ Collects a new dataset from several sources:
 
 - selection of inputs: `--dataset` (repeatable) or `--datasets` (CSV);
 - class management: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
-- crash: `--fusion-split train,val,test`.
+- split: `--fusion-split train,val,test`;
+- **`--strip-unused-classes`**: after merge, drop output classes with zero instances (remap `class_id` in `.txt`).
+
+## `prune`
+
+```bash
+smartrain prune empty --dataset my_dataset
+smartrain prune dedup --dataset my_dataset
+smartrain prune classes --dataset my_dataset
+```
+
+- **`prune empty`** — removes empty image/label pairs into `<dataset>_pruned`.
+- **`prune dedup`** — removes duplicate images by content into `<dataset>_deduped`.
+- **`prune classes`** — copies the dataset to `<dataset>_classes_pruned`, removes unused classes from metadata (`data.yaml`, `obj.names`), remaps `class_id` in annotations; image and label files are kept.
 
 ## `augment`, `balance`, `orient`, `rotate`, `roi`
 

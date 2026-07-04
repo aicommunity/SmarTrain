@@ -19,6 +19,7 @@ from smartrain.services.datasets.dataset_access import (
     resolve_dataset_root_for_entry,
 )
 from smartrain.services.datasets.dataset_passport import write_dataset_passport
+from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
 from smartrain.services.datasets.image_label_pairs import collect_label_image_pairs as _collect_label_image_pairs
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import (
@@ -188,6 +189,11 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         "--drop-empty-images",
         action="store_true",
         help="After merging, remove image+label pairs in the output directory without a single valid YOLO line in .txt",
+    )
+    parser.add_argument(
+        "--strip-unused-classes",
+        action="store_true",
+        help="After merging, remove output classes with zero label instances (remaps class ids in .txt)",
     )
     parser.add_argument(
         "--tmp-dir",
@@ -1245,6 +1251,23 @@ def main(argv=None):
             print(f"[INFO] --drop-empty-images: pairs without objects removed: {pruned}")
             copied_count = max(0, copied_count - pruned)
 
+    if args.strip_unused_classes:
+        class_map_pre = {name: idx for idx, name in enumerate(selected_classes)}
+        strip_stats = strip_unused_classes(
+            target_dir,
+            "split",
+            {"classes": class_map_pre},
+            class_names_map=class_names_map,
+        )
+        if strip_stats.removed_class_names:
+            selected_classes = [
+                k for k, _ in sorted(strip_stats.new_class_map.items(), key=lambda kv: kv[1])
+            ]
+            print(
+                f"[INFO] --strip-unused-classes: removed {strip_stats.removed_class_names} "
+                f"({strip_stats.classes_before} -> {strip_stats.classes_after} classes)"
+            )
+
     print(f"\n[DEBUG] Total label files: {total_labels}")
     print(f"[DEBUG] Image+label pair processed: {processed_pairs}")
     print(f"[DEBUG] Skipped equivalent takes: {skipped_equivalent}")
@@ -1303,6 +1326,7 @@ def main(argv=None):
                         "common_classes_only": bool(args.common_classes_only),
                         "exclude_test": bool(args.exclude_test),
                         "drop_empty_images": bool(args.drop_empty_images),
+                        "strip_unused_classes": bool(args.strip_unused_classes),
                     }
                 ],
                 random_seed=12345,

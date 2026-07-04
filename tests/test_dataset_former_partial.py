@@ -412,6 +412,44 @@ def test_fusion_preserves_empty_label_pairs_by_default(tmp_path: Path) -> None:
     assert sum(1 for p in labels if p.stat().st_size == 0) == 1
 
 
+def test_fusion_strip_unused_classes(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds = sd / "ds_cat"
+    _write_jpg(ds / "train" / "images" / "a.jpg", color=(40, 40, 40))
+    (ds / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps(
+            {"ds_cat": {"classes": {"cat": 0, "dog": 1, "bird": 2}, "structure": "split"}},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(json.dumps({"cat": "cat"}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_strip",
+            "--dataset",
+            "ds_cat",
+            "--classes",
+            "cat,dog,bird",
+            "--strip-unused-classes",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "merged_strip"
+    import yaml
+
+    cfg = yaml.safe_load((out / "data.yaml").read_text(encoding="utf-8"))
+    assert cfg["names"] == ["cat"]
+
+
 def test_fusion_drop_empty_images_removes_background_pairs(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     sd = tmp_path / "datasets"

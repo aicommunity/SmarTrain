@@ -48,6 +48,7 @@ from smartrain.services.datasets.datasets_json_scan_index_service import (
     _unique_dataset_key as _svc_unique_dataset_key,
     _zip_extract_path as _svc_zip_extract_path,
 )
+from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
 from smartrain.services.datasets.datasets_json_convert_purge_service import (
     _confirm_purge_processed_raw as _svc_confirm_purge_processed_raw,
     _copy_source_to_training as _svc_copy_source_to_training,
@@ -195,6 +196,12 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="repair_relative_paths_include_datasets_list",
         help="With path repair, also rewrite absolute paths inside raw_data/datasets_list.txt when they lie under the workspace.",
+    )
+    parser.add_argument(
+        "--strip-unused-classes",
+        action="store_true",
+        help="Scan only: for newly added datasets, remove class names with zero label instances "
+        "(remaps class ids in annotations). Default: off.",
     )
 
     return parser
@@ -469,6 +476,7 @@ def main(argv=None):
     datasets_info: dict = {}
     class_names: dict = {}
     processed_raw_sources: set[str] = set()
+    stripped_dataset_names: set[str] = set()
 
     if args.mode == "refresh" and not use_workspace:
         print("[ERROR] --mode refresh is only supported without --datasets-path (via workspace).")
@@ -747,6 +755,37 @@ def main(argv=None):
             folder_roots.append((folder_name, folder_path, overrides))
             used_names.add(folder_name)
 
+        if use_workspace and args.mode == "scan" and getattr(args, "strip_unused_classes", False):
+            class_names_map: dict[str, str] = {}
+            if os.path.isfile(output_class_names_file):
+                try:
+                    with open(output_class_names_file, "r", encoding="utf-8") as f:
+                        prev_cn = json.load(f)
+                    if isinstance(prev_cn, dict):
+                        class_names_map = {str(k): str(v) for k, v in prev_cn.items()}
+                except Exception:
+                    pass
+            newly_added = {name for name, _, _ in folder_roots if name not in previous_info_for_diff}
+            for name in sorted(newly_added):
+                folder_path = next(fp for n, fp, _ in folder_roots if n == name)
+                structure = detect_structure(folder_path)
+                stats = strip_unused_classes(
+                    folder_path,
+                    structure,
+                    {},
+                    class_names_map=class_names_map,
+                    ensure_cb=_ensure_training_ready_after_copy,
+                )
+                if stats.removed_class_names:
+                    stripped_dataset_names.add(name)
+                    print(
+                        f"[INFO] strip-unused-classes: {name!r} removed "
+                        f"{stats.removed_class_names} "
+                        f"({stats.classes_before} -> {stats.classes_after} classes)"
+                    )
+                elif stats.skipped and stats.skip_reason:
+                    print(f"[WARNING] strip-unused-classes: skipped {name!r}: {stats.skip_reason}")
+
         datasets_info, class_names = _run_scan_folder_roots(folder_roots)
 
     if use_workspace and args.mode == "scan" and args.purge_processed_raw:
@@ -768,6 +807,8 @@ def main(argv=None):
             datasets_info[name] = _merge_preserved_dataset_fields(
                 datasets_info[name], previous_info[name]
             )
+        if use_workspace and name in stripped_dataset_names:
+            datasets_info[name][MODIFIED_KEY] = True
         if use_workspace:
             ds_path = os.path.join(layout.datasets, name)
             current_hash = _dataset_content_hash(ds_path)

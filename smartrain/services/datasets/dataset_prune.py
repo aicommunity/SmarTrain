@@ -19,6 +19,8 @@ from smartrain.services.datasets.dataset_cli_catalog import (
     load_datasets_catalog,
     try_prompt_dataset_interactive,
 )
+from smartrain.services.datasets.dataset_cli_common import update_datasets_sidecar
+from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
 from smartrain.services.datasets.dataset_former import _image_content_hash
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
@@ -46,6 +48,15 @@ def build_prune_empty_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
+def build_prune_classes_arg_parser() -> argparse.ArgumentParser:
+    p = CliArgumentParser(description="Remove unused classes from dataset metadata and remap label ids")
+    p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
+    p.add_argument("--dataset", type=str, default=None, help="Source dataset key from datasets_info.json")
+    p.add_argument("--output-name", type=str, default=None, help="Output dataset name (default <dataset>_classes_pruned)")
+    p.add_argument("--dry-run", action="store_true")
+    return p
+
+
 def build_prune_dedup_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(description="Prune duplicated images by content into a new dataset")
     p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
@@ -61,6 +72,7 @@ def build_prune_arg_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="mode")
     sub.required = False
     sub.add_parser("empty", parents=[build_prune_empty_arg_parser()], add_help=False)
+    sub.add_parser("classes", parents=[build_prune_classes_arg_parser()], add_help=False)
     sub.add_parser("dedup", parents=[build_prune_dedup_arg_parser()], add_help=False)
     return p
 
@@ -106,6 +118,12 @@ def _list_output_items(out_dir: str) -> list[_ImageItem]:
                 )
             )
     return items
+
+
+def _copy_full_dataset(src_root: str, out_dir: str) -> None:
+    if os.path.isdir(out_dir):
+        shutil.rmtree(out_dir, ignore_errors=True)
+    shutil.copytree(src_root, out_dir)
 
 
 def _copy_source_dataset(src_root: str, entry: dict[str, Any], out_dir: str, dataset_name: str, tmp_root: str) -> int:
@@ -274,12 +292,14 @@ def _interactive_fill(args: argparse.Namespace, mode: str, dataset_names: list[s
 
 def main(argv=None) -> None:
     argv = sys.argv[1:] if argv is None else argv
-    mode = argv[0] if argv and argv[0] in {"empty", "dedup"} else None
+    mode = argv[0] if argv and argv[0] in {"empty", "dedup", "classes"} else None
     mode_args = argv[1:] if mode else argv
     interactive_allowed = is_interactive_allowed(argv)
 
     if mode == "dedup":
         parser = build_prune_dedup_arg_parser()
+    elif mode == "classes":
+        parser = build_prune_classes_arg_parser()
     else:
         parser = build_prune_empty_arg_parser()
     args = parser.parse_args(mode_args)
@@ -294,13 +314,18 @@ def main(argv=None) -> None:
     interactive_used = False
     if mode is None:
         if not interactive_allowed:
-            print("[ERROR] Incomplete arguments: specify prune mode (empty|dedup).")
+            print("[ERROR] Incomplete arguments: specify prune mode (empty|dedup|classes).")
             return
         if not sys.stdin.isatty():
             print("[ERROR] Interactive prune mode requires a terminal (TTY).")
             return
-        mode = prompt_choice("Prune mode", ["empty", "dedup"], default="empty")
-        parser = build_prune_dedup_arg_parser() if mode == "dedup" else build_prune_empty_arg_parser()
+        mode = prompt_choice("Prune mode", ["empty", "dedup", "classes"], default="empty")
+        if mode == "dedup":
+            parser = build_prune_dedup_arg_parser()
+        elif mode == "classes":
+            parser = build_prune_classes_arg_parser()
+        else:
+            parser = build_prune_empty_arg_parser()
         args = parser.parse_args([])
         _interactive_fill(args, mode, sorted(catalog.keys()))
         interactive_used = True
@@ -338,7 +363,7 @@ def main(argv=None) -> None:
         )
         return
 
-    out_base = args.output_name or f"{args.dataset}_{'pruned' if mode == 'empty' else 'deduped'}"
+    out_base = args.output_name or f"{args.dataset}_{'pruned' if mode == 'empty' else 'deduped' if mode == 'dedup' else 'classes_pruned'}"
     out_name = next_dataset_name(layout.datasets, out_base)
     out_dir = os.path.join(layout.datasets, out_name)
 
@@ -348,24 +373,65 @@ def main(argv=None) -> None:
             print_replay_command("after execution", replay_cmd)
         return
 
-    copied = _copy_source_dataset(
-        src_root,
-        entry if isinstance(entry, dict) else {},
-        out_dir,
-        dataset_name=args.dataset,
-        tmp_root=os.path.join(layout.root, "tmp"),
-    )
-    if mode == "empty":
-        stats = _prune_empty(out_dir)
-    else:
-        stats = _prune_dedup(out_dir)
+    entry_dict = entry if isinstance(entry, dict) else {}
+    structure = str(entry_dict.get("structure", "split"))
+    class_names_path = layout.work_class_names_path()
+    class_names_map: dict[str, str] = {}
+    if os.path.isfile(class_names_path):
+        try:
+            with open(class_names_path, "r", encoding="utf-8") as f:
+                loaded = _json.load(f)
+            if isinstance(loaded, dict):
+                class_names_map = {str(k): str(v) for k, v in loaded.items()}
+        except Exception:
+            pass
 
-    class_map = entry.get("classes", {}) if isinstance(entry, dict) else {}
-    if isinstance(class_map, dict):
-        _write_data_yaml(out_dir, class_map)
-    out_hash = calculate_dataset_hash(out_dir)
-    if isinstance(class_map, dict):
-        _update_datasets_sidecar(layout, out_name, class_map, out_dir, out_hash)
+    if mode == "classes":
+        _copy_full_dataset(src_root, out_dir)
+        strip_stats = strip_unused_classes(
+            out_dir,
+            structure,
+            entry_dict,
+            class_names_map=class_names_map,
+            dry_run=False,
+        )
+        class_map = strip_stats.new_class_map or entry_dict.get("classes", {})
+        out_hash = calculate_dataset_hash(out_dir)
+        if isinstance(class_map, dict) and class_map:
+            update_datasets_sidecar(
+                layout=layout,
+                output_key=out_name,
+                class_map=class_map,
+                target_dir=out_dir,
+                output_hash=out_hash,
+                structure=structure,
+            )
+        stats = {
+            "classes_before": strip_stats.classes_before,
+            "classes_after": strip_stats.classes_after,
+            "removed_class_names": strip_stats.removed_class_names,
+            "labels_remapped": strip_stats.labels_remapped,
+        }
+        copied = 0
+    else:
+        copied = _copy_source_dataset(
+            src_root,
+            entry_dict,
+            out_dir,
+            dataset_name=args.dataset,
+            tmp_root=os.path.join(layout.root, "tmp"),
+        )
+        if mode == "empty":
+            stats = _prune_empty(out_dir)
+        else:
+            stats = _prune_dedup(out_dir)
+
+        class_map = entry_dict.get("classes", {})
+        if isinstance(class_map, dict):
+            _write_data_yaml(out_dir, class_map)
+        out_hash = calculate_dataset_hash(out_dir)
+        if isinstance(class_map, dict):
+            _update_datasets_sidecar(layout, out_name, class_map, out_dir, out_hash)
 
     passport_path = write_dataset_passport(
         output_dataset_dir=out_dir,
@@ -374,7 +440,7 @@ def main(argv=None) -> None:
         parameters=vars(args),
         workspace_root=layout.root,
         transformations=[{"mode": mode}],
-        stats_before={"copied_images": copied},
+        stats_before={"copied_images": copied} if mode != "classes" else {"classes_before": stats.get("classes_before", 0)},
         stats_after=stats | {"output_hash": out_hash},
         random_seed=None,
     )

@@ -9,6 +9,7 @@
 - Выходные файлы: `datasets_info.json`, `class_names.json`, `datasets_scan_summary.json`.
 - Поддерживает источники из `raw_data/`, `--dataset`, `--datasets-list`.
 - Полезные режимы: `--mode refresh`, `--purge-processed-raw`.
+- **`--strip-unused-classes`** (по умолчанию выкл.): для **новых** датасетов после копирования в `datasets/` и конвертации (CVAT 1.1 → YOLO и т.п.) удаляет из `data.yaml` / `obj.names` классы без инстансов в разметке; `class_id` в аннотациях перенумеровывается. Поддерживаются все structure ID scan (`split`, `flat`, `darknet`, `cvat11`, `cvsdcldet`, …).
 - После успешного скана можно переписать абсолютные пути внутри workspace на переносимые относительные: `--repair-relative-paths` или только показать план — `--repair-relative-paths-dry-run`; при необходимости добавьте `--repair-relative-paths-include-datasets-list` для строк в `raw_data/datasets_list.txt`. Только `data.yaml` по-прежнему правит отдельная команда `normalize-data-yaml`.
 
 ## `normalize-data-yaml`
@@ -23,7 +24,20 @@
 
 - выбор входов: `--dataset` (повторяемый) или `--datasets` (CSV);
 - управление классами: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
-- разбиение: `--fusion-split train,val,test`.
+- разбиение: `--fusion-split train,val,test`;
+- **`--strip-unused-classes`**: после merge удалить из output классы без инстансов (remap `class_id` в `.txt`).
+
+## `prune`
+
+```bash
+smartrain prune empty --dataset my_dataset
+smartrain prune dedup --dataset my_dataset
+smartrain prune classes --dataset my_dataset
+```
+
+- **`prune empty`** — удаляет пустые пары image/label в `<dataset>_pruned`.
+- **`prune dedup`** — удаляет дубли изображений по содержимому в `<dataset>_deduped`.
+- **`prune classes`** — копирует датасет в `<dataset>_classes_pruned`, удаляет неиспользуемые классы из метаданных (`data.yaml`, `obj.names`), перенумеровывает `class_id` в аннотациях; файлы изображений и label-файлов не удаляются.
 
 ## `augment`, `balance`, `orient`, `rotate`, `roi`
 
