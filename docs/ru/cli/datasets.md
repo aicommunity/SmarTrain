@@ -27,6 +27,19 @@
 - разбиение: `--fusion-split train,val,test`;
 - **`--strip-unused-classes`**: после merge удалить из output классы без инстансов (remap `class_id` в `.txt`).
 
+## `split`
+
+Переразбивает один существующий датасет на `train`/`valid`/`test` без слияния источников:
+
+```bash
+smartrain split --dataset my_dataset --split-ratio 0.7,0.2,0.1
+smartrain split --dataset my_dataset --exclude-test --output-name my_dataset_resplit
+```
+
+- `--split-ratio train,val,test` — случайное перераспределение внутри каждого входного bucket (по умолчанию `0.8,0.1,0.1`; тот же алгоритм, что у `fusion --fusion-split`);
+- `--exclude-test` — не брать test-buckets из исходника;
+- создаёт новый датасет в `datasets/` с `data.yaml` и обновляет `datasets_info.json`.
+
 ## `prune`
 
 ```bash

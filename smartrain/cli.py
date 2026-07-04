@@ -545,6 +545,31 @@ def cmd_augment(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "split",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_split(ctx: typer.Context) -> None:
+    """Repartition one dataset into train/valid/test splits.
+
+    Examples:
+      smartrain split --dataset my_dataset --split-ratio 0.7,0.2,0.1
+      smartrain split --dataset my_dataset --exclude-test --output-name my_dataset_resplit
+      smartrain split --workspace /data/MarsSmarTrain --dataset my_dataset
+    """
+    from smartrain.workflows.datasets.dataset_split import build_split_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.datasets.dataset_split",
+        build_parser=build_split_arg_parser,
+        prog="smartrain split",
+        empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
+    )
+
+
+@app.command(
     "balance",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,

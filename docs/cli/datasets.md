@@ -26,6 +26,19 @@ Collects a new dataset from several sources:
 - split: `--fusion-split train,val,test`;
 - **`--strip-unused-classes`**: after merge, drop output classes with zero instances (remap `class_id` in `.txt`).
 
+## `split`
+
+Repartitions one existing dataset into `train`/`valid`/`test` without merging sources:
+
+```bash
+smartrain split --dataset my_dataset --split-ratio 0.7,0.2,0.1
+smartrain split --dataset my_dataset --exclude-test --output-name my_dataset_resplit
+```
+
+- `--split-ratio train,val,test` — random repartition within each input bucket (default `0.8,0.1,0.1`; same algorithm as `fusion --fusion-split`);
+- `--exclude-test` — skip test buckets from the source input;
+- writes a new dataset under `datasets/` with `data.yaml` and updates `datasets_info.json`.
+
 ## `prune`
 
 ```bash

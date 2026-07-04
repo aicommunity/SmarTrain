@@ -30,40 +30,19 @@ from smartrain.core.runtime.workspace_paths import (
     CLASS_NAMES_FILE,
 )
 
-# Default directory name suffix in workspace (prefix is ​​date-time, see main).
+from smartrain.services.datasets.dataset_split_core import (
+    DEFAULT_RANDOM_SEED,
+    TEST_PART,
+    TRAIN_PART,
+    VAL_PART,
+    parse_split_ratio_arg,
+    split_pairs_by_ratio,
+)
+
+# Default directory name suffix in workspace (prefix is date-time, see main).
 FUSION_DEFAULT_DIR_SUFFIX = "merged"
-TRAIN_PART = 0.8  # 80%
-VAL_PART = 0.1    # 10%
-TEST_PART = 0.1   # 10%
-RANDOM_SEED = random.seed(12345)
-
-_SPLIT_SUM_EPS = 1e-5
-
-
-def parse_fusion_split_arg(value: str | None) -> tuple[float, float, float]:
-    """
-    Three parts train, val, test for repartitioning frames within each bucket during fusion.
-    The sum must be 1.0 (with tolerance). If value is None - module constants.
-    """
-    if value is None or not str(value).strip():
-        return TRAIN_PART, VAL_PART, TEST_PART
-    raw = [x.strip() for x in str(value).split(",")]
-    if len(raw) != 3:
-        raise ValueError(
-            "Exactly three numbers separated by commas are expected: train,val,test (for example 0.8,0.1,0.1)."
-        )
-    try:
-        tr, va, te = (float(x) for x in raw)
-    except ValueError as e:
-        raise ValueError(f"Invalid numbers in --fusion-split: {value!r}") from e
-    if tr < 0 or va < 0 or te < 0:
-        raise ValueError("Shares in --fusion-split cannot be negative.")
-    s = tr + va + te
-    if abs(s - 1.0) > _SPLIT_SUM_EPS:
-        raise ValueError(
-            f"Sum of --fusion-split should be 1.0 (currently {s:.6f}): {value!r}"
-        )
-    return tr, va, te
+parse_fusion_split_arg = parse_split_ratio_arg
+random.seed(DEFAULT_RANDOM_SEED)
 
 
 def safe_mkdir(path):
@@ -1182,15 +1161,9 @@ def main(argv=None):
                     if not pairs:
                         continue
 
-                    random.shuffle(pairs)
-                    n = len(pairs)
-                    train_split = pairs[: int(n * train_part)]
-                    val_split = pairs[
-                        int(n * train_part) : int(n * (train_part + val_part))
-                    ]
-                    test_split = pairs[int(n * (val_part + train_part)) :]
-
-                    splits_data = {"train": train_split, "valid": val_split, "test": test_split}
+                    splits_data = split_pairs_by_ratio(
+                        pairs, train_part, val_part, test_part, rng=random
+                    )
 
                     for split_name, split_pairs in splits_data.items():
                         for image_src, label_src in split_pairs:
@@ -1329,7 +1302,7 @@ def main(argv=None):
                         "strip_unused_classes": bool(args.strip_unused_classes),
                     }
                 ],
-                random_seed=12345,
+                random_seed=DEFAULT_RANDOM_SEED,
                 stats_before={"total_labels": total_labels},
                 stats_after={
                     "copied_images": copied_count,

@@ -22,6 +22,7 @@ HELP_MATRIX: list[list[str]] = [
     ["scan", "--", "--help"],
     ["normalize-data-yaml", "--", "--help"],
     ["fusion", "--", "--help"],
+    ["split", "--", "--help"],
     ["train", "--", "--help"],
     ["augment", "--", "--help"],
     ["balance", "--", "--help"],
@@ -86,6 +87,7 @@ NO_ARGS_USAGE_CASES: list[str] = [
     "registry",
     "scan",
     "fusion",
+    "split",
     "augment",
     "balance",
     "prune",
@@ -552,6 +554,7 @@ raise SystemExit(0)
     "cmd,required_error,forbidden_phrase",
     [
         (["fusion", "--", "--workspace", "."], "incomplete arguments", "interactive"),
+        (["split", "--", "--workspace", "."], "incomplete arguments", "interactive"),
         (["augment", "--", "--workspace", "."], "incomplete arguments", "interactive augment mode"),
         (["balance", "--", "--workspace", "."], "incomplete arguments", "interactive balance mode"),
         (["orient", "--", "--workspace", "."], "incomplete arguments", "interactive"),
