@@ -9,7 +9,7 @@ Updates the dataset index and synchronizes sources in the workspace.
 - Output files: `datasets_info.json`, `class_names.json`, `datasets_scan_summary.json`.
 - Supports sources from `raw_data/`, `--dataset`, `--datasets-list`.
 - Useful modes: `--mode refresh`, `--purge-processed-raw`.
-- **`--strip-unused-classes`** (default off): for **newly added** datasets, after copy to `datasets/` and format normalization (e.g. CVAT 1.1 → YOLO), removes class names with zero label instances from `data.yaml` / `obj.names` and remaps annotation `class_id` values. Supports all scan structure IDs (`split`, `flat`, `darknet`, `cvat11`, `cvsdcldet`, …).
+- **`--strip-unused-classes`** (default **on**): for **newly added** datasets, after copy to `datasets/` and format normalization (e.g. CVAT 1.1 → YOLO), removes class names with zero label instances from `data.yaml` / `obj.names` and remaps annotation `class_id` values. Disable with `--no-strip-unused-classes`. Supports all scan structure IDs (`split`, `flat`, `darknet`, `cvat11`, `cvsdcldet`, …).
 
 ## `normalize-data-yaml`
 

@@ -9,7 +9,7 @@
 - Выходные файлы: `datasets_info.json`, `class_names.json`, `datasets_scan_summary.json`.
 - Поддерживает источники из `raw_data/`, `--dataset`, `--datasets-list`.
 - Полезные режимы: `--mode refresh`, `--purge-processed-raw`.
-- **`--strip-unused-classes`** (по умолчанию выкл.): для **новых** датасетов после копирования в `datasets/` и конвертации (CVAT 1.1 → YOLO и т.п.) удаляет из `data.yaml` / `obj.names` классы без инстансов в разметке; `class_id` в аннотациях перенумеровывается. Поддерживаются все structure ID scan (`split`, `flat`, `darknet`, `cvat11`, `cvsdcldet`, …).
+- **`--strip-unused-classes`** (по умолчанию **вкл.**): для **новых** датасетов после копирования в `datasets/` и конвертации (CVAT 1.1 → YOLO и т.п.) удаляет из `data.yaml` / `obj.names` классы без инстансов в разметке; `class_id` в аннотациях перенумеровывается. Отключить: `--no-strip-unused-classes`. Поддерживаются все structure ID scan (`split`, `flat`, `darknet`, `cvat11`, `cvsdcldet`, …).
 - После успешного скана можно переписать абсолютные пути внутри workspace на переносимые относительные: `--repair-relative-paths` или только показать план — `--repair-relative-paths-dry-run`; при необходимости добавьте `--repair-relative-paths-include-datasets-list` для строк в `raw_data/datasets_list.txt`. Только `data.yaml` по-прежнему правит отдельная команда `normalize-data-yaml`.
 
 ## `normalize-data-yaml`

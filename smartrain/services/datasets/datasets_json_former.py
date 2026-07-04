@@ -199,9 +199,10 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--strip-unused-classes",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Scan only: for newly added datasets, remove class names with zero label instances "
-        "(remaps class ids in annotations). Default: off.",
+        "(remaps class ids in annotations). Default: on; use --no-strip-unused-classes to disable.",
     )
 
     return parser
@@ -755,7 +756,7 @@ def main(argv=None):
             folder_roots.append((folder_name, folder_path, overrides))
             used_names.add(folder_name)
 
-        if use_workspace and args.mode == "scan" and getattr(args, "strip_unused_classes", False):
+        if use_workspace and args.mode == "scan" and args.strip_unused_classes:
             class_names_map: dict[str, str] = {}
             if os.path.isfile(output_class_names_file):
                 try:

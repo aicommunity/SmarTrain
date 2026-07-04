@@ -289,11 +289,21 @@ def test_scan_strip_unused_classes_skips_existing(tmp_path: Path) -> None:
     assert before == after
 
 
-def test_scan_strip_unused_classes_default_off(tmp_path: Path) -> None:
+def test_scan_strip_unused_classes_default_on(tmp_path: Path) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _flat_dataset(rd, "ds_on", extra_classes=True)
+
+    datasets_json_main(["--workspace", str(tmp_path)])
+    cfg = yaml.safe_load((tmp_path / "datasets" / "ds_on" / "data.yaml").read_text(encoding="utf-8"))
+    assert cfg["names"] == ["bee", "wasp"]
+
+
+def test_scan_strip_unused_classes_disabled_with_no_flag(tmp_path: Path) -> None:
     deploy_workspace(tmp_path)
     rd = tmp_path / "raw_data"
     _flat_dataset(rd, "ds_off", extra_classes=True)
 
-    datasets_json_main(["--workspace", str(tmp_path)])
+    datasets_json_main(["--workspace", str(tmp_path), "--no-strip-unused-classes"])
     cfg = yaml.safe_load((tmp_path / "datasets" / "ds_off" / "data.yaml").read_text(encoding="utf-8"))
     assert cfg["names"] == ["bee", "wasp", "unused"]
