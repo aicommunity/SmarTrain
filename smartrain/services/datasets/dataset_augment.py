@@ -1593,27 +1593,53 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             default=str(getattr(args, "conveyor_noise_selection", "random")),
         )
     args.enable_conveyor = _conveyor_any(args)
-    if args.enable_center_rotate or args.enable_bbox_copy:
+    imbalance_soft = str(getattr(args, "imbalance_mode", "soft")) == "soft"
+    geo_copies_enabled = bool(args.enable_center_rotate or args.enable_bbox_copy)
+    if geo_copies_enabled:
         print(_augment_balancing_block_title(
             enable_center_rotate=bool(args.enable_center_rotate),
             enable_bbox_copy=bool(args.enable_bbox_copy),
         ))
         args.imbalance_mode = prompt_choice(
-            "Class balancing (--imbalance-mode)",
+            (
+                "Class balancing (--imbalance-mode): off=equal copies per frame; "
+                "soft=extra rotate/bbox_copy on frames with rare classes"
+            ),
             ["off", "soft"],
             default=str(getattr(args, "imbalance_mode", "soft")),
         )
-        args.imbalance_strength = float(
-            prompt_text("Balancing strength (>=0) (--imbalance-strength)", default=str(getattr(args, "imbalance_strength", 1.0))).strip()
-            or str(getattr(args, "imbalance_strength", 1.0))
-        )
+        imbalance_soft = str(args.imbalance_mode) == "soft"
+        if imbalance_soft:
+            args.imbalance_strength = float(
+                prompt_text(
+                    (
+                        "Balancing strength (>=0) (--imbalance-strength): scales extra "
+                        "rotate/bbox_copy on rare-class frames (0=none, 1=default, higher=stronger)"
+                    ),
+                    default=str(getattr(args, "imbalance_strength", 1.0)),
+                ).strip()
+                or str(getattr(args, "imbalance_strength", 1.0))
+            )
+        print("[INFO] Sub-block: deduplication (drop near-duplicate variants)")
         args.min_diversity_iou = float(
-            prompt_text("IoU duplicate threshold [0..1] (--min-diversity-iou)", default=str(getattr(args, "min_diversity_iou", 0.97))).strip()
+            prompt_text(
+                (
+                    "Skip variant if label IoU vs any saved variant >= threshold [0..1] "
+                    "(--min-diversity-iou); higher rejects more (0.97≈almost identical)"
+                ),
+                default=str(getattr(args, "min_diversity_iou", 0.97)),
+            ).strip()
             or str(getattr(args, "min_diversity_iou", 0.97))
         )
     if args.enable_center_rotate:
         args.min_angle_delta = float(
-            prompt_text("Min. angle difference (degrees) (--min-angle-delta)", default=str(getattr(args, "min_angle_delta", 1.0))).strip()
+            prompt_text(
+                (
+                    "Min angle between center-rotate variants on one frame (degrees) "
+                    "(--min-angle-delta); avoids nearly identical rotations"
+                ),
+                default=str(getattr(args, "min_angle_delta", 1.0)),
+            ).strip()
             or str(getattr(args, "min_angle_delta", 1.0))
         )
     if args.enable_bbox_copy:
@@ -1653,12 +1679,25 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             or str(getattr(args, "bbox_copy_copies", 1))
         )
     print("[INFO] Block: budget / class-aware")
-    args.aug_class_aware_geo = prompt_yes_no(
-        "Enable class-aware geo augment (--aug-class-aware-geo)?",
-        default=bool(getattr(args, "aug_class_aware_geo", False)),
-    )
+    if geo_copies_enabled and not imbalance_soft:
+        print("[INFO] Class-aware geo augment skipped (--imbalance-mode off)")
+        args.aug_class_aware_geo = False
+    else:
+        args.aug_class_aware_geo = prompt_yes_no(
+            (
+                "Reduce flip/photo/conveyor rate on majority-class frames "
+                "(--aug-class-aware-geo; requires --imbalance-mode soft)?"
+            ),
+            default=bool(getattr(args, "aug_class_aware_geo", False)),
+        )
     args.aug_total_bbox_cap_mult = float(
-        prompt_text("Bbox cap mult (0=off) (--aug-total-bbox-cap-mult)", default=str(getattr(args, "aug_total_bbox_cap_mult", 0.0))).strip()
+        prompt_text(
+            (
+                "Train bbox budget: max total bbox = mult × baseline B₀ "
+                "(--aug-total-bbox-cap-mult; 0=unlimited, 1.0=no extra bbox beyond baseline)"
+            ),
+            default=str(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
+        ).strip()
         or str(getattr(args, "aug_total_bbox_cap_mult", 0.0))
     )
     args.splits = prompt_text("Splits separated by commas (train,val,test)", default=args.splits).strip() or args.splits
