@@ -347,7 +347,11 @@ def test_fusion_missing_workspace_metadata_shows_friendly_error(
 ) -> None:
     env = dict(subprocess_env)
     env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
-    r = _run(["fusion", "--", "--workspace", str(tmp_path), "--dataset", "ds_a"], cwd=tmp_path, env=env)
+    r = _run(
+        ["fusion", "--", "--no-auto-scan", "--workspace", str(tmp_path), "--dataset", "ds_a"],
+        cwd=tmp_path,
+        env=env,
+    )
     out = (r.stdout or "") + (r.stderr or "")
     low = out.lower()
     assert r.returncode == 0, out

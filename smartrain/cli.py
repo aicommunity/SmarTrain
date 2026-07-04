@@ -330,9 +330,13 @@ def _forward_argparse_command(
     prog: str | None = None,
     prepend_args: list[str] | None = None,
     empty_args_mode: str = "help",
+    ensure_scan: bool = False,
 ) -> None:
     raw = list(prepend_args or []) + list(ctx.args)
     filtered, meta_stripped = strip_typer_meta_non_interactive_flags(raw)
+    auto_scan_disabled = any(
+        tok == "--no-auto-scan" or tok.startswith("--no-auto-scan=") for tok in raw
+    )
     legacy_ni = any(tok in raw for tok in ("-y", "--non-interactive"))
     if meta_stripped or legacy_ni or env_forces_non_interactive_cli():
         interactive_allowed = False
@@ -353,11 +357,17 @@ def _forward_argparse_command(
 
     if not filtered:
         if empty_args_mode == "invoke":
+            from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
+
+            maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
             with _interactive_flag_env(interactive_allowed):
                 _invoke_module_main(module, filtered)
             return
         if empty_args_mode == "invoke_if_tty_else_help":
             if sys.stdin.isatty():
+                from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
+
+                maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
                 with _interactive_flag_env(interactive_allowed):
                     _invoke_module_main(module, filtered)
                 return
@@ -382,6 +392,9 @@ def _forward_argparse_command(
             if code is None:
                 code = 0
             raise typer.Exit(code if isinstance(code, int) else 1)
+    from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
+
+    maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
     with _interactive_flag_env(interactive_allowed):
         _invoke_module_main(module, filtered)
 
@@ -472,6 +485,7 @@ def cmd_fusion(ctx: typer.Context) -> None:
         build_parser=build_dataset_former_arg_parser,
         prog="smartrain fusion",
         empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
     )
 
 
@@ -501,6 +515,7 @@ def cmd_train(ctx: typer.Context) -> None:
         build_parser=build_arg_parser,
         prog="smartrain train",
         empty_args_mode="invoke",
+        ensure_scan=True,
     )
 
 
@@ -525,6 +540,7 @@ def cmd_augment(ctx: typer.Context) -> None:
         build_parser=build_augment_arg_parser,
         prog="smartrain augment",
         empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
     )
 
 
@@ -549,6 +565,7 @@ def cmd_balance(ctx: typer.Context) -> None:
         build_parser=build_balance_arg_parser,
         prog="smartrain balance",
         empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
     )
 
 
@@ -591,6 +608,7 @@ def cmd_prune(ctx: typer.Context) -> None:
         build_parser=parser,
         prog=prog,
         empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
     )
 
 
@@ -617,6 +635,7 @@ def cmd_hash(ctx: typer.Context) -> None:
         module="smartrain.services.datasets.dataset_hash",
         build_parser=build_hash_arg_parser,
         prog="smartrain hash",
+        ensure_scan=True,
     )
 
 
@@ -644,6 +663,7 @@ def cmd_stats(ctx: typer.Context) -> None:
         build_parser=parser,
         prog=prog,
         empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
     )
 
 
@@ -668,6 +688,7 @@ def cmd_roi(ctx: typer.Context) -> None:
         build_parser=build_roi_arg_parser,
         prog="smartrain roi",
         empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
     )
 
 
@@ -704,6 +725,7 @@ def cmd_inference(ctx: typer.Context) -> None:
         build_parser=build_arg_parser,
         prog="smartrain inference",
         empty_args_mode="invoke",
+        ensure_scan=True,
     )
 
 
@@ -741,6 +763,7 @@ def cmd_report_dataset(ctx: typer.Context) -> None:
         build_parser=build_report_dataset_arg_parser,
         prog="smartrain report dataset",
         empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
     )
 
 
@@ -1422,6 +1445,7 @@ def cmd_orient(ctx: typer.Context) -> None:
         build_parser=build_orient_arg_parser,
         prog="smartrain orient",
         empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
     )
 
 
@@ -1447,6 +1471,7 @@ def cmd_rotate(ctx: typer.Context) -> None:
         build_parser=build_rotate_arg_parser,
         prog="smartrain rotate",
         empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
     )
 
 

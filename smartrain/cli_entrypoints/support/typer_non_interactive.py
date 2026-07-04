@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 
 # Stripped from argv before invoking argparse subcommands (never passed to parsers).
-TYPER_META_NON_INTERACTIVE_FLAGS: frozenset[str] = frozenset({"--nit", "--smartrain-replay"})
+TYPER_META_NON_INTERACTIVE_FLAGS: frozenset[str] = frozenset(
+    {"--nit", "--smartrain-replay", "--no-auto-scan"}
+)
 
 # Env: force Typer non-interactive (CI / wrappers) even without flags on argv.
 FORCE_NON_INTERACTIVE_ENV = "SMART_TRAIN_FORCE_NON_INTERACTIVE"
@@ -20,6 +22,8 @@ def _is_typer_meta_non_interactive_token(tok: str) -> bool:
     if tok in TYPER_META_NON_INTERACTIVE_FLAGS:
         return True
     if tok.startswith("--nit=") or tok.startswith("--smartrain-replay="):
+        return True
+    if tok.startswith("--no-auto-scan="):
         return True
     return False
 
