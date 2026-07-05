@@ -44,9 +44,78 @@ def allowed_filter_sides(mode: str) -> frozenset[str]:
 
 
 @dataclass(frozen=True)
+class ContentBounds:
+    """Normalized axis-aligned region where objects appear in the dataset."""
+
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    source_frames: int = 0
+
+    def to_manifest_dict(self) -> dict[str, Any]:
+        return {
+            "x1": self.x1,
+            "y1": self.y1,
+            "x2": self.x2,
+            "y2": self.y2,
+            "source_frames": self.source_frames,
+        }
+
+
+def union_geoms_content_bounds(geoms: list[BboxGeom]) -> ContentBounds | None:
+    if not geoms:
+        return None
+    return ContentBounds(
+        x1=min(g.x1 for g in geoms),
+        y1=min(g.y1 for g in geoms),
+        x2=max(g.x2 for g in geoms),
+        y2=max(g.y2 for g in geoms),
+        source_frames=1,
+    )
+
+
+def merge_content_bounds(bounds: list[ContentBounds]) -> ContentBounds | None:
+    if not bounds:
+        return None
+    return ContentBounds(
+        x1=min(b.x1 for b in bounds),
+        y1=min(b.y1 for b in bounds),
+        x2=max(b.x2 for b in bounds),
+        y2=max(b.y2 for b in bounds),
+        source_frames=len(bounds),
+    )
+
+
+EMPIRICAL_MIN_OBJECTS_PER_FRAME = 2
+
+
+def summarize_frame_content_bounds(bounds_map: dict[str, ContentBounds]) -> dict[str, Any] | None:
+    if not bounds_map:
+        return None
+    values = list(bounds_map.values())
+    hull = merge_content_bounds(values)
+    assert hull is not None
+    x1s = sorted(b.x1 for b in values)
+    x2s = sorted(b.x2 for b in values)
+    mid = len(x1s) // 2
+    return {
+        "mode": "per_frame",
+        "frames_with_bounds": len(values),
+        "hull_x1": hull.x1,
+        "hull_y1": hull.y1,
+        "hull_x2": hull.x2,
+        "hull_y2": hull.y2,
+        "median_x1": x1s[mid],
+        "median_x2": x2s[mid],
+    }
+
+
+@dataclass(frozen=True)
 class BboxEdgeFilterConfig:
     edge_filter: bool = True
     edge_sides: str = "any"
+    empirical_bounds: bool = False
     baseline_inset_margin: float = 0.01
     baseline_inset_margin_px: float | None = None
     edge_eps: float = 0.002
@@ -218,18 +287,30 @@ def bbox_geom_from_label(lb: YoloLabel, *, img_w: int, img_h: int) -> BboxGeom |
     )
 
 
-def is_baseline_inset(geom: BboxGeom, *, config: BboxEdgeFilterConfig) -> bool:
+def _reference_rect(content_bounds: ContentBounds | None) -> tuple[float, float, float, float]:
+    if content_bounds is None:
+        return 0.0, 0.0, 1.0, 1.0
+    return content_bounds.x1, content_bounds.y1, content_bounds.x2, content_bounds.y2
+
+
+def is_baseline_inset(
+    geom: BboxGeom,
+    *,
+    config: BboxEdgeFilterConfig,
+    content_bounds: ContentBounds | None = None,
+) -> bool:
     margin = _margin_norm(
         margin_norm=config.baseline_inset_margin,
         margin_px=config.baseline_inset_margin_px,
         img_w=geom.img_w,
         img_h=geom.img_h,
     )
+    rx1, ry1, rx2, ry2 = _reference_rect(content_bounds if config.empirical_bounds else None)
     return (
-        geom.x1 >= margin
-        and geom.y1 >= margin
-        and geom.x2 <= 1.0 - margin
-        and geom.y2 <= 1.0 - margin
+        geom.x1 >= rx1 + margin
+        and geom.y1 >= ry1 + margin
+        and geom.x2 <= rx2 - margin
+        and geom.y2 <= ry2 - margin
     )
 
 
@@ -250,7 +331,12 @@ def _extends_outside_selected(geom: BboxGeom, allowed: frozenset[str]) -> bool:
     return False
 
 
-def in_filter_zone(geom: BboxGeom, *, config: BboxEdgeFilterConfig) -> bool:
+def in_filter_zone(
+    geom: BboxGeom,
+    *,
+    config: BboxEdgeFilterConfig,
+    content_bounds: ContentBounds | None = None,
+) -> bool:
     allowed = allowed_filter_sides(config.edge_sides)
     proximity = _margin_norm(
         margin_norm=config.resolved_filter_proximity_margin(),
@@ -258,7 +344,8 @@ def in_filter_zone(geom: BboxGeom, *, config: BboxEdgeFilterConfig) -> bool:
         img_w=geom.img_w,
         img_h=geom.img_h,
     )
-    sides = _edge_sides(geom, proximity_margin=proximity, edge_eps=config.edge_eps)
+    bounds = content_bounds if config.empirical_bounds else None
+    sides = _edge_sides(geom, proximity_margin=proximity, edge_eps=config.edge_eps, content_bounds=bounds)
     if sides & allowed:
         return True
     return _extends_outside_selected(geom, allowed)
@@ -272,17 +359,40 @@ def _clip_xyxy(geom: BboxGeom) -> tuple[float, float, float, float]:
     return x1, y1, x2, y2
 
 
-def _edge_sides(geom: BboxGeom, *, proximity_margin: float, edge_eps: float) -> set[str]:
-    sides: set[str] = set()
-    if geom.x1 < 0.0 or geom.x1 <= edge_eps or geom.x1 <= proximity_margin:
+def _edge_sides(
+    geom: BboxGeom,
+    *,
+    proximity_margin: float,
+    edge_eps: float,
+    content_bounds: ContentBounds | None = None,
+) -> set[str]:
+    if content_bounds is None:
+        sides: set[str] = set()
+        if geom.x1 < 0.0 or geom.x1 <= edge_eps or geom.x1 <= proximity_margin:
+            sides.add("left")
+        if geom.x2 > 1.0 or geom.x2 >= 1.0 - edge_eps or geom.x2 >= 1.0 - proximity_margin:
+            sides.add("right")
+        if geom.y1 < 0.0 or geom.y1 <= edge_eps or geom.y1 <= proximity_margin:
+            sides.add("top")
+        if geom.y2 > 1.0 or geom.y2 >= 1.0 - edge_eps or geom.y2 >= 1.0 - proximity_margin:
+            sides.add("bottom")
+        return sides
+
+    rx1, ry1, rx2, ry2 = _reference_rect(content_bounds)
+    sides = set()
+    if _near_ref_edge(geom.x1, geom.x2, rx1, proximity_margin, edge_eps):
         sides.add("left")
-    if geom.x2 > 1.0 or geom.x2 >= 1.0 - edge_eps or geom.x2 >= 1.0 - proximity_margin:
+    if _near_ref_edge(geom.x2, geom.x1, rx2, proximity_margin, edge_eps):
         sides.add("right")
-    if geom.y1 < 0.0 or geom.y1 <= edge_eps or geom.y1 <= proximity_margin:
+    if _near_ref_edge(geom.y1, geom.y2, ry1, proximity_margin, edge_eps):
         sides.add("top")
-    if geom.y2 > 1.0 or geom.y2 >= 1.0 - edge_eps or geom.y2 >= 1.0 - proximity_margin:
+    if _near_ref_edge(geom.y2, geom.y1, ry2, proximity_margin, edge_eps):
         sides.add("bottom")
     return sides
+
+
+def _near_ref_edge(edge_coord: float, other_coord: float, ref: float, proximity_margin: float, edge_eps: float) -> bool:
+    return edge_coord <= ref + max(proximity_margin, edge_eps) and other_coord >= ref - max(proximity_margin, edge_eps)
 
 
 def collect_baseline_stats(
@@ -290,6 +400,7 @@ def collect_baseline_stats(
     *,
     config: BboxEdgeFilterConfig,
     id_to_name: dict[int, str] | None = None,
+    content_bounds: ContentBounds | None = None,
 ) -> dict[int, ClassBboxStats]:
     stats: dict[int, ClassBboxStats] = {}
     for cls_id, geom in samples:
@@ -297,7 +408,7 @@ def collect_baseline_stats(
             cls_id,
             ClassBboxStats(cls_id=cls_id, cls_name=(id_to_name or {}).get(cls_id, str(cls_id))),
         )
-        if is_baseline_inset(geom, config=config):
+        if is_baseline_inset(geom, config=config, content_bounds=content_bounds):
             row.baseline_eligible_count += 1
             row.width_px_samples.append(geom.w_px)
             row.height_px_samples.append(geom.h_px)
@@ -311,7 +422,7 @@ def collect_baseline_stats(
             for cid, geom in samples:
                 if cid != cls_id:
                     continue
-                if in_filter_zone(geom, config=config):
+                if in_filter_zone(geom, config=config, content_bounds=content_bounds):
                     continue
                 fallback_w.append(geom.w_px)
                 fallback_h.append(geom.h_px)
@@ -332,11 +443,13 @@ def should_drop_bbox(
     *,
     config: BboxEdgeFilterConfig,
     class_stats: dict[int, ClassBboxStats],
+    content_bounds: ContentBounds | None = None,
 ) -> tuple[bool, DropReason | None]:
     if not config.edge_filter:
         return _global_filters(geom, config)
 
-    if not in_filter_zone(geom, config=config):
+    bounds = content_bounds if config.empirical_bounds else None
+    if not in_filter_zone(geom, config=config, content_bounds=bounds):
         return _global_filters(geom, config)
 
     proximity = _margin_norm(
@@ -346,7 +459,7 @@ def should_drop_bbox(
         img_h=geom.img_h,
     )
     allowed = allowed_filter_sides(config.edge_sides)
-    sides = _edge_sides(geom, proximity_margin=proximity, edge_eps=config.edge_eps) & allowed
+    sides = _edge_sides(geom, proximity_margin=proximity, edge_eps=config.edge_eps, content_bounds=bounds) & allowed
     if not sides:
         return _global_filters(geom, config)
     x1c, y1c, x2c, y2c = _clip_xyxy(geom)

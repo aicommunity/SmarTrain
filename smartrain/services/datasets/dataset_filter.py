@@ -26,12 +26,16 @@ from smartrain.services.datasets.bbox_edge_filter import (
     BboxEdgeFilterConfig,
     BboxGeom,
     ClassBboxStats,
+    ContentBounds,
     EDGE_SIDES_CHOICES,
+    EMPIRICAL_MIN_OBJECTS_PER_FRAME,
     allowed_filter_sides,
     collect_baseline_stats,
     normalize_edge_sides,
     should_drop_bbox,
     bbox_geom_from_label,
+    summarize_frame_content_bounds,
+    union_geoms_content_bounds,
 )
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_cli_catalog import (
@@ -63,6 +67,8 @@ class LabelPairItem:
 @dataclass
 class FilterForecast:
     baseline_stats: dict[int, ClassBboxStats]
+    frame_content_bounds: dict[str, ContentBounds] = field(default_factory=dict)
+    empirical_bounds_summary: dict[str, Any] | None = None
     removed_by_class: dict[int, int] = field(default_factory=lambda: defaultdict(int))
     removed_by_reason: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     would_drop: int = 0
@@ -91,6 +97,14 @@ def build_filter_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--baseline-inset-margin-px", type=float, default=None)
     p.add_argument("--edge-eps", type=float, default=0.002)
     p.add_argument("--filter-proximity-margin", type=float, default=None)
+    p.add_argument(
+        "--empirical-bounds",
+        action="store_true",
+        help=(
+            "Measure edge proximity from per-frame union bbox of objects in the same image "
+            f"(requires >={EMPIRICAL_MIN_OBJECTS_PER_FRAME} objects; else image borders)"
+        ),
+    )
     p.add_argument("--abs-min-width-px", type=float, default=8.0)
     p.add_argument("--abs-min-height-px", type=float, default=8.0)
     p.add_argument("--rel-quantile", type=float, default=0.10)
@@ -119,6 +133,7 @@ def _config_from_args(args: argparse.Namespace) -> BboxEdgeFilterConfig:
     return BboxEdgeFilterConfig(
         edge_filter=bool(args.edge_filter),
         edge_sides=edge_sides,
+        empirical_bounds=bool(args.empirical_bounds),
         baseline_inset_margin=float(args.baseline_inset_margin),
         baseline_inset_margin_px=args.baseline_inset_margin_px,
         edge_eps=float(args.edge_eps),
@@ -244,6 +259,41 @@ def _gather_samples(
     return samples, segment_proxy
 
 
+def _collect_frame_content_bounds(
+    items: list[LabelPairItem],
+    *,
+    class_filter: set[int] | None,
+    size_cache: dict[str, tuple[int, int]],
+) -> dict[str, ContentBounds]:
+    frame_bounds: dict[str, ContentBounds] = {}
+    for item in items:
+        if not os.path.isfile(item.label_path):
+            continue
+        iw, ih = _image_size(item.image_path, size_cache)
+        geoms: list[BboxGeom] = []
+        for lb in read_yolo_labels(item.label_path):
+            if class_filter is not None and int(getattr(lb, "cls_id", -1)) not in class_filter:
+                continue
+            geom = bbox_geom_from_label(lb, img_w=iw, img_h=ih)
+            if geom is not None:
+                geoms.append(geom)
+        if len(geoms) < EMPIRICAL_MIN_OBJECTS_PER_FRAME:
+            continue
+        union = union_geoms_content_bounds(geoms)
+        if union is not None:
+            frame_bounds[item.rel_image] = union
+    return frame_bounds
+
+
+def _content_bounds_for_item(
+    item: LabelPairItem,
+    frame_content_bounds: dict[str, ContentBounds] | None,
+) -> ContentBounds | None:
+    if not frame_content_bounds:
+        return None
+    return frame_content_bounds.get(item.rel_image)
+
+
 def _forecast_filter(
     items: list[LabelPairItem],
     *,
@@ -252,9 +302,25 @@ def _forecast_filter(
     id_to_name: dict[int, str],
     size_cache: dict[str, tuple[int, int]],
 ) -> FilterForecast:
+    frame_content_bounds = (
+        _collect_frame_content_bounds(items, class_filter=class_filter, size_cache=size_cache)
+        if config.empirical_bounds
+        else {}
+    )
+    bounds_summary = summarize_frame_content_bounds(frame_content_bounds) if frame_content_bounds else None
     samples, segment_proxy = _gather_samples(items, config=config, class_filter=class_filter, size_cache=size_cache)
-    baseline = collect_baseline_stats(samples, config=config, id_to_name=id_to_name)
-    forecast = FilterForecast(baseline_stats=baseline, segment_proxy_count=segment_proxy)
+    baseline = collect_baseline_stats(
+        samples,
+        config=config,
+        id_to_name=id_to_name,
+        content_bounds=None,
+    )
+    forecast = FilterForecast(
+        baseline_stats=baseline,
+        frame_content_bounds=frame_content_bounds,
+        empirical_bounds_summary=bounds_summary,
+        segment_proxy_count=segment_proxy,
+    )
     forecast.instances_before = len(samples)
 
     for item in items:
@@ -269,7 +335,12 @@ def _forecast_filter(
             geom = bbox_geom_from_label(lb, img_w=iw, img_h=ih)
             if geom is None:
                 continue
-            drop, reason = should_drop_bbox(geom, config=config, class_stats=baseline)
+            drop, reason = should_drop_bbox(
+                geom,
+                config=config,
+                class_stats=baseline,
+                content_bounds=_content_bounds_for_item(item, frame_content_bounds),
+            )
             if drop:
                 forecast.would_drop += 1
                 forecast.removed_by_class[geom.cls_id] += 1
@@ -288,6 +359,14 @@ def _print_forecast_table(forecast: FilterForecast, *, id_to_name: dict[int, str
     print(f"  instances_before={forecast.instances_before} would_drop={forecast.would_drop} would_keep={forecast.would_keep}")
     if forecast.segment_proxy_count:
         print(f"  segment_proxy_count={forecast.segment_proxy_count} (bbox envelope used)")
+    if forecast.empirical_bounds_summary is not None:
+        s = forecast.empirical_bounds_summary
+        print(
+            "  empirical_bounds=per_frame "
+            f"frames_with_bounds={s['frames_with_bounds']} "
+            f"median_x1={s['median_x1']:.4f} median_x2={s['median_x2']:.4f} "
+            f"hull_x1={s['hull_x1']:.4f} hull_x2={s['hull_x2']:.4f}"
+        )
     print("  per-class:")
     cls_ids = sorted(set(forecast.baseline_stats.keys()) | set(forecast.removed_by_class.keys()))
     for cid in cls_ids:
@@ -314,6 +393,7 @@ def _filter_labels_for_item(
     class_stats: dict[int, ClassBboxStats],
     class_filter: set[int] | None,
     size_cache: dict[str, tuple[int, int]],
+    content_bounds: ContentBounds | None = None,
 ) -> tuple[list[YoloLabel], list[YoloLabel], bool, dict[str, int], dict[int, int]]:
     if not os.path.isfile(item.label_path):
         return [], [], False, {}, {}
@@ -331,7 +411,12 @@ def _filter_labels_for_item(
         if geom is None:
             kept.append(lb)
             continue
-        drop, reason = should_drop_bbox(geom, config=config, class_stats=class_stats)
+        drop, reason = should_drop_bbox(
+            geom,
+            config=config,
+            class_stats=class_stats,
+            content_bounds=content_bounds,
+        )
         if drop:
             had_drop = True
             removed.append(lb)
@@ -401,6 +486,8 @@ def _copy_and_filter(
     prune_empty: bool,
     drop_background: bool,
     size_cache: dict[str, tuple[int, int]],
+    frame_content_bounds: dict[str, ContentBounds] | None = None,
+    empirical_bounds_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     removed_instances = 0
     kept_instances = 0
@@ -445,6 +532,7 @@ def _copy_and_filter(
             class_stats=class_stats,
             class_filter=class_filter,
             size_cache=size_cache,
+            content_bounds=_content_bounds_for_item(item, frame_content_bounds),
         )
         for k, v in item_reasons.items():
             removed_by_reason[k] += v
@@ -508,6 +596,7 @@ def _copy_and_filter(
         "images_pruned_empty": images_pruned_empty,
         "background_images_kept": background_images_kept,
         "background_images_dropped": background_images_dropped,
+        "empirical_content_bounds": empirical_bounds_summary,
         "removed_by_class": {str(k): int(v) for k, v in removed_by_class.items()},
         "removed_by_reason": dict(removed_by_reason),
         "audit": {
@@ -570,6 +659,10 @@ def _interactive_fill(args: argparse.Namespace, dataset_names: list[str], catalo
     )
 
     print("[INFO] Block: baseline margins")
+    args.empirical_bounds = prompt_yes_no(
+        "--empirical-bounds (edge proximity from dataset object hull)?",
+        default=bool(args.empirical_bounds),
+    )
     args.baseline_inset_margin = float(
         prompt_text("--baseline-inset-margin", default=str(args.baseline_inset_margin)).strip()
         or str(args.baseline_inset_margin)
@@ -759,6 +852,8 @@ def main(argv: list[str] | None = None) -> None:
         prune_empty=bool(args.prune_empty),
         drop_background=bool(args.drop_background),
         size_cache=size_cache,
+        frame_content_bounds=forecast.frame_content_bounds,
+        empirical_bounds_summary=forecast.empirical_bounds_summary,
     )
     _write_data_yaml(out_dir, class_map)
     manifest_path = _write_filter_manifest(out_dir, parameters=parameters, forecast=forecast, stats_after=stats_after)

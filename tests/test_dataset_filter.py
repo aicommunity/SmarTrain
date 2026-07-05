@@ -9,10 +9,13 @@ from PIL import Image
 from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, WORKSPACE_ENV_VAR, deploy_workspace
 from smartrain.services.datasets.bbox_edge_filter import (
     BboxEdgeFilterConfig,
+    ContentBounds,
     bbox_geom_from_label,
     collect_baseline_stats,
     is_baseline_inset,
+    merge_content_bounds,
     should_drop_bbox,
+    union_geoms_content_bounds,
 )
 from smartrain.services.datasets.yolo_labels import YoloBBox
 from smartrain.workflows.datasets.dataset_filter import main as filter_main
@@ -80,6 +83,76 @@ def test_edge_sides_right_drops_right_edge_bbox() -> None:
     assert drop
     assert reason is not None
     assert reason.value in {"abs_width", "rel_width"}
+
+
+def test_empirical_bounds_measures_from_content_hull() -> None:
+    centers = [
+        bbox_geom_from_label(YoloBBox(0, 0.4, 0.5, 0.2, 0.2), img_w=1000, img_h=800),
+        bbox_geom_from_label(YoloBBox(0, 0.5, 0.5, 0.2, 0.2), img_w=1000, img_h=800),
+        bbox_geom_from_label(YoloBBox(0, 0.6, 0.5, 0.2, 0.2), img_w=1000, img_h=800),
+    ]
+    assert all(c is not None for c in centers)
+    content_bounds = merge_content_bounds([union_geoms_content_bounds(centers)])  # type: ignore[arg-type]
+    assert content_bounds is not None
+    near_content_left = bbox_geom_from_label(YoloBBox(0, 0.295, 0.5, 0.005, 0.1), img_w=1000, img_h=800)
+    assert near_content_left is not None
+
+    cfg_default = BboxEdgeFilterConfig()
+    stats = collect_baseline_stats(
+        [(0, c) for c in centers if c is not None],
+        config=cfg_default,
+        id_to_name={0: "cat"},
+    )
+    drop_default, _ = should_drop_bbox(near_content_left, config=cfg_default, class_stats=stats)
+    assert not drop_default
+
+    cfg_empirical = BboxEdgeFilterConfig(empirical_bounds=True)
+    stats_e = collect_baseline_stats(
+        [(0, c) for c in centers if c is not None],
+        config=cfg_empirical,
+        id_to_name={0: "cat"},
+        content_bounds=content_bounds,
+    )
+    drop_empirical, reason = should_drop_bbox(
+        near_content_left,
+        config=cfg_empirical,
+        class_stats=stats_e,
+        content_bounds=content_bounds,
+    )
+    assert drop_empirical
+    assert reason is not None
+    assert reason.value in {"abs_width", "rel_width"}
+
+
+def test_filter_empirical_bounds_per_frame_multi_object(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "multi.jpg")
+    (ds / "train" / "labels" / "multi.txt").write_text(
+        "0 0.4 0.5 0.2 0.2\n0 0.6 0.5 0.2 0.2\n",
+        encoding="utf-8",
+    )
+    _write_jpg(ds / "train" / "images" / "single.jpg")
+    (ds / "train" / "labels" / "single.txt").write_text("0 0.9975 0.5 0.005 0.1\n", encoding="utf-8")
+
+    filter_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "src_ds",
+            "--empirical-bounds",
+            "--edge-sides",
+            "horizontal",
+            "-y",
+        ]
+    )
+
+    manifest = json.loads((tmp_path / "datasets" / "src_ds_fltd" / "filter_manifest.json").read_text())
+    summary = manifest["stats_after"]["empirical_content_bounds"]
+    assert summary is not None
+    assert summary["mode"] == "per_frame"
+    assert summary["frames_with_bounds"] == 1
 
 
 def test_should_keep_large_bbox_at_edge() -> None:
@@ -241,6 +314,7 @@ def test_filter_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
             "src_ds",
             "",
             "any",
+            False,
             "0.01",
             False,
             True,
@@ -293,6 +367,7 @@ def test_filter_interactive_cancel(tmp_path: Path, monkeypatch: pytest.MonkeyPat
             "src_ds",
             "",
             "any",
+            False,
             "0.01",
             False,
             True,
