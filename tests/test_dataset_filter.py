@@ -59,6 +59,29 @@ def test_should_drop_small_bbox_at_right_edge() -> None:
     assert reason.value in {"abs_width", "rel_width"}
 
 
+def test_edge_sides_left_ignores_right_edge_bbox() -> None:
+    geom = bbox_geom_from_label(YoloBBox(0, 0.9975, 0.5, 0.005, 0.1), img_w=1000, img_h=800)
+    assert geom is not None
+    cfg = BboxEdgeFilterConfig(edge_sides="left")
+    stats = collect_baseline_stats([], config=cfg, id_to_name={0: "cat"})
+    drop, reason = should_drop_bbox(geom, config=cfg, class_stats=stats)
+    assert not drop
+    assert reason is None
+
+
+def test_edge_sides_right_drops_right_edge_bbox() -> None:
+    geom = bbox_geom_from_label(YoloBBox(0, 0.9975, 0.5, 0.005, 0.1), img_w=1000, img_h=800)
+    assert geom is not None
+    cfg = BboxEdgeFilterConfig(edge_sides="right")
+    center = bbox_geom_from_label(YoloBBox(0, 0.5, 0.5, 0.2, 0.2), img_w=1000, img_h=800)
+    assert center is not None
+    stats = collect_baseline_stats([(0, center)], config=cfg, id_to_name={0: "cat"})
+    drop, reason = should_drop_bbox(geom, config=cfg, class_stats=stats)
+    assert drop
+    assert reason is not None
+    assert reason.value in {"abs_width", "rel_width"}
+
+
 def test_should_keep_large_bbox_at_edge() -> None:
     cfg = BboxEdgeFilterConfig()
     centers = [
@@ -152,6 +175,45 @@ def test_filter_archives_removed_labels_only(tmp_path: Path) -> None:
     assert "0.5 0.5 0.2 0.2" not in removed.read_text(encoding="utf-8")
 
 
+def test_filter_keeps_background_without_label(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "bg.jpg")
+
+    filter_main(["--workspace", str(tmp_path), "--dataset", "src_ds", "-y"])
+
+    out = tmp_path / "datasets" / "src_ds_fltd"
+    assert (out / "train" / "images" / "bg.jpg").is_file()
+    assert not (out / "_filter_audit" / "dropped_images" / "train" / "images" / "bg.jpg").exists()
+
+
+def test_filter_keeps_empty_label_background_by_default(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "bg_empty.txt".replace(".txt", ".jpg"))
+    (ds / "train" / "labels" / "bg_empty.txt").write_text("", encoding="utf-8")
+
+    filter_main(["--workspace", str(tmp_path), "--dataset", "src_ds", "-y"])
+
+    out = tmp_path / "datasets" / "src_ds_fltd"
+    assert (out / "train" / "images" / "bg_empty.jpg").is_file()
+    assert not (out / "train" / "labels" / "bg_empty.txt").exists()
+    assert not (out / "_filter_audit" / "dropped_images" / "train" / "images" / "bg_empty.jpg").exists()
+
+
+def test_filter_drop_background_removes_unlabeled(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "bg.jpg")
+    (ds / "train" / "labels" / "bg.txt").write_text("", encoding="utf-8")
+
+    filter_main(["--workspace", str(tmp_path), "--dataset", "src_ds", "--drop-background", "-y"])
+
+    out = tmp_path / "datasets" / "src_ds_fltd"
+    assert not (out / "train" / "images" / "bg.jpg").exists()
+    assert (out / "_filter_audit" / "dropped_images" / "train" / "images" / "bg.jpg").is_file()
+
+
 def test_filter_dry_run_and_stats_only(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     ds = _setup_split_dataset(tmp_path)
@@ -178,6 +240,7 @@ def test_filter_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         [
             "src_ds",
             "",
+            "any",
             "0.01",
             False,
             True,
@@ -187,6 +250,7 @@ def test_filter_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
             "0.10",
             "0.85",
             "0.85",
+            False,
             False,
             False,
             False,
@@ -228,6 +292,7 @@ def test_filter_interactive_cancel(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         [
             "src_ds",
             "",
+            "any",
             "0.01",
             False,
             True,
@@ -237,6 +302,7 @@ def test_filter_interactive_cancel(tmp_path: Path, monkeypatch: pytest.MonkeyPat
             "0.10",
             "0.85",
             "0.85",
+            False,
             False,
             False,
             False,

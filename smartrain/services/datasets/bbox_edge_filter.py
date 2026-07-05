@@ -17,9 +17,36 @@ class DropReason(str, Enum):
     ASPECT_RATIO = "aspect_ratio"
 
 
+EDGE_SIDES_CHOICES = ("any", "horizontal", "vertical", "up", "down", "left", "right")
+EDGE_SIDES_ALIASES = {"horisontal": "horizontal", "top": "up", "bottom": "down"}
+
+
+def normalize_edge_sides(mode: str) -> str:
+    value = str(mode or "any").strip().lower()
+    return EDGE_SIDES_ALIASES.get(value, value)
+
+
+def allowed_filter_sides(mode: str) -> frozenset[str]:
+    normalized = normalize_edge_sides(mode)
+    mapping: dict[str, frozenset[str]] = {
+        "any": frozenset({"left", "right", "top", "bottom"}),
+        "horizontal": frozenset({"left", "right"}),
+        "vertical": frozenset({"top", "bottom"}),
+        "up": frozenset({"top"}),
+        "down": frozenset({"bottom"}),
+        "left": frozenset({"left"}),
+        "right": frozenset({"right"}),
+    }
+    if normalized not in mapping:
+        allowed = ", ".join(EDGE_SIDES_CHOICES)
+        raise ValueError(f"Unknown --edge-sides {mode!r}; expected one of: {allowed}")
+    return mapping[normalized]
+
+
 @dataclass(frozen=True)
 class BboxEdgeFilterConfig:
     edge_filter: bool = True
+    edge_sides: str = "any"
     baseline_inset_margin: float = 0.01
     baseline_inset_margin_px: float | None = None
     edge_eps: float = 0.002
@@ -206,31 +233,35 @@ def is_baseline_inset(geom: BboxGeom, *, config: BboxEdgeFilterConfig) -> bool:
     )
 
 
-def _touches_edge_eps(geom: BboxGeom, eps: float) -> bool:
-    return geom.x1 <= eps or geom.y1 <= eps or geom.x2 >= 1.0 - eps or geom.y2 >= 1.0 - eps
-
 
 def _extends_outside(geom: BboxGeom) -> bool:
     return geom.x1 < 0.0 or geom.y1 < 0.0 or geom.x2 > 1.0 or geom.y2 > 1.0
 
 
+def _extends_outside_selected(geom: BboxGeom, allowed: frozenset[str]) -> bool:
+    if "left" in allowed and geom.x1 < 0.0:
+        return True
+    if "right" in allowed and geom.x2 > 1.0:
+        return True
+    if "top" in allowed and geom.y1 < 0.0:
+        return True
+    if "bottom" in allowed and geom.y2 > 1.0:
+        return True
+    return False
+
+
 def in_filter_zone(geom: BboxGeom, *, config: BboxEdgeFilterConfig) -> bool:
-    if _extends_outside(geom):
-        return True
-    if _touches_edge_eps(geom, config.edge_eps):
-        return True
-    margin = _margin_norm(
+    allowed = allowed_filter_sides(config.edge_sides)
+    proximity = _margin_norm(
         margin_norm=config.resolved_filter_proximity_margin(),
         margin_px=config.baseline_inset_margin_px,
         img_w=geom.img_w,
         img_h=geom.img_h,
     )
-    return (
-        geom.x1 <= margin
-        or geom.y1 <= margin
-        or geom.x2 >= 1.0 - margin
-        or geom.y2 >= 1.0 - margin
-    )
+    sides = _edge_sides(geom, proximity_margin=proximity, edge_eps=config.edge_eps)
+    if sides & allowed:
+        return True
+    return _extends_outside_selected(geom, allowed)
 
 
 def _clip_xyxy(geom: BboxGeom) -> tuple[float, float, float, float]:
@@ -314,7 +345,10 @@ def should_drop_bbox(
         img_w=geom.img_w,
         img_h=geom.img_h,
     )
-    sides = _edge_sides(geom, proximity_margin=proximity, edge_eps=config.edge_eps)
+    allowed = allowed_filter_sides(config.edge_sides)
+    sides = _edge_sides(geom, proximity_margin=proximity, edge_eps=config.edge_eps) & allowed
+    if not sides:
+        return _global_filters(geom, config)
     x1c, y1c, x2c, y2c = _clip_xyxy(geom)
     w_clip_px = max(0.0, (x2c - x1c) * geom.img_w)
     h_clip_px = max(0.0, (y2c - y1c) * geom.img_h)

@@ -26,7 +26,10 @@ from smartrain.services.datasets.bbox_edge_filter import (
     BboxEdgeFilterConfig,
     BboxGeom,
     ClassBboxStats,
+    EDGE_SIDES_CHOICES,
+    allowed_filter_sides,
     collect_baseline_stats,
+    normalize_edge_sides,
     should_drop_bbox,
     bbox_geom_from_label,
 )
@@ -75,6 +78,13 @@ def build_filter_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dataset", type=str, default=None, help="Source dataset key from datasets_info.json")
     p.add_argument("--output-name", type=str, default=None, help="Output dataset name (default <dataset>_fltd)")
     p.add_argument("--classes", type=str, default=None, help="Comma-separated class names to filter (default all)")
+    p.add_argument(
+        "--edge-sides",
+        type=str,
+        default="any",
+        choices=EDGE_SIDES_CHOICES,
+        help="Which image edges to filter bbox against: any, horizontal, vertical, up, down, left, right",
+    )
     p.add_argument("--edge-filter", dest="edge_filter", action="store_true", default=True)
     p.add_argument("--no-edge-filter", dest="edge_filter", action="store_false")
     p.add_argument("--baseline-inset-margin", type=float, default=0.01)
@@ -90,6 +100,11 @@ def build_filter_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-area-px", type=float, default=0.0)
     p.add_argument("--max-aspect-ratio", type=float, default=None)
     p.add_argument("--drop-images", action="store_true", help="Remove entire image if any bbox matches filter")
+    p.add_argument(
+        "--drop-background",
+        action="store_true",
+        help="Remove images that had no annotations in the source dataset (background frames)",
+    )
     p.add_argument("--prune-empty", dest="prune_empty", action="store_true", default=True)
     p.add_argument("--no-prune-empty", dest="prune_empty", action="store_false")
     p.add_argument("--dry-run", action="store_true")
@@ -99,8 +114,11 @@ def build_filter_arg_parser() -> argparse.ArgumentParser:
 
 
 def _config_from_args(args: argparse.Namespace) -> BboxEdgeFilterConfig:
+    edge_sides = normalize_edge_sides(args.edge_sides)
+    allowed_filter_sides(edge_sides)
     return BboxEdgeFilterConfig(
         edge_filter=bool(args.edge_filter),
+        edge_sides=edge_sides,
         baseline_inset_margin=float(args.baseline_inset_margin),
         baseline_inset_margin_px=args.baseline_inset_margin_px,
         edge_eps=float(args.edge_eps),
@@ -325,6 +343,19 @@ def _filter_labels_for_item(
     return kept, removed, had_drop, dict(reason_counts), dict(class_counts)
 
 
+def _originally_unlabeled(item: LabelPairItem) -> bool:
+    if not os.path.isfile(item.label_path):
+        return True
+    return len(read_yolo_labels(item.label_path)) == 0
+
+
+def _copy_background_image(out_dir: str, item: LabelPairItem, *, copied_images: int) -> int:
+    out_img = os.path.join(out_dir, item.rel_image)
+    os.makedirs(os.path.dirname(out_img), exist_ok=True)
+    shutil.copy2(item.image_path, out_img)
+    return copied_images + 1
+
+
 def _audit_dropped_image_paths(out_dir: str, rel_image: str, rel_label: str) -> tuple[str, str]:
     base = os.path.join(out_dir, FILTER_AUDIT_ROOT, FILTER_AUDIT_DROPPED_IMAGES)
     return os.path.join(base, rel_image), os.path.join(base, rel_label)
@@ -368,12 +399,15 @@ def _copy_and_filter(
     class_filter: set[int] | None,
     drop_images: bool,
     prune_empty: bool,
+    drop_background: bool,
     size_cache: dict[str, tuple[int, int]],
 ) -> dict[str, Any]:
     removed_instances = 0
     kept_instances = 0
     images_dropped = 0
     images_pruned_empty = 0
+    background_images_kept = 0
+    background_images_dropped = 0
     removed_by_class: dict[int, int] = defaultdict(int)
     removed_by_reason: dict[str, int] = defaultdict(int)
     copied_images = 0
@@ -389,10 +423,21 @@ def _copy_and_filter(
         os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
 
         if not os.path.isfile(item.label_path):
-            if os.path.isfile(item.image_path):
-                shutil.copy2(item.image_path, out_img)
-                copied_images += 1
+            if drop_background:
+                _archive_dropped_image_pair(
+                    out_dir,
+                    item,
+                    archive_reason="background",
+                    archive_reasons=audit_archive_reasons,
+                )
+                background_images_dropped += 1
+                audit_dropped_image_pairs += 1
+            else:
+                copied_images = _copy_background_image(out_dir, item, copied_images=copied_images)
+                background_images_kept += 1
             continue
+
+        originally_bg = _originally_unlabeled(item)
 
         kept_labels, removed_labels, had_drop, item_reasons, item_class_counts = _filter_labels_for_item(
             item,
@@ -423,6 +468,20 @@ def _copy_and_filter(
             continue
 
         if prune_empty and kept_count == 0:
+            if originally_bg:
+                if drop_background:
+                    _archive_dropped_image_pair(
+                        out_dir,
+                        item,
+                        archive_reason="background",
+                        archive_reasons=audit_archive_reasons,
+                    )
+                    background_images_dropped += 1
+                    audit_dropped_image_pairs += 1
+                else:
+                    copied_images = _copy_background_image(out_dir, item, copied_images=copied_images)
+                    background_images_kept += 1
+                continue
             _archive_dropped_image_pair(
                 out_dir,
                 item,
@@ -447,6 +506,8 @@ def _copy_and_filter(
         "kept_instances": kept_instances,
         "images_dropped": images_dropped,
         "images_pruned_empty": images_pruned_empty,
+        "background_images_kept": background_images_kept,
+        "background_images_dropped": background_images_dropped,
         "removed_by_class": {str(k): int(v) for k, v in removed_by_class.items()},
         "removed_by_reason": dict(removed_by_reason),
         "audit": {
@@ -502,6 +563,11 @@ def _interactive_fill(args: argparse.Namespace, dataset_names: list[str], catalo
         picked = prompt_multi_choice_csv("Classes (--classes; empty=all)", class_names, default_values=[])
         args.classes = ",".join(picked) if picked else None
     args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
+    args.edge_sides = prompt_choice(
+        "Edge sides to filter (--edge-sides)",
+        list(EDGE_SIDES_CHOICES),
+        default=str(getattr(args, "edge_sides", "any")),
+    )
 
     print("[INFO] Block: baseline margins")
     args.baseline_inset_margin = float(
@@ -560,6 +626,10 @@ def _interactive_fill(args: argparse.Namespace, dataset_names: list[str], catalo
 
     print("[INFO] Block: image removal")
     args.drop_images = prompt_yes_no("--drop-images (remove whole image on any match)?", default=bool(args.drop_images))
+    args.drop_background = prompt_yes_no(
+        "--drop-background (remove source images without annotations)?",
+        default=bool(args.drop_background),
+    )
     args.prune_empty = prompt_yes_no("--prune-empty (default on)?", default=bool(args.prune_empty))
 
     mode = prompt_choice("Run mode", ["execute", "dry-run", "stats-only"], default="execute")
@@ -571,6 +641,12 @@ def main(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
     parser = build_filter_arg_parser()
     args = parser.parse_args(argv)
+    try:
+        args.edge_sides = normalize_edge_sides(args.edge_sides)
+        allowed_filter_sides(args.edge_sides)
+    except ValueError as exc:
+        print(f"[ERROR] {exc}")
+        return
     interactive_allowed = is_interactive_allowed(argv)
 
     if args.dataset is None and not interactive_allowed:
@@ -681,6 +757,7 @@ def main(argv: list[str] | None = None) -> None:
         class_filter=class_filter,
         drop_images=bool(args.drop_images),
         prune_empty=bool(args.prune_empty),
+        drop_background=bool(args.drop_background),
         size_cache=size_cache,
     )
     _write_data_yaml(out_dir, class_map)

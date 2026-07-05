@@ -63,10 +63,11 @@ smartrain filter --dataset my_dataset --drop-images
 ```
 
 - **Pass 1** — per-class baseline width/height stats from bbox **fully inside** an inset zone (`--baseline-inset-margin`, default `0.01`; optional `--baseline-inset-margin-px`).
-- **Pass 2** — drop near-edge bbox that are too small (absolute `--abs-min-width-px` / `--abs-min-height-px` and relative to class p-quantile `--rel-quantile` with `--rel-width-factor` / `--rel-height-factor`). Near-edge zone: `--filter-proximity-margin` (defaults to baseline inset margin); strict touch/OOB: `--edge-eps`.
+- **Pass 2** — drop near-edge bbox that are too small (absolute `--abs-min-width-px` / `--abs-min-height-px` and relative to class p-quantile `--rel-quantile` with `--rel-width-factor` / `--rel-height-factor`). Near-edge zone: `--filter-proximity-margin` (defaults to baseline inset margin); strict touch/OOB: `--edge-eps`. Limit affected edges with `--edge-sides` (`any`, `horizontal`, `vertical`, `up`, `down`, `left`, `right`; default `any`).
 - Optional: `--min-visibility`, `--min-area-px`, `--max-aspect-ratio`; `--classes` to limit affected classes.
 - **`--drop-images`** — remove entire image+labels from train/val/test buckets; originals are archived under `_filter_audit/dropped_images/<split>/images|labels` (excluded from `data.yaml`, training, and stats).
-- **`--prune-empty`** (default on) — pairs with no labels after filtering are removed from main buckets and archived to `_filter_audit/dropped_images/` with source labels.
+- **`--prune-empty`** (default on) — after filtering, remove pairs that **had annotations** but none remain; archived to `_filter_audit/dropped_images/`.
+- **`--drop-background`** (default off) — remove source images that never had annotations (no label file or empty label); archived to `_filter_audit/dropped_images/` when enabled.
 - Partial label removal (image kept) — dropped bbox lines are written to `_filter_audit/removed_labels/<split>/labels/` with the same relative paths as in the main dataset.
 - Audit paths and counts are recorded in `filter_manifest.json` → `stats_after.audit`.
 - **`--stats-only`** / **`--dry-run`** — preview without writing output dataset; interactive mode (`smartrain filter` from TTY) shows preview table and replay command.

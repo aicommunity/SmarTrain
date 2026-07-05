@@ -157,7 +157,7 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "  smartrain filter --dataset my_dataset\n"
         "  smartrain filter --dataset my_dataset --stats-only\n"
         "  smartrain filter --dataset my_dataset --dry-run --baseline-inset-margin 0.01\n"
-        "  smartrain filter --dataset my_dataset --drop-images --output-name my_dataset_fltd\n"
+        "  smartrain filter --dataset my_dataset --edge-sides horizontal\n"
     ),
     "smartrain report dataset": (
         "Examples:\n"
