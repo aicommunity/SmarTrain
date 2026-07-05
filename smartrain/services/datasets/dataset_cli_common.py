@@ -22,6 +22,17 @@ def sorted_class_names_union_from_catalog(catalog: dict[str, Any]) -> list[str]:
     return sorted(names)
 
 
+def sorted_class_names_for_dataset(catalog: dict[str, Any], dataset_key: str) -> list[str]:
+    """Class name keys from a single datasets_info entry."""
+    entry = catalog.get(dataset_key)
+    if not isinstance(entry, dict):
+        return []
+    classes = entry.get("classes")
+    if not isinstance(classes, dict):
+        return []
+    return sorted(str(k) for k in classes.keys())
+
+
 def detect_split_from_path(images_path: str, *, prefer_valid_name: bool = False) -> str:
     low = str(images_path).lower()
     if "/train/" in low:

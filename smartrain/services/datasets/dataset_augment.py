@@ -19,13 +19,11 @@ import albumentations as A
 import cv2
 import numpy as np
 from PIL import Image
-from prompt_toolkit import prompt
-from prompt_toolkit.completion import WordCompleter
 from tqdm import tqdm
 from ultralytics import YOLO
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_multi_choice_csv, prompt_text, prompt_yes_no
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
@@ -47,7 +45,7 @@ from smartrain.services.datasets.yolo_labels import YoloLabel, read_yolo_labels,
 from smartrain.services.datasets.dataset_cli_catalog import (
     EMPTY_DATASETS_INFO_MESSAGE,
     load_datasets_catalog,
-    sorted_class_names_union_from_catalog,
+    sorted_class_names_for_dataset,
     try_prompt_dataset_interactive,
 )
 from smartrain.services.datasets.dataset_cli_common import (
@@ -235,8 +233,8 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--placement-mode",
         choices=("none", "bbox", "detector"),
-        default="detector",
-        help="ROI placement mode for bbox_copy: none|bbox|detector (default detector)",
+        default="none",
+        help="ROI placement mode for bbox_copy and rotation pivot: none|bbox|detector (default none)",
     )
     p.add_argument("--placement-roi", action="store_true", help="Legacy: same as --placement-mode bbox")
     p.add_argument("--roi-model", type=str, default="yolo11n.pt", help="ROI detector model for --placement-mode detector")
@@ -414,7 +412,7 @@ def _normalize_augment_args(args, *, argv: list[str] | None = None) -> str | Non
                 "none": "center",
                 "bbox": "bbox",
                 "detector": "detector",
-            }[str(getattr(args, "placement_mode", "detector"))]
+            }[str(getattr(args, "placement_mode", "none"))]
         elif anchor_explicit and not placement_explicit:
             args.placement_mode = {
                 "center": "none",
@@ -1231,7 +1229,7 @@ def _apply_copy_paste(
     img = Image.open(image_path).convert("RGB")
     w, h = img.size
     labels = _parse_yolo_labels(label_path)
-    placement_mode = str(getattr(args, "placement_mode", "detector"))
+    placement_mode = str(getattr(args, "placement_mode", "none"))
     roi: tuple[int, int, int, int] | None = None
     if placement_mode == "bbox":
         roi = _roi_from_labels(labels, w, h)
@@ -1533,14 +1531,11 @@ def _print_augment_placement_mode_help(*, enable_center_rotate: bool, enable_bbo
 
 
 def _default_placement_mode_for_interactive(*, enable_center_rotate: bool, enable_bbox_copy: bool, current: str) -> str:
-    cur = str(current or "detector")
+    _ = enable_center_rotate, enable_bbox_copy
+    cur = str(current or "none")
     if cur in {"none", "bbox", "detector"}:
-        stored = cur
-    else:
-        stored = "detector"
-    if enable_center_rotate and not enable_bbox_copy:
-        return "none"
-    return stored
+        return cur
+    return "none"
 
 
 def _augment_balancing_block_title(*, enable_center_rotate: bool, enable_bbox_copy: bool) -> str:
@@ -1551,21 +1546,20 @@ def _augment_balancing_block_title(*, enable_center_rotate: bool, enable_bbox_co
     return "[INFO] Block: Balancing/Variety (bbox_copy)"
 
 
-def _interactive_fill(args, dataset_names: list[str], classes: list[str], workspace_root: str) -> None:
+def _interactive_fill(args, dataset_names: list[str], catalog: dict, workspace_root: str) -> None:
     print("[INFO] Interactive augment mode")
-    print("[INFO] Available classes:")
-    for c in classes:
-        print(f"  - {c}")
     args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
-    args.classes = (
-        prompt(
-            "Classes separated by commas (empty=all): ",
-            default="",
-            completer=WordCompleter(classes, ignore_case=True),
-            complete_while_typing=True,
-        ).strip()
-        or None
-    )
+    class_names = sorted_class_names_for_dataset(catalog, str(args.dataset))
+    if class_names:
+        picked = prompt_multi_choice_csv(
+            "Classes (--classes; empty=all)",
+            class_names,
+            default_values=[],
+        )
+        args.classes = ",".join(picked) if picked else None
+    else:
+        print("[WARN] No classes in dataset catalog; --classes filter unavailable.")
+        args.classes = None
     args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
     print("[INFO] Block: flip")
     args.enable_flip = prompt_yes_no("Turn on flip?", default=bool(args.enable_flip))
@@ -1613,10 +1607,6 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
         "Enable frame rotation augmentation (--enable-center-rotate)?",
         default=bool(args.enable_center_rotate),
     )
-    args.enable_bbox_copy = prompt_yes_no(
-        "Enable bbox_copy paste augmentation (--enable-bbox-copy)?",
-        default=bool(args.enable_bbox_copy),
-    )
     if args.enable_center_rotate:
         print("[INFO] Block: center-rotate")
         args.center_rotate_deg = float(
@@ -1627,6 +1617,56 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             prompt_text("Number of rotate-options per frame (--rotate-copies)", default=str(getattr(args, "rotate_copies", 1))).strip()
             or str(getattr(args, "rotate_copies", 1))
         )
+        args.min_angle_delta = float(
+            prompt_text(
+                (
+                    "Min angle between center-rotate variants on one frame (degrees) "
+                    "(--min-angle-delta); avoids nearly identical rotations"
+                ),
+                default=str(getattr(args, "min_angle_delta", 1.0)),
+            ).strip()
+            or str(getattr(args, "min_angle_delta", 1.0))
+        )
+    args.enable_bbox_copy = prompt_yes_no(
+        "Enable bbox_copy paste augmentation (--enable-bbox-copy)?",
+        default=bool(args.enable_bbox_copy),
+    )
+    if args.enable_bbox_copy:
+        print("[INFO] Block: bbox_copy")
+        args.class_balance = prompt_choice(
+            "Class balance (--class-balance)",
+            ["on", "off"],
+            default=str(getattr(args, "class_balance", "on")),
+        )
+        args.color_match = prompt_choice(
+            "Color match (--color-match)",
+            ["meanstd", "off"],
+            default=str(getattr(args, "color_match", "meanstd")),
+        )
+        args.blend_feather = float(
+            prompt_text("Parameter feather [0..0.5] (--blend-feather)", default=str(getattr(args, "blend_feather", 0.16))).strip()
+            or str(getattr(args, "blend_feather", 0.16))
+        )
+        args.copy_paste_count = int(
+            prompt_text("Copy-paste count (--copy-paste-count)", default=str(args.copy_paste_count)).strip()
+            or str(args.copy_paste_count)
+        )
+        args.copy_paste_min_center_dist = float(
+            prompt_text(
+                "Min. distance between pastes [0..1] (--copy-paste-min-center-dist)",
+                default=str(getattr(args, "copy_paste_min_center_dist", 0.15)),
+            ).strip()
+            or str(getattr(args, "copy_paste_min_center_dist", 0.15))
+        )
+        args.copy_paste_placement_style = prompt_choice(
+            "Paste placement style (--copy-paste-placement-style)",
+            ["random", "uniform-grid"],
+            default=str(getattr(args, "copy_paste_placement_style", "random")),
+        )
+        args.bbox_copy_copies = int(
+            prompt_text("Number of bbox_copy-options per frame (--bbox-copy-copies)", default=str(getattr(args, "bbox_copy_copies", 1))).strip()
+            or str(getattr(args, "bbox_copy_copies", 1))
+        )
     if args.enable_center_rotate or args.enable_bbox_copy:
         print("[INFO] Block: placement / ROI")
         _print_augment_placement_mode_help(
@@ -1636,7 +1676,7 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
         roi_mode_default = _default_placement_mode_for_interactive(
             enable_center_rotate=bool(args.enable_center_rotate),
             enable_bbox_copy=bool(args.enable_bbox_copy),
-            current=str(getattr(args, "placement_mode", "detector")),
+            current=str(getattr(args, "placement_mode", "none")),
         )
         roi_mode = prompt_choice(
             _augment_roi_prompt_label(
@@ -1745,53 +1785,6 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             ).strip()
             or str(getattr(args, "min_diversity_iou", 0.97))
         )
-    if args.enable_center_rotate:
-        args.min_angle_delta = float(
-            prompt_text(
-                (
-                    "Min angle between center-rotate variants on one frame (degrees) "
-                    "(--min-angle-delta); avoids nearly identical rotations"
-                ),
-                default=str(getattr(args, "min_angle_delta", 1.0)),
-            ).strip()
-            or str(getattr(args, "min_angle_delta", 1.0))
-        )
-    if args.enable_bbox_copy:
-        print("[INFO] Block: bbox_copy")
-        args.class_balance = prompt_choice(
-            "Class balance (--class-balance)",
-            ["on", "off"],
-            default=str(getattr(args, "class_balance", "on")),
-        )
-        args.color_match = prompt_choice(
-            "Color match (--color-match)",
-            ["meanstd", "off"],
-            default=str(getattr(args, "color_match", "meanstd")),
-        )
-        args.blend_feather = float(
-            prompt_text("Parameter feather [0..0.5] (--blend-feather)", default=str(getattr(args, "blend_feather", 0.16))).strip()
-            or str(getattr(args, "blend_feather", 0.16))
-        )
-        args.copy_paste_count = int(
-            prompt_text("Copy-paste count (--copy-paste-count)", default=str(args.copy_paste_count)).strip()
-            or str(args.copy_paste_count)
-        )
-        args.copy_paste_min_center_dist = float(
-            prompt_text(
-                "Min. distance between pastes [0..1] (--copy-paste-min-center-dist)",
-                default=str(getattr(args, "copy_paste_min_center_dist", 0.15)),
-            ).strip()
-            or str(getattr(args, "copy_paste_min_center_dist", 0.15))
-        )
-        args.copy_paste_placement_style = prompt_choice(
-            "Paste placement style (--copy-paste-placement-style)",
-            ["random", "uniform-grid"],
-            default=str(getattr(args, "copy_paste_placement_style", "random")),
-        )
-        args.bbox_copy_copies = int(
-            prompt_text("Number of bbox_copy-options per frame (--bbox-copy-copies)", default=str(getattr(args, "bbox_copy_copies", 1))).strip()
-            or str(getattr(args, "bbox_copy_copies", 1))
-        )
     print("[INFO] Block: budget / class-aware")
     if geo_copies_enabled and not imbalance_soft:
         print("[INFO] Class-aware geo augment skipped (--imbalance-mode off)")
@@ -1856,7 +1849,7 @@ def main(argv=None):
         fill=lambda: _interactive_fill(
             args,
             sorted(catalog.keys()),
-            sorted_class_names_union_from_catalog(catalog),
+            catalog,
             layout.root,
         ),
     )
@@ -1953,7 +1946,7 @@ def main(argv=None):
     need_detector_for_rotate = bool(args.enable_center_rotate) and str(
         getattr(args, "center_rotate_anchor", "center")
     ) == "detector"
-    need_detector_for_copy = bool(args.enable_bbox_copy) and str(getattr(args, "placement_mode", "detector")) == "detector"
+    need_detector_for_copy = bool(args.enable_bbox_copy) and str(getattr(args, "placement_mode", "none")) == "detector"
     if need_detector_for_rotate or need_detector_for_copy:
         setattr(
             args,

@@ -120,9 +120,10 @@ def test_interactive_skips_bbox_copy_block_when_disabled(capsys) -> None:
             "n",
             "n",
             "y",
-            "n",
             "5.0",
             "1",
+            "1.0",
+            "n",
             "none",
             "n",
             "n",
@@ -133,7 +134,6 @@ def test_interactive_skips_bbox_copy_block_when_disabled(capsys) -> None:
             "soft",
             "1.0",
             "0.97",
-            "1.0",
             "n",
             "0",
             "train,val,test",
@@ -158,12 +158,19 @@ def test_interactive_skips_bbox_copy_block_when_disabled(capsys) -> None:
                 return options[idx - 1]
         return str(default or options[0])
 
+    def fake_prompt_multi_choice_csv(label, options, default_values=None, **kwargs):
+        del label, options, kwargs
+        raw = next(prompts)
+        if not raw:
+            return list(default_values or [])
+        return [x.strip() for x in raw.split(",") if x.strip()]
+
     with patch("smartrain.services.datasets.dataset_augment.prompt_choice", side_effect=fake_prompt_choice), patch(
         "smartrain.services.datasets.dataset_augment.prompt_text", side_effect=fake_prompt_text
     ), patch("smartrain.services.datasets.dataset_augment.prompt_yes_no", side_effect=fake_prompt_yes_no), patch(
-        "smartrain.services.datasets.dataset_augment.prompt", side_effect=lambda *a, **k: next(prompts)
+        "smartrain.services.datasets.dataset_augment.prompt_multi_choice_csv", side_effect=fake_prompt_multi_choice_csv
     ):
-        _interactive_fill(args, ["ds_a"], ["cat"], "/tmp/ws")
+        _interactive_fill(args, ["ds_a"], {"ds_a": {"classes": {"cat": 0}}}, "/tmp/ws")
 
     assert args.enable_bbox_copy is False
     out = capsys.readouterr().out
@@ -231,9 +238,10 @@ def test_interactive_skips_imbalance_strength_when_balancing_off(capsys) -> None
             "n",
             "n",
             "y",
-            "n",
             "5.0",
             "1",
+            "1.0",
+            "n",
             "none",
             "n",
             "n",
@@ -243,7 +251,6 @@ def test_interactive_skips_imbalance_strength_when_balancing_off(capsys) -> None
             "n",
             "off",
             "0.97",
-            "1.0",
             "0",
             "train,val,test",
             "n",
@@ -267,12 +274,19 @@ def test_interactive_skips_imbalance_strength_when_balancing_off(capsys) -> None
                 return options[idx - 1]
         return str(default or options[0])
 
+    def fake_prompt_multi_choice_csv(label, options, default_values=None, **kwargs):
+        del label, options, kwargs
+        raw = next(prompts)
+        if not raw:
+            return list(default_values or [])
+        return [x.strip() for x in raw.split(",") if x.strip()]
+
     with patch("smartrain.services.datasets.dataset_augment.prompt_choice", side_effect=fake_prompt_choice), patch(
         "smartrain.services.datasets.dataset_augment.prompt_text", side_effect=fake_prompt_text
     ), patch("smartrain.services.datasets.dataset_augment.prompt_yes_no", side_effect=fake_prompt_yes_no), patch(
-        "smartrain.services.datasets.dataset_augment.prompt", side_effect=lambda *a, **k: next(prompts)
+        "smartrain.services.datasets.dataset_augment.prompt_multi_choice_csv", side_effect=fake_prompt_multi_choice_csv
     ):
-        _interactive_fill(args, ["ds_a"], ["cat"], "/tmp/ws")
+        _interactive_fill(args, ["ds_a"], {"ds_a": {"classes": {"cat": 0}}}, "/tmp/ws")
 
     assert args.imbalance_mode == "off"
     assert args.imbalance_strength == 1.0
@@ -346,9 +360,10 @@ def test_interactive_prompts_tail_budget_when_cap_positive(capsys) -> None:
             "n",
             "n",
             "y",
-            "n",
             "5.0",
             "1",
+            "1.0",
+            "n",
             "none",
             "n",
             "n",
@@ -359,7 +374,6 @@ def test_interactive_prompts_tail_budget_when_cap_positive(capsys) -> None:
             "soft",
             "1.0",
             "0.97",
-            "1.0",
             "n",
             "1.1",
             "y",
@@ -386,12 +400,19 @@ def test_interactive_prompts_tail_budget_when_cap_positive(capsys) -> None:
                 return options[idx - 1]
         return str(default or options[0])
 
+    def fake_prompt_multi_choice_csv(label, options, default_values=None, **kwargs):
+        del label, options, kwargs
+        raw = next(prompts)
+        if not raw:
+            return list(default_values or [])
+        return [x.strip() for x in raw.split(",") if x.strip()]
+
     with patch("smartrain.services.datasets.dataset_augment.prompt_choice", side_effect=fake_prompt_choice), patch(
         "smartrain.services.datasets.dataset_augment.prompt_text", side_effect=fake_prompt_text
     ), patch("smartrain.services.datasets.dataset_augment.prompt_yes_no", side_effect=fake_prompt_yes_no), patch(
-        "smartrain.services.datasets.dataset_augment.prompt", side_effect=lambda *a, **k: next(prompts)
+        "smartrain.services.datasets.dataset_augment.prompt_multi_choice_csv", side_effect=fake_prompt_multi_choice_csv
     ):
-        _interactive_fill(args, ["ds_a"], ["cat"], "/tmp/ws")
+        _interactive_fill(args, ["ds_a"], {"ds_a": {"classes": {"cat": 0}}}, "/tmp/ws")
 
     assert args.aug_total_bbox_cap_mult == 1.1
     assert args.aug_budget_tail_first is True

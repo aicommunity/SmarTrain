@@ -21,7 +21,7 @@ from smartrain.services.datasets.dataset_access import iter_image_label_buckets,
 from smartrain.services.datasets.dataset_cli_catalog import (
     EMPTY_DATASETS_INFO_MESSAGE,
     load_datasets_catalog,
-    sorted_class_names_union_from_catalog,
+    sorted_class_names_for_dataset,
     try_prompt_dataset_interactive,
 )
 from smartrain.services.datasets.dataset_cli_common import (
@@ -315,12 +315,10 @@ def _read_label_classes(label_path: str) -> list[int]:
     return out
 
 
-def _interactive_fill(args, dataset_names: list[str], class_names: list[str]) -> None:
+def _interactive_fill(args, dataset_names: list[str], catalog: dict) -> None:
     print("[INFO] Interactive balance mode")
-    print("[INFO] Available classes:")
-    for c in class_names:
-        print(f"  - {c}")
     args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
+    class_names = sorted_class_names_for_dataset(catalog, str(args.dataset))
     args.strategy = prompt_choice(
         "Strategy",
         ["copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid", "hybrid-aug"],
@@ -1411,7 +1409,7 @@ def main(argv=None):
         fill=lambda: _interactive_fill(
             args,
             sorted(catalog.keys()),
-            sorted_class_names_union_from_catalog(catalog),
+            catalog,
         ),
     )
     if not args.dataset:
