@@ -52,6 +52,27 @@ smartrain prune classes --dataset my_dataset
 - **`prune dedup`** — удаляет дубли изображений по содержимому в `<dataset>_deduped`.
 - **`prune classes`** — копирует датасет в `<dataset>_classes_pruned`, удаляет неиспользуемые классы из метаданных (`data.yaml`, `obj.names`), перенумеровывает `class_id` в аннотациях; файлы изображений и label-файлов не удаляются.
 
+## `filter`
+
+Фильтрация edge-truncated YOLO bbox в новый датасет (по умолчанию `<dataset>_fltd`):
+
+```bash
+smartrain filter --dataset my_dataset
+smartrain filter --dataset my_dataset --stats-only
+smartrain filter --dataset my_dataset --dry-run
+smartrain filter --dataset my_dataset --drop-images
+```
+
+- **Pass 1** — baseline ширины/высоты bbox по классам только из inset-зоны (`--baseline-inset-margin`, по умолчанию `0.01`; опционально `--baseline-inset-margin-px`).
+- **Pass 2** — удаление near-edge bbox, слишком малых по абсолютным (`--abs-min-width-px`, `--abs-min-height-px`) и относительным порогам (`--rel-quantile`, `--rel-width-factor`, `--rel-height-factor`). Зона близости: `--filter-proximity-margin` (по умолчанию = baseline inset); строгое касание/OOB: `--edge-eps`.
+- Опционально: `--min-visibility`, `--min-area-px`, `--max-aspect-ratio`; `--classes` для ограничения классов.
+- **`--drop-images`** — кадр и исходная разметка убираются из train/val/test и архивируются в `_filter_audit/dropped_images/<split>/images|labels` (не участвуют в `data.yaml`, обучении и stats).
+- **`--prune-empty`** (по умолчанию вкл.) — пустые после фильтрации пары убираются из основных bucket'ов и попадают в `_filter_audit/dropped_images/` с исходными label-файлами.
+- Частичное удаление меток — снятые строки пишутся в `_filter_audit/removed_labels/<split>/labels/` с теми же относительными путями, что и в основном датасете.
+- Пути и счётчики аудита — в `filter_manifest.json` → `stats_after.audit`.
+- **`--stats-only`** / **`--dry-run`** — прогноз без записи; интерактив (`smartrain filter` из TTY) показывает таблицу preview и replay-команду.
+- В output: `filter_manifest.json` и `dataset_passport.json`.
+
 ## `augment`, `balance`, `orient`, `rotate`, `roi`
 
 ### Instance segmentation (полигоны YOLO)

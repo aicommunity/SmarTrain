@@ -152,6 +152,13 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "  smartrain heatmap --model models/best.pt --source image.jpg --output heatmap.png\n"
         "  smartrain heatmap --model models/best.pt --source image.jpg --colormap 12\n"
     ),
+    "smartrain filter": (
+        "Examples:\n"
+        "  smartrain filter --dataset my_dataset\n"
+        "  smartrain filter --dataset my_dataset --stats-only\n"
+        "  smartrain filter --dataset my_dataset --dry-run --baseline-inset-margin 0.01\n"
+        "  smartrain filter --dataset my_dataset --drop-images --output-name my_dataset_fltd\n"
+    ),
     "smartrain report dataset": (
         "Examples:\n"
         "  smartrain report dataset --dataset my_dataset\n"
@@ -635,6 +642,31 @@ def cmd_prune(ctx: typer.Context) -> None:
         module="smartrain.workflows.datasets.dataset_prune",
         build_parser=parser,
         prog=prog,
+        empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
+    )
+
+
+@app.command(
+    "filter",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_filter(ctx: typer.Context) -> None:
+    """Filter edge-truncated bbox annotations into a new dataset.
+
+    Examples:
+      smartrain filter --dataset my_dataset
+      smartrain filter --dataset my_dataset --stats-only
+      smartrain filter --dataset my_dataset --dry-run
+    """
+    from smartrain.workflows.datasets.dataset_filter import build_filter_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.datasets.dataset_filter",
+        build_parser=build_filter_arg_parser,
+        prog="smartrain filter",
         empty_args_mode="invoke_if_tty_else_help",
         ensure_scan=True,
     )

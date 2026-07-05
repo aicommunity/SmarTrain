@@ -6,7 +6,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 
 ## Command groups
 
-- Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`
+- Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`
 - Training: `train`, `clearml-upload`
 - Providers: `providers`
 - Info: `info`
@@ -97,5 +97,6 @@ Balance and stats additions:
 - `smartrain prune empty` removes empty image/label pairs into a new `<dataset>_pruned` dataset.
 - `smartrain prune dedup` removes duplicate images by file content into `<dataset>_deduped` (global split priority: train > val > test).
 - `smartrain prune classes` removes unused classes from metadata into `<dataset>_classes_pruned` (files kept; `class_id` remapped).
+- `smartrain filter` removes edge-truncated bbox annotations into `<dataset>_fltd` (baseline inset stats + relative/absolute thresholds; audit under `_filter_audit/`; `--stats-only`, `--drop-images`, interactive preview).
 - `smartrain scan --strip-unused-classes` strips unused classes for **new** datasets during scan (default **on**; use `--no-strip-unused-classes` to disable).
 - `smartrain report dataset` writes a multilingual per-class sample report (Markdown + PNG; default folder `analytics/datasets-reports/<dataset>_<timestamp>/`). Default dependencies include bundled pandoc (`pypandoc-binary`), WeasyPrint, `fpdf2`, and `odfpy` for PDF/ODT. WeasyPrint may need OS libraries (Cairo, Pango) if wheels are unavailable.
