@@ -9,11 +9,9 @@ import pandas as pd
 
 def run_scan_command(
     *,
-    models_root: str,
-    find_run_directories_fn: Callable[[str], list[str]],
+    runs: list[str],
     flat_row_for_run: Callable[[str], dict[str, Any]],
 ) -> None:
-    runs = find_run_directories_fn(models_root)
     scan_runs(runs=runs, flat_row_for_run=flat_row_for_run)
 
 
@@ -23,9 +21,9 @@ def scan_runs(
     flat_row_for_run: Callable[[str], dict[str, Any]],
 ) -> None:
     if not runs:
-        print("(no runs with training_metadata.json found)")
+        print("(no runs or promoted models found)")
         return
-    print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'run_dir'}")
+    print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'path'}")
     print("-" * 100)
     for i, run_dir in enumerate(runs, start=1):
         try:

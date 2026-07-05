@@ -4,6 +4,8 @@ import os
 import sys
 from typing import Any, Callable
 
+from smartrain.core.runtime.workspace_paths import resolve_workspace_root
+
 
 def prepare_all_selection(
     args: Any,
@@ -33,31 +35,44 @@ def prepare_all_selection(
         selection_prompts_used = True
         indexed = filtered_run_records_cb(args)
         if len(indexed) < 1:
-            print("[ERROR] Need at least one run for full analysis.")
+            print("[ERROR] Need at least one run or promoted model for full analysis.")
             sys.exit(1)
-        runs_root = os.path.abspath(str(args.models_root))
+        workspace_root: str | None = None
+        try:
+            workspace_root = resolve_workspace_root(getattr(args, "workspace", None))
+        except ValueError:
+            workspace_root = None
 
-        def _display_run_dir(path: str) -> str:
+        def _source_label(path: str) -> str:
+            parts = [p.lower() for p in os.path.abspath(path).split(os.sep)]
+            if "models" in parts:
+                return "models"
+            if "runs" in parts:
+                return "runs"
+            return "?"
+
+        def _display_target_dir(path: str) -> str:
             ap = os.path.abspath(path)
-            try:
-                rel = os.path.relpath(ap, runs_root)
-                if not rel.startswith(".."):
-                    return rel
-            except Exception:
-                pass
+            if workspace_root:
+                try:
+                    rel = os.path.relpath(ap, workspace_root)
+                    if not rel.startswith(".."):
+                        return rel
+                except Exception:
+                    pass
             return ap
 
-        print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'run_dir (relative to runs root)'}")
-        print("-" * 120)
+        print(f"{'#':>4}  {'src':<7}  {'model':<14}  {'dataset':<24}  {'path (relative to workspace)'}")
+        print("-" * 130)
         for i, (rd, rec) in enumerate(indexed, start=1):
             print(
-                f"{i:4d}  {str(rec.model or '?')[:14]:<14}  "
-                + f"{str(rec.dataset_name or '?')[:24]:<24}  {_display_run_dir(rd)}"
+                f"{i:4d}  {_source_label(rd):<7}  {str(rec.model or '?')[:14]:<14}  "
+                + f"{str(rec.dataset_name or '?')[:24]:<24}  {_display_target_dir(rd)}"
             )
         if len(indexed) == 1:
             baseline = indexed[0][0]
             others = []
-            print("[INFO] Single run in workspace: using it as baseline (baseline-only report).")
+            print("[INFO] Single target in workspace: using it as baseline (baseline-only report).")
         else:
             baseline_idx = prompt_int_cb("Baseline run number", default=1)
             others_raw = prompt_text_cb(
@@ -84,4 +99,3 @@ def prepare_all_selection(
         setattr(args, "others", others)
         setattr(args, "profile", profile)
     return baseline, others, profile, selection_prompts_used
-

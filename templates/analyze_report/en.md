@@ -52,6 +52,12 @@ Next we analyze per-class quality: where models disagree most and which classes 
 <!-- BLOCK: SUB_ULTRA_RUN -->
 This subsection lists Ultralytics test artifacts and images for a specific run: configuration, machine info, and CSV/PR links. It is a quick completeness audit of the test pass.
 
+<!-- BLOCK: SUB_ULTRA_COMPLETENESS -->
+Below is how complete the Ultralytics test artifact set is for this run and where files were resolved from (test-split vs train-ultralytics fallback).
+
+<!-- BLOCK: SUB_ULTRA_PER_CLASS_TABLE -->
+The table summarizes per-class AP from pr_per_class.csv for quick review without opening the source CSV.
+
 <!-- BLOCK: SUB_CONCLUSION_MISSING -->
 Below are missing artifacts and structured reasons from the session manifest. This is an explicit record of what could not be collected or recomputed—not a reporting error.
 

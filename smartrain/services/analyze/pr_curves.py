@@ -203,17 +203,9 @@ def run_pr_curves(
             clear_gpu_memory_cb()
 
         curves.append((label, recall, precision))
-        pr_dir = os.path.join(run_dir, "tests", "test-ultralytics")
-        if not os.path.isdir(pr_dir):
-            pr_dir = os.path.join(run_dir, "test")
-        os.makedirs(pr_dir, exist_ok=True)
-        pr_csv = os.path.join(pr_dir, "pr.csv")
-        pd.DataFrame({"recall": recall, "precision": precision}).to_csv(pr_csv, index=False, encoding="utf-8")
         if per_class_df is not None and len(per_class_df) > 0:
-            pr_pc_csv = os.path.join(pr_dir, "pr_per_class.csv")
-            per_class_df.to_csv(pr_pc_csv, index=False, encoding="utf-8")
             per_class_rows.extend(per_class_df.to_dict(orient="records"))
-        print(f"[OK] {label}: saved {pr_csv}")
+        print(f"[OK] {label}: PR curve cached at {cache_agg}")
 
     if not curves:
         print("[ERROR] Failed to obtain any PR curves.", file=sys.stderr)

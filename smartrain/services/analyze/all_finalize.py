@@ -10,6 +10,9 @@ import pandas as pd
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 
 
+from smartrain.services.analyze.ultralytics_test_ensure import ensure_ultralytics_test_for_runs
+
+
 def finalize_all_session(
     *,
     args: Any,
@@ -36,6 +39,14 @@ def finalize_all_session(
     replay_parser: argparse.ArgumentParser | None = None,
 ) -> None:
     abbreviations = build_abbreviations_for_report_cb([baseline] + others)
+    ensure_ultralytics_test_for_runs(
+        [baseline] + others,
+        args=args,
+        profile=profile,
+        workspace_cli=getattr(args, "workspace", None),
+        run_data_yaml_map=run_data_yaml_map,
+        record_failure_cb=record_failure_cb,
+    )
     ultralytics_test_rows, ultralytics_test_artifacts = collect_ultralytics_test_artifacts_cb(
         session_root,
         [baseline] + others,

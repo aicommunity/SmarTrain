@@ -42,6 +42,7 @@ def ultralytics_pt_rich_files_required(task_type: str | None) -> tuple[str, ...]
         return base
     if t in {"segmentation", "segment", "seg"}:
         return base + detect_style
+    return base + detect_style
 
 
 # Recommended but not required for completeness (Ultralytics version-dependent).
@@ -58,7 +59,6 @@ def ultralytics_pt_mask_plots_optional(task_type: str | None) -> tuple[str, ...]
     if t in {"segmentation", "segment", "seg"}:
         return ULTRALYTICS_PT_MASK_PLOTS_OPTIONAL
     return ()
-    return base + detect_style
 
 
 def native_format_rich_files_required() -> tuple[str, ...]:
@@ -100,5 +100,6 @@ def _read_training_task_type(root_dir: str) -> str | None:
 def rich_files_required_for_format(root_dir: str, format_name: str) -> tuple[str, ...]:
     fmt = str(format_name or "pt").strip().lower()
     if fmt == "pt":
-        return ultralytics_pt_rich_files_required(_read_training_task_type(root_dir))
+        task = _read_training_task_type(root_dir)
+        return ultralytics_pt_rich_files_required(task or "detect")
     return native_format_rich_files_required()

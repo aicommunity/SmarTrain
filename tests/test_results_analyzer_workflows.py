@@ -129,6 +129,8 @@ def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path
     monkeypatch.setattr("smartrain.run_model_contract.gateway.load_target", lambda *_a, **_k: _P())
     ns = argparse.Namespace(
         models_root=str(tmp_path / "runs"),
+        models_root_cli=None,
+        workspace=str(tmp_path),
         filter_dataset=None,
         filter_model=None,
         filter_training_ok=None,
@@ -139,6 +141,40 @@ def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path
     _rd, rec = rows[0]
     assert rec.model == "canonical_model"
     assert rec.dataset_name == "ds_a"
+
+
+def test_filtered_run_records_includes_promoted_models(tmp_path: Path, monkeypatch) -> None:
+    from smartrain.services.analyze.run_query import filtered_run_records
+
+    release_dir = tmp_path / "models" / "ds_b" / "detect_yolo_20260115"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    (release_dir.parent / "detect_yolo_20260115.pt").write_bytes(b"pt")
+    (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    class _M:
+        model_id = "released_model"
+
+    class _R:
+        dataset_ref = "ds_b"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.load_metrics", lambda *_a, **_k: [])
+
+    ns = argparse.Namespace(
+        workspace=str(tmp_path),
+        models_root_cli=None,
+        filter_dataset=None,
+        filter_model=None,
+        filter_training_ok=None,
+        filter_testing_ok=None,
+    )
+    rows = filtered_run_records(ns, build_run_record_cb=results_analyzer._build_run_record_unified)
+    paths = [rd for rd, _ in rows]
+    assert str(release_dir.resolve()) in paths
 
 
 def test_build_run_record_unified_uses_gateway_metrics(tmp_path: Path, monkeypatch) -> None:
@@ -1233,7 +1269,7 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
 
     def _fake_prompt_text(label: str, default: str = "", **_kwargs) -> str:
         prompt_defaults[label] = default
-        if label == "Other run numbers (comma-separated)":
+        if label == "Other run numbers (comma-separated, leave empty for baseline-only report)":
             return ""
         if label == "Path to data.yaml (required for speed/full)":
             return str(tmp_path / "datasets" / "ds_a" / "data.yaml")
@@ -1260,11 +1296,10 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
     )
     out = capsys.readouterr().out
 
-    assert prompt_defaults.get("Other run numbers (comma-separated)") == ""
-    assert "run_dir (relative to runs root)" in out
+    assert prompt_defaults.get("Other run numbers (comma-separated, leave empty for baseline-only report)") == ""
+    assert "path (relative to workspace)" in out.lower()
     first_row = next((line for line in out.splitlines() if line.strip().startswith("1  ")), "")
-    assert "ds_a/run_a" in first_row
-    assert "/runs/" not in first_row
+    assert "runs/ds_a/run_a" in first_row
     assert "No candidate runs selected: compare artifacts are skipped" in out
 
     session_root = tmp_path / "analytics" / "analyze-reports" / "session_single_run"

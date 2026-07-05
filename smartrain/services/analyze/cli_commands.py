@@ -55,7 +55,12 @@ from smartrain.services.analyze.metrics_reader import (
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
-from smartrain.core.runtime.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
+from smartrain.core.runtime.run_discovery import (
+    discover_analysis_targets,
+    find_run_directories,
+    is_run_directory,
+    resolve_models_scan_root,
+)
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.training.confidence_recommendation import recommendation_file_path, read_recommendation_file
@@ -467,15 +472,21 @@ def _load_dataset_class_names(data_yaml: str) -> dict[int, str]:
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
+    targets = discover_analysis_targets(
+        workspace_cli=getattr(args, "workspace", None),
+        models_root_cli=getattr(args, "models_root_cli", None),
+    )
     run_scan_command(
-        models_root=args.models_root,
-        find_run_directories_fn=find_run_directories,
+        runs=targets,
         flat_row_for_run=_flat_row_for_run,
     )
 
 
 def cmd_export_table(args: argparse.Namespace) -> None:
-    runs = find_run_directories(args.models_root)
+    runs = discover_analysis_targets(
+        workspace_cli=getattr(args, "workspace", None),
+        models_root_cli=getattr(args, "models_root_cli", None),
+    )
     out_path = _default_relative_output(
         args.workspace, args.analytics_session, "table", "runs_summary.csv", args.output
     )
@@ -672,8 +683,13 @@ def _build_run_record_unified(run_dir: str) -> RunRecord:
     )
 
 
-def _read_test_metrics_for_run(run_dir: str, *, format_name: str = "pt") -> dict[str, Any]:
-    return _svc_read_test_metrics_for_run(run_dir, format_name=format_name)
+def _read_test_metrics_for_run(
+    run_dir: str,
+    *,
+    format_name: str = "pt",
+    source_kind: str | None = None,
+) -> dict[str, Any]:
+    return _svc_read_test_metrics_for_run(run_dir, format_name=format_name, source_kind=source_kind)
 
 
 def _flat_row_unified(run_dir: str) -> dict[str, Any]:
@@ -738,7 +754,10 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
         args.quality_metric = prompt_text("Quality metric", default="mAP50-95").strip() or "mAP50-95"
     if not getattr(args, "speed_metric", None) and sys.stdin.isatty():
         args.speed_metric = prompt_text("Speed metric", default="avg_inference_fps").strip() or "avg_inference_fps"
-    runs = find_run_directories(args.models_root)
+    runs = discover_analysis_targets(
+        workspace_cli=getattr(args, "workspace", None),
+        models_root_cli=getattr(args, "models_root_cli", None),
+    )
     selected_norm = {
         os.path.abspath(os.path.expanduser(str(p)))
         for p in (getattr(args, "selected_run_dirs", None) or [])
@@ -1212,6 +1231,19 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         default="mAP50-95",
         help="Y-axis metric for speed/quality scatter from test metrics",
     )
+    p_all.add_argument(
+        "--ensure-ultralytics-test",
+        dest="ensure_ultralytics_test",
+        action="store_true",
+        default=None,
+        help="Run full PT Ultralytics test when canonical test artifacts are incomplete (default: on for profile full)",
+    )
+    p_all.add_argument(
+        "--no-ensure-ultralytics-test",
+        dest="ensure_ultralytics_test",
+        action="store_false",
+        help="Skip auto PT Ultralytics test before report collection",
+    )
     p_all.add_argument("--val-batch", type=int, default=1, help="Validation batch size for GPU memory-safe val()")
     p_all.add_argument("--val-imgsz", type=int, default=640, help="Validation image size for GPU memory-safe val()")
     p_all.add_argument("--val-half", dest="val_half", action="store_true", default=True, help="Use FP16 for validation on GPU")
@@ -1465,7 +1497,8 @@ def main(argv=None) -> None:
         argv = sys.argv[1:]
     parser = build_analyze_arg_parser()
     args = parser.parse_args(argv)
-    args.models_root = resolve_models_scan_root(args.workspace, args.models_root)
+    args.models_root_cli = getattr(args, "models_root", None)
+    args.models_root = resolve_models_scan_root(args.workspace, args.models_root_cli)
     ws_prune: str | None = None
     try:
         ws_prune = resolve_workspace_root(getattr(args, "workspace", None))

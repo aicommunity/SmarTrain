@@ -1103,6 +1103,110 @@ def _load_filtered_table_df(rel: str, abs_path: str, manifest: dict[str, Any]) -
         return None
 
 
+def _ultralytics_completeness_lines(item: dict[str, Any], is_ru: bool) -> list[str]:
+    completeness = str(item.get("completeness") or "").strip().lower()
+    note = str(item.get("completeness_note") or "").strip()
+    missing = item.get("missing_files") if isinstance(item.get("missing_files"), list) else []
+    sources = item.get("artifact_sources") if isinstance(item.get("artifact_sources"), dict) else {}
+    lines: list[str] = []
+    labels = {
+        "complete": ("Полнота: полный набор test-артефактов." if is_ru else "Completeness: full canonical test artifact set."),
+        "partial_csv_only": (
+            "Полнота: только PR CSV; графики Ultralytics отсутствуют в test-split."
+            if is_ru
+            else "Completeness: PR CSV only; Ultralytics plots missing from test-split."
+        ),
+        "train_val_fallback": (
+            "Полнота: часть графиков взята из train-ultralytics (val при обучении), не test-split."
+            if is_ru
+            else "Completeness: some plots resolved from train-ultralytics (training val), not test-split."
+        ),
+        "missing": ("Полнота: артефакты Ultralytics test не найдены." if is_ru else "Completeness: no Ultralytics test artifacts found."),
+    }
+    if completeness in labels:
+        lines.append("- " + labels[completeness])
+    if note:
+        lines.append("- " + note)
+    if missing:
+        miss_txt = ", ".join(str(x) for x in missing[:12])
+        if len(missing) > 12:
+            miss_txt += ", ..."
+        lines.append(
+            "- "
+            + ("Отсутствуют обязательные файлы: " if is_ru else "Missing required files: ")
+            + miss_txt
+        )
+    if sources:
+        prov_labels = {
+            "test": "test" if not is_ru else "test-split",
+            "legacy": "legacy",
+            "train_val_fallback": "train-val" if not is_ru else "train-val",
+        }
+        sample = []
+        for name, prov in sorted(sources.items()):
+            sample.append(f"{name}←{prov_labels.get(str(prov), prov)}")
+        if sample:
+            lines.append(
+                "- "
+                + ("Источники файлов: " if is_ru else "File sources: ")
+                + ", ".join(sample[:10])
+                + (" ..." if len(sample) > 10 else "")
+            )
+    if completeness in {"partial_csv_only", "missing", "train_val_fallback"}:
+        run_name = str(item.get("run_name") or item.get("run_code") or "")
+        lines.append(
+            "- "
+            + (
+                f"Для полного test-набора выполните: `smartrain model test --run {run_name}`."
+                if is_ru
+                else f"For a full test artifact set run: `smartrain model test --run {run_name}`."
+            )
+        )
+    return lines
+
+
+def _ultralytics_per_class_ap_table_lines(
+    *,
+    report_root: str,
+    csv_rel: str,
+    is_ru: bool,
+    table_no: int,
+) -> tuple[list[str], int]:
+    abs_path = os.path.join(report_root, csv_rel)
+    if not os.path.isfile(abs_path):
+        return [], table_no
+    try:
+        df = pd.read_csv(abs_path)
+    except Exception:
+        return [], table_no
+    if len(df) == 0:
+        return [], table_no
+    df.columns = [str(c).strip() for c in df.columns]
+    if "class_name" not in df.columns or "ap" not in df.columns:
+        return [], table_no
+    summary = (
+        df.groupby("class_name", dropna=False)["ap"]
+        .max()
+        .reset_index()
+        .rename(columns={"ap": "AP"})
+        .sort_values("AP", ascending=False)
+    )
+    if len(summary) > 20:
+        summary = summary.head(20)
+    lines: list[str] = []
+    lines.extend(_center_open())
+    lines.append("")
+    title = "AP по классам (Ultralytics test)" if is_ru else "Per-class AP (Ultralytics test)"
+    lines.append(f"**{('Таблица' if is_ru else 'Table')} {table_no}. {title}**")
+    lines.append("")
+    lines.extend(_md_table_from_df(summary, {}, limit=None, is_ru=is_ru))
+    lines.append("")
+    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{csv_rel}`"))
+    lines.append("")
+    lines.extend(_center_close())
+    return lines, table_no + 1
+
+
 def _csv_source_label(csv_key: str, is_ru: bool) -> str:
     key = str(csv_key or "").strip().lower()
     if key == "pr.csv":
@@ -2947,6 +3051,11 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.append(f"### {ultra_sub_idx}.{run_pos} {('Запуск' if is_ru else 'Run')} {run_code}")
             lines.append("")
             lines.extend(_subsection_intro_lines(tpl, "SUB_ULTRA_RUN"))
+            comp_lines = _ultralytics_completeness_lines(item, is_ru)
+            if comp_lines:
+                lines.append("")
+                lines.extend(_subsection_intro_lines(tpl, "SUB_ULTRA_COMPLETENESS"))
+                lines.extend(comp_lines)
             run_info = item.get("run_info") or {}
             if isinstance(run_info, dict):
                 model = str(run_info.get("model") or "").strip()
@@ -3006,6 +3115,17 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             + _csv_source_label(key, is_ru)
                             + f": `{rel}`"
                         )
+                pc_rel = str(csv_map.get("pr_per_class.csv") or "")
+                if pc_rel and str(report_root):
+                    lines.append("")
+                    lines.extend(_subsection_intro_lines(tpl, "SUB_ULTRA_PER_CLASS_TABLE"))
+                    pc_lines, table_no = _ultralytics_per_class_ap_table_lines(
+                        report_root=str(report_root),
+                        csv_rel=pc_rel,
+                        is_ru=is_ru,
+                        table_no=table_no,
+                    )
+                    lines.extend(pc_lines)
             if lines and not lines[-1] == "":
                 lines.append("")
             for rel in item.get("images") or []:
