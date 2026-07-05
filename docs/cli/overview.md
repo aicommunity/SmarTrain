@@ -92,6 +92,8 @@ Balance and stats additions:
 - For `--strategy hybrid-aug`, a constrained-growth tail-first mode is enabled by default: `--aug-total-bbox-cap-mult 1.10`, `--aug-budget-tail-first`, `--aug-budget-tail-gamma 1.0`, `--train-head-bbox-undersample median-factor`, `--train-head-bbox-cap-mult 5.0`, plus conservative eval head trimming `--eval-head-bbox-undersample median-factor --eval-head-bbox-cap-mult 8.0 --eval-head-bbox-min-count 30 --eval-head-bbox-max-remove-frac 0.35` (override with explicit flags).
 - `smartrain balance --eval-coverage` (default on) adjusts the balanced train pool so `val`/`test` stay non-empty when possible and missing classes in eval splits are filled from train; `--no-eval-coverage` disables this. Interactive `balance` prompts for the same choice.
 - `smartrain stats --balance-ready` prints imbalance metrics and balancing recommendations.
+- `smartrain stats --after-augment` compares per-class train bbox counts after balance vs after augment (reads `balance_manifest.json` from hybrid-aug outputs).
+- Standalone `smartrain augment --preset augment-tail-safe` enables class-aware geo, bbox cap 1.10×, and tail-first budget (same augment knobs as `balance --preset hybrid-aug-tail-budget` without running balance).
 - `smartrain prune empty` removes empty image/label pairs into a new `<dataset>_pruned` dataset.
 - `smartrain prune dedup` removes duplicate images by file content into `<dataset>_deduped` (global split priority: train > val > test).
 - `smartrain prune classes` removes unused classes from metadata into `<dataset>_classes_pruned` (files kept; `class_id` remapped).

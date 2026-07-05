@@ -222,6 +222,36 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
         help="For hybrid-aug with bbox cap: tail-priority exponent passed to augment (default 1.0).",
     )
     p.add_argument(
+        "--aug-imbalance-mode",
+        choices=("off", "soft"),
+        default="soft",
+        help="For hybrid-aug: pass --imbalance-mode to augment (class-aware geo requires soft).",
+    )
+    p.add_argument(
+        "--aug-imbalance-strength",
+        type=float,
+        default=1.0,
+        help="For hybrid-aug: pass --imbalance-strength to augment.",
+    )
+    p.add_argument(
+        "--aug-flip-sampling",
+        choices=("probabilistic", "exhaustive"),
+        default="probabilistic",
+        help="For hybrid-aug: pass --flip-sampling to augment.",
+    )
+    p.add_argument(
+        "--aug-flip-prob",
+        type=float,
+        default=0.5,
+        help="For hybrid-aug: pass --flip-prob to augment (probabilistic flip only).",
+    )
+    p.add_argument(
+        "--aug-min-diversity-iou",
+        type=float,
+        default=0.97,
+        help="For hybrid-aug: pass --min-diversity-iou to augment.",
+    )
+    p.add_argument(
         "--train-head-bbox-undersample",
         choices=("off", "median-factor"),
         default="off",
@@ -1016,6 +1046,11 @@ def _build_hybrid_aug_augment_argv(
     aug_total_bbox_cap_mult: float,
     aug_budget_tail_first: bool,
     aug_budget_tail_gamma: float,
+    aug_imbalance_mode: str = "soft",
+    aug_imbalance_strength: float = 1.0,
+    aug_flip_sampling: str = "probabilistic",
+    aug_flip_prob: float = 0.5,
+    aug_min_diversity_iou: float = 0.97,
 ) -> list[str]:
     argv = [
         "--workspace",
@@ -1037,6 +1072,16 @@ def _build_hybrid_aug_augment_argv(
         "5",
         "--rotate-copies",
         "1",
+        "--imbalance-mode",
+        str(aug_imbalance_mode),
+        "--imbalance-strength",
+        str(float(aug_imbalance_strength)),
+        "--flip-sampling",
+        str(aug_flip_sampling),
+        "--flip-prob",
+        str(float(aug_flip_prob)),
+        "--min-diversity-iou",
+        str(float(aug_min_diversity_iou)),
     ]
     if preset == "conveyor-lite":
         argv.append("--enable-conveyor")
@@ -1676,8 +1721,13 @@ def main(argv=None):
     aug_argv_list: list[str] | None = None
     bbox_before_augment: int | None = None
     bbox_after_augment: int | None = None
+    class_counts_after_augment: dict[str, int] | None = None
     if is_hybrid_aug:
-        from smartrain.services.datasets.dataset_augment import main as augment_main, sum_train_bbox_disk
+        from smartrain.services.datasets.dataset_augment import (
+            main as augment_main,
+            sum_train_bbox_disk,
+            sum_train_class_bbox_disk,
+        )
 
         saved_intermediate_name = out_name
         final_base = args.output_name or f"{args.dataset}_balanced_aug"
@@ -1692,6 +1742,11 @@ def main(argv=None):
             aug_total_bbox_cap_mult=float(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
             aug_budget_tail_first=bool(getattr(args, "aug_budget_tail_first", True)),
             aug_budget_tail_gamma=float(getattr(args, "aug_budget_tail_gamma", 1.0)),
+            aug_imbalance_mode=str(getattr(args, "aug_imbalance_mode", "soft")),
+            aug_imbalance_strength=float(getattr(args, "aug_imbalance_strength", 1.0)),
+            aug_flip_sampling=str(getattr(args, "aug_flip_sampling", "probabilistic")),
+            aug_flip_prob=float(getattr(args, "aug_flip_prob", 0.5)),
+            aug_min_diversity_iou=float(getattr(args, "aug_min_diversity_iou", 0.97)),
         )
         pred_final = next_dataset_name(layout.datasets, final_base)
         bbox_before_augment = int(sum_train_bbox_disk(out_dir))
@@ -1716,6 +1771,10 @@ def main(argv=None):
         out_name = pred_final
         out_hash = calculate_dataset_hash(out_dir)
         bbox_after_augment = int(sum_train_bbox_disk(out_dir))
+        class_counts_after_augment_ids = sum_train_class_bbox_disk(out_dir)
+        class_counts_after_augment = {
+            id_to_name.get(c, f"id_{c}"): int(n) for c, n in class_counts_after_augment_ids.items()
+        }
     if args.emit_train_config or args.emit_balance_report:
         counts_after: dict[str, int] = defaultdict(int)
         for _split, _img, _lbl, cls_names in balanced_train:
@@ -1779,6 +1838,7 @@ def main(argv=None):
                             "budget_tail_gamma": float(getattr(args, "aug_budget_tail_gamma", 1.0)),
                             "train_bbox_sum_before_augment": bbox_before_augment,
                             "train_bbox_sum_after_augment": bbox_after_augment,
+                            "class_counts_after_augment": class_counts_after_augment,
                             "argv_summary": aug_argv_list or [],
                         }
                         if is_hybrid_aug

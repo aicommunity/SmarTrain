@@ -63,6 +63,15 @@ SPLIT_ALIASES = {"train": "train", "val": "val", "valid": "valid", "test": "test
 _BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 _ROI_MODEL_CACHE: dict[str, YOLO] = {}
 
+AUGMENT_PRESETS: dict[str, dict[str, object]] = {
+    "augment-tail-safe": {
+        "aug_class_aware_geo": True,
+        "aug_total_bbox_cap_mult": 1.10,
+        "aug_budget_tail_first": True,
+        "aug_budget_tail_gamma": 1.0,
+    },
+}
+
 
 def build_augment_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(description="Offline augmentation of a dataset into a new datasets/<name>")
@@ -79,6 +88,16 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--splits", type=str, default="train", help="CSV: train,val,test")
     p.add_argument("--classes", type=str, default=None, help="Limit augmentation to CSV classes")
     p.add_argument("--seed", type=int, default=12345)
+    p.add_argument(
+        "--preset",
+        choices=tuple(AUGMENT_PRESETS.keys()),
+        default=None,
+        help=(
+            "Preset with tuned augment balancing. "
+            "augment-tail-safe: class-aware geo, bbox cap 1.10× baseline, tail-first budget "
+            "(aligned with hybrid-aug-tail-budget defaults; standalone augment defaults stay unchanged)."
+        ),
+    )
     # --- flip ---
     p.add_argument("--enable-flip", action="store_true", help="Enable flip augmentation")
     p.add_argument(
@@ -91,7 +110,10 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
         "--flip-sampling",
         choices=("probabilistic", "exhaustive"),
         default="probabilistic",
-        help="probabilistic: at most one flip per frame via --flip-prob; exhaustive: always all variants for --flip",
+        help=(
+            "probabilistic: at most one flip per frame via --flip-prob; exhaustive: always all variants for --flip. "
+            "With --aug-class-aware-geo, exhaustive bypasses per-frame probability scaling (see startup WARN)."
+        ),
     )
     p.add_argument(
         "--flip-prob",
@@ -105,7 +127,10 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
         "--orthogonal-rotate-sampling",
         choices=("probabilistic", "exhaustive"),
         default="probabilistic",
-        help="probabilistic: at most one ±90° variant; exhaustive: always both +90° and -90°",
+        help=(
+            "probabilistic: at most one ±90° variant; exhaustive: always both +90° and -90°. "
+            "With --aug-class-aware-geo, exhaustive bypasses per-frame probability scaling (see startup WARN)."
+        ),
     )
     p.add_argument(
         "--orthogonal-rotate-prob",
@@ -254,6 +279,15 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help="Exponent γ for tail priority when --aug-budget-tail-first (default 1.0).",
+    )
+    p.add_argument(
+        "--aug-per-class-bbox-cap-mult",
+        type=float,
+        default=0.0,
+        help=(
+            "If >0: per-class train bbox cap = ceil(mult × baseline n_c); extra variants that would exceed "
+            "class slack are skipped. Complements --aug-total-bbox-cap-mult and tail-first ordering."
+        ),
     )
     p.add_argument("--min-diversity-iou", type=float, default=0.97, help="bbox similarity threshold (higher -> almost duplicate)")
     p.add_argument("--min-angle-delta", type=float, default=1.0, help="Minimum angle difference between rotate options")
@@ -569,12 +603,43 @@ def _labels_signature_iou(
     return float(sum(sims) / len(sims)) if sims else 0.0
 
 
-def _collect_class_freq(items: list[dict]) -> dict[int, int]:
+def _collect_class_freq(items: list[dict], *, train_only: bool = True) -> dict[int, int]:
     freq: dict[int, int] = {}
     for it in items:
+        if train_only:
+            split_norm = SPLIT_ALIASES.get(str(it.get("split", "")).strip().lower(), str(it.get("split", "")).strip().lower())
+            if split_norm != "train":
+                continue
         for cls, *_ in _parse_yolo_labels(it["lbl"]):
             freq[int(cls)] = freq.get(int(cls), 0) + 1
     return freq
+
+
+def _label_class_counts(lbl_path: str) -> dict[int, int]:
+    ctr: dict[int, int] = defaultdict(int)
+    for cls, *_ in _parse_yolo_labels(lbl_path):
+        ctr[int(cls)] += 1
+    return dict(ctr)
+
+
+def _labels_class_counts(labels: list[tuple[int, float, float, float, float]]) -> dict[int, int]:
+    ctr: dict[int, int] = defaultdict(int)
+    for cls, *_ in labels:
+        ctr[int(cls)] += 1
+    return dict(ctr)
+
+
+def _inserted_class_delta(
+    original: dict[int, int],
+    new_labels: list[tuple[int, float, float, float, float]],
+) -> tuple[int, dict[int, int]]:
+    new_counts = _labels_class_counts(new_labels)
+    delta_by_class: dict[int, int] = {}
+    for c in set(original) | set(new_counts):
+        d = int(new_counts.get(c, 0)) - int(original.get(c, 0))
+        if d > 0:
+            delta_by_class[c] = d
+    return sum(delta_by_class.values()), delta_by_class
 
 
 def _image_soft_weight(class_ids: set[int], class_freq: dict[int, int], alpha: float) -> float:
@@ -672,42 +737,35 @@ def _reorder_items_for_bbox_budget(
     return [items[j] for j in order]
 
 
-def _effective_orthogonal_prob_geo(args, image_weight: float) -> float:
-    base = float(getattr(args, "orthogonal_rotate_prob", 0.5))
-    if not bool(getattr(args, "aug_class_aware_geo", False)):
-        return base
-    if str(getattr(args, "imbalance_mode", "soft")) != "soft":
+def _class_aware_enabled(args) -> bool:
+    return bool(getattr(args, "aug_class_aware_geo", False)) and str(getattr(args, "imbalance_mode", "soft")) == "soft"
+
+
+def _class_aware_trigger_prob(args, image_weight: float, base_prob: float) -> float:
+    """Unified class-aware trigger probability for flip / photo / orthogonal geo branches."""
+    base = float(base_prob)
+    if not _class_aware_enabled(args):
         return base
     strength = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
     w = max(1e-9, float(image_weight))
     scale = math.sqrt(w) * max(0.35, min(2.5, strength))
     p = base * scale
     return float(min(1.0, max(0.02, p)))
+
+
+def _effective_orthogonal_prob_geo(args, image_weight: float) -> float:
+    return _class_aware_trigger_prob(args, image_weight, float(getattr(args, "orthogonal_rotate_prob", 0.5)))
 
 
 def _effective_flip_prob_geo(args, image_weight: float) -> float:
-    """Higher probability for tail-heavy frames when aug-class-aware-geo + imbalance soft."""
-    base = float(getattr(args, "flip_prob", 0.5))
-    if not bool(getattr(args, "aug_class_aware_geo", False)):
-        return base
-    if str(getattr(args, "imbalance_mode", "soft")) != "soft":
-        return base
-    strength = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
-    w = max(1e-9, float(image_weight))
-    scale = math.sqrt(w) * max(0.35, min(2.5, strength))
-    p = base * scale
-    return float(min(1.0, max(0.02, p)))
+    return _class_aware_trigger_prob(args, image_weight, float(getattr(args, "flip_prob", 0.5)))
 
 
 def _geo_photo_trigger(args, image_weight: float, rng: random.Random) -> bool:
     """Whether to emit photometric/conveyor variant for this frame (class-aware)."""
-    if not bool(getattr(args, "aug_class_aware_geo", False)):
+    if not _class_aware_enabled(args):
         return True
-    if str(getattr(args, "imbalance_mode", "soft")) != "soft":
-        return True
-    strength = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
-    w = float(image_weight)
-    p = min(1.0, max(0.0, (w * strength) / (1.0 + strength)))
+    p = _class_aware_trigger_prob(args, image_weight, 1.0)
     return bool(rng.random() < p)
 
 
@@ -731,6 +789,62 @@ def sum_train_bbox_disk(dataset_root: str) -> int:
             s += count_yolo_bbox_lines(os.path.join(lbl_dir, name))
         return s
     return 0
+
+
+def sum_train_class_bbox_disk(dataset_root: str) -> dict[int, int]:
+    """Per-class bbox counts on train split (or flat labels/)."""
+    ctr: dict[int, int] = defaultdict(int)
+    for rel in ("train/labels", "labels"):
+        lbl_dir = os.path.join(dataset_root, rel)
+        if not os.path.isdir(lbl_dir):
+            continue
+        for name in os.listdir(lbl_dir):
+            if not name.endswith(".txt"):
+                continue
+            for cls, *_ in _parse_yolo_labels(os.path.join(lbl_dir, name)):
+                ctr[int(cls)] += 1
+        return dict(ctr)
+    return {}
+
+
+def _provided_augment_flags(argv: list[str]) -> set[str]:
+    out: set[str] = set()
+    for tok in argv:
+        if tok.startswith("--"):
+            out.add(tok.split("=", 1)[0])
+    return out
+
+
+def _apply_augment_preset_defaults(args: argparse.Namespace, provided_flags: set[str]) -> None:
+    if not getattr(args, "preset", None):
+        return
+    preset_cfg = AUGMENT_PRESETS.get(str(args.preset), {})
+    flag_for_attr = {
+        "aug_class_aware_geo": "--aug-class-aware-geo",
+        "aug_total_bbox_cap_mult": "--aug-total-bbox-cap-mult",
+        "aug_budget_tail_first": "--aug-budget-tail-first",
+        "aug_budget_tail_gamma": "--aug-budget-tail-gamma",
+    }
+    for attr, value in preset_cfg.items():
+        flag = flag_for_attr.get(attr)
+        if flag and flag in provided_flags:
+            continue
+        setattr(args, attr, value)
+
+
+def _warn_exhaustive_class_aware(args) -> None:
+    if not _class_aware_enabled(args):
+        return
+    flip_ex = bool(getattr(args, "enable_flip", False)) and str(getattr(args, "flip_sampling", "probabilistic")) == "exhaustive"
+    orth_ex = bool(getattr(args, "enable_orthogonal_rotate", False)) and str(
+        getattr(args, "orthogonal_rotate_sampling", "probabilistic")
+    ) == "exhaustive"
+    if flip_ex or orth_ex:
+        print(
+            "[WARN] augment: --aug-class-aware-geo is active but flip/orthogonal use exhaustive sampling; "
+            "per-frame probability scaling is bypassed (all variants are emitted). "
+            "Use probabilistic sampling or disable class-aware geo for head-tail control."
+        )
 
 
 def _to_xyxy(box: tuple[int, float, float, float, float], w: int, h: int) -> tuple[int, int, int, int]:
@@ -1700,6 +1814,18 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
         ).strip()
         or str(getattr(args, "aug_total_bbox_cap_mult", 0.0))
     )
+    if float(args.aug_total_bbox_cap_mult) > 0:
+        args.aug_budget_tail_first = prompt_yes_no(
+            "Tail-first budget ordering (--aug-budget-tail-first)?",
+            default=bool(getattr(args, "aug_budget_tail_first", True)),
+        )
+        args.aug_budget_tail_gamma = float(
+            prompt_text(
+                "Tail priority gamma (--aug-budget-tail-gamma)",
+                default=str(getattr(args, "aug_budget_tail_gamma", 1.0)),
+            ).strip()
+            or str(getattr(args, "aug_budget_tail_gamma", 1.0))
+        )
     args.splits = prompt_text("Splits separated by commas (train,val,test)", default=args.splits).strip() or args.splits
     args.dry_run = prompt_yes_no("Do dry-run (--dry-run)?", default=bool(args.dry_run))
 
@@ -1708,6 +1834,8 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = build_augment_arg_parser()
     args = parser.parse_args(argv)
+    provided_flags = _provided_augment_flags(argv)
+    _apply_augment_preset_defaults(args, provided_flags)
     _sync_conveyor_flags(args, argv=argv)
     interactive_allowed = is_interactive_allowed(argv)
     if args.dataset is None and not interactive_allowed:
@@ -1741,6 +1869,7 @@ def main(argv=None):
     if norm_err:
         print(norm_err)
         return
+    _warn_exhaustive_class_aware(args)
     if args.dataset not in catalog:
         print(f"[ERROR] Unknown dataset: {args.dataset}")
         return
@@ -1843,6 +1972,13 @@ def main(argv=None):
     extra_budget: int | None = None
     if bbox_cap_total is not None:
         extra_budget = max(0, bbox_cap_total - train_baseline_bbox)
+    per_class_cap_mult = float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0))
+    per_class_extra_budget: dict[int, int] | None = None
+    train_extra_bbox_by_class: dict[int, int] = defaultdict(int)
+    if per_class_cap_mult > 0 and train_cls_counts:
+        per_class_extra_budget = {
+            c: max(0, int(math.ceil(per_class_cap_mult * int(n))) - int(n)) for c, n in train_cls_counts.items()
+        }
     train_extra_bbox_used = 0
     train_cls_counts = _train_split_class_bbox_counts(items)
     items = _reorder_items_for_bbox_budget(
@@ -1888,27 +2024,38 @@ def main(argv=None):
             continue
 
         image_weight = _image_soft_weight(classes_in_image, class_freq, alpha)
+        image_class_counts = _label_class_counts(lbl_src)
         seen_labels: list[list[tuple[int, float, float, float, float]]] = []
 
-        def _budget_ok(delta_total: int) -> bool:
+        def _budget_ok(delta_total: int, delta_by_class: dict[int, int] | None = None) -> bool:
             if split_norm != "train":
                 return True
             if args.dry_run:
                 return True
+            if delta_by_class and per_class_extra_budget is not None:
+                for c, d in delta_by_class.items():
+                    if d <= 0:
+                        continue
+                    if train_extra_bbox_by_class.get(c, 0) + d > per_class_extra_budget.get(c, 0):
+                        return False
             return _aug_extra_budget_allow(train_extra_bbox_used, delta_total, extra_budget)
 
-        def _consume_extra(delta_total: int) -> None:
+        def _consume_extra(delta_total: int, delta_by_class: dict[int, int] | None = None) -> None:
             nonlocal train_extra_bbox_used
             if split_norm != "train" or args.dry_run:
                 return
             train_extra_bbox_used += delta_total
+            if delta_by_class:
+                for c, d in delta_by_class.items():
+                    if d > 0:
+                        train_extra_bbox_by_class[c] = train_extra_bbox_by_class.get(c, 0) + d
 
         crc_img = zlib.crc32(img_src.encode("utf-8"))
         flip_rng = random.Random(int(args.seed) + crc_img)
         flip_p = _effective_flip_prob_geo(args, image_weight)
 
         for fi, flip_spec in enumerate(_iter_flip_variants(args, flip_rng, flip_prob=flip_p), start=1):
-            if not _budget_ok(bi):
+            if not _budget_ok(bi, image_class_counts):
                 break
             aug_stem = _aug_stem(stem, args, fi, "f", flip_tag=flip_spec.tag)
             if args.dry_run:
@@ -1944,14 +2091,14 @@ def main(argv=None):
                 continue
             seen_labels.append(new_labels)
             if split_norm == "train":
-                _consume_extra(count_yolo_bbox_lines(out_lbl))
+                _consume_extra(bi, image_class_counts)
             augmented += 1
 
         photo_rng = random.Random(int(args.seed) + 901 + crc_img)
         if (args.enable_photometric or args.enable_conveyor) and _geo_photo_trigger(args, image_weight, photo_rng):
             geom_mode = "c" if args.enable_conveyor else "b"
             aug_stem = _aug_stem(stem, args, 1, geom_mode)
-            if _budget_ok(bi):
+            if _budget_ok(bi, image_class_counts):
                 if not args.dry_run:
                     out_img, out_lbl = _augment_output_paths(
                         out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
@@ -1982,7 +2129,7 @@ def main(argv=None):
                     else:
                         seen_labels.append(new_labels)
                         if split_norm == "train":
-                            _consume_extra(count_yolo_bbox_lines(out_lbl))
+                            _consume_extra(bi, image_class_counts)
                         augmented += 1
                 else:
                     augmented += 1
@@ -1990,7 +2137,7 @@ def main(argv=None):
         orth_rng = random.Random(int(args.seed) + 7001 + crc_img)
         orth_p = _effective_orthogonal_prob_geo(args, image_weight)
         for oi, orth_spec in enumerate(_iter_orthogonal_variants(args, orth_rng, orth_prob=orth_p), start=1):
-            if not _budget_ok(bi):
+            if not _budget_ok(bi, image_class_counts):
                 break
             aug_stem = _aug_stem(stem, args, oi, "o", orth_tag=orth_spec.tag)
             if args.dry_run:
@@ -2007,7 +2154,7 @@ def main(argv=None):
                 direction=orth_spec.direction,
             )
             orth_tot = len(new_labels)
-            if not _budget_ok(orth_tot):
+            if not _budget_ok(orth_tot, image_class_counts):
                 try:
                     os.remove(out_img)
                     os.remove(out_lbl)
@@ -2027,7 +2174,7 @@ def main(argv=None):
                 continue
             seen_labels.append(new_labels)
             if split_norm == "train":
-                _consume_extra(orth_tot)
+                _consume_extra(orth_tot, image_class_counts)
             augmented += 1
 
         if args.enable_center_rotate:
@@ -2067,7 +2214,7 @@ def main(argv=None):
                             skipped_roi_missing += 1
                         continue
                     rot_tot = len(new_labels)
-                    if not _budget_ok(rot_tot):
+                    if not _budget_ok(rot_tot, image_class_counts):
                         try:
                             os.remove(out_img)
                             os.remove(out_lbl)
@@ -2087,7 +2234,7 @@ def main(argv=None):
                         continue
                     seen_labels.append(new_labels)
                     if split_norm == "train":
-                        _consume_extra(rot_tot)
+                        _consume_extra(rot_tot, image_class_counts)
                     rot_saved += 1
                     augmented += 1
                 else:
@@ -2117,7 +2264,7 @@ def main(argv=None):
                         detector_roi=detector_roi_cache.get(img_src),
                     )
                     if ok:
-                        delta_bb = len(new_labels)
+                        delta_bb, delta_by_class = _inserted_class_delta(image_class_counts, new_labels)
                         if any(
                             _labels_signature_iou(prev, new_labels, 1000, 1000)
                             >= float(getattr(args, "min_diversity_iou", 0.97))
@@ -2129,7 +2276,7 @@ def main(argv=None):
                             except OSError:
                                 pass
                             continue
-                        if not _budget_ok(delta_bb):
+                        if not _budget_ok(delta_bb, delta_by_class):
                             try:
                                 os.remove(out_img)
                                 os.remove(out_lbl)
@@ -2138,7 +2285,7 @@ def main(argv=None):
                             continue
                         seen_labels.append(new_labels)
                         if split_norm == "train":
-                            _consume_extra(delta_bb)
+                            _consume_extra(delta_bb, delta_by_class)
                         augmented += 1
                     elif args.placement_mode in ("bbox", "detector"):
                         skipped_roi_missing += 1

@@ -1040,6 +1040,14 @@ def build_stats_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Export balance-ready metrics to JSON file path",
     )
+    parser.add_argument(
+        "--after-augment",
+        action="store_true",
+        help=(
+            "For datasets with balance_manifest post_augment: compare per-class bbox counts "
+            "after balance (class_counts_after_bbox) vs after augment (class_counts_after_augment)."
+        ),
+    )
     return parser
 
 
@@ -1128,6 +1136,74 @@ def _render_balance_ready(scanned: dict[str, DatasetStats], *, beta: float, tail
     return rows
 
 
+def _load_balance_manifest(dataset_dir: str) -> dict | None:
+    path = os.path.join(dataset_dir, "balance_manifest.json")
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data if isinstance(data, dict) else None
+
+
+def _render_after_augment(selected: list[str], available: dict[str, str]) -> list[dict]:
+    rows: list[dict] = []
+    for name in selected:
+        ds_dir = available.get(name)
+        if not ds_dir:
+            continue
+        manifest = _load_balance_manifest(ds_dir)
+        if not manifest:
+            rows.append({"dataset": name, "error": "no balance_manifest.json"})
+            continue
+        post = manifest.get("post_augment")
+        if not isinstance(post, dict):
+            rows.append({"dataset": name, "error": "no post_augment in manifest (not hybrid-aug output?)"})
+            continue
+        before_raw = manifest.get("class_counts_after_bbox") or {}
+        after_raw = post.get("class_counts_after_augment") or {}
+        before = {str(k): int(v) for k, v in before_raw.items()}
+        after = {str(k): int(v) for k, v in after_raw.items()}
+        all_classes = sorted(set(before) | set(after))
+        class_rows: list[dict] = []
+        for cls in all_classes:
+            b = int(before.get(cls, 0))
+            a = int(after.get(cls, 0))
+            class_rows.append({"class": cls, "after_balance": b, "after_augment": a, "delta": a - b})
+        rows.append(
+            {
+                "dataset": name,
+                "strategy": manifest.get("strategy"),
+                "train_bbox_before_augment": post.get("train_bbox_sum_before_augment"),
+                "train_bbox_after_augment": post.get("train_bbox_sum_after_augment"),
+                "classes": class_rows,
+            }
+        )
+    table = Table(title="Per-class bbox: after balance vs after augment")
+    table.add_column("dataset")
+    table.add_column("class")
+    table.add_column("after_balance")
+    table.add_column("after_augment")
+    table.add_column("delta")
+    for row in rows:
+        if row.get("error"):
+            table.add_row(str(row["dataset"]), str(row["error"]), "", "", "")
+            continue
+        classes = row.get("classes") or []
+        if not classes:
+            table.add_row(str(row["dataset"]), "(no classes)", "", "", "")
+            continue
+        for i, cr in enumerate(classes):
+            table.add_row(
+                str(row["dataset"]) if i == 0 else "",
+                str(cr["class"]),
+                str(cr["after_balance"]),
+                str(cr["after_augment"]),
+                f"{cr['delta']:+d}" if cr["delta"] else "0",
+            )
+    console.print(table)
+    return rows
+
+
 def build_stats_compare_arg_parser() -> argparse.ArgumentParser:
     parser = CliArgumentParser(description="Comparing two datasets from datasets/")
     parser.add_argument(
@@ -1211,6 +1287,18 @@ def _run_stats(args, layout: WorkspaceLayout, *, interactive_allowed: bool) -> i
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump({"generated_at": datetime.now().isoformat(), "datasets": rows}, f, ensure_ascii=False, indent=2)
             console.print(f"[OK] Balance-ready report exported: {out_path}")
+    if bool(getattr(args, "after_augment", False)):
+        after_rows = _render_after_augment(selected, available)
+        out_path = getattr(args, "export_balance_report", None)
+        if out_path:
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"generated_at": datetime.now().isoformat(), "after_augment": after_rows},
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            console.print(f"[OK] After-augment report exported: {out_path}")
     if replay_cmd:
         print_replay_command("after execution", replay_cmd)
     return 0

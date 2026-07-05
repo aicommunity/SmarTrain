@@ -600,9 +600,14 @@ def test_hybrid_aug_creates_final_with_post_augment_manifest(tmp_path: Path) -> 
     assert manifest["eval_head_bbox_undersample_stats"] is not None
     assert isinstance(manifest["post_augment"].get("train_bbox_sum_before_augment"), int)
     assert isinstance(manifest["post_augment"].get("train_bbox_sum_after_augment"), int)
+    assert isinstance(manifest["post_augment"].get("class_counts_after_augment"), dict)
+    assert manifest["post_augment"]["class_counts_after_augment"]
     argv_sum = manifest["post_augment"].get("argv_summary") or []
     assert any("enable-flip" in str(x) for x in argv_sum)
     assert "--aug-class-aware-geo" in argv_sum
+    assert "--imbalance-mode" in argv_sum
+    assert "--flip-sampling" in argv_sum
+    assert "--min-diversity-iou" in argv_sum
     assert manifest.get("hybrid_intermediate_name") is None
     assert (out / "train" / "images").is_dir()
     hybrid_keys = [k for k in info if "__hybrid" in k]
