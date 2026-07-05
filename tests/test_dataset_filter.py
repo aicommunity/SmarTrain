@@ -12,6 +12,7 @@ from smartrain.services.datasets.bbox_edge_filter import (
     ContentBounds,
     bbox_geom_from_label,
     collect_baseline_stats,
+    collect_empirical_bounds,
     is_baseline_inset,
     merge_content_bounds,
     should_drop_bbox,
@@ -124,16 +125,26 @@ def test_empirical_bounds_measures_from_content_hull() -> None:
     assert reason.value in {"abs_width", "rel_width"}
 
 
-def test_filter_empirical_bounds_per_frame_multi_object(tmp_path: Path) -> None:
+def test_empirical_bounds_per_class_dataset_hull() -> None:
+    center = bbox_geom_from_label(YoloBBox(0, 0.5, 0.5, 0.2, 0.2), img_w=1000, img_h=800)
+    edge = bbox_geom_from_label(YoloBBox(1, 0.98, 0.5, 0.02, 0.1), img_w=1000, img_h=800)
+    assert center is not None and edge is not None
+    cfg = BboxEdgeFilterConfig(empirical_bounds=True, edge_sides="horizontal", empirical_inset_only=True)
+    samples = [(0, center), (1, edge)]
+    bounds_map = collect_empirical_bounds(samples, config=cfg)
+    class_bounds = bounds_map.by_class
+    assert 0 in class_bounds and 1 in class_bounds
+    assert class_bounds[0].x2 < 0.9
+
+
+def test_filter_empirical_bounds_per_class_multi_class_frame(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     ds = _setup_split_dataset(tmp_path)
-    _write_jpg(ds / "train" / "images" / "multi.jpg")
-    (ds / "train" / "labels" / "multi.txt").write_text(
-        "0 0.4 0.5 0.2 0.2\n0 0.6 0.5 0.2 0.2\n",
+    _write_jpg(ds / "train" / "images" / "mixed.jpg")
+    (ds / "train" / "labels" / "mixed.txt").write_text(
+        "0 0.5 0.5 0.2 0.2\n1 0.98 0.5 0.02 0.1\n",
         encoding="utf-8",
     )
-    _write_jpg(ds / "train" / "images" / "single.jpg")
-    (ds / "train" / "labels" / "single.txt").write_text("0 0.9975 0.5 0.005 0.1\n", encoding="utf-8")
 
     filter_main(
         [
@@ -151,8 +162,9 @@ def test_filter_empirical_bounds_per_frame_multi_object(tmp_path: Path) -> None:
     manifest = json.loads((tmp_path / "datasets" / "src_ds_fltd" / "filter_manifest.json").read_text())
     summary = manifest["stats_after"]["empirical_content_bounds"]
     assert summary is not None
-    assert summary["mode"] == "per_frame"
-    assert summary["frames_with_bounds"] == 1
+    assert summary["mode"] == "per_class_percentile"
+    assert "cat" in summary["classes"]
+    assert "dog" in summary["classes"]
 
 
 def test_should_keep_large_bbox_at_edge() -> None:

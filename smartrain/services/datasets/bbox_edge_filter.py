@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -45,13 +46,13 @@ def allowed_filter_sides(mode: str) -> frozenset[str]:
 
 @dataclass(frozen=True)
 class ContentBounds:
-    """Normalized axis-aligned region where objects appear in the dataset."""
+    """Normalized axis-aligned region where objects of a class appear in the dataset."""
 
     x1: float
     y1: float
     x2: float
     y2: float
-    source_frames: int = 0
+    source_frames: int = 0  # per-class mode: number of bbox instances aggregated
 
     def to_manifest_dict(self) -> dict[str, Any]:
         return {
@@ -61,6 +62,24 @@ class ContentBounds:
             "y2": self.y2,
             "source_frames": self.source_frames,
         }
+
+
+@dataclass(frozen=True)
+class EmpiricalBoundsMap:
+    by_class: dict[int, ContentBounds]
+    by_class_format: dict[tuple[int, int, int], ContentBounds]
+
+    def resolve(self, geom: BboxGeom, *, config: BboxEdgeFilterConfig) -> ContentBounds | None:
+        if not config.empirical_bounds:
+            return None
+        if touches_physical_image_edge(geom, config.edge_eps):
+            return None
+        if config.empirical_by_format:
+            key = (int(geom.cls_id), int(geom.img_w), int(geom.img_h))
+            found = self.by_class_format.get(key)
+            if found is not None:
+                return found
+        return self.by_class.get(int(geom.cls_id))
 
 
 def union_geoms_content_bounds(geoms: list[BboxGeom]) -> ContentBounds | None:
@@ -87,27 +106,141 @@ def merge_content_bounds(bounds: list[ContentBounds]) -> ContentBounds | None:
     )
 
 
-EMPIRICAL_MIN_OBJECTS_PER_FRAME = 2
+def percentile_content_bounds(
+    geoms: list[BboxGeom],
+    *,
+    q_low: float,
+    q_high: float,
+) -> ContentBounds | None:
+    if not geoms:
+        return None
+    x1s = [g.x1 for g in geoms]
+    y1s = [g.y1 for g in geoms]
+    x2s = [g.x2 for g in geoms]
+    y2s = [g.y2 for g in geoms]
+    return ContentBounds(
+        x1=_percentile(x1s, q_low),
+        y1=_percentile(y1s, q_low),
+        x2=_percentile(x2s, q_high),
+        y2=_percentile(y2s, q_high),
+        source_frames=len(geoms),
+    )
 
 
-def summarize_frame_content_bounds(bounds_map: dict[str, ContentBounds]) -> dict[str, Any] | None:
+def touches_physical_image_edge(geom: BboxGeom, edge_eps: float) -> bool:
+    if _extends_outside(geom):
+        return True
+    eps = float(edge_eps)
+    return (
+        geom.x1 <= eps
+        or geom.y1 <= eps
+        or geom.x2 >= 1.0 - eps
+        or geom.y2 >= 1.0 - eps
+    )
+
+
+def is_empirical_inset_sample(geom: BboxGeom, *, config: BboxEdgeFilterConfig) -> bool:
+    return is_baseline_inset(geom, config=config, content_bounds=None)
+
+
+def collect_empirical_bounds(
+    samples: list[tuple[int, BboxGeom]],
+    *,
+    config: BboxEdgeFilterConfig,
+) -> EmpiricalBoundsMap:
+    eligible: list[tuple[int, BboxGeom]] = []
+    for cls_id, geom in samples:
+        if config.empirical_inset_only and not is_empirical_inset_sample(geom, config=config):
+            continue
+        eligible.append((int(cls_id), geom))
+
+    q = float(config.empirical_percentile)
+    q_low = max(0.0, min(q, 0.49))
+    q_high = 1.0 - q_low
+
+    by_class_geoms: dict[int, list[BboxGeom]] = defaultdict(list)
+    by_format_geoms: dict[tuple[int, int, int], list[BboxGeom]] = defaultdict(list)
+    for cls_id, geom in eligible:
+        by_class_geoms[cls_id].append(geom)
+        if config.empirical_by_format:
+            by_format_geoms[(cls_id, int(geom.img_w), int(geom.img_h))].append(geom)
+
+    by_class: dict[int, ContentBounds] = {}
+    for cls_id, geoms in by_class_geoms.items():
+        bounds = percentile_content_bounds(geoms, q_low=q_low, q_high=q_high)
+        if bounds is not None:
+            by_class[cls_id] = bounds
+
+    by_class_format: dict[tuple[int, int, int], ContentBounds] = {}
+    for key, geoms in by_format_geoms.items():
+        bounds = percentile_content_bounds(geoms, q_low=q_low, q_high=q_high)
+        if bounds is not None:
+            by_class_format[key] = bounds
+
+    return EmpiricalBoundsMap(by_class=by_class, by_class_format=by_class_format)
+
+
+def summarize_empirical_bounds(
+    bounds: EmpiricalBoundsMap,
+    *,
+    config: BboxEdgeFilterConfig,
+    id_to_name: dict[int, str] | None = None,
+) -> dict[str, Any]:
+    classes: dict[str, Any] = {}
+    for cls_id in sorted(bounds.by_class):
+        name = (id_to_name or {}).get(cls_id, str(cls_id))
+        classes[name] = bounds.by_class[cls_id].to_manifest_dict()
+
+    formats: dict[str, dict[str, Any]] = {}
+    for (cls_id, img_w, img_h), row in sorted(bounds.by_class_format.items()):
+        fmt = f"{img_w}x{img_h}"
+        name = (id_to_name or {}).get(cls_id, str(cls_id))
+        formats.setdefault(fmt, {})[name] = row.to_manifest_dict()
+
+    return {
+        "mode": "per_class_percentile",
+        "percentile": config.empirical_percentile,
+        "inset_only": config.empirical_inset_only,
+        "by_format": config.empirical_by_format,
+        "dual_path_image_edge": True,
+        "classes": classes,
+        "formats": formats,
+    }
+
+
+def collect_class_content_bounds(samples: list[tuple[int, BboxGeom]]) -> dict[int, ContentBounds]:
+    by_class: dict[int, list[BboxGeom]] = defaultdict(list)
+    for cls_id, geom in samples:
+        by_class[int(cls_id)].append(geom)
+    result: dict[int, ContentBounds] = {}
+    for cls_id, geoms in by_class.items():
+        merged = union_geoms_content_bounds(geoms)
+        if merged is not None:
+            result[cls_id] = ContentBounds(
+                x1=merged.x1,
+                y1=merged.y1,
+                x2=merged.x2,
+                y2=merged.y2,
+                source_frames=len(geoms),
+            )
+    return result
+
+
+def summarize_class_content_bounds(
+    bounds_map: dict[int, ContentBounds],
+    *,
+    id_to_name: dict[int, str] | None = None,
+) -> dict[str, Any] | None:
     if not bounds_map:
         return None
-    values = list(bounds_map.values())
-    hull = merge_content_bounds(values)
-    assert hull is not None
-    x1s = sorted(b.x1 for b in values)
-    x2s = sorted(b.x2 for b in values)
-    mid = len(x1s) // 2
+    classes: dict[str, Any] = {}
+    for cls_id in sorted(bounds_map):
+        row = bounds_map[cls_id]
+        name = (id_to_name or {}).get(cls_id, str(cls_id))
+        classes[name] = row.to_manifest_dict()
     return {
-        "mode": "per_frame",
-        "frames_with_bounds": len(values),
-        "hull_x1": hull.x1,
-        "hull_y1": hull.y1,
-        "hull_x2": hull.x2,
-        "hull_y2": hull.y2,
-        "median_x1": x1s[mid],
-        "median_x2": x2s[mid],
+        "mode": "per_class",
+        "classes": classes,
     }
 
 
@@ -116,6 +249,9 @@ class BboxEdgeFilterConfig:
     edge_filter: bool = True
     edge_sides: str = "any"
     empirical_bounds: bool = False
+    empirical_percentile: float = 0.10
+    empirical_inset_only: bool = True
+    empirical_by_format: bool = True
     baseline_inset_margin: float = 0.01
     baseline_inset_margin_px: float | None = None
     edge_eps: float = 0.002
@@ -344,7 +480,7 @@ def in_filter_zone(
         img_w=geom.img_w,
         img_h=geom.img_h,
     )
-    bounds = content_bounds if config.empirical_bounds else None
+    bounds = content_bounds
     sides = _edge_sides(geom, proximity_margin=proximity, edge_eps=config.edge_eps, content_bounds=bounds)
     if sides & allowed:
         return True
@@ -448,7 +584,7 @@ def should_drop_bbox(
     if not config.edge_filter:
         return _global_filters(geom, config)
 
-    bounds = content_bounds if config.empirical_bounds else None
+    bounds = content_bounds
     if not in_filter_zone(geom, config=config, content_bounds=bounds):
         return _global_filters(geom, config)
 
