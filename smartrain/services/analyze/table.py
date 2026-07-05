@@ -6,6 +6,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from smartrain.core.analyze.run_metrics_discovery import resolve_recomputed_metrics_csv
+
 
 def run_scan_command(
     *,
@@ -52,6 +54,8 @@ def export_runs_table(
             print(f"[WARN] {run_dir}: {exc}", file=sys.stderr)
             continue
         test_metrics_path = latest_test_metrics_path(run_dir)
+        if not test_metrics_path:
+            test_metrics_path = resolve_recomputed_metrics_csv(run_dir)
         if test_metrics_path:
             try:
                 test_df = pd.read_csv(test_metrics_path)

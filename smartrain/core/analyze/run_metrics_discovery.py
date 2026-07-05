@@ -19,6 +19,8 @@ __all__ = [
     "read_metrics_by_format_for_split_artifacts",
     "read_test_metrics_by_format",
     "read_test_metrics_by_format_artifacts",
+    "resolve_recomputed_metrics_csv",
+    "recomputed_metrics_write_path",
 ]
 
 from smartrain.tasks.metric_columns import metric_agg_columns
@@ -46,6 +48,25 @@ def _resolve_manifest_metrics_path(run_dir: str, rel_path: str) -> str | None:
         if os.path.isfile(tests_candidate):
             return os.path.abspath(tests_candidate)
     return None
+
+
+def resolve_recomputed_metrics_csv(run_dir: str) -> str | None:
+    """Return path to recomputed test metrics CSV if present (run root or tests/)."""
+    root = os.path.abspath(run_dir.rstrip(os.sep))
+    for rel in ("test_metrics_recomputed.csv", os.path.join("tests", "test_metrics_recomputed.csv")):
+        candidate = os.path.join(root, rel)
+        if os.path.isfile(candidate):
+            return os.path.abspath(candidate)
+    return None
+
+
+def recomputed_metrics_write_path(run_dir: str) -> str:
+    """Preferred on-disk path for writing recomputed test metrics."""
+    root = os.path.abspath(run_dir.rstrip(os.sep))
+    tests_dir = os.path.join(root, "tests")
+    if os.path.isdir(tests_dir):
+        return os.path.join(tests_dir, "test_metrics_recomputed.csv")
+    return os.path.join(root, "test_metrics_recomputed.csv")
 
 
 def latest_test_metrics_path(run_dir: str, format_name: str | None = "pt") -> str | None:
@@ -93,6 +114,10 @@ def read_test_metrics_by_format(run_dir: str, *, include_internal: bool = False)
         p = latest_test_metrics_path(run_dir, fmt)
         if p and os.path.isfile(p):
             out.setdefault(fmt, p)
+    if not out:
+        recomputed = resolve_recomputed_metrics_csv(run_dir)
+        if recomputed:
+            out.setdefault("pt", recomputed)
     return out
 
 

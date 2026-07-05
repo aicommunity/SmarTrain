@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from smartrain.tasks.metric_columns import metric_agg_columns_with_fallback, read_run_task_type
+from smartrain.core.analyze.run_metrics_discovery import recomputed_metrics_write_path
 
 
 def _default_metrics_for_run_dirs(
@@ -180,7 +180,7 @@ def run_test_metrics_plot(
                     recompute_status_by_run[run_dir] = "skipped_known_unresolved"
                     continue
             try:
-                recomputed_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
+                recomputed_csv = recomputed_metrics_write_path(run_dir)
                 fp_metrics = compute_fingerprint_cb(
                     {
                         "tool": "analyze-v2",
@@ -221,6 +221,7 @@ def run_test_metrics_plot(
                         },
                     )
                     try:
+                        os.makedirs(os.path.dirname(recomputed_csv) or ".", exist_ok=True)
                         pd.DataFrame([recomputed]).to_csv(recomputed_csv, index=False, encoding="utf-8")
                     except Exception:
                         pass

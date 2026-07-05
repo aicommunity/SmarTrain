@@ -43,6 +43,9 @@ A compact summary of metric computation issues by split/format: reason codes, af
 <!-- BLOCK: SUB_FORMAT_PERF -->
 This subsection captures per-format performance on the test split: pure inference, full pipeline, and optional diagnostic columns. Measurements follow a consistent benchmarking methodology.
 
+<!-- BLOCK: NARR_PERF_NOT_COLLECTED -->
+If PT rows in the performance tables show “no data”, the corresponding test artifacts have no `perf_*.json` from model testing. Run `smartrain model test --collect-performance --run <path>` for each run. The inference benchmark from `analyze all` (speed comparison figure, `benchmark.csv`) measures PT on CPU only and does not populate format performance tables.
+
 <!-- BLOCK: SUB_FORMAT_SPEED -->
 Speed-related figures and companion tables (e.g., speed–quality trade-off). Visuals complement numeric tables and help pick a point on the empirical Pareto frontier.
 

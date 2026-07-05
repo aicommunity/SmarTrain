@@ -665,6 +665,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         results_csv_path=results_csv_path,
         pick_map_column=pick_map_column,
         default_map_col=DEFAULT_MAP_COL,
+        display_labels=_build_run_display_labels(all_runs),
     )
 
     _finalize_compare_analytics_session(
@@ -812,6 +813,7 @@ def _write_speed_quality_artifacts(
     scatter_x: str,
     scatter_y: str,
     run_data_yaml_map: dict[str, str] | None = None,
+    display_labels: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     return write_speed_quality_artifacts(
         session_root=session_root,
@@ -822,6 +824,7 @@ def _write_speed_quality_artifacts(
         scatter_y=scatter_y,
         run_data_yaml_map=run_data_yaml_map,
         read_test_metrics_for_run=_read_test_metrics_for_run,
+        display_labels=display_labels,
     )
 
 
@@ -922,23 +925,22 @@ def _save_recompute_status(
     )
 
 
+def _build_run_display_labels(run_dirs: list[str]) -> dict[str, str]:
+    from smartrain.services.analyze.report_labels import build_run_display_labels
+
+    return build_run_display_labels(run_dirs, build_run_record_cb=_build_run_record_unified)
+
+
 def _build_abbreviations_for_report(run_dirs: list[str]) -> dict[str, str]:
-    out: dict[str, str] = {}
+    out = _build_run_display_labels(run_dirs)
     dataset_to_idx: dict[str, int] = {}
     dataset_counter = 1
-    for idx, rd in enumerate(run_dirs, start=1):
-        run_name = os.path.basename(rd.rstrip(os.sep))
-        if len(run_name) > 22:
-            out[run_name] = f"R{idx}"
+    for rd in run_dirs:
         try:
             rec = _build_run_record_unified(rd)
-            model = str((rec.model or "")).strip()
             dataset_name = str((rec.dataset_name or "")).strip()
         except Exception:
-            model = ""
             dataset_name = ""
-        if model and len(model) > 16:
-            out[model] = f"M{idx}"
         if dataset_name:
             if dataset_name not in dataset_to_idx:
                 dataset_to_idx[dataset_name] = dataset_counter

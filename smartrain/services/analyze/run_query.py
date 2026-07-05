@@ -5,6 +5,11 @@ import json
 import os
 from typing import Any
 
+from smartrain.core.analyze.run_metrics_discovery import (
+    METRIC_AGG_COLUMNS,
+    latest_test_metrics_path,
+    resolve_recomputed_metrics_csv,
+)
 from smartrain.core.runtime.run_discovery import discover_analysis_targets
 from smartrain.run_model_contract.io.read.resolvers import infer_source_kind
 from smartrain.services.analyze.models import RunRecord
@@ -53,12 +58,63 @@ def read_test_metrics_for_run(
     from smartrain.run_model_contract.gateway import load_metrics
 
     sk = (source_kind or "").strip().lower() or infer_source_kind(run_dir)
-    metric_refs = load_metrics(run_dir, source_kind=sk, format_name=format_name)
-    if metric_refs:
-        out = dict(metric_refs[0].primary_metrics or {})
-        out.update(dict(metric_refs[0].secondary_metrics or {}))
-        return out
-    return {}
+    out: dict[str, Any] = {}
+    try:
+        metric_refs = load_metrics(run_dir, source_kind=sk, format_name=format_name)
+        if metric_refs:
+            out = dict(metric_refs[0].primary_metrics or {})
+            out.update(dict(metric_refs[0].secondary_metrics or {}))
+    except Exception:
+        out = {}
+    if not out:
+        for metrics_path in (
+            latest_test_metrics_path(run_dir),
+            resolve_recomputed_metrics_csv(run_dir),
+        ):
+            if not metrics_path:
+                continue
+            row = _read_metrics_row_from_csv(metrics_path)
+            if row:
+                out.update(row)
+                break
+    else:
+        recomputed_csv = resolve_recomputed_metrics_csv(run_dir)
+        if recomputed_csv:
+            try:
+                row = _read_metrics_row_from_csv(recomputed_csv)
+                if row:
+                    out.update(row)
+            except Exception:
+                pass
+    return out
+
+
+def _read_metrics_row_from_csv(metrics_path: str) -> dict[str, Any]:
+    import pandas as pd
+
+    if not metrics_path or not os.path.isfile(metrics_path):
+        return {}
+    try:
+        df = pd.read_csv(metrics_path)
+    except Exception:
+        return {}
+    if len(df) == 0:
+        return {}
+    df.columns = [str(c).strip() for c in df.columns]
+    if "Class" in df.columns:
+        cls = df["Class"].astype(str).str.strip().str.lower()
+        all_mask = cls.eq("all")
+        if bool(all_mask.any()):
+            return df.loc[all_mask].iloc[0].to_dict()
+    if "Class" in df.columns and len(df) > 1:
+        agg_cols = [c for c in METRIC_AGG_COLUMNS if c in df.columns]
+        if agg_cols:
+            out: dict[str, Any] = {}
+            for col in agg_cols:
+                out[col] = pd.to_numeric(df[col], errors="coerce").mean()
+            out["Class"] = "all"
+            return out
+    return df.iloc[0].to_dict()
 
 
 def _system_profile_flat_from_training_metadata(run_dir: str) -> dict[str, Any]:

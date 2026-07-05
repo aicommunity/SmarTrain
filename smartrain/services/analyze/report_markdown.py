@@ -793,8 +793,9 @@ def _perf_status_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
     return lines
 
 
-def _speed_quality_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
+def _speed_quality_takeaways(df: pd.DataFrame, is_ru: bool, abbreviations: dict[str, str] | None = None) -> list[str]:
     lines: list[str] = []
+    abbreviations = abbreviations or {}
     if df is None or len(df) == 0:
         return lines
     x, y = "scatter_x_value", "scatter_y_value"
@@ -803,18 +804,20 @@ def _speed_quality_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
         sy = pd.to_numeric(df[y], errors="coerce")
         if sy.notna().sum() > 0:
             best = df.loc[sy.idxmax()]
+            model_label = abbreviations.get(str(best[mcol]), str(best[mcol]))
             if is_ru:
-                lines.append(f"- Лучший компромисс по качеству (**{y}**): **{best[mcol]}** ({float(sy.max()):.4f}).")
+                lines.append(f"- Лучший компромисс по качеству (**{y}**): **{model_label}** ({float(sy.max()):.4f}).")
             else:
-                lines.append(f"- Best quality (**{y}**): **{best[mcol]}** ({float(sy.max()):.4f}).")
+                lines.append(f"- Best quality (**{y}**): **{model_label}** ({float(sy.max()):.4f}).")
     if mcol and x in df.columns:
         sx = pd.to_numeric(df[x], errors="coerce")
         if sx.notna().sum() > 0:
             fast = df.loc[sx.idxmin()]
+            model_label = abbreviations.get(str(fast[mcol]), str(fast[mcol]))
             if is_ru:
-                lines.append(f"- Наиболее быстрый по **{x}**: **{fast[mcol]}** ({float(sx.min()):.4f}).")
+                lines.append(f"- Наиболее быстрый по **{x}**: **{model_label}** ({float(sx.min()):.4f}).")
             else:
-                lines.append(f"- Fastest on **{x}**: **{fast[mcol]}** ({float(sx.min()):.4f}).")
+                lines.append(f"- Fastest on **{x}**: **{model_label}** ({float(sx.min()):.4f}).")
     return lines[:MAX_NARRATIVE_BULLETS]
 
 
@@ -1331,16 +1334,7 @@ def _figure_title(rel: str, is_ru: bool) -> str:
 
 
 def _build_run_model_abbreviations(manifest: dict[str, Any], abbreviations: dict[str, str]) -> dict[str, str]:
-    out = dict(abbreviations)
-    baseline = os.path.basename(str(manifest.get("baseline", "")).rstrip("/"))
-    others = [os.path.basename(str(x).rstrip("/")) for x in (manifest.get("others") or [])]
-    all_runs = [baseline] + others if baseline else others
-    for idx, run_name in enumerate([x for x in all_runs if x], start=1):
-        out.setdefault(run_name, f"R{idx}")
-        model_guess = run_name.split("_", 2)[-1] if "_" in run_name else run_name
-        if model_guess:
-            out.setdefault(model_guess, out[run_name])
-    return out
+    return dict(abbreviations)
 
 
 def _path_for_report(path: str, workspace_root: str) -> str:
@@ -1567,6 +1561,20 @@ def _missing_reasons_from_manifest(manifest: dict[str, Any], lang: str) -> list[
             top = ", ".join(f"{k}={v}" for k, v in sorted(by_reason.items(), key=lambda x: x[1], reverse=True)[:8])
             lines.append(("- Диагностические причины: " if lang == "ru" else "- Diagnostic reasons: ") + top)
     return lines
+
+
+def _perf_not_collected_hint_lines(manifest: dict[str, Any], is_ru: bool, tpl: dict[str, str]) -> list[str]:
+    failures = manifest.get("artifact_failures") if isinstance(manifest.get("artifact_failures"), list) else []
+    has_perf_gap = any(
+        isinstance(item, dict) and str(item.get("reason_code") or "") == "perf_not_collected_for_target"
+        for item in failures
+    )
+    if not has_perf_gap:
+        return []
+    text = str(tpl.get("NARR_PERF_NOT_COLLECTED") or "").strip()
+    if not text:
+        return []
+    return _justify_block(text)
 
 
 def _discover_missing_pr_images(report_root: str, manifest_images: list[str]) -> list[str]:
@@ -2428,6 +2436,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append(f"### {format_idx}.2 " + ("Сравнение производительности" if is_ru else "Performance comparison"))
     lines.append("")
     lines.extend(_subsection_intro_lines(tpl, "SUB_FORMAT_PERF"))
+    lines.extend(_perf_not_collected_hint_lines(manifest, is_ru, tpl))
     lines.append(
         "Сравнение производительности форматов (test)" if is_ru else "Format performance comparison (test)"
     )

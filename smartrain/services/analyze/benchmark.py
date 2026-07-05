@@ -339,6 +339,7 @@ def run_inference_plot(
     if "model" not in data_frame.columns:
         print("[ERROR] CSV has no 'model' column.", file=sys.stderr)
         sys.exit(1)
+    label_col = "display_label" if "display_label" in data_frame.columns else "model"
     metric = args.metric
     if metric not in data_frame.columns:
         print(
@@ -347,7 +348,8 @@ def run_inference_plot(
         )
         sys.exit(1)
 
-    plot_df = data_frame[["model", metric]].copy()
+    plot_df = data_frame[[label_col, metric]].copy()
+    plot_df = plot_df.rename(columns={label_col: "model"})
     plot_df[metric] = pd.to_numeric(plot_df[metric], errors="coerce")
     plot_df = plot_df.dropna(subset=[metric])
     if len(plot_df) == 0:
