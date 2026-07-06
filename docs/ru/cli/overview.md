@@ -54,6 +54,7 @@ smartrain model convert --help
 - В интерактивном режиме команда автоматически находит `.pt/.onnx` в `models/` и `runs/` workspace и даёт выбор источника по номеру или ручной ввод пути.
 - Выходные модели выбираются отдельно (`onnx`, `engine`, `trt`) с мультивыбором (`1,2` или `onnx,trt`), недоступные варианты показываются с причиной.
 - Для run-источников интерактивный выбор использует канонические артефакты (`<run_dir>/<run_dir_name>.<ext>`). Legacy-раскладка run автоматически канонизируется при первом обращении.
+- Если экспорт ONNX пропущен (уже есть публичный `.onnx`), интерактивный ONNX+TRT и пропуск в `--format onnx` всё равно создают dedicated `*_trtprep.onnx` для `trtexec` при совпадении подписи ONNX.
 
 Особенности `model release`:
 
@@ -66,6 +67,14 @@ smartrain model convert --help
 - `smartrain model rename` переименовывает release-модель в `models/<dataset>/`: меняется stem (`.pt`, sidecar `.json`, каталог артефактов release и конвертированные ONNX/engine/trt с тем же префиксом).
 - Registry-бандлы (`model_manifest.json`) и модели в `runs/` не затрагиваются.
 - В интерактивном режиме показывается список release-моделей, текущий stem подставляется в поле ввода для редактирования.
+
+Особенности `analyze`:
+
+- `smartrain analyze` без подкоманды (TTY) запускает интерактивный `analyze all` (compare, метрики, опционально speed/PR, отчёт).
+- Блок quality использует метрики обучения; отдельный `smartrain test` для compare и графиков test-metrics не обязателен.
+- При `profile=full` speed (inference benchmark) берёт кадры из split `test`, затем `val`, затем `train`; если изображений нет — speed/PR деградируют с предупреждениями, отчёт всё равно строится.
+- Пути в runtime `_runtime_data_*.yaml` разрешаются через поле `path:` в data.yaml (а не относительно файла в `run/tmp/`).
+- `--strict-diagnostics` включайте только если отсутствие PR/metric_sources должно прерывать сессию.
 
 Особенности `dataset report`:
 

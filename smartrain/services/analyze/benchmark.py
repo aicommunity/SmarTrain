@@ -11,8 +11,12 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import yaml
 from tqdm import tqdm
+
+from smartrain.services.analyze.data_yaml_splits import (
+    collect_split_images_for_split,
+    collect_split_images_resolved,
+)
 
 
 def resolve_selected_run_dirs(
@@ -43,25 +47,11 @@ def resolve_selected_run_dirs(
 
 
 def collect_split_images(data_yaml_path: str, split_name: str, limit: int) -> list[str]:
-    with open(data_yaml_path, "r", encoding="utf-8") as file_obj:
-        data = yaml.safe_load(file_obj) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"Invalid YAML: {data_yaml_path}")
-    split_rel = data.get(split_name)
-    if not split_rel or not isinstance(split_rel, str):
-        raise ValueError(f"data.yaml has no path for split={split_name!r}")
-
-    base_dir = os.path.dirname(os.path.abspath(data_yaml_path))
-    split_path = os.path.abspath(os.path.join(base_dir, split_rel))
-    if not os.path.isdir(split_path):
-        raise FileNotFoundError(f"Split directory not found: {split_path}")
-
-    exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-    images = sorted(
-        p for p in glob(os.path.join(split_path, "**", "*"), recursive=True)
-        if os.path.isfile(p) and p.lower().endswith(exts)
-    )
-    return images[:limit]
+    """Backward-compatible wrapper; split_name may be 'auto' to use test→val→train fallback."""
+    if str(split_name).strip().lower() in {"", "auto"}:
+        images, _used = collect_split_images_resolved(data_yaml_path, limit=limit)
+        return images
+    return collect_split_images_for_split(data_yaml_path, split_name, limit)
 
 
 def resolve_inference_csv_path(
@@ -159,14 +149,41 @@ def run_inference_benchmark(
         print("[WARN] --half is not used on CPU; disabling half.")
         effective_half = False
 
+    soft_fail = bool(getattr(args, "soft_fail", False))
+    split_arg = str(getattr(args, "split", "test") or "test").strip().lower()
+    benchmark_split_used = split_arg
     try:
-        images = collect_split_images(data_yaml, args.split, args.frames)
+        if split_arg in {"", "auto"}:
+            images, benchmark_split_used = collect_split_images_resolved(
+                data_yaml,
+                limit=int(args.frames),
+            )
+        else:
+            images = collect_split_images_for_split(data_yaml, split_arg, int(args.frames))
+            benchmark_split_used = split_arg
     except Exception as exc:
+        if soft_fail:
+            print(f"[WARN] Failed to load benchmark frames ({exc}); skipping inference benchmark.")
+            stats_out = str(getattr(args, "cache_stats_out", "") or "").strip()
+            if stats_out:
+                os.makedirs(os.path.dirname(stats_out) or ".", exist_ok=True)
+                with open(stats_out, "w", encoding="utf-8") as file_obj:
+                    json.dump({"cache": [], "skipped": True, "reason": str(exc)}, file_obj, ensure_ascii=False, indent=2)
+            return
         print(f"[ERROR] Failed to load test frames: {exc}", file=sys.stderr)
         sys.exit(1)
     if not images:
+        if soft_fail:
+            print("[WARN] No images found for inference benchmark; skipping speed stage for this group.")
+            return
         print("[ERROR] No images found for inference.", file=sys.stderr)
         sys.exit(1)
+    if benchmark_split_used != split_arg and split_arg not in {"", "auto"}:
+        print(
+            f"[WARN] Requested split={split_arg!r} unavailable; using split={benchmark_split_used!r} instead."
+        )
+    elif split_arg in {"", "auto"}:
+        print(f"[INFO] Benchmark frames loaded from split={benchmark_split_used!r} ({len(images)} images).")
 
     run_dirs = resolve_selected_run_dirs(runs_group_dir, getattr(args, "selected_run_dirs", None))
     if not run_dirs:
@@ -187,7 +204,7 @@ def run_inference_benchmark(
             {
                 "tool": "analyze-v2",
                 "task": "inference_benchmark",
-                "split": args.split,
+                "split": benchmark_split_used,
                 "frames": int(args.frames),
                 "device": effective_device,
                 "half": bool(effective_half),
@@ -255,6 +272,7 @@ def run_inference_benchmark(
                 "run_dir": run_dir,
                 "weights": best_pt,
                 "frames_count": len(images),
+                "benchmark_split_used": benchmark_split_used,
                 "device": effective_device,
                 "half": effective_half,
                 "avg_total_ms_per_frame": avg_ms,
@@ -288,6 +306,9 @@ def run_inference_benchmark(
                 pass
 
     if not rows:
+        if soft_fail:
+            print("[WARN] No benchmark results produced; speed artifacts may be incomplete.")
+            return
         print("[ERROR] No benchmark results produced.", file=sys.stderr)
         sys.exit(1)
 

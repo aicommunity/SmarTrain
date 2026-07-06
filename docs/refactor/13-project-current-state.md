@@ -1,6 +1,6 @@
 # Актуальное состояние архитектуры SmarTrain (срез)
 
-**Дата среза:** 2026-05-16  
+**Дата среза:** 2026-05-25  
 **Назначение:** краткий narrative-snapshot структуры пакета, закрытых волн рефакторинга, границ слоёв и известных ограничений. Не заменяет детальные спецификации в `00`–`08`.
 
 **Источник истины по статусу волн и PR:** [`10-implementation-checklist.md`](./10-implementation-checklist.md) (чекбоксы Phase A–F и заметки). Журнал компромиссов и история шагов: [`09-tech-debt.md`](./09-tech-debt.md). Базовый аудит соответствия целевой архитектуре: [`11-plan-conformance-audit.md`](./11-plan-conformance-audit.md). Волна закрытия P0/P1 разрывов: [`12-gap-closure-wave-p0-p1.md`](./12-gap-closure-wave-p0-p1.md).
@@ -125,8 +125,7 @@
 
 ## Следующий горизонт (backlog, без обязательства срока)
 
-1. **Train CLI (опционально):** дальнейшее утоньшение [`inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py) (LB-D4 LOC) и косметика wiring — основной train path уже в [`train_cli_main`](../../smartrain/services/training/train_cli_main.py) + [`train_wiring`](../../smartrain/workflows/training/train_wiring.py); MTM удалён (LB-D8).
-2. **Документация RU:** синхронизация [`../ru/development/architecture.md`](../ru/development/architecture.md) с EN-срезом datasets/services.
+1. **Inference CLI (опционально):** [`inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py) ~235 LOC (цель LB-D4: under 200) — косметическое сжатие фасада; runtime в `services/inference_service.py`.
 
 ---
 

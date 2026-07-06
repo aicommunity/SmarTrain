@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Triggered from [`model_test_orchestrator`](../../smartrain/services/model_test_orchestrator.py) when format `pt` is in the test plan and `task_type` is one of **`detection`**, **`classification`**, **`segmentation`** (normalized via [`task_to_metadata_task_type`](../../smartrain/core/training/train_profile.py)).
+- Triggered from [`model_test_runner`](../../smartrain/services/testing/model_test_runner.py) when format `pt` is in the test plan and `task_type` is one of **`detection`**, **`classification`**, **`segmentation`** (normalized via [`task_to_metadata_task_type`](../../smartrain/core/training/train_profile.py)).
 - Produces the internal format **`pt_uni`** artifacts alongside ordinary `pt` test metrics, using [`run_internal_pt_uni_backend`](../../smartrain/services/test_backend_dispatch.py) → [`run_native_format_backend`](../../smartrain/workflows/testing/model_test_backends.py) → Ultralytics `model.val(...)`.
 
 ## Task-specific behavior

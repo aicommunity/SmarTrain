@@ -60,6 +60,7 @@ Model convert highlights:
 - Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows source selection by number or manual path input.
 - Target selection is model-based (`onnx`, `engine`, `trt`) with multi-select input (`1,2` or `onnx,trt`), and unavailable targets are shown with reason.
 - For run sources, interactive discovery uses canonical run artifacts (`<run_dir>/<run_dir_name>.<ext>`). Legacy run layouts are canonized automatically on first access.
+- When ONNX export is skipped because a public `.onnx` already exists, interactive ONNX+TRT (and `--format onnx` skip) still materialize the dedicated `*_trtprep.onnx` cache for `trtexec` when signatures match.
 
 Inference highlights:
 
@@ -80,6 +81,14 @@ Model rename highlights:
 - `smartrain model rename` renames a released model in `models/<dataset>/` by changing the release stem (`.pt`, sidecar `.json`, release artifact directory, and converted ONNX/engine/trt files with matching prefix).
 - Registry-promoted bundles (`model_manifest.json`) and run models under `runs/` are not affected.
 - Interactive mode lists released models and pre-fills the current stem for editing.
+
+Analyze highlights:
+
+- `smartrain analyze` (TTY, no subcommand) runs the interactive `analyze all` workflow (compare, metrics, optional speed/PR, report).
+- Quality artifacts use training-time metrics; a separate `smartrain test` run is not required for compare and test-metrics plots.
+- For `profile=full`, speed (inference benchmark) resolves frames from `test`, then `val`, then `train` split; if no split images exist, speed/PR stages degrade with warnings and the session report still completes.
+- Runtime `_runtime_data_*.yaml` paths are resolved via the `path:` field in data.yaml (not relative to the yaml file location in `run/tmp/`).
+- Use `--strict-diagnostics` only when missing PR/metric_sources artifacts must fail the session.
 
 Dataset report highlights:
 

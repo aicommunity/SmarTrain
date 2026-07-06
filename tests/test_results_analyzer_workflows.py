@@ -2579,6 +2579,71 @@ def test_analyze_all_marks_incomplete_speed_quality_series(
     assert "benchmark_missing_or_failed" in reasons
 
 
+def test_analyze_all_completes_when_benchmark_has_no_usable_split(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    dataset_dir = tmp_path / "datasets" / "ds_a"
+    train_images = dataset_dir / "train" / "images"
+    train_images.mkdir(parents=True, exist_ok=True)
+    (train_images / "a.jpg").write_bytes(b"img")
+    (dataset_dir / "data.yaml").write_text(
+        "path: .\ntrain: train/images\nval: val/images\ntest: test/images\n",
+        encoding="utf-8",
+    )
+
+    runtime_yaml = run_a / "tmp" / "_runtime_data_train.yaml"
+    runtime_yaml.parent.mkdir(parents=True, exist_ok=True)
+    runtime_yaml.write_text(
+        f"path: {dataset_dir}\ntrain: train/images\nval: val/images\ntest: test/images\n",
+        encoding="utf-8",
+    )
+    (run_a / "train" / "args.yaml").write_text(f"data: {runtime_yaml}\n", encoding="utf-8")
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            pass
+
+        def predict(self, **_kwargs):
+            class _Speed:
+                speed = {"preprocess": 1.0, "inference": 2.0, "postprocess": 0.5}
+
+            return [_Speed()]
+
+    monkeypatch.setattr("ultralytics.YOLO", _FakeYOLO)
+    monkeypatch.setattr(workflow_dispatch, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a)}, {"run_dir": str(run_b)}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "composite_score": 1.0}, {"run_dir": str(run_b), "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(workflow_dispatch, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+
+    analyze_main(
+        [
+            "all",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--baseline",
+            str(run_a),
+            "--others",
+            str(run_b),
+            "--profile",
+            "full",
+            "--analytics-session",
+            "session_no_test_split",
+            "--no-pdf",
+            "--no-odt",
+        ]
+    )
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_no_test_split"
+    assert (session_root / "session.json").is_file()
+    assert (session_root / "ru" / "index.md").is_file()
+    manifest = json.loads((session_root / "session.json").read_text(encoding="utf-8"))
+    assert manifest.get("profile") == "full"
+
+
 def test_test_metrics_plot_saves_unresolved_status_on_recompute_exception(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

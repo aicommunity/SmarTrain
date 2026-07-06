@@ -4,6 +4,7 @@ Operational execution status and PR-level checkboxes: [`10-implementation-checkl
 
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
+- 2026-05-25: **model convert TRT prep:** при пропуске экспорта ONNX (уже есть публичный `*.onnx`) интерактивный пайплайн ONNX+TRT и режим `--format onnx` синхронизируют dedicated `*_trtprep.onnx` перед `trtexec`, если подпись ONNX совпадает с ожидаемой. Исправляет сбой «Input file cannot be found» для `trtexec` при наличии только короткого имени `.onnx`.
 - 2026-05-17: **CLI package layout:** `cli_apps/` → `cli_entrypoints/`; `cli_support/` → `cli_entrypoints/support/`. Entry point `smartrain.cli:main` unchanged.
 - 2026-05-17: **Package rename (imports/docs):** all code imports `smartrain.run_model_contract`; docs/release-notes updated. Legacy on-disk `/.smartrain/unified/` and env `SMARTTRAIN_UNIFIED_*` intentionally unchanged.
 - 2026-05-17: **Package rename (tree):** `smartrain/unified/` → `smartrain/run_model_contract/`; tests → `tests/run_model_contract/`. Disk `.smartrain/unified/` and `SMARTTRAIN_UNIFIED_*` unchanged; public types still `Unified*`.

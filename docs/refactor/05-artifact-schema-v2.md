@@ -40,5 +40,5 @@ Paths are relative to a **run root** or **model export root** unless noted:
 | `deep_diagnostics/debug_test.jsonl` | Test-split deep-diagnostics dump (optional). |
 | `deep_diagnostics/debug_val.jsonl` | Val-split deep-diagnostics dump (optional). |
 
-[`canonical_gateway.load_predictions`](../../smartrain/orchestrators/canonical_gateway.py) in **`predictions_strict=True`** mode discovers **only** these templates (recursive under the root). Heuristic `*pred*` globs are used only when strict mode is off.
+[`run_model_contract.gateway.load_predictions`](../../smartrain/run_model_contract/gateway.py) in **`predictions_strict=True`** mode discovers **only** these templates (recursive under the root). Heuristic `*pred*` globs are used only when strict mode is off.
 

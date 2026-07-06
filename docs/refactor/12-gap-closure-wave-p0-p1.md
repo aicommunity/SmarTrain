@@ -28,7 +28,7 @@ Close the highest-impact conformance gaps against the original refactor target-s
 - `smartrain/services/train_service.py`
 - `smartrain/services/inference_service.py`
 - `smartrain/services/test_backend_dispatch.py`
-- `smartrain/services/model_test_orchestrator.py`
+- `smartrain/services/testing/model_test_runner.py`
 
 ### Definition of done
 - No service module imports workflow-private symbols (`_name` helpers).
@@ -61,7 +61,7 @@ Close the highest-impact conformance gaps against the original refactor target-s
 ### Candidate files
 - `smartrain/services/analyze_format_compare_service.py`
 - `smartrain/workflows/analyze/results_analyzer.py`
-- `smartrain/orchestrators/canonical_gateway.py`
+- `smartrain/run_model_contract/gateway.py`
 - `smartrain/workflows/analyze/metrics_reader.py` (fallback policy hooks only)
 
 ### Definition of done

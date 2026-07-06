@@ -98,10 +98,11 @@ def run_all_speed_stage(
             runs_group_dir=runs_group_dir,
             selected_run_dirs=group_runs,
             data_yaml=group_yaml,
-            split="test",
+            split="auto",
             frames=100,
             device="cpu",
             half=False,
+            soft_fail=True,
             out_csv=inf_part_csv,
             workspace=args.workspace,
             models_root=args.models_root,
@@ -263,13 +264,31 @@ def run_all_speed_stage(
         models_root=args.models_root,
         analytics_session=args.analytics_session,
     )
-    cmd_inference_plot_cb(ip_ns)
-    artifacts.extend(
-        [
-            {"role": "inference_csv", "path": os.path.relpath(inf_csv, session_root)},
-            {"role": "inference_png", "path": os.path.relpath(inf_png, session_root)},
-        ]
-    )
+    plot_ready = False
+    if os.path.isfile(inf_csv) and os.path.getsize(inf_csv) > 0:
+        try:
+            plot_df = pd.read_csv(inf_csv)
+            speed_col = "avg_inference_ms_per_frame"
+            if speed_col in plot_df.columns:
+                plot_ready = pd.to_numeric(plot_df[speed_col], errors="coerce").notna().any()
+            if not plot_ready and "avg_inference_fps" in plot_df.columns:
+                speed_col = "avg_inference_fps"
+                plot_ready = pd.to_numeric(plot_df[speed_col], errors="coerce").notna().any()
+                ip_ns.metric = speed_col
+        except Exception:
+            plot_ready = False
+    if plot_ready:
+        cmd_inference_plot_cb(ip_ns)
+        artifacts.extend(
+            [
+                {"role": "inference_csv", "path": os.path.relpath(inf_csv, session_root)},
+                {"role": "inference_png", "path": os.path.relpath(inf_png, session_root)},
+            ]
+        )
+    else:
+        print("[WARN] Speed stage: skipping inference plot (no benchmark timing metrics).")
+        if os.path.isfile(inf_csv):
+            artifacts.append({"role": "inference_csv", "path": os.path.relpath(inf_csv, session_root)})
 
     for g_idx in range(1, len(run_groups) + 1):
         cache_stats_path = os.path.join(session_root, "artifacts", "inference", f"cache_stats_group_{g_idx}.json")

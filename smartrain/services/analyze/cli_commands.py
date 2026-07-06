@@ -25,6 +25,10 @@ import pandas as pd
 import yaml
 from tqdm import tqdm
 
+from smartrain.services.analyze.data_yaml_splits import (
+    pick_best_data_yaml_candidate,
+    split_dir_exists,
+)
 from smartrain.services.analyze.compare import (
     build_delta_rows,
     compute_composite_score,
@@ -336,19 +340,15 @@ def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | Non
 
 
 def _has_split_dir(data_yaml_path: str, split_name: str) -> bool:
-    try:
-        with open(data_yaml_path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-        if not isinstance(cfg, dict):
-            return False
-        split_rel = str(cfg.get(split_name, "")).strip()
-        if not split_rel:
-            return False
-        base_dir = os.path.dirname(os.path.abspath(data_yaml_path))
-        split_path = os.path.abspath(os.path.join(base_dir, split_rel))
-        return os.path.isdir(split_path)
-    except Exception:
-        return False
+    return split_dir_exists(data_yaml_path, split_name)
+
+
+def _pick_data_yaml_candidate(
+    candidates: list[tuple[str, str]],
+    *,
+    preferred_split: str | None = None,
+) -> tuple[str, str] | None:
+    return pick_best_data_yaml_candidate(candidates, preferred_split=preferred_split)
 
 
 def _auto_select_data_yaml(
@@ -357,30 +357,27 @@ def _auto_select_data_yaml(
     workspace_cli: str | None,
     preferred_split: str | None = None,
 ) -> str | None:
-    candidates: list[str] = []
-    source_by_path: dict[str, str] = {}
+    candidate_pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
     for rd in [baseline] + others:
         for p, src in _collect_data_yaml_candidates_for_run(rd, workspace_cli):
-            if p not in candidates:
-                candidates.append(p)
-            source_by_path[p] = src
-    if not candidates:
+            if p in seen:
+                continue
+            seen.add(p)
+            candidate_pairs.append((p, src))
+    if not candidate_pairs:
         return None
-    if preferred_split:
-        viable = [p for p in candidates if _has_split_dir(p, preferred_split)]
-        if viable:
-            candidates = viable
-    if len(candidates) == 1:
-        src = source_by_path.get(candidates[0], "unknown")
-        print(f"[INFO] Auto-detected data.yaml: {candidates[0]} (source: {src})")
-        return candidates[0]
+    picked_pair = _pick_data_yaml_candidate(candidate_pairs, preferred_split=preferred_split)
+    if picked_pair is None:
+        return None
+    picked, src = picked_pair
+    if len(candidate_pairs) == 1:
+        print(f"[INFO] Auto-detected data.yaml: {picked} (source: {src})")
+        return picked
     print("[INFO] Multiple data.yaml candidates detected:")
-    for idx, path in enumerate(candidates, start=1):
-        src = source_by_path.get(path, "unknown")
-        print(f"  {idx}. {path}  [source: {src}]")
-    picked = _workflow_attr("prompt_choice")(
-        "Select data.yaml", candidates, default=candidates[0], show_options=False
-    )
+    for idx, (path, source) in enumerate(candidate_pairs, start=1):
+        print(f"  {idx}. {path}  [source: {source}]")
+    print(f"[INFO] Auto-selected data.yaml: {picked} (source: {src})")
     return picked
 
 
@@ -395,15 +392,12 @@ def _build_run_data_yaml_map(
     unresolved: list[str] = []
     for rd in run_dirs:
         candidates = _collect_data_yaml_candidates_for_run(rd, workspace_cli)
-        if preferred_split:
-            viable = [(p, src) for p, src in candidates if _has_split_dir(p, preferred_split)]
-            if viable:
-                candidates = viable
-        if not candidates:
+        picked = _pick_data_yaml_candidate(candidates, preferred_split=preferred_split)
+        if picked is None:
             unresolved.append(rd)
             continue
-        run_to_yaml[rd] = candidates[0][0]
-        run_to_source[rd] = candidates[0][1]
+        run_to_yaml[rd] = picked[0]
+        run_to_source[rd] = picked[1]
     return run_to_yaml, run_to_source, unresolved
 
 
