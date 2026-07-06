@@ -69,11 +69,11 @@ smartrain train --data my_dataset --model yolo11n.pt -y
 
 Режимы запуска:
 
-- Interactive (без аргументов): `smartrain report dataset`
+- Interactive (без аргументов): `smartrain dataset report`
 - Non-interactive (минимальные аргументы):
 
 ```bash
-smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
+smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
 ```
 
 6. **Сформируйте аналитический отчет по запускам**

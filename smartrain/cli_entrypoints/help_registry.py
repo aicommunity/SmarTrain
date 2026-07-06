@@ -140,21 +140,13 @@ COMMANDS: dict[str, CommandHelp] = {
             "workspace-ready YOLO datasets."
         ),
     ),
-    "report": CommandHelp(
-        name="report",
-        summary="Build multilingual dataset sample reports (Markdown, figures, PDF/ODT).",
-        description=(
-            "Generate per-class sample figures and narrative reports under "
-            "analytics/datasets-reports/. Subcommand: dataset."
-        ),
-    ),
     "dataset": CommandHelp(
         name="dataset",
-        summary="Rename workspace datasets and update catalog references.",
+        summary="Dataset catalog management: reports and rename.",
         description=(
-            "Manage dataset catalog entries beyond transform commands. Renames datasets/<name>/, "
-            "updates datasets_info.json, and propagates references in runs/, models/, queue.txt, "
-            "analytics/, and dataset_passport.json files. Subcommand: rename."
+            "Generate multilingual per-class sample reports under analytics/datasets-reports/, "
+            "and rename workspace datasets with reference propagation across runs/, models/, "
+            "queue.txt, analytics/, and dataset_passport.json. Subcommands: report, rename."
         ),
     ),
     "train": CommandHelp(
@@ -308,7 +300,7 @@ COMMAND_GROUPS: list[tuple[str, list[str]]] = [
             "rotate",
             "roi",
             "cvat",
-            "report",
+            "dataset",
         ],
     ),
     (

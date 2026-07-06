@@ -38,7 +38,7 @@ def _print_en_quick_start() -> None:
         "  smartrain deploy\n"
         "  smartrain scan\n"
         "  smartrain train --data my_dataset --model yolo11n.pt -y\n"
-        "  smartrain report dataset --dataset my_dataset -n 6 --languages en,ru\n"
+        "  smartrain dataset report --dataset my_dataset -n 6 --languages en,ru\n"
         "  smartrain analyze scan\n"
         "  smartrain analyze all --report-languages en,ru\n"
     )
@@ -81,18 +81,13 @@ Quick examples:
   smartrain registry models-list
 """
 
-HELP_REPORT_GROUP = """Dataset sample reports (multilingual Markdown, figures, optional PDF/ODT).
+HELP_DATASET_GROUP = """Dataset catalog management and sample reports.
 
-Default output folder: workspace `analytics/datasets-reports/<dataset>_<timestamp>/`.
-
-Quick examples:
-  smartrain report dataset --dataset my_dataset
-  smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
-"""
-
-HELP_DATASET_GROUP = """Dataset catalog management.
+Default report output: workspace `analytics/datasets-reports/<dataset>_<timestamp>/`.
 
 Quick examples:
+  smartrain dataset report --dataset my_dataset
+  smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
   smartrain dataset rename --dataset old_name --new-name new_name
   smartrain dataset rename --dataset old_name --new-name new_name --dry-run
   smartrain dataset rename
@@ -169,11 +164,11 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "  smartrain filter --dataset my_dataset --no-edge-filter --size-filter\n"
         "  smartrain filter --dataset my_dataset --size-filter --size-baseline-mode stable --size-dims width\n"
     ),
-    "smartrain report dataset": (
+    "smartrain dataset report": (
         "Examples:\n"
-        "  smartrain report dataset --dataset my_dataset\n"
-        "  smartrain report dataset --dataset my_dataset -n 6 --languages en,ru\n"
-        "  smartrain report dataset --workspace /data/ws --dataset my_dataset --no-odt\n"
+        "  smartrain dataset report --dataset my_dataset\n"
+        "  smartrain dataset report --dataset my_dataset -n 6 --languages en,ru\n"
+        "  smartrain dataset report --workspace /data/ws --dataset my_dataset --no-odt\n"
     ),
     "smartrain inference": (
         "Examples:\n"
@@ -799,52 +794,6 @@ def cmd_inference(ctx: typer.Context) -> None:
     )
 
 
-report_app = plain_sub_typer(
-    help=HELP_REPORT_GROUP,
-    invoke_without_command=True,
-)
-
-
-def _report_group_callback(ctx: typer.Context) -> None:
-    if ctx.invoked_subcommand is None:
-        typer.echo(HELP_REPORT_GROUP)
-        typer.echo("Run: smartrain report dataset -- --help")
-        raise typer.Exit(0)
-
-
-@report_app.command(
-    "dataset",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-    add_help_option=False,
-)
-def cmd_report_dataset(ctx: typer.Context) -> None:
-    """Multilingual per-class sample report (Markdown + PNG; PDF/ODT via pandoc or extras).
-
-    Examples:
-      smartrain report dataset --dataset my_dataset
-      smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
-      smartrain report dataset --workspace /data/MarsSmarTrain --dataset my_dataset --no-pdf
-    """
-    from smartrain.services.datasets.dataset_report import build_report_dataset_arg_parser
-
-    _forward_argparse_command(
-        ctx,
-        module="smartrain.services.datasets.dataset_report",
-        build_parser=build_report_dataset_arg_parser,
-        prog="smartrain report dataset",
-        empty_args_mode="invoke_if_tty_else_help",
-        ensure_scan=True,
-    )
-
-
-app.add_typer(
-    report_app,
-    name="report",
-    invoke_without_command=True,
-    callback=_report_group_callback,
-)
-
-
 queue_app = plain_sub_typer(
     help=HELP_QUEUE_GROUP,
     invoke_without_command=True,
@@ -1324,6 +1273,31 @@ dataset_app = plain_sub_typer(
 
 
 @dataset_app.command(
+    "report",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_dataset_report(ctx: typer.Context) -> None:
+    """Multilingual per-class sample report (Markdown + PNG; PDF/ODT via pandoc or extras).
+
+    Examples:
+      smartrain dataset report --dataset my_dataset
+      smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
+      smartrain dataset report --workspace /data/MarsSmarTrain --dataset my_dataset --no-pdf
+    """
+    from smartrain.services.datasets.dataset_report import build_report_dataset_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.services.datasets.dataset_report",
+        build_parser=build_report_dataset_arg_parser,
+        prog="smartrain dataset report",
+        empty_args_mode="invoke_if_tty_else_help",
+        ensure_scan=True,
+    )
+
+
+@dataset_app.command(
     "rename",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
@@ -1350,6 +1324,7 @@ def cmd_dataset_rename(ctx: typer.Context) -> None:
 def _dataset_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         typer.echo(HELP_DATASET_GROUP)
+        typer.echo("Run: smartrain dataset report -- --help")
         typer.echo("Run: smartrain dataset rename -- --help")
         raise typer.Exit(0)
 

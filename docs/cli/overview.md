@@ -6,7 +6,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 
 ## Command groups
 
-- Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`, `dataset rename`
+- Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `dataset report`, `dataset rename`
 - Training: `train`, `clearml-upload`
 - Providers: `providers`
 - Info: `info`
@@ -14,7 +14,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
 - Models: `model convert`, `model release`, `model rename`
-- Dataset catalog: `dataset rename`
+- Dataset catalog: `dataset report`, `dataset rename`
 - Format tools: `cvat`, `sahi`, `heatmap`
 - Migration: `migrate`, `migrate-models`
 
@@ -43,7 +43,7 @@ smartrain <group> <subcommand> -- --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `report dataset`, `dataset rename`, `model convert`, `model release`, `model rename`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model rename`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -81,6 +81,10 @@ Model rename highlights:
 - Registry-promoted bundles (`model_manifest.json`) and run models under `runs/` are not affected.
 - Interactive mode lists released models and pre-fills the current stem for editing.
 
+Dataset report highlights:
+
+- `smartrain dataset report` writes a multilingual per-class sample report (Markdown + PNG; default folder `analytics/datasets-reports/<dataset>_<timestamp>/`). Default dependencies include bundled pandoc (`pypandoc-binary`), WeasyPrint, `fpdf2`, and `odfpy` for PDF/ODT. WeasyPrint may need OS libraries (Cairo, Pango) if wheels are unavailable.
+
 Dataset rename highlights:
 
 - `smartrain dataset rename` renames a workspace dataset key and directory (`datasets/<name>/`), plus related `runs/<name>/` and `models/<name>/` folders when present.
@@ -106,4 +110,3 @@ Balance and stats additions:
 - `smartrain prune classes` removes unused classes from metadata into `<dataset>_classes_pruned` (files kept; `class_id` remapped).
 - `smartrain filter` removes edge-truncated bbox annotations into `<dataset>_fltd` (baseline inset stats + relative/absolute thresholds; audit under `_filter_audit/`; `--stats-only`, `--drop-images`, interactive preview).
 - `smartrain scan --strip-unused-classes` strips unused classes for **new** datasets during scan (default **on**; use `--no-strip-unused-classes` to disable).
-- `smartrain report dataset` writes a multilingual per-class sample report (Markdown + PNG; default folder `analytics/datasets-reports/<dataset>_<timestamp>/`). Default dependencies include bundled pandoc (`pypandoc-binary`), WeasyPrint, `fpdf2`, and `odfpy` for PDF/ODT. WeasyPrint may need OS libraries (Cairo, Pango) if wheels are unavailable.

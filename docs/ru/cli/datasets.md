@@ -129,6 +129,20 @@ smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
 
 В `data.yaml` для переносимости корень датасета задаётся **каталогом, в котором лежит сам файл** (ключ `path` не обязателен); пути `train`/`val`/`test` — относительные к этому каталогу, без ведущего `./`, в духе Ultralytics.
 
+## `dataset report`
+
+Многоязычный отчёт с примерами по классам (Markdown + PNG; опционально PDF/ODT):
+
+```bash
+smartrain dataset report --dataset my_dataset
+smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
+smartrain dataset report
+```
+
+- Папка по умолчанию: `analytics/datasets-reports/<dataset>_<timestamp>/`.
+- Интерактивный режим (`smartrain dataset report` из TTY): выбор датасета и параметров, replay-команда.
+- PDF/ODT через pandoc, WeasyPrint, `fpdf2` или `odfpy` (см. overview для зависимостей).
+
 ## `dataset rename`
 
 Переименование датасета в каталоге workspace и обновление связанных ссылок:

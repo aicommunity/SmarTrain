@@ -6,7 +6,7 @@
 
 ## Группы команд
 
-- Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`, `dataset rename`
+- Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `dataset report`, `dataset rename`
 - Обучение: `train`, `clearml-upload`
 - Провайдеры: `providers`
 - Инфо: `info`
@@ -14,7 +14,7 @@
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
 - Модели: `model convert`, `model release`, `model rename`
-- Каталог датасетов: `dataset rename`
+- Каталог датасетов: `dataset report`, `dataset rename`
 - Инструменты форматов: `cvat`, `sahi`, `heatmap`
 - Миграция: `migrate-models`
 
@@ -37,7 +37,7 @@ smartrain model convert --help
 
 - интерактив включается только при запуске команды без аргументов (TTY обязателен);
 - выбор датасета(ов): сразу нумерованный список; ввод по имени или по номеру (несколько датасетов — через CSV номеров или имён);
-- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `report dataset`, `dataset rename`, `model convert`, `model release`, `model rename` пустой вызов запускает интерактивный режим;
+- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model rename` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
 
@@ -67,6 +67,10 @@ smartrain model convert --help
 - Registry-бандлы (`model_manifest.json`) и модели в `runs/` не затрагиваются.
 - В интерактивном режиме показывается список release-моделей, текущий stem подставляется в поле ввода для редактирования.
 
+Особенности `dataset report`:
+
+- `smartrain dataset report` формирует многоязычный отчёт с примерами по классам (Markdown + PNG; по умолчанию `analytics/datasets-reports/<dataset>_<timestamp>/`). В базовые зависимости входят pandoc (`pypandoc-binary`), WeasyPrint, `fpdf2` и `odfpy` для PDF/ODT. Для WeasyPrint на некоторых ОС могут понадобиться системные библиотеки (Cairo, Pango), если нет подходящего wheel.
+
 Особенности `dataset rename`:
 
 - `smartrain dataset rename` переименовывает ключ датасета и каталог `datasets/<name>/`, а также связанные `runs/<name>/` и `models/<name>/`, если они есть.
@@ -95,5 +99,4 @@ smartrain model convert --help
 - `smartrain prune classes` удаляет неиспользуемые классы из метаданных в `<dataset>_classes_pruned` (файлы не удаляются, `class_id` перенумеровывается).
 - `smartrain filter` удаляет edge-truncated bbox в `<dataset>_fltd` (baseline inset + пороги; аудит в `_filter_audit/`; `--stats-only`, `--drop-images`, интерактивный preview).
 - `smartrain scan --strip-unused-classes` очищает неиспользуемые классы у **новых** датасетов при scan (по умолчанию **вкл.**; `--no-strip-unused-classes` для отключения).
-- `smartrain report dataset` формирует многоязычный отчёт с примерами по классам (Markdown + PNG; по умолчанию `analytics/datasets-reports/<dataset>_<timestamp>/`). В базовые зависимости входят pandoc (`pypandoc-binary`), WeasyPrint, `fpdf2` и `odfpy` для PDF/ODT. Для WeasyPrint на некоторых ОС могут понадобиться системные библиотеки (Cairo, Pango), если нет подходящего wheel.
 - `smartrain inference` запускает инференс по двум режимам источника данных: `folder` (произвольная папка с изображениями) и `dataset-split` (`train|val|test` подвыборка из датасета по `datasets_info` + `data.yaml`). Результат сохраняется в `inference/<model>/<timestamp>-<source>/inference_results.json`; в отчёте есть параметры запуска, источник (абсолютный/относительный путь), ROI (если включён pre-detect) и детекции с координатами в ROI/исходной системе координат, классом и confidence.

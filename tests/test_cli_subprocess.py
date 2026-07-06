@@ -46,8 +46,9 @@ HELP_MATRIX: list[list[str]] = [
     ["heatmap", "--", "--help"],
     ["orient", "--", "--help"],
     ["queue-run", "--", "--help"],
-    ["report", "--help"],
-    ["report", "dataset", "--", "--help"],
+    ["dataset", "--help"],
+    ["dataset", "report", "--", "--help"],
+    ["dataset", "rename", "--", "--help"],
     ["queue", "--help"],
     ["queue", "list", "--", "--help"],
     ["queue", "add", "--", "--help"],
@@ -83,8 +84,6 @@ HELP_MATRIX: list[list[str]] = [
     ["model", "convert", "--", "--help"],
     ["model", "release", "--", "--help"],
     ["model", "rename", "--", "--help"],
-    ["dataset", "--help"],
-    ["dataset", "rename", "--", "--help"],
     ["rotate", "--", "--help"],
 ]
 
@@ -196,7 +195,7 @@ def test_smartrain_quickstart_prints_guide(subprocess_env: dict[str, str], tmp_p
     out = (r.stdout or "") + (r.stderr or "")
     assert r.returncode == 0, out
     assert "Quick start" in out or "smartrain deploy" in out
-    assert "smartrain report dataset" in out
+    assert "smartrain dataset report" in out
 
 
 def test_smartrain_deploy_twice(subprocess_env: dict[str, str], tmp_path: Path) -> None:
@@ -301,7 +300,7 @@ def test_analyze_no_subcommand_requires_tty(subprocess_env: dict[str, str], tmp_
     assert "tty" in out.lower()
 
 
-@pytest.mark.parametrize("group_name", ["report", "model"])
+@pytest.mark.parametrize("group_name", ["dataset", "model"])
 def test_group_without_subcommand_prints_group_help(
     group_name: str,
     subprocess_env: dict[str, str],
@@ -799,7 +798,7 @@ def test_docs_cli_group_subcommand_parity_has_key_entries() -> None:
     ]
     combined = "\n".join(p.read_text(encoding="utf-8") for p in docs_files if p.is_file()).lower()
     expected_entries = [
-        "smartrain report dataset",
+        "smartrain dataset report",
         "smartrain queue list",
         "smartrain queue add",
         "smartrain queue run",

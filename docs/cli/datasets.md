@@ -129,6 +129,20 @@ Conveyor noise (`--enable-conveyor-noise`): types via **`--conveyor-noise-types`
 
 All of the above commands form `dataset_passport.json` in the new dataset directory.
 
+## `dataset report`
+
+Multilingual per-class sample report (Markdown + PNG; optional PDF/ODT):
+
+```bash
+smartrain dataset report --dataset my_dataset
+smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
+smartrain dataset report
+```
+
+- Default output folder: `analytics/datasets-reports/<dataset>_<timestamp>/`.
+- Interactive mode (`smartrain dataset report` from TTY): pick dataset and options, get a replay command.
+- PDF/ODT via pandoc, WeasyPrint, `fpdf2`, or `odfpy` (see overview for dependency notes).
+
 ## `dataset rename`
 
 Rename a dataset catalog entry and propagate references across the workspace:

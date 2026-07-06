@@ -77,11 +77,11 @@ smartrain inference --model <best.pt> --source images/ --task segment
 
 Launch modes:
 
-- Interactive (no args): `smartrain report dataset`
+- Interactive (no args): `smartrain dataset report`
 - Non-interactive (minimal args):
 
 ```bash
-smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
+smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
 ```
 
 6. **Build run analysis report**
