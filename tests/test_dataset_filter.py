@@ -313,6 +313,202 @@ def test_filter_dry_run_and_stats_only(tmp_path: Path) -> None:
     assert (tmp_path / "tmp" / "filter_manifest.json").is_file()
 
 
+def test_size_filter_soft_removes_small_center_bbox(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "mixed.jpg")
+    (ds / "train" / "labels" / "mixed.txt").write_text(
+        "0 0.5 0.5 0.2 0.2\n0 0.3 0.5 0.005 0.005\n",
+        encoding="utf-8",
+    )
+
+    filter_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "src_ds",
+            "--no-edge-filter",
+            "--size-filter",
+            "-y",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "src_ds_fltd"
+    assert (out / "train" / "images" / "mixed.jpg").is_file()
+    kept = (out / "train" / "labels" / "mixed.txt").read_text(encoding="utf-8")
+    assert "0.50000000" in kept
+    assert "0.005" not in kept
+    removed = out / "_filter_audit" / "removed_labels" / "train" / "labels" / "mixed.txt"
+    assert removed.is_file()
+    assert "0.005" in removed.read_text(encoding="utf-8")
+
+
+def test_size_filter_drop_images(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "small.jpg")
+    (ds / "train" / "labels" / "small.txt").write_text(
+        "0 0.5 0.5 0.2 0.2\n0 0.3 0.5 0.005 0.005\n",
+        encoding="utf-8",
+    )
+
+    filter_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "src_ds",
+            "--no-edge-filter",
+            "--size-filter",
+            "--drop-images",
+            "-y",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "src_ds_fltd"
+    assert not (out / "train" / "images" / "small.jpg").exists()
+    audit_lbl = out / "_filter_audit" / "dropped_images" / "train" / "labels" / "small.txt"
+    assert audit_lbl.is_file()
+    assert "0.005" in audit_lbl.read_text(encoding="utf-8")
+
+
+def test_size_filter_combined_with_edge_filter(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "combo.jpg")
+    (ds / "train" / "labels" / "combo.txt").write_text(
+        "0 0.5 0.5 0.2 0.2\n0 0.3 0.5 0.005 0.005\n0 0.9975 0.5 0.005 0.1\n",
+        encoding="utf-8",
+    )
+
+    filter_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "src_ds",
+            "--size-filter",
+            "-y",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "src_ds_fltd"
+    kept = (out / "train" / "labels" / "combo.txt").read_text(encoding="utf-8")
+    assert "0.50000000" in kept
+    assert "0.005" not in kept
+    assert "0.9975" not in kept
+
+
+def test_size_filter_stats_only_manifest(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "a.jpg")
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+    filter_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "src_ds",
+            "--no-edge-filter",
+            "--size-filter",
+            "--stats-only",
+        ]
+    )
+
+    manifest = json.loads((tmp_path / "tmp" / "filter_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["parameters"]["size_filter"] is True
+    assert manifest["parameters"]["edge_filter"] is False
+    assert manifest["parameters"]["config"]["size_dims"] == "any"
+
+
+def test_filter_requires_at_least_one_mode(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    deploy_workspace(str(tmp_path))
+    _setup_split_dataset(tmp_path)
+
+    filter_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "src_ds",
+            "--no-edge-filter",
+            "--no-size-filter",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert "At least one" in captured.out
+
+
+def test_size_filter_respects_classes(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "classes.jpg")
+    (ds / "train" / "labels" / "classes.txt").write_text(
+        "0 0.5 0.5 0.2 0.2\n1 0.3 0.5 0.005 0.005\n",
+        encoding="utf-8",
+    )
+
+    filter_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "src_ds",
+            "--no-edge-filter",
+            "--size-filter",
+            "--classes",
+            "cat",
+            "-y",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "src_ds_fltd"
+    kept = (out / "train" / "labels" / "classes.txt").read_text(encoding="utf-8")
+    assert "0.50000000" in kept
+    assert "0.005" in kept
+
+
+def test_stable_size_filter_drops_narrow_width(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    for i in range(12):
+        _write_jpg(ds / "train" / "images" / f"large_{i}.jpg")
+        (ds / "train" / "labels" / f"large_{i}.txt").write_text(
+            "0 0.50000000 0.50000000 0.50000000 0.20000000\n",
+            encoding="utf-8",
+        )
+    _write_jpg(ds / "train" / "images" / "narrow.jpg")
+    (ds / "train" / "labels" / "narrow.txt").write_text(
+        "0 0.13503662 0.08945313 0.03607910 0.17890625\n",
+        encoding="utf-8",
+    )
+
+    filter_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "src_ds",
+            "--no-edge-filter",
+            "--size-filter",
+            "--size-dims",
+            "width",
+            "--size-baseline-mode",
+            "stable",
+            "-y",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "src_ds_fltd"
+    assert not (out / "train" / "images" / "narrow.jpg").exists()
+    assert (out / "_filter_audit" / "dropped_images" / "train" / "images" / "narrow.jpg").is_file()
+    manifest = json.loads((out / "filter_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["class_size_baseline_stats"]["mode"] == "stable"
+
+
 def test_filter_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     deploy_workspace(str(tmp_path))
     ds = _setup_split_dataset(tmp_path)
@@ -325,6 +521,8 @@ def test_filter_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         [
             "src_ds",
             "",
+            True,
+            False,
             "any",
             False,
             "0.01",
@@ -378,6 +576,8 @@ def test_filter_interactive_cancel(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         [
             "src_ds",
             "",
+            True,
+            False,
             "any",
             False,
             "0.01",

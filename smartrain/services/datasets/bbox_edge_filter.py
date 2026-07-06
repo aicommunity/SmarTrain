@@ -21,6 +21,9 @@ class DropReason(str, Enum):
 EDGE_SIDES_CHOICES = ("any", "horizontal", "vertical", "up", "down", "left", "right")
 EDGE_SIDES_ALIASES = {"horisontal": "horizontal", "top": "up", "bottom": "down"}
 
+SIZE_DIMS_CHOICES = ("any", "width", "height")
+SIZE_BASELINE_MODE_CHOICES = ("inset", "stable")
+
 
 def normalize_edge_sides(mode: str) -> str:
     value = str(mode or "any").strip().lower()
@@ -42,6 +45,35 @@ def allowed_filter_sides(mode: str) -> frozenset[str]:
         allowed = ", ".join(EDGE_SIDES_CHOICES)
         raise ValueError(f"Unknown --edge-sides {mode!r}; expected one of: {allowed}")
     return mapping[normalized]
+
+
+def normalize_size_dims(mode: str) -> str:
+    return str(mode or "any").strip().lower()
+
+
+def allowed_size_dims(mode: str) -> frozenset[str]:
+    normalized = normalize_size_dims(mode)
+    mapping: dict[str, frozenset[str]] = {
+        "any": frozenset({"width", "height"}),
+        "width": frozenset({"width"}),
+        "height": frozenset({"height"}),
+    }
+    if normalized not in mapping:
+        allowed = ", ".join(SIZE_DIMS_CHOICES)
+        raise ValueError(f"Unknown --size-dims {mode!r}; expected one of: {allowed}")
+    return mapping[normalized]
+
+
+def normalize_size_baseline_mode(mode: str) -> str:
+    return str(mode or "inset").strip().lower()
+
+
+def allowed_size_baseline_mode(mode: str) -> str:
+    normalized = normalize_size_baseline_mode(mode)
+    if normalized not in SIZE_BASELINE_MODE_CHOICES:
+        allowed = ", ".join(SIZE_BASELINE_MODE_CHOICES)
+        raise ValueError(f"Unknown --size-baseline-mode {mode!r}; expected one of: {allowed}")
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -248,6 +280,12 @@ def summarize_class_content_bounds(
 class BboxEdgeFilterConfig:
     edge_filter: bool = True
     edge_sides: str = "any"
+    size_filter: bool = False
+    size_dims: str = "any"
+    size_baseline_mode: str = "inset"
+    size_bulk_split_ratio: float = 0.5
+    size_typical_quantile: float = 0.25
+    size_by_format: bool = False
     empirical_bounds: bool = False
     empirical_percentile: float = 0.10
     empirical_inset_only: bool = True
@@ -338,6 +376,54 @@ class ClassBboxStats:
         }
 
 
+@dataclass
+class ClassSizeStats:
+    cls_id: int
+    cls_name: str = ""
+    sample_count: int = 0
+    bulk_width_count: int = 0
+    bulk_height_count: int = 0
+    width_typical: float = 0.0
+    height_typical: float = 0.0
+    width_threshold: float = 0.0
+    height_threshold: float = 0.0
+    baseline_mode: str = "stable"
+    img_w: int | None = None
+    img_h: int | None = None
+
+    def to_manifest_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "cls_id": self.cls_id,
+            "cls_name": self.cls_name,
+            "sample_count": self.sample_count,
+            "baseline_mode": self.baseline_mode,
+            "bulk_width_count": self.bulk_width_count,
+            "bulk_height_count": self.bulk_height_count,
+            "width_typical_px": self.width_typical,
+            "height_typical_px": self.height_typical,
+            "width_threshold_px": self.width_threshold,
+            "height_threshold_px": self.height_threshold,
+        }
+        if self.img_w is not None and self.img_h is not None:
+            out["img_w"] = self.img_w
+            out["img_h"] = self.img_h
+        return out
+
+
+@dataclass(frozen=True)
+class SizeStatsMap:
+    by_class: dict[int, ClassSizeStats]
+    by_class_format: dict[tuple[int, int, int], ClassSizeStats]
+
+    def resolve(self, geom: BboxGeom, *, config: BboxEdgeFilterConfig) -> ClassSizeStats | None:
+        if config.size_by_format:
+            key = (int(geom.cls_id), int(geom.img_w), int(geom.img_h))
+            found = self.by_class_format.get(key)
+            if found is not None:
+                return found
+        return self.by_class.get(int(geom.cls_id))
+
+
 @dataclass(frozen=True)
 class BboxGeom:
     cls_id: int
@@ -375,6 +461,147 @@ def _quantile_value(values: list[float], q: float, *, fallback_p50: float) -> fl
     if fallback_p50 > 0:
         return fallback_p50
     return 0.0
+
+
+def _stable_typical_threshold(
+    values: list[float],
+    *,
+    split_ratio: float,
+    typical_quantile: float,
+    rel_factor: float,
+    min_baseline_samples: int,
+) -> tuple[float, float, int]:
+    if not values:
+        return 0.0, 0.0, 0
+    med = _percentile(values, 0.50)
+    split = float(split_ratio) * med
+    bulk = [float(v) for v in values if float(v) >= split]
+    if len(bulk) < min_baseline_samples:
+        bulk = [float(v) for v in values]
+    typical = _percentile(bulk, typical_quantile)
+    threshold = float(rel_factor * typical) if typical > 0 else 0.0
+    return typical, threshold, len(bulk)
+
+
+def _build_class_size_stats(
+    cls_id: int,
+    widths: list[float],
+    heights: list[float],
+    *,
+    config: BboxEdgeFilterConfig,
+    cls_name: str = "",
+    img_w: int | None = None,
+    img_h: int | None = None,
+) -> ClassSizeStats:
+    w_typ, w_thr, w_bulk = _stable_typical_threshold(
+        widths,
+        split_ratio=config.size_bulk_split_ratio,
+        typical_quantile=config.size_typical_quantile,
+        rel_factor=config.rel_width_factor,
+        min_baseline_samples=config.min_baseline_samples,
+    )
+    h_typ, h_thr, h_bulk = _stable_typical_threshold(
+        heights,
+        split_ratio=config.size_bulk_split_ratio,
+        typical_quantile=config.size_typical_quantile,
+        rel_factor=config.rel_height_factor,
+        min_baseline_samples=config.min_baseline_samples,
+    )
+    return ClassSizeStats(
+        cls_id=cls_id,
+        cls_name=cls_name,
+        sample_count=len(widths),
+        bulk_width_count=w_bulk,
+        bulk_height_count=h_bulk,
+        width_typical=w_typ,
+        height_typical=h_typ,
+        width_threshold=w_thr,
+        height_threshold=h_thr,
+        baseline_mode="stable",
+        img_w=img_w,
+        img_h=img_h,
+    )
+
+
+def collect_size_baseline_stats(
+    samples: list[tuple[int, BboxGeom]],
+    *,
+    config: BboxEdgeFilterConfig,
+    id_to_name: dict[int, str] | None = None,
+) -> SizeStatsMap | None:
+    if not config.size_filter or normalize_size_baseline_mode(config.size_baseline_mode) != "stable":
+        return None
+
+    by_class_w: dict[int, list[float]] = defaultdict(list)
+    by_class_h: dict[int, list[float]] = defaultdict(list)
+    by_format_w: dict[tuple[int, int, int], list[float]] = defaultdict(list)
+    by_format_h: dict[tuple[int, int, int], list[float]] = defaultdict(list)
+
+    for cls_id, geom in samples:
+        cid = int(cls_id)
+        by_class_w[cid].append(geom.w_px)
+        by_class_h[cid].append(geom.h_px)
+        if config.size_by_format:
+            key = (cid, int(geom.img_w), int(geom.img_h))
+            by_format_w[key].append(geom.w_px)
+            by_format_h[key].append(geom.h_px)
+
+    by_class: dict[int, ClassSizeStats] = {}
+    for cls_id in sorted(set(by_class_w) | set(by_class_h)):
+        name = (id_to_name or {}).get(cls_id, str(cls_id))
+        by_class[cls_id] = _build_class_size_stats(
+            cls_id,
+            by_class_w.get(cls_id, []),
+            by_class_h.get(cls_id, []),
+            config=config,
+            cls_name=name,
+        )
+
+    by_class_format: dict[tuple[int, int, int], ClassSizeStats] = {}
+    if config.size_by_format:
+        for key in sorted(set(by_format_w) | set(by_format_h)):
+            cls_id, img_w, img_h = key
+            name = (id_to_name or {}).get(cls_id, str(cls_id))
+            by_class_format[key] = _build_class_size_stats(
+                cls_id,
+                by_format_w.get(key, []),
+                by_format_h.get(key, []),
+                config=config,
+                cls_name=name,
+                img_w=img_w,
+                img_h=img_h,
+            )
+
+    return SizeStatsMap(by_class=by_class, by_class_format=by_class_format)
+
+
+def summarize_size_baseline_stats(
+    size_stats_map: SizeStatsMap | None,
+    *,
+    config: BboxEdgeFilterConfig,
+    id_to_name: dict[int, str] | None = None,
+) -> dict[str, Any] | None:
+    if size_stats_map is None:
+        return None
+    classes: dict[str, Any] = {}
+    for cls_id in sorted(size_stats_map.by_class):
+        row = size_stats_map.by_class[cls_id]
+        name = (id_to_name or {}).get(cls_id, str(cls_id))
+        classes[name] = row.to_manifest_dict()
+    result: dict[str, Any] = {
+        "mode": "stable",
+        "bulk_split_ratio": config.size_bulk_split_ratio,
+        "typical_quantile": config.size_typical_quantile,
+        "by_format": config.size_by_format,
+        "classes": classes,
+    }
+    if config.size_by_format and size_stats_map.by_class_format:
+        formats: dict[str, Any] = {}
+        for (cls_id, img_w, img_h), row in sorted(size_stats_map.by_class_format.items()):
+            name = (id_to_name or {}).get(cls_id, str(cls_id))
+            formats[f"{name}@{img_w}x{img_h}"] = row.to_manifest_dict()
+        result["formats"] = formats
+    return result
 
 
 def _margin_norm(*, margin_norm: float, margin_px: float | None, img_w: int, img_h: int) -> float:
@@ -625,6 +852,45 @@ def should_drop_bbox(
             return True, DropReason.REL_HEIGHT
 
     return _global_filters(geom, config, w_px=w_clip_px, h_px=h_clip_px)
+
+
+def should_drop_small_bbox(
+    geom: BboxGeom,
+    *,
+    config: BboxEdgeFilterConfig,
+    class_stats: dict[int, ClassBboxStats],
+    size_stats_map: SizeStatsMap | None = None,
+) -> tuple[bool, DropReason | None]:
+    if not config.size_filter:
+        return False, None
+
+    dims = allowed_size_dims(config.size_dims)
+    cls_row = class_stats.get(geom.cls_id)
+    size_row = size_stats_map.resolve(geom, config=config) if size_stats_map is not None else None
+
+    if normalize_size_baseline_mode(config.size_baseline_mode) == "stable" and size_row is not None:
+        rel_w_thr = size_row.width_threshold
+        rel_h_thr = size_row.height_threshold
+    else:
+        rel_w_thr = cls_row.rel_width_threshold(config.rel_quantile, config.rel_width_factor) if cls_row else 0.0
+        rel_h_thr = cls_row.rel_height_threshold(config.rel_quantile, config.rel_height_factor) if cls_row else 0.0
+
+    w_px = geom.w_px
+    h_px = geom.h_px
+
+    if "width" in dims and w_px > 0:
+        if w_px < config.abs_min_width_px:
+            return True, DropReason.ABS_WIDTH
+        if rel_w_thr > 0 and w_px < rel_w_thr:
+            return True, DropReason.REL_WIDTH
+
+    if "height" in dims and h_px > 0:
+        if h_px < config.abs_min_height_px:
+            return True, DropReason.ABS_HEIGHT
+        if rel_h_thr > 0 and h_px < rel_h_thr:
+            return True, DropReason.REL_HEIGHT
+
+    return False, None
 
 
 def _global_filters(

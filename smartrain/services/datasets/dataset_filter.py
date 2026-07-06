@@ -29,13 +29,23 @@ from smartrain.services.datasets.bbox_edge_filter import (
     ContentBounds,
     EmpiricalBoundsMap,
     EDGE_SIDES_CHOICES,
+    SIZE_BASELINE_MODE_CHOICES,
+    SIZE_DIMS_CHOICES,
+    SizeStatsMap,
     allowed_filter_sides,
+    allowed_size_baseline_mode,
+    allowed_size_dims,
     collect_baseline_stats,
     collect_empirical_bounds,
+    collect_size_baseline_stats,
     normalize_edge_sides,
+    normalize_size_baseline_mode,
+    normalize_size_dims,
     should_drop_bbox,
+    should_drop_small_bbox,
     bbox_geom_from_label,
     summarize_empirical_bounds,
+    summarize_size_baseline_stats,
 )
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_cli_catalog import (
@@ -67,6 +77,8 @@ class LabelPairItem:
 @dataclass
 class FilterForecast:
     baseline_stats: dict[int, ClassBboxStats]
+    size_stats_map: SizeStatsMap | None = None
+    size_stats_summary: dict[str, Any] | None = None
     empirical_bounds_map: EmpiricalBoundsMap | None = None
     empirical_bounds_summary: dict[str, Any] | None = None
     removed_by_class: dict[int, int] = field(default_factory=lambda: defaultdict(int))
@@ -79,7 +91,7 @@ class FilterForecast:
 
 
 def build_filter_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(description="Filter edge-truncated YOLO annotations into a new dataset")
+    p = CliArgumentParser(description="Filter YOLO annotations (edge-truncated and/or undersized) into a new dataset")
     p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
     p.add_argument("--dataset", type=str, default=None, help="Source dataset key from datasets_info.json")
     p.add_argument("--output-name", type=str, default=None, help="Output dataset name (default <dataset>_fltd)")
@@ -93,6 +105,36 @@ def build_filter_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--edge-filter", dest="edge_filter", action="store_true", default=True)
     p.add_argument("--no-edge-filter", dest="edge_filter", action="store_false")
+    p.add_argument("--size-filter", dest="size_filter", action="store_true", default=False)
+    p.add_argument("--no-size-filter", dest="size_filter", action="store_false")
+    p.add_argument(
+        "--size-dims",
+        type=str,
+        default="any",
+        choices=SIZE_DIMS_CHOICES,
+        help="Which bbox dimensions to check in size-filter mode: any, width, height",
+    )
+    p.add_argument(
+        "--size-baseline-mode",
+        type=str,
+        default="inset",
+        choices=SIZE_BASELINE_MODE_CHOICES,
+        help="Size baseline: inset (p10 of inset samples) or stable (bulk-trim of all samples)",
+    )
+    p.add_argument(
+        "--size-bulk-split-ratio",
+        type=float,
+        default=0.5,
+        help="Stable mode: keep samples with size >= ratio * median (default 0.5)",
+    )
+    p.add_argument(
+        "--size-typical-quantile",
+        type=float,
+        default=0.25,
+        help="Stable mode: quantile within bulk for typical size (default 0.25)",
+    )
+    p.add_argument("--size-by-format", dest="size_by_format", action="store_true", default=False)
+    p.add_argument("--no-size-by-format", dest="size_by_format", action="store_false")
     p.add_argument("--baseline-inset-margin", type=float, default=0.01)
     p.add_argument("--baseline-inset-margin-px", type=float, default=None)
     p.add_argument("--edge-eps", type=float, default=0.002)
@@ -140,9 +182,19 @@ def build_filter_arg_parser() -> argparse.ArgumentParser:
 def _config_from_args(args: argparse.Namespace) -> BboxEdgeFilterConfig:
     edge_sides = normalize_edge_sides(args.edge_sides)
     allowed_filter_sides(edge_sides)
+    size_dims = normalize_size_dims(args.size_dims)
+    allowed_size_dims(size_dims)
+    size_baseline_mode = normalize_size_baseline_mode(args.size_baseline_mode)
+    allowed_size_baseline_mode(size_baseline_mode)
     return BboxEdgeFilterConfig(
         edge_filter=bool(args.edge_filter),
         edge_sides=edge_sides,
+        size_filter=bool(args.size_filter),
+        size_dims=size_dims,
+        size_baseline_mode=size_baseline_mode,
+        size_bulk_split_ratio=float(args.size_bulk_split_ratio),
+        size_typical_quantile=float(args.size_typical_quantile),
+        size_by_format=bool(args.size_by_format),
         empirical_bounds=bool(args.empirical_bounds),
         empirical_percentile=float(args.empirical_percentile),
         empirical_inset_only=bool(args.empirical_inset_only),
@@ -283,6 +335,36 @@ def _resolve_empirical_bounds(
     return empirical_bounds_map.resolve(geom, config=config)
 
 
+def _should_drop_instance(
+    geom: BboxGeom,
+    *,
+    config: BboxEdgeFilterConfig,
+    class_stats: dict[int, ClassBboxStats],
+    empirical_bounds_map: EmpiricalBoundsMap | None,
+    size_stats_map: SizeStatsMap | None = None,
+) -> tuple[bool, str | None]:
+    drop_edge, reason_edge = should_drop_bbox(
+        geom,
+        config=config,
+        class_stats=class_stats,
+        content_bounds=_resolve_empirical_bounds(
+            geom, config=config, empirical_bounds_map=empirical_bounds_map
+        ),
+    )
+    if drop_edge:
+        return True, reason_edge.value if reason_edge is not None else None
+    if config.size_filter:
+        drop_size, reason_size = should_drop_small_bbox(
+            geom,
+            config=config,
+            class_stats=class_stats,
+            size_stats_map=size_stats_map,
+        )
+        if drop_size:
+            return True, reason_size.value if reason_size is not None else None
+    return False, None
+
+
 def _forecast_filter(
     items: list[LabelPairItem],
     *,
@@ -304,8 +386,16 @@ def _forecast_filter(
         id_to_name=id_to_name,
         content_bounds=None,
     )
+    size_stats_map = collect_size_baseline_stats(samples, config=config, id_to_name=id_to_name)
+    size_stats_summary = (
+        summarize_size_baseline_stats(size_stats_map, config=config, id_to_name=id_to_name)
+        if size_stats_map is not None
+        else None
+    )
     forecast = FilterForecast(
         baseline_stats=baseline,
+        size_stats_map=size_stats_map,
+        size_stats_summary=size_stats_summary,
         empirical_bounds_map=empirical_bounds_map,
         empirical_bounds_summary=bounds_summary,
         segment_proxy_count=segment_proxy,
@@ -324,19 +414,18 @@ def _forecast_filter(
             geom = bbox_geom_from_label(lb, img_w=iw, img_h=ih)
             if geom is None:
                 continue
-            drop, reason = should_drop_bbox(
+            drop, reason_key = _should_drop_instance(
                 geom,
                 config=config,
                 class_stats=baseline,
-                content_bounds=_resolve_empirical_bounds(
-                    geom, config=config, empirical_bounds_map=empirical_bounds_map
-                ),
+                empirical_bounds_map=empirical_bounds_map,
+                size_stats_map=size_stats_map,
             )
             if drop:
                 forecast.would_drop += 1
                 forecast.removed_by_class[geom.cls_id] += 1
-                if reason is not None:
-                    forecast.removed_by_reason[reason.value] += 1
+                if reason_key is not None:
+                    forecast.removed_by_reason[reason_key] += 1
                 image_has_drop = True
             else:
                 forecast.would_keep += 1
@@ -345,7 +434,12 @@ def _forecast_filter(
     return forecast
 
 
-def _print_forecast_table(forecast: FilterForecast, *, id_to_name: dict[int, str]) -> None:
+def _print_forecast_table(
+    forecast: FilterForecast,
+    *,
+    id_to_name: dict[int, str],
+    config: BboxEdgeFilterConfig | None = None,
+) -> None:
     print("\n[INFO] Filter preview")
     print(f"  instances_before={forecast.instances_before} would_drop={forecast.would_drop} would_keep={forecast.would_keep}")
     if forecast.segment_proxy_count:
@@ -361,6 +455,17 @@ def _print_forecast_table(forecast: FilterForecast, *, id_to_name: dict[int, str
                 f"    {name}: x1={row['x1']:.4f} x2={row['x2']:.4f} "
                 f"y1={row['y1']:.4f} y2={row['y2']:.4f} instances={row['source_frames']}"
             )
+    if forecast.size_stats_summary is not None:
+        s = forecast.size_stats_summary
+        print(
+            f"  size_baseline=stable bulk_split={s['bulk_split_ratio']:.2f} "
+            f"typical_q={s['typical_quantile']:.2f} by_format={s['by_format']}"
+        )
+        for name, row in s.get("classes", {}).items():
+            print(
+                f"    {name}: n={row['sample_count']} bulk_w={row['bulk_width_count']} "
+                f"typical_w={row['width_typical_px']:.1f}px thr_w={row['width_threshold_px']:.1f}px"
+            )
     print("  per-class:")
     cls_ids = sorted(set(forecast.baseline_stats.keys()) | set(forecast.removed_by_class.keys()))
     for cid in cls_ids:
@@ -370,11 +475,23 @@ def _print_forecast_table(forecast: FilterForecast, *, id_to_name: dict[int, str
             print(f"    {name}: would_drop={forecast.removed_by_class.get(cid, 0)}")
             continue
         fb = f" fallback={row.baseline_fallback}" if row.baseline_fallback else ""
+        thr = ""
+        if config is not None and config.size_filter:
+            if normalize_size_baseline_mode(config.size_baseline_mode) == "stable":
+                size_row = (forecast.size_stats_map.by_class.get(cid) if forecast.size_stats_map else None)
+                if size_row is not None:
+                    thr = (
+                        f" typical_w={size_row.width_typical:.1f}px thr_w={size_row.width_threshold:.1f}px"
+                    )
+            else:
+                rel_w = row.rel_width_threshold(config.rel_quantile, config.rel_width_factor)
+                rel_h = row.rel_height_threshold(config.rel_quantile, config.rel_height_factor)
+                thr = f" rel_w_thr={rel_w:.1f}px rel_h_thr={rel_h:.1f}px"
         print(
             f"    {name}: baseline_eligible={row.baseline_eligible_count} "
             f"excluded_near_edge={row.baseline_excluded_near_edge_count} "
             f"would_drop={forecast.removed_by_class.get(cid, 0)} "
-            f"w_p10={row.width_p10:.1f}px h_p10={row.height_p10:.1f}px{fb}"
+            f"w_p10={row.width_p10:.1f}px h_p10={row.height_p10:.1f}px{thr}{fb}"
         )
     if forecast.removed_by_reason:
         print("  removed_by_reason:", dict(forecast.removed_by_reason))
@@ -388,6 +505,7 @@ def _filter_labels_for_item(
     class_filter: set[int] | None,
     size_cache: dict[str, tuple[int, int]],
     empirical_bounds_map: EmpiricalBoundsMap | None = None,
+    size_stats_map: SizeStatsMap | None = None,
 ) -> tuple[list[YoloLabel], list[YoloLabel], bool, dict[str, int], dict[int, int]]:
     if not os.path.isfile(item.label_path):
         return [], [], False, {}, {}
@@ -405,20 +523,19 @@ def _filter_labels_for_item(
         if geom is None:
             kept.append(lb)
             continue
-        drop, reason = should_drop_bbox(
+        drop, reason_key = _should_drop_instance(
             geom,
             config=config,
             class_stats=class_stats,
-            content_bounds=_resolve_empirical_bounds(
-                geom, config=config, empirical_bounds_map=empirical_bounds_map
-            ),
+            empirical_bounds_map=empirical_bounds_map,
+            size_stats_map=size_stats_map,
         )
         if drop:
             had_drop = True
             removed.append(lb)
             class_counts[geom.cls_id] += 1
-            if reason is not None:
-                reason_counts[reason.value] += 1
+            if reason_key is not None:
+                reason_counts[reason_key] += 1
             continue
         kept.append(lb)
     return kept, removed, had_drop, dict(reason_counts), dict(class_counts)
@@ -484,6 +601,8 @@ def _copy_and_filter(
     size_cache: dict[str, tuple[int, int]],
     empirical_bounds_map: EmpiricalBoundsMap | None = None,
     empirical_bounds_summary: dict[str, Any] | None = None,
+    size_stats_map: SizeStatsMap | None = None,
+    size_stats_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     removed_instances = 0
     kept_instances = 0
@@ -529,6 +648,7 @@ def _copy_and_filter(
             class_filter=class_filter,
             size_cache=size_cache,
             empirical_bounds_map=empirical_bounds_map,
+            size_stats_map=size_stats_map,
         )
         for k, v in item_reasons.items():
             removed_by_reason[k] += v
@@ -593,6 +713,7 @@ def _copy_and_filter(
         "background_images_kept": background_images_kept,
         "background_images_dropped": background_images_dropped,
         "empirical_content_bounds": empirical_bounds_summary,
+        "size_baseline_stats": size_stats_summary,
         "removed_by_class": {str(k): int(v) for k, v in removed_by_class.items()},
         "removed_by_reason": dict(removed_by_reason),
         "audit": {
@@ -623,6 +744,7 @@ def _write_filter_manifest(out_dir: str, *, parameters: dict[str, Any], forecast
     payload = {
         "parameters": parameters,
         "class_baseline_stats": {str(k): v.to_manifest_dict() for k, v in forecast.baseline_stats.items()},
+        "class_size_baseline_stats": forecast.size_stats_summary,
         "forecast": {
             "instances_before": forecast.instances_before,
             "would_drop": forecast.would_drop,
@@ -648,83 +770,137 @@ def _interactive_fill(args: argparse.Namespace, dataset_names: list[str], catalo
         picked = prompt_multi_choice_csv("Classes (--classes; empty=all)", class_names, default_values=[])
         args.classes = ",".join(picked) if picked else None
     args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
-    args.edge_sides = prompt_choice(
-        "Edge sides to filter (--edge-sides)",
-        list(EDGE_SIDES_CHOICES),
-        default=str(getattr(args, "edge_sides", "any")),
-    )
 
-    print("[INFO] Block: baseline margins")
-    args.empirical_bounds = prompt_yes_no(
-        "--empirical-bounds (dual-path percentile class hull)?",
-        default=bool(args.empirical_bounds),
-    )
-    if args.empirical_bounds:
-        args.empirical_percentile = float(
-            prompt_text("--empirical-percentile", default=str(args.empirical_percentile)).strip()
-            or str(args.empirical_percentile)
+    print("[INFO] Block: filter modes")
+    args.edge_filter = prompt_yes_no("--edge-filter (edge-truncated bbox)?", default=bool(args.edge_filter))
+    args.size_filter = prompt_yes_no("--size-filter (undersized bbox vs class baseline)?", default=bool(args.size_filter))
+    if not args.edge_filter and not args.size_filter:
+        print("[WARN] At least one filter mode required; enabling --edge-filter.")
+        args.edge_filter = True
+
+    if args.edge_filter:
+        args.edge_sides = prompt_choice(
+            "Edge sides to filter (--edge-sides)",
+            list(EDGE_SIDES_CHOICES),
+            default=str(getattr(args, "edge_sides", "any")),
         )
-        args.empirical_inset_only = prompt_yes_no(
-            "--empirical-inset-only (aggregate only inset samples)?",
-            default=bool(args.empirical_inset_only),
+
+    if args.size_filter:
+        args.size_dims = prompt_choice(
+            "Size dimensions to check (--size-dims)",
+            list(SIZE_DIMS_CHOICES),
+            default=str(getattr(args, "size_dims", "any")),
         )
-        args.empirical_by_format = prompt_yes_no(
-            "--empirical-by-format (separate hull per image resolution)?",
-            default=bool(args.empirical_by_format),
+        args.size_baseline_mode = prompt_choice(
+            "Size baseline mode (--size-baseline-mode)",
+            list(SIZE_BASELINE_MODE_CHOICES),
+            default=str(getattr(args, "size_baseline_mode", "inset")),
         )
-    args.baseline_inset_margin = float(
-        prompt_text("--baseline-inset-margin", default=str(args.baseline_inset_margin)).strip()
-        or str(args.baseline_inset_margin)
-    )
-    use_px = prompt_yes_no("Set baseline inset margin in pixels?", default=args.baseline_inset_margin_px is not None)
-    if use_px:
-        args.baseline_inset_margin_px = float(
-            prompt_text("--baseline-inset-margin-px", default=str(args.baseline_inset_margin_px or 10)).strip() or "10"
+        if normalize_size_baseline_mode(str(args.size_baseline_mode)) == "stable":
+            args.size_bulk_split_ratio = float(
+                prompt_text("--size-bulk-split-ratio", default=str(args.size_bulk_split_ratio)).strip()
+                or str(args.size_bulk_split_ratio)
+            )
+            args.size_typical_quantile = float(
+                prompt_text("--size-typical-quantile", default=str(args.size_typical_quantile)).strip()
+                or str(args.size_typical_quantile)
+            )
+            args.size_by_format = prompt_yes_no(
+                "--size-by-format (separate stable baseline per image resolution)?",
+                default=bool(args.size_by_format),
+            )
+
+    if args.edge_filter or args.size_filter:
+        print("[INFO] Block: baseline margins")
+    if args.edge_filter:
+        args.empirical_bounds = prompt_yes_no(
+            "--empirical-bounds (dual-path percentile class hull)?",
+            default=bool(args.empirical_bounds),
         )
-    else:
-        args.baseline_inset_margin_px = None
-    same_prox = prompt_yes_no("Use same value for --filter-proximity-margin?", default=args.filter_proximity_margin is None)
-    if same_prox:
-        args.filter_proximity_margin = None
-    else:
-        args.filter_proximity_margin = float(
-            prompt_text("--filter-proximity-margin", default=str(args.baseline_inset_margin)).strip()
+        if args.empirical_bounds:
+            args.empirical_percentile = float(
+                prompt_text("--empirical-percentile", default=str(args.empirical_percentile)).strip()
+                or str(args.empirical_percentile)
+            )
+            args.empirical_inset_only = prompt_yes_no(
+                "--empirical-inset-only (aggregate only inset samples)?",
+                default=bool(args.empirical_inset_only),
+            )
+            args.empirical_by_format = prompt_yes_no(
+                "--empirical-by-format (separate hull per image resolution)?",
+                default=bool(args.empirical_by_format),
+            )
+        args.baseline_inset_margin = float(
+            prompt_text("--baseline-inset-margin", default=str(args.baseline_inset_margin)).strip()
             or str(args.baseline_inset_margin)
         )
-
-    print("[INFO] Block: edge eps and thresholds")
-    args.edge_eps = float(prompt_text("--edge-eps", default=str(args.edge_eps)).strip() or str(args.edge_eps))
-    args.abs_min_width_px = float(
-        prompt_text("--abs-min-width-px", default=str(args.abs_min_width_px)).strip() or str(args.abs_min_width_px)
-    )
-    args.abs_min_height_px = float(
-        prompt_text("--abs-min-height-px", default=str(args.abs_min_height_px)).strip() or str(args.abs_min_height_px)
-    )
-    args.rel_quantile = float(prompt_text("--rel-quantile", default=str(args.rel_quantile)).strip() or str(args.rel_quantile))
-    args.rel_width_factor = float(
-        prompt_text("--rel-width-factor", default=str(args.rel_width_factor)).strip() or str(args.rel_width_factor)
-    )
-    args.rel_height_factor = float(
-        prompt_text("--rel-height-factor", default=str(args.rel_height_factor)).strip() or str(args.rel_height_factor)
-    )
-
-    print("[INFO] Block: extra filters")
-    if prompt_yes_no("Enable --min-visibility?", default=args.min_visibility > 0):
-        args.min_visibility = float(
-            prompt_text("--min-visibility", default=str(args.min_visibility or 0.5)).strip() or "0.5"
+        use_px = prompt_yes_no("Set baseline inset margin in pixels?", default=args.baseline_inset_margin_px is not None)
+        if use_px:
+            args.baseline_inset_margin_px = float(
+                prompt_text("--baseline-inset-margin-px", default=str(args.baseline_inset_margin_px or 10)).strip() or "10"
+            )
+        else:
+            args.baseline_inset_margin_px = None
+        same_prox = prompt_yes_no(
+            "Use same value for --filter-proximity-margin?", default=args.filter_proximity_margin is None
         )
-    else:
-        args.min_visibility = 0.0
-    if prompt_yes_no("Enable --min-area-px?", default=args.min_area_px > 0):
-        args.min_area_px = float(prompt_text("--min-area-px", default=str(args.min_area_px or 16)).strip() or "16")
-    else:
-        args.min_area_px = 0.0
-    if prompt_yes_no("Enable --max-aspect-ratio?", default=args.max_aspect_ratio is not None):
-        args.max_aspect_ratio = float(
-            prompt_text("--max-aspect-ratio", default=str(args.max_aspect_ratio or 20)).strip() or "20"
+        if same_prox:
+            args.filter_proximity_margin = None
+        else:
+            args.filter_proximity_margin = float(
+                prompt_text("--filter-proximity-margin", default=str(args.baseline_inset_margin)).strip()
+                or str(args.baseline_inset_margin)
+            )
+        print("[INFO] Block: edge eps and thresholds")
+        args.edge_eps = float(prompt_text("--edge-eps", default=str(args.edge_eps)).strip() or str(args.edge_eps))
+    elif args.size_filter:
+        args.baseline_inset_margin = float(
+            prompt_text("--baseline-inset-margin", default=str(args.baseline_inset_margin)).strip()
+            or str(args.baseline_inset_margin)
         )
-    else:
-        args.max_aspect_ratio = None
+        use_px = prompt_yes_no("Set baseline inset margin in pixels?", default=args.baseline_inset_margin_px is not None)
+        if use_px:
+            args.baseline_inset_margin_px = float(
+                prompt_text("--baseline-inset-margin-px", default=str(args.baseline_inset_margin_px or 10)).strip() or "10"
+            )
+        else:
+            args.baseline_inset_margin_px = None
+
+    if args.edge_filter or args.size_filter:
+        args.abs_min_width_px = float(
+            prompt_text("--abs-min-width-px", default=str(args.abs_min_width_px)).strip() or str(args.abs_min_width_px)
+        )
+        args.abs_min_height_px = float(
+            prompt_text("--abs-min-height-px", default=str(args.abs_min_height_px)).strip() or str(args.abs_min_height_px)
+        )
+        args.rel_quantile = float(
+            prompt_text("--rel-quantile", default=str(args.rel_quantile)).strip() or str(args.rel_quantile)
+        )
+        args.rel_width_factor = float(
+            prompt_text("--rel-width-factor", default=str(args.rel_width_factor)).strip() or str(args.rel_width_factor)
+        )
+        args.rel_height_factor = float(
+            prompt_text("--rel-height-factor", default=str(args.rel_height_factor)).strip() or str(args.rel_height_factor)
+        )
+
+    if args.edge_filter:
+        print("[INFO] Block: extra filters")
+        if prompt_yes_no("Enable --min-visibility?", default=args.min_visibility > 0):
+            args.min_visibility = float(
+                prompt_text("--min-visibility", default=str(args.min_visibility or 0.5)).strip() or "0.5"
+            )
+        else:
+            args.min_visibility = 0.0
+        if prompt_yes_no("Enable --min-area-px?", default=args.min_area_px > 0):
+            args.min_area_px = float(prompt_text("--min-area-px", default=str(args.min_area_px or 16)).strip() or "16")
+        else:
+            args.min_area_px = 0.0
+        if prompt_yes_no("Enable --max-aspect-ratio?", default=args.max_aspect_ratio is not None):
+            args.max_aspect_ratio = float(
+                prompt_text("--max-aspect-ratio", default=str(args.max_aspect_ratio or 20)).strip() or "20"
+            )
+        else:
+            args.max_aspect_ratio = None
 
     print("[INFO] Block: image removal")
     args.drop_images = prompt_yes_no("--drop-images (remove whole image on any match)?", default=bool(args.drop_images))
@@ -746,6 +922,10 @@ def main(argv: list[str] | None = None) -> None:
     try:
         args.edge_sides = normalize_edge_sides(args.edge_sides)
         allowed_filter_sides(args.edge_sides)
+        args.size_dims = normalize_size_dims(args.size_dims)
+        allowed_size_dims(args.size_dims)
+        args.size_baseline_mode = normalize_size_baseline_mode(args.size_baseline_mode)
+        allowed_size_baseline_mode(args.size_baseline_mode)
     except ValueError as exc:
         print(f"[ERROR] {exc}")
         return
@@ -803,10 +983,13 @@ def main(argv: list[str] | None = None) -> None:
     tmp_root = os.path.join(layout.root, "tmp")
     items = _list_items(src_root, structure, entry, args.dataset, tmp_root)
     config = _config_from_args(args)
+    if not config.edge_filter and not config.size_filter:
+        print("[ERROR] At least one of --edge-filter or --size-filter must be enabled.")
+        return
     size_cache: dict[str, tuple[int, int]] = {}
 
     forecast = _forecast_filter(items, config=config, class_filter=class_filter, id_to_name=id_to_name, size_cache=size_cache)
-    _print_forecast_table(forecast, id_to_name=id_to_name)
+    _print_forecast_table(forecast, id_to_name=id_to_name, config=config)
 
     if interactive_used and not args.yes and not args.dry_run and not args.stats_only:
         if not prompt_yes_no("Proceed with filter?", default=True):
@@ -863,6 +1046,8 @@ def main(argv: list[str] | None = None) -> None:
         size_cache=size_cache,
         empirical_bounds_map=forecast.empirical_bounds_map,
         empirical_bounds_summary=forecast.empirical_bounds_summary,
+        size_stats_map=forecast.size_stats_map,
+        size_stats_summary=forecast.size_stats_summary,
     )
     _write_data_yaml(out_dir, class_map)
     manifest_path = _write_filter_manifest(out_dir, parameters=parameters, forecast=forecast, stats_after=stats_after)
