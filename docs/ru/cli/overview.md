@@ -6,7 +6,7 @@
 
 ## Группы команд
 
-- Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`
+- Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`, `dataset rename`
 - Обучение: `train`, `clearml-upload`
 - Провайдеры: `providers`
 - Инфо: `info`
@@ -14,6 +14,7 @@
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
 - Модели: `model convert`, `model release`, `model rename`
+- Каталог датасетов: `dataset rename`
 - Инструменты форматов: `cvat`, `sahi`, `heatmap`
 - Миграция: `migrate-models`
 
@@ -36,7 +37,7 @@ smartrain model convert --help
 
 - интерактив включается только при запуске команды без аргументов (TTY обязателен);
 - выбор датасета(ов): сразу нумерованный список; ввод по имени или по номеру (несколько датасетов — через CSV номеров или имён);
-- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `report dataset`, `model convert`, `model release`, `model rename` пустой вызов запускает интерактивный режим;
+- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `report dataset`, `dataset rename`, `model convert`, `model release`, `model rename` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
 
@@ -65,6 +66,12 @@ smartrain model convert --help
 - `smartrain model rename` переименовывает release-модель в `models/<dataset>/`: меняется stem (`.pt`, sidecar `.json`, каталог артефактов release и конвертированные ONNX/engine/trt с тем же префиксом).
 - Registry-бандлы (`model_manifest.json`) и модели в `runs/` не затрагиваются.
 - В интерактивном режиме показывается список release-моделей, текущий stem подставляется в поле ввода для редактирования.
+
+Особенности `dataset rename`:
+
+- `smartrain dataset rename` переименовывает ключ датасета и каталог `datasets/<name>/`, а также связанные `runs/<name>/` и `models/<name>/`, если они есть.
+- Обновляет `datasets_info.json`, ссылки в `dataset_passport.json`, метаданные run, `queue.txt` и артефакты в `analytics/`.
+- `--dry-run` показывает план без изменений; `--move-data-path` нужен, если `data_path` указывает вне стандартного `datasets/<name>/`.
 
 Особенности `train` (контроль модели):
 

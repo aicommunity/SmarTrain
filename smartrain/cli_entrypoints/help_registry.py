@@ -148,6 +148,15 @@ COMMANDS: dict[str, CommandHelp] = {
             "analytics/datasets-reports/. Subcommand: dataset."
         ),
     ),
+    "dataset": CommandHelp(
+        name="dataset",
+        summary="Rename workspace datasets and update catalog references.",
+        description=(
+            "Manage dataset catalog entries beyond transform commands. Renames datasets/<name>/, "
+            "updates datasets_info.json, and propagates references in runs/, models/, queue.txt, "
+            "analytics/, and dataset_passport.json files. Subcommand: rename."
+        ),
+    ),
     "train": CommandHelp(
         name="train",
         summary="Train YOLO and write run artifacts to runs/.",

@@ -90,6 +90,14 @@ Quick examples:
   smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
 """
 
+HELP_DATASET_GROUP = """Dataset catalog management.
+
+Quick examples:
+  smartrain dataset rename --dataset old_name --new-name new_name
+  smartrain dataset rename --dataset old_name --new-name new_name --dry-run
+  smartrain dataset rename
+"""
+
 HELP_MODEL_GROUP = """Model conversion tools.
 
 Quick examples:
@@ -158,6 +166,8 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "  smartrain filter --dataset my_dataset --stats-only\n"
         "  smartrain filter --dataset my_dataset --dry-run --baseline-inset-margin 0.01\n"
         "  smartrain filter --dataset my_dataset --edge-sides horizontal\n"
+        "  smartrain filter --dataset my_dataset --no-edge-filter --size-filter\n"
+        "  smartrain filter --dataset my_dataset --size-filter --size-baseline-mode stable --size-dims width\n"
     ),
     "smartrain report dataset": (
         "Examples:\n"
@@ -1304,6 +1314,51 @@ app.add_typer(
     name="model",
     invoke_without_command=True,
     callback=_model_group_callback,
+)
+
+
+dataset_app = plain_sub_typer(
+    help=HELP_DATASET_GROUP,
+    invoke_without_command=True,
+)
+
+
+@dataset_app.command(
+    "rename",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_dataset_rename(ctx: typer.Context) -> None:
+    """Rename a workspace dataset and update related references.
+
+    Examples:
+      smartrain dataset rename --dataset old_name --new-name new_name
+      smartrain dataset rename --dataset old_name --new-name new_name --dry-run
+      smartrain dataset rename
+    """
+    from smartrain.workflows.datasets.dataset_rename_cli import build_dataset_rename_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.datasets.dataset_rename_cli",
+        build_parser=build_dataset_rename_arg_parser,
+        prog="smartrain dataset rename",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+def _dataset_group_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(HELP_DATASET_GROUP)
+        typer.echo("Run: smartrain dataset rename -- --help")
+        raise typer.Exit(0)
+
+
+app.add_typer(
+    dataset_app,
+    name="dataset",
+    invoke_without_command=True,
+    callback=_dataset_group_callback,
 )
 
 

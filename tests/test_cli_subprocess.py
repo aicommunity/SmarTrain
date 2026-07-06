@@ -30,6 +30,7 @@ HELP_MATRIX: list[list[str]] = [
     ["prune", "--", "--help"],
     ["prune", "empty", "--", "--help"],
     ["prune", "dedup", "--", "--help"],
+    ["filter", "--", "--help"],
     ["hash", "--", "--help"],
     ["stats", "--", "--help"],
     ["stats", "compare", "--", "--help"],
@@ -82,6 +83,8 @@ HELP_MATRIX: list[list[str]] = [
     ["model", "convert", "--", "--help"],
     ["model", "release", "--", "--help"],
     ["model", "rename", "--", "--help"],
+    ["dataset", "--help"],
+    ["dataset", "rename", "--", "--help"],
     ["rotate", "--", "--help"],
 ]
 

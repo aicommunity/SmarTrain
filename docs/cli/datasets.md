@@ -53,18 +53,24 @@ smartrain prune classes --dataset my_dataset
 
 ## `filter`
 
-Filter edge-truncated YOLO bbox annotations into a new dataset (default output `<dataset>_fltd`):
+Filter YOLO bbox annotations into a new dataset (default output `<dataset>_fltd`). Two independent modes (can be combined; disable either with `--no-edge-filter` / `--no-size-filter`):
 
 ```bash
 smartrain filter --dataset my_dataset
 smartrain filter --dataset my_dataset --stats-only
 smartrain filter --dataset my_dataset --dry-run
 smartrain filter --dataset my_dataset --drop-images
+smartrain filter --dataset my_dataset --no-edge-filter --size-filter --classes startup_marker
+smartrain filter --dataset my_dataset --size-filter --size-dims width --drop-images
+smartrain filter --dataset my_dataset --no-edge-filter --size-filter --size-dims width --size-baseline-mode stable --drop-images
 ```
 
-- **Pass 1** — per-class baseline width/height stats from bbox **fully inside** an inset zone (`--baseline-inset-margin`, default `0.01`; optional `--baseline-inset-margin-px`).
-- **Pass 2** — drop near-edge bbox that are too small (absolute `--abs-min-width-px` / `--abs-min-height-px` and relative to class p-quantile `--rel-quantile` with `--rel-width-factor` / `--rel-height-factor`). Near-edge zone: `--filter-proximity-margin` (defaults to baseline inset margin); strict touch/OOB: `--edge-eps`. Limit affected edges with `--edge-sides` (`any`, `horizontal`, `vertical`, `up`, `down`, `left`, `right`; default `any`). With **`--empirical-bounds`** (default off): bbox touching the physical image border use image edges; inset bbox use a per-class percentile hull (`--empirical-percentile`, default `0.10` → p10–p90) built from inset-only samples (`--empirical-inset-only`, default on). Optional per-resolution hulls: `--empirical-by-format` (default on).
-- Optional: `--min-visibility`, `--min-area-px`, `--max-aspect-ratio`; `--classes` to limit affected classes.
+- **Pass 1** — per-class baseline width/height stats from bbox **fully inside** an inset zone (`--baseline-inset-margin`, default `0.01`; optional `--baseline-inset-margin-px`). Used by both edge and size filters.
+- **Edge filter** (`--edge-filter`, default on) — drop near-edge bbox that are too small (absolute `--abs-min-width-px` / `--abs-min-height-px` and relative to class p-quantile `--rel-quantile` with `--rel-width-factor` / `--rel-height-factor`). Near-edge zone: `--filter-proximity-margin` (defaults to baseline inset margin); strict touch/OOB: `--edge-eps`. Limit affected edges with `--edge-sides` (`any`, `horizontal`, `vertical`, `up`, `down`, `left`, `right`; default `any`). With **`--empirical-bounds`** (default off): bbox touching the physical image border use image edges; inset bbox use a per-class percentile hull (`--empirical-percentile`, default `0.10` → p10–p90) built from inset-only samples (`--empirical-inset-only`, default on). Optional per-resolution hulls: `--empirical-by-format` (default on).
+- **Size filter** (`--size-filter`, default off) — drop bbox **smaller than the class baseline** anywhere in the frame. Control checked dimensions with `--size-dims` (`any`, `width`, `height`; default `any`). `--classes` limits which classes are filtered; other classes pass through unchanged.
+  - **`--size-baseline-mode inset`** (default) — typical size from inset-only samples; threshold = `--rel-width-factor` × quantile(`--rel-quantile`) of inset widths/heights (same as edge relative thresholds).
+  - **`--size-baseline-mode stable`** — for classes with stable object size: bulk-trim over **all** samples (`--size-bulk-split-ratio` × median, default 0.5), typical = quantile within bulk (`--size-typical-quantile`, default 0.25), threshold = `--rel-width-factor` × typical. Optional per-resolution baselines: `--size-by-format`.
+- Optional: `--min-visibility`, `--min-area-px`, `--max-aspect-ratio` (edge filter only).
 - **`--drop-images`** — remove entire image+labels from train/val/test buckets; originals are archived under `_filter_audit/dropped_images/<split>/images|labels` (excluded from `data.yaml`, training, and stats).
 - **`--prune-empty`** (default on) — after filtering, remove pairs that **had annotations** but none remain; archived to `_filter_audit/dropped_images/`.
 - **`--drop-background`** (default off) — remove source images that never had annotations (no label file or empty label); archived to `_filter_audit/dropped_images/` when enabled.
@@ -122,6 +128,24 @@ Flip modes: `horizontal`, `vertical`, `both` (single H+V pass), `h-and-v` (two s
 Conveyor noise (`--enable-conveyor-noise`): types via **`--conveyor-noise-types`** (`gaussian`, `iso`, `shot`, `poisson-gaussian`, `multiplicative`, `impulse`; default `iso,shot,gaussian`), strength **`--conveyor-noise-intensity`** [0..1], selection **`--conveyor-noise-selection`** `random` (one type) or `stack` (all types).
 
 All of the above commands form `dataset_passport.json` in the new dataset directory.
+
+## `dataset rename`
+
+Rename a dataset catalog entry and propagate references across the workspace:
+
+```bash
+smartrain dataset rename --dataset old_name --new-name new_name
+smartrain dataset rename --dataset old_name --new-name new_name --dry-run
+smartrain dataset rename
+```
+
+- Renames `datasets/<old>/` to `datasets/<new>/` and moves the key in `datasets_info.json`.
+- Also renames `runs/<old>/` and `models/<old>/` when present.
+- Updates references in `dataset_passport.json`, `training_metadata.json`, `args.yaml`, `queue.txt`, and analytics artifacts under `analytics/`.
+- **`--dry-run`**: print the rename plan without applying changes.
+- **`--move-data-path`**: required when the dataset uses a custom `data_path` outside `datasets/<name>/`.
+- Interactive mode (`smartrain dataset rename` from TTY): pick a dataset from the catalog, enter a new name, preview the plan, and get a replay command.
+- Does not modify `raw_data/` sources or `class_names.json`.
 
 ## `hash`
 

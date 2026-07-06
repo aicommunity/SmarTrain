@@ -6,7 +6,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 
 ## Command groups
 
-- Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`
+- Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `report dataset`, `dataset rename`
 - Training: `train`, `clearml-upload`
 - Providers: `providers`
 - Info: `info`
@@ -14,6 +14,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
 - Models: `model convert`, `model release`, `model rename`
+- Dataset catalog: `dataset rename`
 - Format tools: `cvat`, `sahi`, `heatmap`
 - Migration: `migrate`, `migrate-models`
 
@@ -42,7 +43,7 @@ smartrain <group> <subcommand> -- --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `report dataset`, `model convert`, `model release`, `model rename`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `report dataset`, `dataset rename`, `model convert`, `model release`, `model rename`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -79,6 +80,12 @@ Model rename highlights:
 - `smartrain model rename` renames a released model in `models/<dataset>/` by changing the release stem (`.pt`, sidecar `.json`, release artifact directory, and converted ONNX/engine/trt files with matching prefix).
 - Registry-promoted bundles (`model_manifest.json`) and run models under `runs/` are not affected.
 - Interactive mode lists released models and pre-fills the current stem for editing.
+
+Dataset rename highlights:
+
+- `smartrain dataset rename` renames a workspace dataset key and directory (`datasets/<name>/`), plus related `runs/<name>/` and `models/<name>/` folders when present.
+- Updates `datasets_info.json`, `dataset_passport.json` references, run metadata, `queue.txt`, and analytics artifacts.
+- Use `--dry-run` to preview the plan; use `--move-data-path` when `data_path` points outside the default `datasets/<name>/` layout.
 
 Migration highlights:
 

@@ -54,18 +54,24 @@ smartrain prune classes --dataset my_dataset
 
 ## `filter`
 
-Фильтрация edge-truncated YOLO bbox в новый датасет (по умолчанию `<dataset>_fltd`):
+Фильтрация YOLO bbox в новый датасет (по умолчанию `<dataset>_fltd`). Два независимых режима (можно комбинировать; отключение: `--no-edge-filter` / `--no-size-filter`):
 
 ```bash
 smartrain filter --dataset my_dataset
 smartrain filter --dataset my_dataset --stats-only
 smartrain filter --dataset my_dataset --dry-run
 smartrain filter --dataset my_dataset --drop-images
+smartrain filter --dataset my_dataset --no-edge-filter --size-filter --classes startup_marker
+smartrain filter --dataset my_dataset --size-filter --size-dims width --drop-images
+smartrain filter --dataset my_dataset --no-edge-filter --size-filter --size-dims width --size-baseline-mode stable --drop-images
 ```
 
-- **Pass 1** — baseline ширины/высоты bbox по классам только из inset-зоны (`--baseline-inset-margin`, по умолчанию `0.01`; опционально `--baseline-inset-margin-px`).
-- **Pass 2** — удаление near-edge bbox, слишком малых по абсолютным (`--abs-min-width-px`, `--abs-min-height-px`) и относительным порогам (`--rel-quantile`, `--rel-width-factor`, `--rel-height-factor`). Зона близости: `--filter-proximity-margin` (по умолчанию = baseline inset); строгое касание/OOB: `--edge-eps`. Ограничение сторон: `--edge-sides` (`any`, `horizontal`, `vertical`, `up`, `down`, `left`, `right`; по умолчанию `any`). С **`--empirical-bounds`** (по умолчанию выкл.): bbox у физического края кадра — по краям изображения; inset bbox — по перцентильному hull класса (`--empirical-percentile`, по умолчанию `0.10` → p10–p90) из inset-образцов (`--empirical-inset-only`, по умолчанию вкл.). Опционально отдельный hull на разрешение: `--empirical-by-format` (по умолчанию вкл.).
-- Опционально: `--min-visibility`, `--min-area-px`, `--max-aspect-ratio`; `--classes` для ограничения классов.
+- **Pass 1** — baseline ширины/высоты bbox по классам только из inset-зоны (`--baseline-inset-margin`, по умолчанию `0.01`; опционально `--baseline-inset-margin-px`). Используется обоими режимами.
+- **Edge filter** (`--edge-filter`, по умолчанию вкл.) — удаление near-edge bbox, слишком малых по абсолютным (`--abs-min-width-px`, `--abs-min-height-px`) и относительным порогам (`--rel-quantile`, `--rel-width-factor`, `--rel-height-factor`). Зона близости: `--filter-proximity-margin` (по умолчанию = baseline inset); строгое касание/OOB: `--edge-eps`. Ограничение сторон: `--edge-sides` (`any`, `horizontal`, `vertical`, `up`, `down`, `left`, `right`; по умолчанию `any`). С **`--empirical-bounds`** (по умолчанию выкл.): bbox у физического края кадра — по краям изображения; inset bbox — по перцентильному hull класса (`--empirical-percentile`, по умолчанию `0.10` → p10–p90) из inset-образцов (`--empirical-inset-only`, по умолчанию вкл.). Опционально отдельный hull на разрешение: `--empirical-by-format` (по умолчанию вкл.).
+- **Size filter** (`--size-filter`, по умолчанию выкл.) — удаление bbox **меньше типичного размера класса** в любом месте кадра. Контроль сторон: `--size-dims` (`any`, `width`, `height`; по умолчанию `any`). `--classes` ограничивает классы для фильтрации; остальные проходят без изменений.
+  - **`--size-baseline-mode inset`** (по умолчанию) — типичный размер из inset-образцов; порог = `--rel-width-factor` × квантиль(`--rel-quantile`) inset-ширин/высот.
+  - **`--size-baseline-mode stable`** — для классов со стабильным размером: bulk-trim по **всем** образцам (`--size-bulk-split-ratio` × медиана, по умолчанию 0.5), typical = квантиль внутри bulk (`--size-typical-quantile`, по умолчанию 0.25), порог = `--rel-width-factor` × typical. Опционально per-resolution: `--size-by-format`.
+- Опционально: `--min-visibility`, `--min-area-px`, `--max-aspect-ratio` (только edge filter).
 - **`--drop-images`** — кадр и исходная разметка убираются из train/val/test и архивируются в `_filter_audit/dropped_images/<split>/images|labels` (не участвуют в `data.yaml`, обучении и stats).
 - **`--prune-empty`** (по умолчанию вкл.) — удаляет пары, где **была** разметка, но после фильтрации строк не осталось; архив в `_filter_audit/dropped_images/`.
 - **`--drop-background`** (по умолчанию выкл.) — удаляет исходные кадры без аннотаций (нет label-файла или он пустой); при включении уходит в `_filter_audit/dropped_images/`.
@@ -122,6 +128,24 @@ smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
 Все перечисленные команды формируют `dataset_passport.json` в новом каталоге датасета.
 
 В `data.yaml` для переносимости корень датасета задаётся **каталогом, в котором лежит сам файл** (ключ `path` не обязателен); пути `train`/`val`/`test` — относительные к этому каталогу, без ведущего `./`, в духе Ultralytics.
+
+## `dataset rename`
+
+Переименование датасета в каталоге workspace и обновление связанных ссылок:
+
+```bash
+smartrain dataset rename --dataset old_name --new-name new_name
+smartrain dataset rename --dataset old_name --new-name new_name --dry-run
+smartrain dataset rename
+```
+
+- Переименовывает `datasets/<old>/` в `datasets/<new>/` и переносит ключ в `datasets_info.json`.
+- Также переименовывает `runs/<old>/` и `models/<old>/`, если они существуют.
+- Обновляет ссылки в `dataset_passport.json`, `training_metadata.json`, `args.yaml`, `queue.txt` и артефактах в `analytics/`.
+- **`--dry-run`**: показать план без изменений.
+- **`--move-data-path`**: обязателен, если у датасета кастомный `data_path` вне `datasets/<name>/`.
+- Интерактивный режим (`smartrain dataset rename` из TTY): выбор датасета, ввод нового имени, предпросмотр плана и replay-команда.
+- Не изменяет источники в `raw_data/` и `class_names.json`.
 
 ## `hash`
 
