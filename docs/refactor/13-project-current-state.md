@@ -83,7 +83,7 @@
 
 ## Analyze, datasets и отчёты
 
-- **Analyze:** логика в [`services/analyze/`](../../smartrain/services/analyze/); CLI-фасад [`workflows/analyze/results_analyzer.py`](../../smartrain/workflows/analyze/results_analyzer.py); отчёты — `report_{markdown,odt,writer}.py`, экспорт — [`services/reporting/document_export.py`](../../smartrain/services/reporting/document_export.py).
+- **Analyze:** логика в [`services/analyze/`](../../smartrain/services/analyze/); CLI-фасад [`workflows/analyze/results_analyzer.py`](../../smartrain/workflows/analyze/results_analyzer.py); отчёты — `report_{markdown,odt,writer}.py`, экспорт — [`services/reporting/document_export.py`](../../smartrain/services/reporting/document_export.py). Split/data.yaml для speed/PR: [`data_yaml_splits.py`](../../smartrain/services/analyze/data_yaml_splits.py) (path-aware пути, fallback test→val→train в `analyze all`, graceful degradation без test/val).
 - **Datasets:** логика в [`services/datasets/`](../../smartrain/services/datasets/); CLI-фасады [`workflows/datasets/*.py`](../../smartrain/workflows/datasets/).
 - **Schema governance:** [`services/analyze/schema_contracts.py`](../../smartrain/services/analyze/schema_contracts.py) (session manifest, format-compare index).
 

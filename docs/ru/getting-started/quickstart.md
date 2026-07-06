@@ -88,7 +88,7 @@ smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
 smartrain analyze all --report-languages en,ru
 ```
 
-`smartrain analyze scan` опционален как отдельная предварительная проверка, но не обязателен перед `smartrain analyze`/`smartrain analyze all`.
+`smartrain analyze scan` опционален как отдельная предварительная проверка, но не обязателен перед `smartrain analyze`/`smartrain analyze all`. Отдельный `smartrain test` и test/val split датасета для отчёта не обязательны; speed/PR при `profile=full` деградируют с предупреждениями при отсутствии split.
 
 ## Опциональные шаги
 

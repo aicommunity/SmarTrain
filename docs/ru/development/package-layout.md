@@ -31,6 +31,8 @@
 
 Use-case слой: `analyze/`, `datasets/`, `training/`, `testing/`, `inference_service.py`, `reporting/`. **Запрещены** прямые импорты `smartrain.workflows.*` (доступ через `core/workflow_adapters/`).
 
+Важный helper analyze: `data_yaml_splits.py` (разрешение путей датасета и split для benchmark/PR).
+
 ## core/
 
 Общая механика: `runtime/` (workspace, env), `training/` (профили, каталоги), `workflow_adapters/` (фасады к workflows для services), `inference/` (общие helpers inference).

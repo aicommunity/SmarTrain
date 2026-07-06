@@ -96,7 +96,7 @@ Launch modes:
 smartrain analyze all --report-languages en,ru
 ```
 
-`smartrain analyze scan` is optional and can be used as a separate pre-check, but it is not required before `smartrain analyze`/`smartrain analyze all`.
+`smartrain analyze scan` is optional and can be used as a separate pre-check, but it is not required before `smartrain analyze`/`smartrain analyze all`. A separate `smartrain test` run and test/val dataset splits are not required for the report; speed/PR stages degrade with warnings when splits are missing (`profile=full`).
 
 ## Optional steps
 
