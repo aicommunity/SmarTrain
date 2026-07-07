@@ -13,7 +13,7 @@ from smartrain.services.datasets.cvsdcldet_converter import (
     is_cvsdcldet_dir,
     parse_rename_classes_args,
 )
-from smartrain.services.datasets.cvat_cli import main as cvat_main
+from smartrain.services.datasets.dataset_convert_cli import main as dataset_convert_main
 
 
 def _write_jpg(path: Path, *, size: tuple[int, int] = (200, 100)) -> None:
@@ -115,23 +115,25 @@ def test_parse_rename_classes_args() -> None:
     assert parse_rename_classes_args([["a", "b"], ["c", "d"]]) == {"a": "b", "c": "d"}
 
 
-def test_cvat_cli_from_cvsdcldet_non_interactive(tmp_path: Path, monkeypatch) -> None:
+def test_dataset_convert_cli_from_cvsdcldet_non_interactive(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "src"
     source.mkdir()
     _write_cvsdcldet_sample(source)
     out = tmp_path / "cvat_out"
     monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
-    cvat_main(
+    dataset_convert_main(
         [
-            "from-cvsdcldet",
             "--source-dir",
             str(source),
+            "--to",
+            "cvat11",
             "--output-dir",
             str(out),
             "--rename-classes",
             "cat",
             "feline",
             "--zip",
+            "--no-delete-after-zip",
         ]
     )
     assert (out / "annotations.xml").is_file()

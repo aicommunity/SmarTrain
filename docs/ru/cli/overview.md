@@ -15,7 +15,7 @@
 - Реестр: `registry`
 - Модели: `model convert`, `model release`, `model rename`
 - Каталог датасетов: `dataset report`, `dataset rename`
-- Инструменты форматов: `cvat`, `sahi`, `heatmap`
+- Инструменты форматов: `dataset convert`, `sahi`, `heatmap`
 - Миграция: `migrate-models`
 
 ## Справка

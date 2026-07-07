@@ -13,13 +13,12 @@
 ## 2) CLI-руководство
 
 - [Обзор команд](cli/overview.md)
-- [Датасеты: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`](cli/datasets.md)
+- [Датасеты: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`, `dataset convert`](cli/datasets.md)
 - [Обучение и тест: `train`, `clearml-upload`](cli/training.md)
 - [Внешние провайдеры: `providers`, алиасы моделей, интеграция train/inference](cli/providers.md)
 - [Очередь: `queue`, `queue-run`](cli/queue.md)
 - [Аналитика: `analyze` (включая `pr-curves`, `inference-benchmark`, `inference-plot`, `test-metrics-plot`)](cli/analyze.md)
 - [Реестр моделей: `registry`](cli/registry.md)
-- [CVAT for images 1.1: `cvat`](cli/cvat.md)
 - [Инференс-инструменты: `sahi`, `heatmap`](cli/inference-tools.md)
 
 ## 2.1) Профили провайдеров

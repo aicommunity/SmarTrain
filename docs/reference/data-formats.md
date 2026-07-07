@@ -55,7 +55,7 @@ These IDs are stable project contracts and are intentionally not renamed.
 - Official name: **CvsDclDet detection export layout** (SmarTrain term)
   - Internal ID: `cvsdcldet`
   - Typical shape: flat folder with paired `*.jpg` (or other image) + `*.json`; JSON contains `detections[]` with `class_name`, `x`, `y`, `width`, `height` in pixels
-  - Notes: convert to CVAT 1.1 with `smartrain cvat from-cvsdcldet`; output is usually placed under `converted_raw_data/`.
+  - Notes: convert to CVAT 1.1 with `smartrain dataset convert --source-dir <path> --to cvat11`; output is usually placed under `converted_raw_data/`.
 
 ## Terminology policy
 

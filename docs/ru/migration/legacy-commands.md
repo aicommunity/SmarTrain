@@ -5,7 +5,7 @@
 ## Устаревшие или переходные сценарии
 
 - `smartrain plot` — устаревшая обёртка над `smartrain analyze`.
-- `smartrain report dataset` удалён; используйте `smartrain dataset report`.
+- `smartrain cvat` удалён; используйте `smartrain dataset convert`.
 - Устаревшие режимы `fusion`/`roi` без рабочего каталога по-прежнему поддерживаются.
 - Внутри исполнителя очереди есть резервный путь `training_queue.txt`, но в режиме рабочего каталога основной файл — `queue.txt`.
 

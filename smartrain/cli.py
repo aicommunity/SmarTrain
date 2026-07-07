@@ -128,14 +128,13 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "  smartrain train --data my_dataset --model yolo11n.pt --epochs 50\n"
         "  smartrain train --data my_dataset --batch 16 --img-size 1024\n"
     ),
-    "smartrain cvat": (
+    "smartrain dataset convert": (
         "Examples:\n"
-        "  smartrain cvat import --cvat-zip task.zip --output-dir datasets/task_yolo\n"
-        "  smartrain cvat export --dataset-dir datasets/task_yolo --zip-path task.cvat11.zip\n"
-        "  smartrain cvat export --dataset-dir datasets/task_yolo --task-name task42 --names class_a,class_b\n"
-        "  smartrain cvat from-cvsdcldet\n"
-        "  smartrain cvat from-cvsdcldet --source-dir raw_data/my_det --output-dir converted_raw_data/my_det --zip\n"
-        "  smartrain cvat from-cvsdcldet --source-dir raw_data/my_det --rename-classes white_line line\n"
+        "  smartrain dataset convert\n"
+        "  smartrain dataset convert --source-zip task.zip --to yolo --output-dir datasets/task_yolo\n"
+        "  smartrain dataset convert --source-dir datasets/task_yolo --to cvat11_zip --output-dir task.cvat11.zip\n"
+        "  smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det\n"
+        "  smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --rename-classes white_line line --zip\n"
     ),
     "smartrain rotate": (
         "Examples:\n"
@@ -1298,6 +1297,31 @@ def cmd_dataset_report(ctx: typer.Context) -> None:
 
 
 @dataset_app.command(
+    "convert",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_dataset_convert(ctx: typer.Context) -> None:
+    """Convert datasets between supported formats (CVAT 1.1, YOLO, CvsDclDet).
+
+    Examples:
+      smartrain dataset convert
+      smartrain dataset convert --source-zip task.zip --to yolo --output-dir datasets/task_yolo
+      smartrain dataset convert --source-dir datasets/task_yolo --to cvat11_zip --output-dir task.cvat11.zip
+      smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
+    """
+    from smartrain.workflows.datasets.dataset_convert_cli import build_dataset_convert_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.datasets.dataset_convert_cli",
+        build_parser=build_dataset_convert_arg_parser,
+        prog="smartrain dataset convert",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@dataset_app.command(
     "rename",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
@@ -1326,6 +1350,7 @@ def _dataset_group_callback(ctx: typer.Context) -> None:
         typer.echo(HELP_DATASET_GROUP)
         typer.echo("Run: smartrain dataset report -- --help")
         typer.echo("Run: smartrain dataset rename -- --help")
+        typer.echo("Run: smartrain dataset convert -- --help")
         raise typer.Exit(0)
 
 
@@ -1406,36 +1431,6 @@ def cmd_migrate_models(ctx: typer.Context) -> None:
         module="smartrain.workflows.migration.migrate_models_to_smartrain",
         build_parser=build_migrate_models_arg_parser,
         prog="smartrain migrate-models",
-    )
-
-
-@app.command(
-    "cvat",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-    add_help_option=False,
-)
-def cmd_cvat(ctx: typer.Context) -> None:
-    """Convert datasets between CVAT 1.1, YOLO, and CvsDclDet formats.
-
-    Examples:
-      smartrain cvat import --cvat-zip task.zip --output-dir datasets/task_yolo
-      smartrain cvat export --dataset-dir datasets/task_yolo --zip-path task.cvat11.zip
-      smartrain cvat export --dataset-dir datasets/task_yolo --task-name task42 --names class_a,class_b
-      smartrain cvat from-cvsdcldet
-      smartrain cvat from-cvsdcldet --source-dir raw_data/my_det --output-dir converted_raw_data/my_det --zip
-      smartrain cvat --help
-
-    Notes:
-      - Subcommands: import, export, from-cvsdcldet.
-      - Use --tmp-dir to control temporary workspace.
-    """
-    from smartrain.workflows.datasets.cvat_cli import build_cvat_arg_parser
-
-    _forward_argparse_command(
-        ctx,
-        module="smartrain.workflows.datasets.cvat_cli",
-        build_parser=build_cvat_arg_parser,
-        prog="smartrain cvat",
     )
 
 

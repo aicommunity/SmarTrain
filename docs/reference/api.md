@@ -19,6 +19,7 @@
 - `smartrain/workflows/inference/inference_cli.py` — `inference`.
 - `smartrain/workflows/datasets/dataset_report.py` — `dataset report`.
 - `smartrain/workflows/datasets/dataset_rename_cli.py` — `dataset rename`.
+- `smartrain/workflows/datasets/dataset_convert_cli.py` — `dataset convert`.
 - `smartrain/workflows/models/model_convert_cli.py`, `model_release_cli.py`, and `model_rename_cli.py` — `model`.
 - `smartrain/workflows/datasets/data_yaml_normalize.py` — `normalize-data-yaml`.
 - `smartrain/workflows/migration/migrate_models_to_smartrain.py` — `migrate-models`.
@@ -43,6 +44,7 @@
 | `smartrain inference` | `smartrain/workflows/inference/inference_cli.py` |
 | `smartrain dataset report` | `smartrain/workflows/datasets/dataset_report.py` |
 | `smartrain dataset rename` | `smartrain/workflows/datasets/dataset_rename_cli.py` |
+| `smartrain dataset convert` | `smartrain/workflows/datasets/dataset_convert_cli.py` |
 | `smartrain analyze` | `smartrain/workflows/analyze/results_analyzer.py` |
 | `smartrain plot` | `smartrain/workflows/analyze/plot_creator.py` |
 | `smartrain queue` / `queue-run` | `smartrain/workflows/queue/training_queue_cli.py` / `smartrain/workflows/queue/training_queue.py` |
@@ -50,7 +52,6 @@
 | `smartrain model convert` / `model release` / `model rename` | `smartrain/workflows/models/model_convert_cli.py` / `model_release_cli.py` / `model_rename_cli.py` |
 | `smartrain migrate-models` | `smartrain/workflows/migration/migrate_models_to_smartrain.py` |
 | `smartrain clearml-upload` | `smartrain/workflows/analyze/clearml_upload.py` |
-| `smartrain cvat` | `smartrain/workflows/datasets/cvat_cli.py` |
 | `smartrain sahi` | `smartrain/workflows/inference/sahi_cli.py` |
 | `smartrain heatmap` | `smartrain/workflows/inference/heatmap_cli.py` |
 
@@ -71,7 +72,7 @@ flowchart LR
     cliRouter --> queueBlock["workflows/queue/training_queue_cli.py + training_queue.py"]
     cliRouter --> registryBlock["workflows/registry/registry_cli.py"]
     cliRouter --> modelBlock["workflows/models/model_convert_cli.py + workflows/models/model_release_cli.py"]
-    cliRouter --> ioBlock["workflows/datasets/cvat_cli.py + workflows/inference/sahi_cli.py + heatmap_cli.py"]
+    cliRouter --> ioBlock["workflows/datasets/dataset_convert_cli.py + workflows/inference/sahi_cli.py + heatmap_cli.py"]
     cliRouter --> reportBlock["workflows/datasets/dataset_report.py"]
 ```
 

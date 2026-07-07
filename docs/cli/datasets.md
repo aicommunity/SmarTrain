@@ -129,6 +129,33 @@ Conveyor noise (`--enable-conveyor-noise`): types via **`--conveyor-noise-types`
 
 All of the above commands form `dataset_passport.json` in the new dataset directory.
 
+## `dataset convert`
+
+Convert datasets between supported formats (CVAT for images 1.1, YOLO, CvsDclDet). Sources can come from the workspace catalog (`datasets/`), `raw_data/`, or explicit external paths.
+
+```bash
+smartrain dataset convert
+smartrain dataset convert --source-zip /path/to/export.zip --to yolo --output-dir datasets/task_yolo
+smartrain dataset convert --source-dir datasets/task_yolo --to cvat11_zip --output-dir /path/to/out.cvat11.zip
+smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
+smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --rename-classes white_line line --zip
+smartrain dataset convert --dataset my_dataset --to cvat11_zip --output-dir /tmp/my_dataset.cvat11.zip
+```
+
+- **Interactive mode** (`smartrain dataset convert` from TTY): pick source (catalog / `raw_data` / manual path or zip), see detected format, choose target (`yolo`, `cvat11`, `cvat11_zip`), set output path, optional class rename for CvsDclDet, then optional zip archive (default **off**) and folder deletion after zip (default **on** when zip is enabled).
+- **`--to`**: `yolo` (flat `images/` + `labels/` + `data.yaml`), `cvat11` (folder), `cvat11_zip` (zip only).
+- **`--zip` / `--no-zip`**: after folder output, optionally pack to zip (`.cvat11.zip` for CVAT folders, `.zip` for YOLO).
+- **`--delete-after-zip` / `--no-delete-after-zip`**: remove output folder after zip (default: delete when `--zip`).
+- Writes `dataset_passport.json` in folder outputs. Run `smartrain scan` separately to update `datasets_info.json`.
+
+Migration from removed `smartrain cvat`:
+
+| Old | New |
+|-----|-----|
+| `cvat import --cvat-zip X --output-dir Y` | `dataset convert --source-zip X --to yolo --output-dir Y` |
+| `cvat export --dataset-dir D --zip-path Z` | `dataset convert --source-dir D --to cvat11_zip --output-dir Z` |
+| `cvat from-cvsdcldet --source-dir S --output-dir O --zip` | `dataset convert --source-dir S --to cvat11 --output-dir O --zip` |
+
 ## `dataset report`
 
 Multilingual per-class sample report (Markdown + PNG; optional PDF/ODT):

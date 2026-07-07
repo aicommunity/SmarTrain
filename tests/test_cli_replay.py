@@ -6,7 +6,7 @@ from smartrain.workflows.datasets.dataset_balance import build_balance_arg_parse
 from smartrain.workflows.datasets.dataset_former import build_dataset_former_arg_parser
 from smartrain.workflows.datasets.dataset_orient import build_orient_arg_parser
 from smartrain.workflows.datasets.dataset_roi_yolo import build_roi_arg_parser
-from smartrain.services.datasets.cvat_cli import build_cvat_arg_parser
+from smartrain.services.datasets.dataset_convert_cli import build_dataset_convert_arg_parser
 from smartrain.services.datasets.dataset_stats import build_stats_arg_parser, build_stats_compare_arg_parser
 from smartrain.services.training.train_cli_parsers import build_train_arg_parser
 
@@ -108,12 +108,13 @@ def test_replay_other_interactive_commands_do_not_emit_python_bools() -> None:
 
 
 def test_replay_append_nargs2_serializes_as_two_args_per_flag() -> None:
-    parser = build_cvat_arg_parser()
+    parser = build_dataset_convert_arg_parser()
     args = parser.parse_args(
         [
-            "from-cvsdcldet",
             "--source-dir",
             "/tmp/src",
+            "--to",
+            "cvat11",
             "--output-dir",
             "/tmp/out",
             "--rename-classes",
@@ -122,7 +123,7 @@ def test_replay_append_nargs2_serializes_as_two_args_per_flag() -> None:
             "--zip",
         ]
     )
-    cmd = build_non_interactive_command("cvat from-cvsdcldet", parser, args)
+    cmd = build_non_interactive_command("dataset convert", parser, args)
     assert "--rename-classes" in cmd
     assert "'['" not in cmd
     assert "--rename-classes white_line startup_marker" in cmd

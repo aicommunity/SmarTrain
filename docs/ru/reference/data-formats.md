@@ -55,7 +55,7 @@
 - Официальное название: **CvsDclDet detection export layout** (термин SmarTrain)
   - Internal ID: `cvsdcldet`
   - Типовая структура: плоская папка с парами `*.jpg` (или другой образ) + `*.json`; в JSON — `detections[]` с `class_name`, `x`, `y`, `width`, `height` в пикселях
-  - Примечание: конвертация в CVAT 1.1 — `smartrain cvat from-cvsdcldet`; результат обычно кладётся в `converted_raw_data/`.
+  - Примечание: конвертация в CVAT 1.1 — `smartrain dataset convert --source-dir <path> --to cvat11`; результат обычно кладётся в `converted_raw_data/`.
 
 ## Terminology policy
 

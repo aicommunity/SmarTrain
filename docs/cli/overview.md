@@ -15,7 +15,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Register: `registry`
 - Models: `model convert`, `model release`, `model rename`
 - Dataset catalog: `dataset report`, `dataset rename`
-- Format tools: `cvat`, `sahi`, `heatmap`
+- Format tools: `dataset convert`, `sahi`, `heatmap`
 - Migration: `migrate`, `migrate-models`
 
 ## Reference

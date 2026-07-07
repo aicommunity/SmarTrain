@@ -5,7 +5,7 @@
 ## Legacy and transitional commands
 
 - `smartrain plot` is an outdated wrapper for `smartrain analyze`.
-- `smartrain report dataset` was removed; use `smartrain dataset report`.
+- `smartrain cvat` was removed; use `smartrain dataset convert`.
 - Legacy modes `fusion`/`roi` without workspace are still supported.
 - Inside the queue executor there is a backup path `training_queue.txt`, but in workspace mode the main file is `queue.txt`.
 

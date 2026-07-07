@@ -132,21 +132,14 @@ COMMANDS: dict[str, CommandHelp] = {
             "labels in cropped coordinates."
         ),
     ),
-    "cvat": CommandHelp(
-        name="cvat",
-        summary="Convert between CVAT 1.1, YOLO, and CvsDclDet formats.",
-        description=(
-            "Import/export CVAT 1.1 archives, convert legacy CvsDclDet sources, and produce "
-            "workspace-ready YOLO datasets."
-        ),
-    ),
     "dataset": CommandHelp(
         name="dataset",
-        summary="Dataset catalog management: reports and rename.",
+        summary="Dataset catalog management: convert, reports, and rename.",
         description=(
-            "Generate multilingual per-class sample reports under analytics/datasets-reports/, "
-            "and rename workspace datasets with reference propagation across runs/, models/, "
-            "queue.txt, analytics/, and dataset_passport.json. Subcommands: report, rename."
+            "Convert datasets between CVAT 1.1, YOLO, and CvsDclDet; generate multilingual per-class "
+            "sample reports under analytics/datasets-reports/; rename workspace datasets with reference "
+            "propagation across runs/, models/, queue.txt, analytics/, and dataset_passport.json. "
+            "Subcommands: convert, report, rename."
         ),
     ),
     "train": CommandHelp(
@@ -299,7 +292,6 @@ COMMAND_GROUPS: list[tuple[str, list[str]]] = [
             "orient",
             "rotate",
             "roi",
-            "cvat",
             "dataset",
         ],
     ),
