@@ -68,3 +68,30 @@ def test_generate_yolo_labels_from_cvat_polyline(tmp_path: Path) -> None:
     parts = lbl.split()
     assert parts[0] == "0"
     assert len(parts) >= 7  # class + 3+ polygon points
+
+
+def test_process_dataset_prefers_yolo_subset_flat_when_pairs_exist(tmp_path: Path) -> None:
+    ds = tmp_path / "mixed_ds"
+    (ds / "images" / "квадрат").mkdir(parents=True, exist_ok=True)
+    (ds / "labels" / "квадрат").mkdir(parents=True, exist_ok=True)
+    (ds / "images" / "квадрат" / "img001.jpg").write_bytes(b"\xff\xd8\xff")
+    (ds / "labels" / "квадрат" / "img001.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (ds / "data.yaml").write_text("nc: 1\nnames: [belt_side]\ntrain: images\nval: images\n", encoding="utf-8")
+    # Keep CVAT artifact in place: YOLO structure should still win.
+    (ds / "annotations.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<annotations>
+  <version>1.1</version>
+  <meta><task><labels><label><name>belt_side</name></label></labels></task></meta>
+  <image id="0" name="квадрат/img001.jpg" width="100" height="80">
+    <box label="belt_side" xtl="10" ytl="10" xbr="30" ybr="30"/>
+  </image>
+</annotations>
+""",
+        encoding="utf-8",
+    )
+    info = process_dataset(str(ds), "mixed_ds")
+    assert info is not None
+    assert info["structure"] == "subset_flat"
+    assert info["elements_count"] == 1
+    assert "belt_side" in info["classes"]

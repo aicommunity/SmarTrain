@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 from typing import Callable, Sequence
+import yaml
 
 
 def convert_cvat11_folder_to_yolo_flat(
@@ -92,6 +93,22 @@ def convert_cvat11_folder_to_yolo_flat(
         + f"names: {list(names)}\n",
         encoding="utf-8",
     )
+
+    try:
+        payload = yaml.safe_load(data_yaml.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        raise ValueError(f"Failed to parse generated data.yaml: {data_yaml} ({e})") from e
+    if not isinstance(payload, dict):
+        raise ValueError(f"Generated data.yaml has unexpected structure: {data_yaml}")
+    train_rel = str(payload.get("train") or "").strip().replace("\\", "/").lstrip("./")
+    if not train_rel:
+        raise ValueError(f"Generated data.yaml has empty train path: {data_yaml}")
+    train_abs = os.path.normpath(os.path.join(str(target_root), train_rel))
+    if not os.path.isdir(train_abs):
+        raise ValueError(
+            "Generated CVAT->YOLO data.yaml points to a missing train directory: "
+            f"{train_rel} (resolved: {train_abs})"
+        )
 
     images_count = 0
     images_dir = target_root / "images"

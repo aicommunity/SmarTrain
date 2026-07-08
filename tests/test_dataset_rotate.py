@@ -144,3 +144,53 @@ def test_rotate_dataset_polygon_90_preserves_segment(tmp_path: Path) -> None:
     for x, y in labels[0].points:
         assert 0.0 <= x <= 1.0
         assert 0.0 <= y <= 1.0
+
+
+def _write_mixed_cvat_yolo_dataset(root: Path, name: str = "ds_mixed") -> Path:
+    ds = root / "raw_data" / name
+    (ds / "images" / "квадрат").mkdir(parents=True, exist_ok=True)
+    (ds / "labels" / "квадрат").mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (100, 80), color=(30, 40, 50)).save(ds / "images" / "квадрат" / "img001.jpg", format="JPEG")
+    (ds / "labels" / "квадрат" / "img001.txt").write_text("0 0.50 0.50 0.40 0.30\n", encoding="utf-8")
+    (ds / "data.yaml").write_text(
+        "train: images\nval: images\ntest: images\nnc: 1\nnames: ['obj']\n",
+        encoding="utf-8",
+    )
+    (ds / "annotations.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<annotations>
+  <version>1.1</version>
+  <meta><task><labels><label><name>obj</name></label></labels></task></meta>
+  <image id="0" name="квадрат/img001.jpg" width="100" height="80">
+    <box label="obj" xtl="10" ytl="10" xbr="30" ybr="30"/>
+  </image>
+</annotations>
+""",
+        encoding="utf-8",
+    )
+    return ds
+
+
+def test_rotate_cli_allows_mixed_dataset_when_yolo_pairs_exist(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    _write_mixed_cvat_yolo_dataset(tmp_path)
+    scan_main(["--workspace", str(tmp_path)])
+    info = json.loads((tmp_path / "datasets" / "datasets_info.json").read_text(encoding="utf-8"))
+    assert info["ds_mixed"]["structure"] == "subset_flat"
+
+    monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
+    rotate_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_mixed",
+            "--angle",
+            "90",
+            "--no-legend",
+        ]
+    )
+    out = tmp_path / "datasets" / "ds_mixed_rot90"
+    assert out.is_dir()
+    assert (out / "images" / "квадрат" / "img001.jpg").is_file()
+    assert (out / "labels" / "квадрат" / "img001.txt").is_file()
