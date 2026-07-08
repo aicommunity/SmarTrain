@@ -72,6 +72,34 @@ def model_kw_model(train_kw: dict[str, Any]) -> str:
     return str(train_kw.get("model", ""))
 
 
+def validate_train_launch_paths(
+    *,
+    train_kw: dict[str, Any],
+    model_dir: str,
+    data_yaml: str,
+) -> None:
+    project_path = str(train_kw.get("project", ""))
+    if os.path.normpath(project_path) != os.path.normpath(model_dir):
+        raise RuntimeError(
+            "Training launch rejected: unexpected project path in kwargs "
+            f"({project_path}). Expected: {model_dir}"
+        )
+    if str(train_kw.get("data", "")) != str(data_yaml):
+        raise RuntimeError(
+            "Training launch rejected: unexpected data yaml in kwargs "
+            f"({train_kw.get('data')}). Expected: {data_yaml}"
+        )
+    if not os.path.isfile(data_yaml):
+        raise FileNotFoundError(f"Runtime data.yaml not found: {data_yaml}")
+    if not os.path.isdir(model_dir):
+        raise FileNotFoundError(f"Run directory is missing: {model_dir}")
+    if not os.access(model_dir, os.W_OK | os.X_OK):
+        raise PermissionError(
+            f"Run directory is not writable: {model_dir}. "
+            "Check permissions and remove path-like keys from external args.yaml (for example save_dir)."
+        )
+
+
 def _materialize_preferred_run_model(run_dir: str, source_path: str | None = None) -> str | None:
     target = materialize_preferred_run_model(
         run_dir,
@@ -244,6 +272,7 @@ def train_yolo(
     train_kw = finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
     if non_interactive or mpl_rt.force_ultralytics_plots_false:
         train_kw.setdefault("plots", False)
+    validate_train_launch_paths(train_kw=train_kw, model_dir=model_dir, data_yaml=data_yaml)
     ensure_initial_training_metadata(
         model_dir=model_dir,
         dataset_path=dataset_path,

@@ -26,9 +26,21 @@ Parameter sources and priority:
 `CLI > --ultralytics_yaml > --config > defaults`
 
 The `data` field from `--ultralytics_yaml` is ignored, the selected `--data` is used.
-Also ignored from `--ultralytics_yaml`: `project`, `name`, `exist_ok`, `cfg`, `device`, `model_dir`, `target_path`, `workspace`.
+Also ignored from `--ultralytics_yaml`: `project`, `name`, `exist_ok`, `cfg`, `device`, `model_dir`, `target_path`, `workspace`, `save_dir`, `runs_dir`, `output_dir`.
 
 That is, command line options always have the highest priority.
+
+Two-stage safety for external YAML:
+
+1. Merge stage ignores service/path keys from `--ultralytics_yaml`.
+2. Finalize stage forces runtime values before `YOLO.train(...)`: `data`, `project`, `name`, `exist_ok`.
+
+This prevents external `args.yaml` from redirecting runs to foreign paths.
+
+Path portability note:
+
+- Avoid absolute machine-specific paths (for example `/mnt/*`) in external `args.yaml`.
+- `--device` from CLI should be used for device selection; `device` in `--ultralytics_yaml` is ignored.
 
 Model selection:
 

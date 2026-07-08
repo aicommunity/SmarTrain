@@ -26,9 +26,21 @@ smartrain train --test-only --model-dir /path/to/run --data /path/to/dataset
 `CLI > --ultralytics_yaml > --config > defaults`
 
 Поле `data` из `--ultralytics_yaml` игнорируется, используется выбранный `--data`.
-Также из `--ultralytics_yaml` игнорируются: `project`, `name`, `exist_ok`, `cfg`, `device`, `model_dir`, `target_path`, `workspace`.
+Также из `--ultralytics_yaml` игнорируются: `project`, `name`, `exist_ok`, `cfg`, `device`, `model_dir`, `target_path`, `workspace`, `save_dir`, `runs_dir`, `output_dir`.
 
 То есть параметры командной строки всегда имеют наивысший приоритет.
+
+Двухэтапная защита для внешнего YAML:
+
+1. На этапе merge из `--ultralytics_yaml` отбрасываются сервисные и path-like ключи.
+2. На этапе finalize перед `YOLO.train(...)` принудительно задаются `data`, `project`, `name`, `exist_ok`.
+
+Это не позволяет стороннему `args.yaml` перенаправить запуск в чужие директории.
+
+Примечание по переносимости путей:
+
+- Избегайте абсолютных машинно-зависимых путей (например `/mnt/*`) во внешнем `args.yaml`.
+- Для выбора устройства используйте `--device` из CLI; `device` в `--ultralytics_yaml` игнорируется.
 
 Выбор модели:
 
