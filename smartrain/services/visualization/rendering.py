@@ -66,8 +66,50 @@ def _label_color(label: str, palette: dict[str, tuple[int, int, int]]) -> tuple[
     return palette.get(label) or palette.get("unknown") or (255, 0, 0)
 
 
+def _fade_color(rgb: tuple[int, int, int], *, strength: float = 0.62) -> tuple[int, int, int]:
+    """
+    Return noticeably faded variant of class color.
+    strength in [0,1]: higher -> more faded (closer to gray/white).
+    """
+    s = max(0.0, min(1.0, float(strength)))
+    r, g, b = rgb
+    gray = int(round((r + g + b) / 3))
+    mix_to_gray = 0.7 * s
+    mix_to_white = 0.55 * s
+    rr = int(round(r * (1.0 - mix_to_gray) + gray * mix_to_gray))
+    gg = int(round(g * (1.0 - mix_to_gray) + gray * mix_to_gray))
+    bb = int(round(b * (1.0 - mix_to_gray) + gray * mix_to_gray))
+    rr = int(round(rr * (1.0 - mix_to_white) + 255 * mix_to_white))
+    gg = int(round(gg * (1.0 - mix_to_white) + 255 * mix_to_white))
+    bb = int(round(bb * (1.0 - mix_to_white) + 255 * mix_to_white))
+    return (max(0, min(255, rr)), max(0, min(255, gg)), max(0, min(255, bb)))
+
+
 def _class_name(class_names: dict[int, str], class_id: int) -> str:
     return str(class_names.get(int(class_id), f"class_{int(class_id)}"))
+
+
+def _det_class_id(det: dict[str, Any]) -> int:
+    raw = det.get("class_id", det.get("class_index", -1))
+    try:
+        return int(raw)
+    except Exception:
+        try:
+            return int(float(raw))
+        except Exception:
+            return -1
+
+
+def _det_class_name(det: dict[str, Any], class_names: dict[int, str], class_id: int) -> str:
+    raw_name = det.get("class_name")
+    if isinstance(raw_name, str) and raw_name.strip():
+        return raw_name.strip()
+    cid = int(class_id)
+    if cid < 0:
+        cid = _det_class_id(det)
+    if cid >= 0 and cid in class_names:
+        return str(class_names[cid])
+    return _class_name(class_names, cid)
 
 
 def _is_grayscale_image(image: Image.Image) -> bool:
@@ -224,12 +266,14 @@ def _draw_gt_label(
     class_names: dict[int, str],
     metrics: VisDrawMetrics,
     label_colors: dict[str, tuple[int, int, int]],
+    faded: bool,
     forbidden: list[tuple[int, int, int, int]],
     placed: list[_PlacedLabel],
 ) -> None:
     cls_id = int(lb.cls_id)
     name = _class_name(class_names, cls_id)
-    col = _label_color(name, label_colors)
+    base_col = _label_color(name, label_colors)
+    col = _fade_color(base_col) if faded else base_col
     if isinstance(lb, YoloBBox):
         x1 = (lb.cx - lb.w / 2.0) * w
         y1 = (lb.cy - lb.h / 2.0) * h
@@ -299,6 +343,7 @@ def render_gt_overlay(
     gt_labels: list[YoloLabel],
     class_names: dict[int, str],
     label_colors: dict[str, tuple[int, int, int]] | None = None,
+    gt_faded: bool = False,
 ) -> Image.Image:
     image, _fmt = _prepare_canvas(image_path)
     w, h = image.size
@@ -308,7 +353,7 @@ def render_gt_overlay(
     forbidden: list[tuple[int, int, int, int]] = []
     placed: list[_PlacedLabel] = []
     for lb in gt_labels:
-        _draw_gt_label(image, draw, w, h, lb, class_names, metrics, palette, forbidden, placed)
+        _draw_gt_label(image, draw, w, h, lb, class_names, metrics, palette, gt_faded, forbidden, placed)
     return image
 
 
@@ -326,11 +371,8 @@ def render_pred_overlay(
     forbidden: list[tuple[int, int, int, int]] = []
     placed: list[_PlacedLabel] = []
     for det in pred_rows:
-        try:
-            cls_id = int(det.get("class_id", -1))
-        except Exception:
-            cls_id = -1
-        name = _class_name(class_names, cls_id)
+        cls_id = _det_class_id(det)
+        name = _det_class_name(det, class_names, cls_id)
         col = _label_color(name, palette)
         conf = det.get("confidence")
         label = f"PRED {name}" if conf is None else f"PRED {name} {float(conf):.2f}"
@@ -377,6 +419,7 @@ def render_combined_overlay(
     pred_rows: list[dict[str, Any]],
     class_names: dict[int, str],
     label_colors: dict[str, tuple[int, int, int]] | None = None,
+    gt_faded: bool = False,
 ) -> tuple[Image.Image, str | None]:
     image, original_format = _prepare_canvas(image_path)
     w, h = image.size
@@ -386,13 +429,10 @@ def render_combined_overlay(
     forbidden: list[tuple[int, int, int, int]] = []
     placed: list[_PlacedLabel] = []
     for lb in gt_labels:
-        _draw_gt_label(image, draw, w, h, lb, class_names, metrics, palette, forbidden, placed)
+        _draw_gt_label(image, draw, w, h, lb, class_names, metrics, palette, gt_faded, forbidden, placed)
     for det in pred_rows:
-        try:
-            cls_id = int(det.get("class_id", -1))
-        except Exception:
-            cls_id = -1
-        name = _class_name(class_names, cls_id)
+        cls_id = _det_class_id(det)
+        name = _det_class_name(det, class_names, cls_id)
         col = _label_color(name, palette)
         conf = det.get("confidence")
         label = f"PRED {name}" if conf is None else f"PRED {name} {float(conf):.2f}"

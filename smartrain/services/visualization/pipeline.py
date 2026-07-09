@@ -127,10 +127,18 @@ def _render_loop(
             for lb in gt_labels:
                 color_registry.ensure(class_names.get(int(lb.cls_id), f"class_{int(lb.cls_id)}"))
             for det in pred_rows:
+                raw_name = det.get("class_name")
+                if isinstance(raw_name, str) and raw_name.strip():
+                    color_registry.ensure(raw_name.strip())
+                    continue
+                raw_cid = det.get("class_id", det.get("class_index", -1))
                 try:
-                    cid = int(det.get("class_id", -1))
+                    cid = int(raw_cid)
                 except Exception:
-                    cid = -1
+                    try:
+                        cid = int(float(raw_cid))
+                    except Exception:
+                        cid = -1
                 color_registry.ensure(class_names.get(cid, f"class_{cid}"))
             rendered, original_format = render_combined_overlay(
                 fr.source_abs,
@@ -138,6 +146,7 @@ def _render_loop(
                 pred_rows,
                 class_names,
                 label_colors=color_registry.colors_rgb(),
+                gt_faded=with_predictions,
             )
             save_rendered_image(rendered, fr.output_abs, original_format=original_format)
             ok += 1

@@ -8,6 +8,7 @@ from smartrain.services.datasets.yolo_labels import YoloBBox
 from smartrain.services.visualization.color_registry import LabelColorRegistry
 from smartrain.services.visualization.rendering import (
     _annotation_scale,
+    _det_class_name,
     _is_grayscale_image,
     _vis_draw_metrics,
     render_combined_overlay,
@@ -65,3 +66,9 @@ def test_label_color_registry_is_stable_and_persistent(tmp_path: Path) -> None:
     reg2.save()
     payload = p.read_text(encoding="utf-8")
     assert "cat" in payload and "dog" in payload
+
+
+def test_class_name_resolves_from_class_index_float_string() -> None:
+    det = {"class_index": "0.0"}
+    name = _det_class_name(det, {0: "person"}, class_id=-1)
+    assert name == "person"
