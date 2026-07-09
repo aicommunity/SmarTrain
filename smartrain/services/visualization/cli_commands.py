@@ -80,6 +80,22 @@ def _prompt_splits_if_missing(args: argparse.Namespace) -> None:
     args.splits = ",".join(selected)
 
 
+def _prompt_confidence(args: argparse.Namespace) -> None:
+    default_conf = float(getattr(args, "conf", 0.25) if getattr(args, "conf", None) is not None else 0.25)
+    while True:
+        raw = prompt_text("Confidence threshold", default=str(default_conf)).strip()
+        try:
+            value = float(raw) if raw else default_conf
+        except Exception:
+            print(f"[ERROR] Invalid confidence value: {raw!r}")
+            continue
+        if value < 0.0 or value > 1.0:
+            print(f"[ERROR] Confidence must be in [0, 1], got: {value}")
+            continue
+        args.conf = value
+        return
+
+
 def _pick_interactive_model(args: argparse.Namespace, layout: WorkspaceLayout) -> None:
     model_entries = discover_model_entries(layout)
     model_options = ["models", "weights"]
@@ -148,6 +164,7 @@ def _fill_model_interactive(args: argparse.Namespace, layout: WorkspaceLayout) -
             title="visualization devices",
             default_device=default_device_value(),
         )
+    _prompt_confidence(args)
 
 
 def _fill_run_interactive(args: argparse.Namespace, layout: WorkspaceLayout) -> None:
@@ -159,6 +176,7 @@ def _fill_run_interactive(args: argparse.Namespace, layout: WorkspaceLayout) -> 
             title="visualization devices",
             default_device=default_device_value(),
         )
+    _prompt_confidence(args)
 
 
 def _ensure_mode_defaults(args: argparse.Namespace) -> None:
