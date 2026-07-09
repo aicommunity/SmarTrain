@@ -84,8 +84,8 @@ pytest
 ## Important details
 
 - Interactive mode starts only when a command is launched with zero arguments (TTY required).
-- Interactive dataset commands: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `inference`; plus `train`.
-- Dataset cleanup command: `prune` (`prune empty` for empty pairs, `prune dedup` for duplicate images by content).
+- Interactive dataset commands: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `inference`, `prune`; plus `train`.
+- Dataset cleanup command: `prune` (`prune empty` for empty pairs, `prune dedup` for duplicate images by content, `prune classes` for unused classes, `prune size` for labels smaller than `NxM` with default `20x20`; by default this mode removes images with no labels left unless `--no-drop-empty-images` is set).
 - If any arguments are provided but required ones are missing, commands return a clear "incomplete arguments" error instead of interactive prompts.
 - Command help now includes practical `Examples` / `Quick examples` blocks for common workflows.
 - `smartrain balance` presets:

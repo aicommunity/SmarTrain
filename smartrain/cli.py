@@ -614,12 +614,14 @@ def cmd_balance(ctx: typer.Context) -> None:
     add_help_option=False,
 )
 def cmd_prune(ctx: typer.Context) -> None:
-    """Prune dataset: remove empty pairs, duplicates, or unused classes.
+    """Prune dataset: remove empty pairs, duplicates, unused classes, or small labels.
 
     Examples:
       smartrain prune empty --dataset my_dataset
       smartrain prune dedup --dataset my_dataset
       smartrain prune classes --dataset my_dataset
+      smartrain prune size --dataset my_dataset
+      smartrain prune size --dataset my_dataset --min-size 12x18 --no-drop-empty-images
       smartrain prune dedup --dataset my_dataset --allow-balanced-dedup
     """
     from smartrain.workflows.datasets.dataset_prune import (
@@ -627,6 +629,7 @@ def cmd_prune(ctx: typer.Context) -> None:
         build_prune_classes_arg_parser,
         build_prune_dedup_arg_parser,
         build_prune_empty_arg_parser,
+        build_prune_size_arg_parser,
     )
 
     parser = build_prune_arg_parser
@@ -640,6 +643,9 @@ def cmd_prune(ctx: typer.Context) -> None:
     elif ctx.args and ctx.args[0] == "classes":
         parser = build_prune_classes_arg_parser
         prog = "smartrain prune classes"
+    elif ctx.args and ctx.args[0] == "size":
+        parser = build_prune_size_arg_parser
+        prog = "smartrain prune size"
 
     _forward_argparse_command(
         ctx,

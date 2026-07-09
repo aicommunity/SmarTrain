@@ -52,11 +52,15 @@ smartrain split --dataset my_dataset --exclude-test --output-name my_dataset_res
 smartrain prune empty --dataset my_dataset
 smartrain prune dedup --dataset my_dataset
 smartrain prune classes --dataset my_dataset
+smartrain prune size --dataset my_dataset
+smartrain prune size --dataset my_dataset --min-size 12x18
+smartrain prune size --dataset my_dataset --no-drop-empty-images
 ```
 
 - **`prune empty`** — removes empty image/label pairs into `<dataset>_pruned`.
 - **`prune dedup`** — removes duplicate images by content into `<dataset>_deduped`.
 - **`prune classes`** — copies the dataset to `<dataset>_classes_pruned`, removes unused classes from metadata (`data.yaml`, `obj.names`), remaps `class_id` in annotations; image and label files are kept.
+- **`prune size`** — copies the dataset to `<dataset>_size_pruned`, removes label instances where bbox size is below `NxM` pixels (`--min-size`, default `20x20`), then by default removes images where no labels remain. Use `--no-drop-empty-images` to keep such images with an empty label file.
 
 ## `filter`
 

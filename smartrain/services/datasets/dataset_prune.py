@@ -10,9 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_text
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.services.datasets.bbox_edge_filter import bbox_geom_from_label
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_cli_catalog import (
     EMPTY_DATASETS_INFO_MESSAGE,
@@ -24,6 +26,7 @@ from smartrain.services.datasets.dataset_class_cleanup import strip_unused_class
 from smartrain.services.datasets.dataset_former import _image_content_hash
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
+from smartrain.services.datasets.yolo_labels import read_yolo_labels, serialize_yolo_labels
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
@@ -67,6 +70,18 @@ def build_prune_dedup_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
+def build_prune_size_arg_parser() -> argparse.ArgumentParser:
+    p = CliArgumentParser(description="Prune labels smaller than NxM pixels into a new dataset")
+    p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
+    p.add_argument("--dataset", type=str, default=None, help="Source dataset key from datasets_info.json")
+    p.add_argument("--output-name", type=str, default=None, help="Output dataset name (default <dataset>_size_pruned)")
+    p.add_argument("--min-size", type=str, default="20x20", help="Minimum bbox size in pixels as NxM (default 20x20)")
+    p.add_argument("--drop-empty-images", dest="drop_empty_images", action="store_true", default=True)
+    p.add_argument("--no-drop-empty-images", dest="drop_empty_images", action="store_false")
+    p.add_argument("--dry-run", action="store_true")
+    return p
+
+
 def build_prune_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(description="Dataset pruning utilities: remove empty pairs or duplicates")
     sub = p.add_subparsers(dest="mode")
@@ -74,6 +89,7 @@ def build_prune_arg_parser() -> argparse.ArgumentParser:
     sub.add_parser("empty", parents=[build_prune_empty_arg_parser()], add_help=False)
     sub.add_parser("classes", parents=[build_prune_classes_arg_parser()], add_help=False)
     sub.add_parser("dedup", parents=[build_prune_dedup_arg_parser()], add_help=False)
+    sub.add_parser("size", parents=[build_prune_size_arg_parser()], add_help=False)
     return p
 
 
@@ -281,6 +297,91 @@ def _prune_dedup(out_dir: str) -> dict[str, int]:
     return {"scanned": scanned, "removed": removed, "cross_split_removed": cross_split_removed}
 
 
+def _parse_min_size(raw: str) -> tuple[float, float]:
+    text = str(raw or "").strip().lower()
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)", text)
+    if not m:
+        raise ValueError(f"Invalid --min-size value: {raw!r}. Expected NxM, e.g. 20x20.")
+    min_w = float(m.group(1))
+    min_h = float(m.group(2))
+    if min_w <= 0 or min_h <= 0:
+        raise ValueError(f"Invalid --min-size value: {raw!r}. Both dimensions must be > 0.")
+    return min_w, min_h
+
+
+def _prune_small_labels(out_dir: str, *, min_w_px: float, min_h_px: float, drop_empty_images: bool) -> dict[str, int]:
+    scanned = 0
+    labels_before = 0
+    removed_labels = 0
+    labels_after = 0
+    images_dropped_empty_after_size = 0
+    kept_empty_images = 0
+    image_size_cache: dict[str, tuple[int, int]] = {}
+
+    for item in _list_output_items(out_dir):
+        scanned += 1
+        if not os.path.isfile(item.label_path):
+            continue
+        if item.image_path in image_size_cache:
+            iw, ih = image_size_cache[item.image_path]
+        else:
+            with Image.open(item.image_path) as im:
+                iw, ih = int(im.width), int(im.height)
+            image_size_cache[item.image_path] = (iw, ih)
+        labels = read_yolo_labels(item.label_path)
+        if not labels:
+            if drop_empty_images:
+                try:
+                    os.remove(item.image_path)
+                except OSError:
+                    pass
+                try:
+                    os.remove(item.label_path)
+                except OSError:
+                    pass
+                images_dropped_empty_after_size += 1
+            else:
+                kept_empty_images += 1
+            continue
+        labels_before += len(labels)
+        kept = []
+        for lb in labels:
+            geom = bbox_geom_from_label(lb, img_w=iw, img_h=ih)
+            if geom is None:
+                kept.append(lb)
+                continue
+            if geom.w_px < min_w_px or geom.h_px < min_h_px:
+                removed_labels += 1
+                continue
+            kept.append(lb)
+        labels_after += len(kept)
+        if not kept:
+            if drop_empty_images:
+                try:
+                    os.remove(item.image_path)
+                except OSError:
+                    pass
+                try:
+                    os.remove(item.label_path)
+                except OSError:
+                    pass
+                images_dropped_empty_after_size += 1
+            else:
+                Path(item.label_path).write_text("", encoding="utf-8")
+                kept_empty_images += 1
+            continue
+        Path(item.label_path).write_text(serialize_yolo_labels(kept), encoding="utf-8")
+
+    return {
+        "scanned": scanned,
+        "labels_before": labels_before,
+        "removed_labels": removed_labels,
+        "labels_after": labels_after,
+        "images_dropped_empty_after_size": images_dropped_empty_after_size,
+        "kept_empty_images": kept_empty_images,
+    }
+
+
 def _interactive_fill(args: argparse.Namespace, mode: str, dataset_names: list[str]) -> None:
     print("[INFO] Interactive prune mode")
     args.dataset = prompt_choice("Dataset", dataset_names, default=(args.dataset or dataset_names[0]))
@@ -288,11 +389,23 @@ def _interactive_fill(args: argparse.Namespace, mode: str, dataset_names: list[s
     if mode == "dedup":
         # Keep strict safeguard by default.
         args.allow_balanced_dedup = False
+    if mode == "size":
+        args.min_size = (
+            prompt_text("Minimum bbox size in px NxM (--min-size)", default=str(getattr(args, "min_size", "20x20")))
+            .strip()
+            or "20x20"
+        )
+        drop_empty_images = prompt_choice(
+            "Drop images with no labels after size prune?",
+            ["yes", "no"],
+            default="yes" if bool(getattr(args, "drop_empty_images", True)) else "no",
+        )
+        args.drop_empty_images = drop_empty_images == "yes"
 
 
 def main(argv=None) -> None:
     argv = sys.argv[1:] if argv is None else argv
-    mode = argv[0] if argv and argv[0] in {"empty", "dedup", "classes"} else None
+    mode = argv[0] if argv and argv[0] in {"empty", "dedup", "classes", "size"} else None
     mode_args = argv[1:] if mode else argv
     interactive_allowed = is_interactive_allowed(argv)
 
@@ -300,6 +413,8 @@ def main(argv=None) -> None:
         parser = build_prune_dedup_arg_parser()
     elif mode == "classes":
         parser = build_prune_classes_arg_parser()
+    elif mode == "size":
+        parser = build_prune_size_arg_parser()
     else:
         parser = build_prune_empty_arg_parser()
     args = parser.parse_args(mode_args)
@@ -314,16 +429,18 @@ def main(argv=None) -> None:
     interactive_used = False
     if mode is None:
         if not interactive_allowed:
-            print("[ERROR] Incomplete arguments: specify prune mode (empty|dedup|classes).")
+            print("[ERROR] Incomplete arguments: specify prune mode (empty|dedup|classes|size).")
             return
         if not sys.stdin.isatty():
             print("[ERROR] Interactive prune mode requires a terminal (TTY).")
             return
-        mode = prompt_choice("Prune mode", ["empty", "dedup", "classes"], default="empty")
+        mode = prompt_choice("Prune mode", ["empty", "dedup", "classes", "size"], default="empty")
         if mode == "dedup":
             parser = build_prune_dedup_arg_parser()
         elif mode == "classes":
             parser = build_prune_classes_arg_parser()
+        elif mode == "size":
+            parser = build_prune_size_arg_parser()
         else:
             parser = build_prune_empty_arg_parser()
         args = parser.parse_args([])
@@ -363,7 +480,16 @@ def main(argv=None) -> None:
         )
         return
 
-    out_base = args.output_name or f"{args.dataset}_{'pruned' if mode == 'empty' else 'deduped' if mode == 'dedup' else 'classes_pruned'}"
+    suffix = (
+        "pruned"
+        if mode == "empty"
+        else "deduped"
+        if mode == "dedup"
+        else "classes_pruned"
+        if mode == "classes"
+        else "size_pruned"
+    )
+    out_base = args.output_name or f"{args.dataset}_{suffix}"
     out_name = next_dataset_name(layout.datasets, out_base)
     out_dir = os.path.join(layout.datasets, out_name)
 
@@ -380,11 +506,20 @@ def main(argv=None) -> None:
     if os.path.isfile(class_names_path):
         try:
             with open(class_names_path, "r", encoding="utf-8") as f:
-                loaded = _json.load(f)
+                loaded = json.load(f)
             if isinstance(loaded, dict):
                 class_names_map = {str(k): str(v) for k, v in loaded.items()}
         except Exception:
             pass
+
+    min_w_px = 0.0
+    min_h_px = 0.0
+    if mode == "size":
+        try:
+            min_w_px, min_h_px = _parse_min_size(getattr(args, "min_size", "20x20"))
+        except ValueError as exc:
+            print(f"[ERROR] {exc}")
+            return
 
     if mode == "classes":
         _copy_full_dataset(src_root, out_dir)
@@ -423,6 +558,13 @@ def main(argv=None) -> None:
         )
         if mode == "empty":
             stats = _prune_empty(out_dir)
+        elif mode == "size":
+            stats = _prune_small_labels(
+                out_dir,
+                min_w_px=min_w_px,
+                min_h_px=min_h_px,
+                drop_empty_images=bool(getattr(args, "drop_empty_images", True)),
+            )
         else:
             stats = _prune_dedup(out_dir)
 

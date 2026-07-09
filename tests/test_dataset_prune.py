@@ -107,6 +107,93 @@ def test_prune_interactive_empty_mode(tmp_path: Path, monkeypatch: pytest.Monkey
     assert (tmp_path / "datasets" / "src_ds_pruned").is_dir()
 
 
+def test_prune_size_removes_small_labels_by_default_20x20(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "a.jpg", (70, 70, 70))
+    # Image is 32x24, so 0.2x0.4 -> 6.4x9.6 (small), 0.7x0.9 -> 22.4x21.6 (kept)
+    (ds / "train" / "labels" / "a.txt").write_text(
+        "0 0.5 0.5 0.2 0.4\n0 0.5 0.5 0.7 0.9\n",
+        encoding="utf-8",
+    )
+
+    prune_main(["size", "--workspace", str(tmp_path), "--dataset", "src_ds"])
+
+    out = tmp_path / "datasets" / "src_ds_size_pruned"
+    labels = (out / "train" / "labels" / "a.txt").read_text(encoding="utf-8").strip().splitlines()
+    assert len(labels) == 1
+    assert labels[0].startswith("0 0.50000000 0.50000000 0.70000000 0.90000000")
+
+
+def test_prune_size_respects_custom_min_size_nxm(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "a.jpg", (71, 71, 71))
+    # 0.2x0.4 -> 6.4x9.6 px, keep when min-size is 6x9
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.4\n", encoding="utf-8")
+
+    prune_main(["size", "--workspace", str(tmp_path), "--dataset", "src_ds", "--min-size", "6x9"])
+
+    out = tmp_path / "datasets" / "src_ds_size_pruned"
+    assert (out / "train" / "images" / "a.jpg").is_file()
+    labels = (out / "train" / "labels" / "a.txt").read_text(encoding="utf-8").strip().splitlines()
+    assert len(labels) == 1
+
+
+def test_prune_size_drops_empty_images_by_default(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "tiny.jpg", (72, 72, 72))
+    (ds / "train" / "labels" / "tiny.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+    prune_main(["size", "--workspace", str(tmp_path), "--dataset", "src_ds"])
+
+    out = tmp_path / "datasets" / "src_ds_size_pruned"
+    assert not (out / "train" / "images" / "tiny.jpg").exists()
+    assert not (out / "train" / "labels" / "tiny.txt").exists()
+
+
+def test_prune_size_keeps_empty_images_with_no_drop_empty_images(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "tiny.jpg", (73, 73, 73))
+    (ds / "train" / "labels" / "tiny.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+    prune_main(
+        [
+            "size",
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "src_ds",
+            "--no-drop-empty-images",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "src_ds_size_pruned"
+    assert (out / "train" / "images" / "tiny.jpg").is_file()
+    assert (out / "train" / "labels" / "tiny.txt").is_file()
+    assert (out / "train" / "labels" / "tiny.txt").read_text(encoding="utf-8") == ""
+
+
+def test_prune_size_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "a.jpg", (74, 74, 74))
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    answers = iter(["size", "src_ds", "", "yes"])
+    monkeypatch.setattr("smartrain.services.datasets.dataset_prune.prompt_choice", lambda *a, **k: next(answers))
+    monkeypatch.setattr(
+        "smartrain.services.datasets.dataset_prune.prompt_text",
+        lambda *a, **k: "20x20" if "--min-size" in str(a[0]) else "",
+    )
+    prune_main([])
+    assert (tmp_path / "datasets" / "src_ds_size_pruned").is_dir()
+
+
 def _setup_classes_dataset(tmp_path: Path, name: str = "src_ds") -> Path:
     ds = tmp_path / "datasets" / name
     (ds / "train" / "images").mkdir(parents=True, exist_ok=True)
