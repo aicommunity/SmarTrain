@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.workflows.datasets.dataset_former import _collect_label_image_pairs, main as fusion_main, prune_output_empty_label_pairs
+from smartrain.workflows.datasets.dataset_former import (
+    _collect_label_image_pairs,
+    _prompt_interactive_merge_rules,
+    _validate_interactive_merge_rules,
+    main as fusion_main,
+    prune_output_empty_label_pairs,
+)
 from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, WORKSPACE_ENV_VAR, deploy_workspace
 
 
@@ -305,7 +311,7 @@ def test_fusion_interactive_options_apply_defaults(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
 
-    def _fake_options(args, default_output_name, class_candidates):
+    def _fake_options(args, default_output_name, class_candidates, class_names_map):
         args.output_name = "merged_from_interactive"
         args.classes = "cat,dog"
         args.include_partial_datasets = True
@@ -315,6 +321,96 @@ def test_fusion_interactive_options_apply_defaults(tmp_path: Path, monkeypatch: 
 
     fusion_main([])
     assert (tmp_path / "datasets" / "merged_from_interactive" / "data.yaml").is_file()
+
+
+def test_validate_interactive_merge_rules_duplicate_source_rejected() -> None:
+    ok, err = _validate_interactive_merge_rules(
+        [["a,b", "ab"], ["b,c", "bc"]],
+        class_names_map={"a": "a", "b": "b", "c": "c", "ab": "ab", "bc": "bc"},
+        selected_classes=["ab", "bc"],
+        class_candidates=["a", "b", "c", "ab", "bc"],
+    )
+    assert not ok
+    assert err is not None
+    assert "participates in more than one --merge-classes group" in err
+
+
+def test_prompt_interactive_merge_rules_retries_until_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    answers = iter(
+        [
+            "a,b -> missing_target",  # invalid target
+            "a,b -> ab",  # valid
+            "b,c -> bc",  # invalid duplicate source
+            "c -> bc",  # valid
+            "",  # finish
+        ]
+    )
+    monkeypatch.setattr(
+        "smartrain.cli_entrypoints.support.cli_prompts.prompt_text",
+        lambda *_args, **_kwargs: next(answers),
+    )
+    result = _prompt_interactive_merge_rules(
+        class_names_map={"a": "a", "b": "b", "c": "c", "ab": "ab", "bc": "bc"},
+        selected_classes=["ab", "bc"],
+        class_candidates=["a", "b", "c", "ab", "bc"],
+    )
+    assert result == [["a,b", "ab"], ["c", "bc"]]
+
+
+def test_prompt_interactive_options_merge_does_not_narrow_auto_classes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from argparse import Namespace
+
+    answers = iter(
+        [
+            "merged_out",  # output name
+            "",  # classes -> auto-union
+            "",  # exclude classes
+            "a,b -> ab",  # merge rule
+            "",  # finish merge rules
+            "0.8,0.1,0.1",  # split
+            "",  # tmp dir
+        ]
+    )
+    yes_no_answers = iter(
+        [
+            True,  # configure merge rules
+            True,  # include partial
+            False,  # common classes only
+            False,  # exclude test
+            False,  # drop empty
+        ]
+    )
+    monkeypatch.setattr(
+        "smartrain.cli_entrypoints.support.cli_prompts.prompt_text",
+        lambda *_args, **_kwargs: next(answers),
+    )
+    monkeypatch.setattr(
+        "smartrain.cli_entrypoints.support.cli_prompts.prompt_yes_no",
+        lambda *_args, **_kwargs: next(yes_no_answers),
+    )
+
+    args = Namespace(
+        output_name=None,
+        classes=None,
+        exclude_classes=None,
+        merge_classes=None,
+        fusion_split=None,
+        include_partial_datasets=True,
+        common_classes_only=False,
+        exclude_test=False,
+        drop_empty_images=False,
+        tmp_dir=None,
+    )
+    from smartrain.workflows.datasets.dataset_former import _prompt_interactive_options
+
+    _prompt_interactive_options(
+        args,
+        default_output_name="default_merged",
+        class_candidates=["a", "b", "ab", "other"],
+        class_names_map={"a": "a", "b": "b", "ab": "ab", "other": "other"},
+    )
+    assert args.classes == "ab,other"
+    assert args.merge_classes == [["a,b", "ab"]]
 
 
 def test_prune_output_empty_label_pairs_removes_orphans(tmp_path: Path) -> None:

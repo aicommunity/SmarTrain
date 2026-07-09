@@ -51,6 +51,32 @@ def test_replay_fusion_boolean_optional_false_emits_negative_flag() -> None:
     assert "True" not in cmd and "False" not in cmd
 
 
+def test_replay_fusion_merge_classes_repeatable_nargs2() -> None:
+    parser = build_dataset_former_arg_parser()
+    args = parser.parse_args(
+        [
+            "--workspace",
+            "/tmp/ws",
+            "--output-name",
+            "merged",
+            "--dataset",
+            "ds_a",
+            "--classes",
+            "ab,bc",
+            "--merge-classes",
+            "a,b",
+            "ab",
+            "--merge-classes",
+            "c",
+            "bc",
+        ]
+    )
+    cmd = build_non_interactive_command("fusion", parser, args)
+    assert "--merge-classes a,b ab" in cmd
+    assert "--merge-classes c bc" in cmd
+    assert cmd.count("--merge-classes") == 2
+
+
 def test_replay_other_interactive_commands_do_not_emit_python_bools() -> None:
     cases: list[tuple[str, object, list[str], list[str]]] = [
         (

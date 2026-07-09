@@ -25,6 +25,13 @@ Collects a new dataset from several sources:
 - class management: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
 - split: `--fusion-split train,val,test`;
 - **`--strip-unused-classes`**: after merge, drop output classes with zero instances (remap `class_id` in `.txt`).
+- Interactive mode (`smartrain fusion` from TTY) now supports merge setup: it asks for class list and lets you add `sources -> target` rules that map to repeatable `--merge-classes` flags in replay.
+
+Example non-interactive equivalent:
+
+```bash
+smartrain fusion --dataset ds_a --dataset ds_b --classes "class_ab,other" --merge-classes "class_a,class_b" class_ab
+```
 
 ## `split`
 

@@ -403,6 +403,49 @@ def test_fusion_missing_workspace_metadata_shows_friendly_error(
     assert "traceback" not in low
 
 
+def test_fusion_merge_classes_smoke(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = tmp_path / "datasets" / "ds_a"
+    (ds / "train" / "images").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "images" / "a.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n1 0.4 0.4 0.1 0.1\n", encoding="utf-8")
+    (tmp_path / "datasets" / "datasets_info.json").write_text(
+        json.dumps({"ds_a": {"classes": {"class_a": 0, "class_b": 1}, "structure": "split"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (tmp_path / "datasets" / "class_names.json").write_text(
+        json.dumps({"class_a": "class_a", "class_b": "class_b"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(
+        [
+            "fusion",
+            "--",
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_smoke",
+            "--dataset",
+            "ds_a",
+            "--classes",
+            "class_a",
+            "--merge-classes",
+            "class_b",
+            "class_a",
+            "--no-auto-scan",
+        ],
+        cwd=tmp_path,
+        env=env,
+    )
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "[OK]" in out
+    assert (tmp_path / "datasets" / "merged_smoke" / "data.yaml").is_file()
+
+
 def test_info_prints_supported_train_models(subprocess_env: dict[str, str], tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     env = dict(subprocess_env)

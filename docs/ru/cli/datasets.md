@@ -26,6 +26,13 @@
 - управление классами: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
 - разбиение: `--fusion-split train,val,test`;
 - **`--strip-unused-classes`**: после merge удалить из output классы без инстансов (remap `class_id` в `.txt`).
+- Интерактивный режим (`smartrain fusion` из TTY) поддерживает настройку merge: после выбора классов можно добавлять правила `sources -> target`, которые в replay сериализуются в повторяемые `--merge-classes`.
+
+Эквивалент в неинтерактивном режиме:
+
+```bash
+smartrain fusion --dataset ds_a --dataset ds_b --classes "class_ab,other" --merge-classes "class_a,class_b" class_ab
+```
 
 ## `split`
 

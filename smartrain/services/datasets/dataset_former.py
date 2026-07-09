@@ -238,11 +238,154 @@ def _prompt_yes_no(label: str, default: bool = False) -> bool:
     return prompt_yes_no(label, default=default)
 
 
+def _validate_interactive_merge_rules(
+    merge_rules: list[list[str]],
+    *,
+    class_names_map: dict,
+    selected_classes: list[str],
+    class_candidates: list[str],
+) -> tuple[bool, str | None]:
+    if not merge_rules:
+        return True, None
+    unknown_targets = []
+    for _sources_csv, target in merge_rules:
+        t = str(target).strip()
+        if t and _normalize_name(t, class_names_map) not in {
+            _normalize_name(cls, class_names_map) for cls in selected_classes
+        }:
+            unknown_targets.append(t)
+    if unknown_targets:
+        return (
+            False,
+            "Merge targets are missing in selected classes: "
+            + ", ".join(sorted(set(unknown_targets)))
+            + ".",
+        )
+
+    flat_sources: list[str] = []
+    for sources_csv, _target in merge_rules:
+        flat_sources.extend(_parse_csv_classes(sources_csv))
+    if flat_sources:
+        ok_sources, missing_sources = _validate_requested_classes(
+            flat_sources,
+            class_candidates,
+            class_names_map,
+        )
+        if not ok_sources:
+            return (
+                False,
+                "Merge sources contain unknown classes: "
+                + ", ".join(missing_sources)
+                + ".",
+            )
+
+    try:
+        build_merge_config(merge_rules, class_names_map, selected_classes)
+    except ValueError as exc:
+        return False, str(exc)
+    return True, None
+
+
+def _derive_auto_classes_with_merge(
+    class_candidates: list[str],
+    merge_rules: list[list[str]] | None,
+    class_names_map: dict,
+) -> list[str]:
+    if not merge_rules:
+        return list(class_candidates)
+    source_norm: set[str] = set()
+    target_order: list[str] = []
+    seen_targets: set[str] = set()
+    for sources_csv, target in merge_rules:
+        for src in _parse_csv_classes(sources_csv):
+            source_norm.add(_normalize_name(src, class_names_map))
+        tgt = str(target).strip()
+        if not tgt:
+            continue
+        tgt_norm = _normalize_name(tgt, class_names_map)
+        if tgt_norm not in seen_targets:
+            seen_targets.add(tgt_norm)
+            target_order.append(tgt)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for cls in class_candidates:
+        n = _normalize_name(cls, class_names_map)
+        if n in source_norm:
+            continue
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(cls)
+    for tgt in target_order:
+        n = _normalize_name(tgt, class_names_map)
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(tgt)
+    return out
+
+
+def _prompt_interactive_merge_rules(
+    *,
+    class_names_map: dict,
+    selected_classes: list[str],
+    class_candidates: list[str],
+    initial_rules: list[list[str]] | None = None,
+    auto_mode: bool = False,
+) -> list[list[str]] | None:
+    from smartrain.cli_entrypoints.support.cli_prompts import prompt_text
+
+    rules: list[list[str]] = [list(x) for x in (initial_rules or [])]
+    if not class_candidates:
+        print("[WARN] Merge classes is skipped: no available classes.")
+        return None
+    print("[INFO] Configure --merge-classes (sources_csv -> target).")
+    print("[INFO] Example: class_a,class_b -> class_ab")
+    if auto_mode:
+        print(
+            "[INFO] Auto classes mode: classes not listed as merge sources are kept. "
+            "Only source classes are replaced by their merge targets."
+        )
+    while True:
+        raw = prompt_text("Merge rule (empty = finish)", default="").strip()
+        if not raw:
+            break
+        if "->" not in raw:
+            print("[WARN] Invalid format. Use: source1,source2 -> target")
+            continue
+        sources_raw, target_raw = raw.split("->", 1)
+        target = target_raw.strip()
+        sources = _parse_csv_classes(sources_raw)
+        if not sources or not target:
+            print("[WARN] Sources and target are required.")
+            continue
+        candidate = rules + [[",".join(sources), target]]
+        selected_for_validation = (
+            _derive_auto_classes_with_merge(class_candidates, candidate, class_names_map)
+            if auto_mode
+            else selected_classes
+        )
+        ok, err = _validate_interactive_merge_rules(
+            candidate,
+            class_names_map=class_names_map,
+            selected_classes=selected_for_validation,
+            class_candidates=class_candidates,
+        )
+        if not ok:
+            print(f"[WARN] {err}")
+            continue
+        rules = candidate
+        print(f"[INFO] Added merge rule: {','.join(sources)} -> {target}")
+    return rules or None
+
+
 def _prompt_interactive_options(
     args,
     *,
     default_output_name: str,
     class_candidates: list[str],
+    class_names_map: dict,
 ) -> None:
     from smartrain.cli_entrypoints.support.cli_prompts import prompt_text
 
@@ -269,6 +412,35 @@ def _prompt_interactive_options(
         choices=class_candidates,
     ).strip()
     args.exclude_classes = exclude_classes_raw or None
+
+    enable_merge = _prompt_yes_no(
+        "Configure class merge rules (--merge-classes)",
+        default=bool(args.merge_classes),
+    )
+    if enable_merge:
+        auto_mode = not bool(_parse_csv_classes(args.classes))
+        selected_classes = _parse_csv_classes(args.classes) or list(class_candidates)
+        args.merge_classes = _prompt_interactive_merge_rules(
+            class_names_map=class_names_map,
+            selected_classes=selected_classes,
+            class_candidates=class_candidates,
+            initial_rules=args.merge_classes,
+            auto_mode=auto_mode,
+        )
+        if auto_mode and args.merge_classes:
+            auto_classes = _derive_auto_classes_with_merge(
+                class_candidates,
+                args.merge_classes,
+                class_names_map,
+            )
+            args.classes = ",".join(auto_classes)
+            print(
+                "[INFO] Auto-selected output classes after merge "
+                "(all non-source classes are preserved): "
+                + ", ".join(auto_classes)
+            )
+    else:
+        args.merge_classes = None
 
     split_default = args.fusion_split or f"{TRAIN_PART},{VAL_PART},{TEST_PART}"
     args.fusion_split = prompt_text(
@@ -904,6 +1076,7 @@ def main(argv=None):
                 args,
                 default_output_name=output_dataset_name,
                 class_candidates=class_candidates,
+                class_names_map=class_names_map,
             )
         except Exception as e:
             print(f"[ERROR] Error interacting with fusion parameters: {e}")
