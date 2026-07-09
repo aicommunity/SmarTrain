@@ -182,6 +182,14 @@ COMMANDS: dict[str, CommandHelp] = {
             "pre-detection and structured JSON output."
         ),
     ),
+    "vis": CommandHelp(
+        name="vis",
+        summary="Visualize dataset labels and model/run predictions.",
+        description=(
+            "Generate rendered overlays with class names for datasets and for run/model targets "
+            "using the training/validation/testing data of that target."
+        ),
+    ),
     "model": CommandHelp(
         name="model",
         summary="Convert, release, and rename workspace models.",
@@ -301,7 +309,7 @@ COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ),
     (
         "Model and inference",
-        ["test", "inference", "model", "sahi", "heatmap"],
+        ["test", "inference", "vis", "model", "sahi", "heatmap"],
     ),
     (
         "Analytics",

@@ -799,6 +799,25 @@ def cmd_inference(ctx: typer.Context) -> None:
     )
 
 
+@app.command(
+    "vis",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_vis(ctx: typer.Context) -> None:
+    """Visualize dataset labels and model/run predictions."""
+    from smartrain.workflows.visualization.vis_cli import build_vis_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.visualization.vis_cli",
+        build_parser=build_vis_arg_parser,
+        prog="smartrain vis",
+        empty_args_mode="invoke",
+        ensure_scan=True,
+    )
+
+
 queue_app = plain_sub_typer(
     help=HELP_QUEUE_GROUP,
     invoke_without_command=True,
