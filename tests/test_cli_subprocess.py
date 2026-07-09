@@ -22,6 +22,8 @@ HELP_MATRIX: list[list[str]] = [
     ["info", "--help"],
     ["scan", "--", "--help"],
     ["normalize-data-yaml", "--", "--help"],
+    ["sync", "--", "--help"],
+    ["merge", "--", "--help"],
     ["fusion", "--", "--help"],
     ["split", "--", "--help"],
     ["train", "--", "--help"],
@@ -37,6 +39,7 @@ HELP_MATRIX: list[list[str]] = [
     ["roi", "--", "--help"],
     ["test", "--", "--help"],
     ["inference", "--", "--help"],
+    ["vis", "--", "--help"],
     ["plot", "--", "--help"],
     ["migrate", "--", "--help"],
     ["migrate-models", "--", "--help"],
@@ -91,6 +94,7 @@ NO_ARGS_USAGE_CASES: list[str] = [
     "queue",
     "registry",
     "scan",
+    "merge",
     "fusion",
     "split",
     "augment",
@@ -403,6 +407,27 @@ def test_fusion_missing_workspace_metadata_shows_friendly_error(
     assert "traceback" not in low
 
 
+def test_merge_missing_workspace_metadata_shows_friendly_error(
+    subprocess_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(
+        ["merge", "--", "--no-auto-scan", "--workspace", str(tmp_path), "--dataset", "ds_a"],
+        cwd=tmp_path,
+        env=env,
+    )
+    out = (r.stdout or "") + (r.stderr or "")
+    low = out.lower()
+    assert r.returncode == 0, out
+    assert "fusion metadata files were not found" in low
+    assert "metadata directory" in low
+    assert "datasets_info.json" in low
+    assert "class_names.json" in low
+    assert "traceback" not in low
+
+
 def test_fusion_merge_classes_smoke(subprocess_env: dict[str, str], tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     ds = tmp_path / "datasets" / "ds_a"
@@ -444,6 +469,16 @@ def test_fusion_merge_classes_smoke(subprocess_env: dict[str, str], tmp_path: Pa
     assert r.returncode == 0, out
     assert "[OK]" in out
     assert (tmp_path / "datasets" / "merged_smoke" / "data.yaml").is_file()
+
+
+def test_fusion_alias_prints_deprecation_warning(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["fusion", "--help"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode in (0, 2), out
+    assert "deprecated" in out.lower()
 
 
 def test_info_prints_supported_train_models(subprocess_env: dict[str, str], tmp_path: Path) -> None:
@@ -635,6 +670,7 @@ raise SystemExit(0)
 @pytest.mark.parametrize(
     "cmd,required_error,forbidden_phrase",
     [
+        (["merge", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive"),
         (["fusion", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive"),
         (["split", "--", "--no-auto-scan", "--workspace", "."], "datasets_info.json", "interactive"),
         (["augment", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive augment mode"),
@@ -668,6 +704,7 @@ def test_partial_args_do_not_trigger_interactive(
         ["test", "--", "--unknown-flag"],
         ["inference", "--", "--unknown-flag"],
         ["scan", "--", "--unknown-flag"],
+        ["merge", "--", "--unknown-flag"],
         ["fusion", "--", "--unknown-flag"],
         ["migrate", "--", "--unknown-flag"],
         ["migrate", "--", "canonical", "--", "--unknown-flag"],

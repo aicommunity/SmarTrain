@@ -466,9 +466,12 @@ def _load_dataset_class_names(data_yaml: str) -> dict[int, str]:
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
+    models_root_cli = getattr(args, "models_root_cli", None)
+    if models_root_cli is None:
+        models_root_cli = getattr(args, "models_root", None)
     targets = discover_analysis_targets(
         workspace_cli=getattr(args, "workspace", None),
-        models_root_cli=getattr(args, "models_root_cli", None),
+        models_root_cli=models_root_cli,
     )
     run_scan_command(
         runs=targets,

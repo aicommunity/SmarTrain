@@ -16,6 +16,7 @@ from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import (
     prompt_choice,
     prompt_multi_choice_csv,
+    prompt_prefilled_text,
     prompt_text,
     prompt_yes_no,
 )
@@ -769,7 +770,11 @@ def _interactive_fill(args: argparse.Namespace, dataset_names: list[str], catalo
     if class_names:
         picked = prompt_multi_choice_csv("Classes (--classes; empty=all)", class_names, default_values=[])
         args.classes = ",".join(picked) if picked else None
-    args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
+    output_default = str(args.output_name or "").strip()
+    if output_default:
+        args.output_name = prompt_prefilled_text("Output dataset name", output_default).strip() or None
+    else:
+        args.output_name = prompt_text("Output dataset name (empty=auto)", default="").strip() or None
 
     print("[INFO] Block: filter modes")
     args.edge_filter = prompt_yes_no("--edge-filter (edge-truncated bbox)?", default=bool(args.edge_filter))

@@ -443,6 +443,24 @@ def cmd_scan(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "sync",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_sync(ctx: typer.Context) -> None:
+    """Safely pull missing artifacts from another workspace copy."""
+    from smartrain.services.workspace.workspace_sync_service import build_sync_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.services.workspace.workspace_sync_service",
+        build_parser=build_sync_arg_parser,
+        prog="smartrain sync",
+        empty_args_mode="invoke",
+    )
+
+
+@app.command(
     "normalize-data-yaml",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
@@ -473,18 +491,18 @@ def cmd_normalize_data_yaml(ctx: typer.Context) -> None:
 
 
 @app.command(
-    "fusion",
+    "merge",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
 )
-def cmd_fusion(ctx: typer.Context) -> None:
+def cmd_merge(ctx: typer.Context) -> None:
     """Build a merged training dataset from source datasets.
 
     Examples:
-      smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
-      smartrain fusion --dataset ds_a --dataset ds_b --exclude-classes "background,trash"
-      smartrain fusion --dataset ds_a --dataset ds_b --output-name merged_ds
-      smartrain fusion --workspace /data/MarsSmarTrain --dataset ds_a
+      smartrain merge --dataset ds_a --dataset ds_b --classes "class_a,class_b"
+      smartrain merge --dataset ds_a --dataset ds_b --exclude-classes "background,trash"
+      smartrain merge --dataset ds_a --dataset ds_b --output-name merged_ds
+      smartrain merge --workspace /data/MarsSmarTrain --dataset ds_a
 
     Notes:
       - Produces a new dataset directory under workspace datasets/.
@@ -497,10 +515,21 @@ def cmd_fusion(ctx: typer.Context) -> None:
         ctx,
         module="smartrain.workflows.datasets.dataset_former",
         build_parser=build_dataset_former_arg_parser,
-        prog="smartrain fusion",
+        prog="smartrain merge",
         empty_args_mode="invoke_if_tty_else_help",
         ensure_scan=True,
     )
+
+
+@app.command(
+    "fusion",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_fusion(ctx: typer.Context) -> None:
+    """Deprecated alias for `smartrain merge`."""
+    typer.echo("[DEPRECATION] smartrain fusion is deprecated; use smartrain merge.")
+    cmd_merge(ctx)
 
 
 @app.command(

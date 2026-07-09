@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import hashlib
 import json
 import os
 import sys
@@ -12,6 +13,7 @@ from typing import Any
 import yaml
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text
 from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
 from smartrain.core.models import tensorrt_checks as trt_checks
 from smartrain.services.testing import model_test_cli_surface as surf
@@ -26,6 +28,7 @@ from smartrain.services.testing.model_test_runner import run_model_test_after_se
 from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
 from smartrain.core.workflow_adapters.training_runtime_api import resolve_dataset_path_for_resume
+from smartrain.core.testing.artifact_paths import TEST_EVAL_SLOT_ENV
 from smartrain.core.runtime.run_artifacts import (
     ensure_run_layout,
     is_internal_conversion_artifact,
@@ -265,6 +268,16 @@ def _normalize_data_to_yaml(data_value: str) -> str:
     return str(data_yaml)
 
 
+def _load_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _suggest_convert_cmd(input_path: str, fmt: str) -> str:
     convert_fmt = {"onnx": "onnx", "engine": "tensorrt-engine", "trt": "tensorrt-trt"}.get(fmt, fmt)
     return f"smartrain model convert --input {input_path} --format {convert_fmt}"
@@ -405,6 +418,24 @@ def _resolve_data_yaml_for_target(
             if dataset_dir:
                 return _normalize_data_to_yaml(dataset_dir)
     raise RuntimeError("Dataset path is required for models/weights targets. Pass --data.")
+
+
+def _normalize_abs(path: str) -> str:
+    return str(Path(path).expanduser().resolve())
+
+
+def _eval_slot_from_dataset_yaml(layout: WorkspaceLayout, data_yaml: str) -> tuple[str, str]:
+    abs_yaml = _normalize_abs(data_yaml)
+    datasets_info = _load_json(Path(layout.datasets) / "datasets_info.json")
+    for key, entry in datasets_info.items():
+        if not isinstance(entry, dict):
+            continue
+        root = Path(layout.root) / str(entry.get("data_path") or "")
+        y = root / "data.yaml"
+        if y.is_file() and _normalize_abs(str(y)) == abs_yaml:
+            return key, "catalog"
+    h = hashlib.sha1(abs_yaml.encode("utf-8")).hexdigest()[:8]
+    return f"external__{h}", "external"
 
 
 def _print_test_plan(
@@ -766,7 +797,10 @@ def main(argv: list[str] | None = None) -> None:
             )
         except Exception:
             default_data_yaml = None
-        raw_data = surf.prompt_text("Dataset path or data.yaml", default=(default_data_yaml or "")).strip()
+        if default_data_yaml and sys.stdin.isatty():
+            raw_data = prompt_prefilled_text("Dataset path or data.yaml", str(default_data_yaml)).strip()
+        else:
+            raw_data = surf.prompt_text("Dataset path or data.yaml", default=(str(default_data_yaml or ""))).strip()
         try:
             data_yaml = _resolve_data_yaml_for_target(
                 target_kind=target_kind,
@@ -836,23 +870,49 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(str(exc))
     print(f"[INFO] Test device: {device_display_name(args.device)}")
 
-    run_model_test_after_setup(
-        parser=parser,
-        args=args,
-        request=request,
-        workspace_root=workspace_root,
-        interactive=interactive,
-        root_dir=root_dir,
-        primary_path=primary_path,
-        target_kind=target_kind,
-        target_label=target_label,
-        data_yaml=data_yaml,
-        formats=formats,
-        onnx_provider_policy=onnx_provider_policy,
-        requested_imgsz=requested_imgsz,
-        requested_conf=requested_conf,
-        requested_iou=requested_iou,
-    )
+    eval_slot_key: str | None = None
+    eval_source: str | None = None
+    if target_kind == "runs":
+        try:
+            default_train_yaml = _resolve_data_yaml_for_target(
+                target_kind=target_kind,
+                root_dir=root_dir,
+                layout=layout,
+                data_cli=None,
+            )
+        except Exception:
+            default_train_yaml = None
+        if default_train_yaml and _normalize_abs(default_train_yaml) != _normalize_abs(data_yaml):
+            eval_slot_key, eval_source = _eval_slot_from_dataset_yaml(layout, data_yaml)
+    elif args.data:
+        eval_slot_key, eval_source = _eval_slot_from_dataset_yaml(layout, data_yaml)
+    if eval_slot_key:
+        os.environ[TEST_EVAL_SLOT_ENV] = eval_slot_key
+        print(f"[INFO] Test scope: eval slot '{eval_slot_key}' ({eval_source}).")
+    else:
+        os.environ.pop(TEST_EVAL_SLOT_ENV, None)
+        print("[INFO] Test scope: primary dataset.")
+
+    try:
+        run_model_test_after_setup(
+            parser=parser,
+            args=args,
+            request=request,
+            workspace_root=workspace_root,
+            interactive=interactive,
+            root_dir=root_dir,
+            primary_path=primary_path,
+            target_kind=target_kind,
+            target_label=target_label,
+            data_yaml=data_yaml,
+            formats=formats,
+            onnx_provider_policy=onnx_provider_policy,
+            requested_imgsz=requested_imgsz,
+            requested_conf=requested_conf,
+            requested_iou=requested_iou,
+        )
+    finally:
+        os.environ.pop(TEST_EVAL_SLOT_ENV, None)
 
 
 surf._check_onnx_format_preflight = _check_onnx_format_preflight

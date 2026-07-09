@@ -13,6 +13,12 @@ PUBLIC_TEST_FORMATS = ("pt", "onnx", "engine", "trt")
 INTERNAL_TEST_FORMATS = ("pt_uni",)
 SUPPORTED_TEST_FORMATS = PUBLIC_TEST_FORMATS
 ALL_TEST_FORMATS = PUBLIC_TEST_FORMATS + INTERNAL_TEST_FORMATS
+TEST_EVAL_SLOT_ENV = "SMARTTRAIN_TEST_EVAL_SLOT"
+
+
+def current_eval_slot_key() -> str | None:
+    raw = str(os.getenv(TEST_EVAL_SLOT_ENV, "")).strip()
+    return raw or None
 
 
 def normalize_format_name(format_name: str | None) -> str:
@@ -43,6 +49,9 @@ def format_test_dir_for_write(root_dir: str, format_name: str | None = "pt") -> 
 
 def _format_test_dir(root_dir: str, format_name: str | None, *, prefer_legacy_for_read: bool) -> str:
     fmt = normalize_format_name(format_name)
+    eval_slot = current_eval_slot_key()
+    if eval_slot:
+        return str(run_tests_dir(root_dir) / "eval" / eval_slot / ("test-ultralytics" if fmt == "pt" else f"test_{fmt}"))
     preferred = run_test_backend_dir(root_dir, "ultralytics") if fmt == "pt" else run_test_format_dir(root_dir, fmt)
     legacy = os.path.join(root_dir, f"test{format_suffix(fmt)}")
     if prefer_legacy_for_read and os.path.isdir(legacy) and not preferred.exists():
@@ -60,6 +69,9 @@ def format_metrics_path_for_write(root_dir: str, format_name: str | None = "pt")
 
 def _format_metrics_path(root_dir: str, format_name: str | None, *, prefer_legacy_for_read: bool) -> str:
     fmt = normalize_format_name(format_name)
+    eval_slot = current_eval_slot_key()
+    if eval_slot:
+        return str(run_tests_dir(root_dir) / "eval" / eval_slot / f"test_metrics{format_suffix(fmt)}.csv")
     preferred = run_tests_dir(root_dir) / f"test_metrics{format_suffix(fmt)}.csv"
     legacy = os.path.join(root_dir, f"test_metrics{format_suffix(fmt)}.csv")
     if prefer_legacy_for_read and os.path.isfile(legacy) and not preferred.is_file():
@@ -114,6 +126,10 @@ def _format_recommendation_path(
     if split_name not in {"test", "val"}:
         raise ValueError(f"Unsupported split: {split}")
     fmt = normalize_format_name(format_name)
+    eval_slot = current_eval_slot_key()
+    if eval_slot:
+        preferred = run_tests_dir(root_dir) / "eval" / eval_slot / f"confidence_recommendations_{split_name}{format_suffix(fmt)}.json"
+        return str(preferred)
     preferred = run_tests_dir(root_dir) / f"confidence_recommendations_{split_name}{format_suffix(fmt)}.json"
     legacy = os.path.join(root_dir, f"confidence_recommendations_{split_name}{format_suffix(fmt)}.json")
     if prefer_legacy_for_read and os.path.isfile(legacy) and not preferred.is_file():

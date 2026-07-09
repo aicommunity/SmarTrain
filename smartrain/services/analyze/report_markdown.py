@@ -3156,6 +3156,30 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     else:
         lines.append("- " + ("Артефакты Ultralytics test не обнаружены." if is_ru else "No Ultralytics test artifacts found."))
         lines.append("")
+    eval_rows = manifest.get("eval_dataset_tests") or []
+    lines.append("## " + ("Тесты на внешних датасетах" if is_ru else "Cross-dataset test runs"))
+    lines.append("")
+    if isinstance(eval_rows, list) and eval_rows:
+        for row in eval_rows:
+            if not isinstance(row, dict):
+                continue
+            run_code = str(row.get("run_code") or row.get("run_name") or "-")
+            slot_key = str(row.get("slot_key") or "-")
+            status = str(row.get("status") or "-")
+            session_csv = str(row.get("session_metrics_csv") or "")
+            dataset_yaml = str(row.get("dataset_yaml") or "")
+            if is_ru:
+                lines.append(f"- Запуск `{run_code}`; slot `{slot_key}`; статус: `{status}`; data: `{dataset_yaml or '-'}`")
+                if session_csv:
+                    lines.append(f"  - Метрики: `{session_csv}`")
+            else:
+                lines.append(f"- Run `{run_code}`; slot `{slot_key}`; status: `{status}`; data: `{dataset_yaml or '-'}`")
+                if session_csv:
+                    lines.append(f"  - Metrics: `{session_csv}`")
+        lines.append("")
+    else:
+        lines.append("- " + ("Данных по cross-dataset тестам нет." if is_ru else "No cross-dataset test data found."))
+        lines.append("")
     lines.append(_sec("conclusion"))
     lines.append("")
     if leaderboard_rel:

@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+from smartrain.services.inference_arg_parser import build_inference_arg_parser
 from smartrain.services.inference_service import run_inference_job
-from smartrain.workflows.inference.inference_cli import build_inference_arg_parser
 
 
 def _latest_inference_report(layout: WorkspaceLayout) -> Path:

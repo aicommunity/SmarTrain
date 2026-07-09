@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, Callable
+
+from smartrain.core.runtime.run_artifacts import materialize_preferred_run_model, preferred_run_model_path
+from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+from smartrain.services.inference_runtime_helpers import resolve_model_from_name
 
 
 def handle_aux_train_commands(
@@ -115,6 +121,49 @@ def run_train_cli_pipeline(
         return None
 
     u_cfg.pop("data", None)
+
+    pretrained_flags = [
+        bool(getattr(args, "pretrained_run", None)),
+        bool(getattr(args, "pretrained_model", None)),
+        bool(getattr(args, "pretrained_weights", None)),
+    ]
+    if sum(1 for x in pretrained_flags if x) > 1:
+        print("[ERROR] Use only one of --pretrained-run / --pretrained-model / --pretrained-weights.")
+        return 2
+    pretrained_path = None
+    if getattr(args, "pretrained_weights", None):
+        raw = str(args.pretrained_weights).strip()
+        p = Path(raw).expanduser()
+        if not p.is_absolute():
+            p = (Path(workspace_root) / p).resolve()
+        pretrained_path = str(p)
+    elif getattr(args, "pretrained_run", None):
+        layout = WorkspaceLayout(workspace_root)
+        raw = str(args.pretrained_run).strip()
+        run_dir = Path(raw).expanduser()
+        if not run_dir.is_absolute():
+            run_dir = (Path(layout.runs) / raw).resolve()
+        best_pt = Path(preferred_run_model_path(str(run_dir), ".pt"))
+        if not best_pt.is_file():
+            materialized = materialize_preferred_run_model(str(run_dir), ext=".pt", move=True, normalize_metadata=True)
+            if materialized is not None:
+                best_pt = Path(materialized)
+        pretrained_path = str(best_pt)
+    elif getattr(args, "pretrained_model", None):
+        layout = WorkspaceLayout(workspace_root)
+        model_path, _ = resolve_model_from_name(layout, str(args.pretrained_model).strip())
+        pretrained_path = str(model_path)
+    if pretrained_path:
+        if not os.path.isfile(pretrained_path):
+            print(f"[ERROR] Pretrained weights not found: {pretrained_path}")
+            return 2
+        args.model = pretrained_path
+        u_cfg["model"] = pretrained_path
+        if getattr(args, "external_provider", None):
+            print("[WARNING] --external-provider ignored because pretrained .pt init is selected.")
+            args.external_provider = None
+        print(f"[INFO] Using pretrained initialization: {pretrained_path}")
+
     model_version = normalize_model_spec_cb(u_cfg.get("model", model_version_default), add_pt_when_missing=True)
     u_cfg["model"] = model_version
     ensure_device_available_or_raise_cb(str(u_cfg.get("device")) if u_cfg.get("device") is not None else None)

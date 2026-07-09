@@ -12,7 +12,7 @@ from typing import Any
 
 from PIL import Image
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_text
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_prefilled_text, prompt_text
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.services.datasets.bbox_edge_filter import bbox_geom_from_label
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
@@ -385,7 +385,11 @@ def _prune_small_labels(out_dir: str, *, min_w_px: float, min_h_px: float, drop_
 def _interactive_fill(args: argparse.Namespace, mode: str, dataset_names: list[str]) -> None:
     print("[INFO] Interactive prune mode")
     args.dataset = prompt_choice("Dataset", dataset_names, default=(args.dataset or dataset_names[0]))
-    args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
+    output_default = str(args.output_name or "").strip()
+    if output_default:
+        args.output_name = prompt_prefilled_text("Output dataset name", output_default).strip() or None
+    else:
+        args.output_name = prompt_text("Output dataset name (empty=auto)", default="").strip() or None
     if mode == "dedup":
         # Keep strict safeguard by default.
         args.allow_balanced_dedup = False

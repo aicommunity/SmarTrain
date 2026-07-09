@@ -9,7 +9,7 @@ def prompt_input(label: str, default: str = "", completer=None, show_default_hin
     from prompt_toolkit import prompt
 
     prompt_label = f"{label} [default: {default}]: " if (default != "" and show_default_hint) else label
-    value = str(prompt(prompt_label, default="", completer=completer, complete_while_typing=True)).strip()
+    value = str(prompt(prompt_label, default=str(default), completer=completer, complete_while_typing=True)).strip()
     if value:
         return value
     if default != "":

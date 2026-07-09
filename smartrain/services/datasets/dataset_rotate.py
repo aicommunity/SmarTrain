@@ -10,7 +10,12 @@ import cv2
 from tqdm import tqdm
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_prompts import (
+    prompt_choice,
+    prompt_prefilled_text,
+    prompt_text,
+    prompt_yes_no,
+)
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
@@ -122,7 +127,7 @@ def _interactive_fill(args, *, dataset_names: list[str]) -> None:
     )
     args.angle = int(angle_raw)
     auto_name = default_output_name(str(args.dataset), int(args.angle))
-    args.output_name = prompt_text("Output dataset name (empty=auto)", default=auto_name).strip() or None
+    args.output_name = prompt_prefilled_text("Output dataset name", auto_name).strip() or None
     args.dry_run = prompt_yes_no("Dry-run only (--dry-run)?", default=bool(args.dry_run))
 
 

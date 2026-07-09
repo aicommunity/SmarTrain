@@ -18,7 +18,7 @@
 
 Пример: `smartrain normalize-data-yaml --workspace /path/to/workspace` или `--datasets-dir ... --dry-run`.
 
-## `fusion`
+## `merge` (алиас: `fusion`)
 
 Собирает новый датасет из нескольких источников:
 
@@ -26,12 +26,12 @@
 - управление классами: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
 - разбиение: `--fusion-split train,val,test`;
 - **`--strip-unused-classes`**: после merge удалить из output классы без инстансов (remap `class_id` в `.txt`).
-- Интерактивный режим (`smartrain fusion` из TTY) поддерживает настройку merge: после выбора классов можно добавлять правила `sources -> target`, которые в replay сериализуются в повторяемые `--merge-classes`.
+- Интерактивный режим (`smartrain merge` из TTY) поддерживает настройку merge: после выбора классов можно добавлять правила `sources -> target`, которые в replay сериализуются в повторяемые `--merge-classes`.
 
 Эквивалент в неинтерактивном режиме:
 
 ```bash
-smartrain fusion --dataset ds_a --dataset ds_b --classes "class_ab,other" --merge-classes "class_a,class_b" class_ab
+smartrain merge --dataset ds_a --dataset ds_b --classes "class_ab,other" --merge-classes "class_a,class_b" class_ab
 ```
 
 ## `split`
@@ -43,7 +43,7 @@ smartrain split --dataset my_dataset --split-ratio 0.7,0.2,0.1
 smartrain split --dataset my_dataset --exclude-test --output-name my_dataset_resplit
 ```
 
-- `--split-ratio train,val,test` — случайное перераспределение внутри каждого входного bucket (по умолчанию `0.8,0.1,0.1`; тот же алгоритм, что у `fusion --fusion-split`);
+- `--split-ratio train,val,test` — случайное перераспределение внутри каждого входного bucket (по умолчанию `0.8,0.1,0.1`; тот же алгоритм, что у `merge --fusion-split`);
 - `--exclude-test` — не брать test-buckets из исходника;
 - создаёт новый датасет в `datasets/` с `data.yaml` и обновляет `datasets_info.json`.
 
@@ -97,7 +97,7 @@ smartrain filter --dataset my_dataset --no-edge-filter --size-filter --size-dims
 
 Разметка: `class_id x1 y1 x2 y2 ...` (нормализованные вершины). См. [форматы данных](../reference/data-formats.md).
 
-**Поддерживается:** `rotate`, `orient`, `roi --mode yolo_segment`, `report`, `fusion` (фильтрация классов).
+**Поддерживается:** `rotate`, `orient`, `roi --mode yolo_segment`, `report`, `merge` (фильтрация классов; `fusion` сохранён как алиас).
 
 **Ограничения:**
 

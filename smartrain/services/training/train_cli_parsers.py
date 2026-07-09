@@ -70,6 +70,24 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--pretrained-run",
+        type=str,
+        default=None,
+        help="Use .pt weights from an existing run directory as initialization.",
+    )
+    parser.add_argument(
+        "--pretrained-model",
+        type=str,
+        default=None,
+        help="Use weights from promoted model directory in workspace/models.",
+    )
+    parser.add_argument(
+        "--pretrained-weights",
+        type=str,
+        default=None,
+        help="Use explicit .pt path as initialization weights.",
+    )
+    parser.add_argument(
         "--external-provider",
         type=str,
         default=None,

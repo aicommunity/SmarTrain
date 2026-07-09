@@ -387,9 +387,9 @@ def _prompt_interactive_options(
     class_candidates: list[str],
     class_names_map: dict,
 ) -> None:
-    from smartrain.cli_entrypoints.support.cli_prompts import prompt_text
+    from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text, prompt_text
 
-    print("[INFO] Interactively configure fusion parameters (Enter = default value).")
+    print("[INFO] Interactively configure merge parameters (Enter = default value).")
     if class_candidates:
         print(
             "[INFO] Available classes of selected datasets: "
@@ -397,7 +397,10 @@ def _prompt_interactive_options(
         )
     else:
         print("[WARN] No classes were found in the metadata for the selected datasets.")
-    out_name = prompt_text("Output dataset name", default=default_output_name).strip()
+    if sys.stdin.isatty():
+        out_name = prompt_prefilled_text("Output dataset name", default_output_name).strip()
+    else:
+        out_name = prompt_text("Output dataset name", default=default_output_name).strip()
     args.output_name = out_name or default_output_name
 
     classes_raw = prompt_text(
@@ -443,10 +446,16 @@ def _prompt_interactive_options(
         args.merge_classes = None
 
     split_default = args.fusion_split or f"{TRAIN_PART},{VAL_PART},{TEST_PART}"
-    args.fusion_split = prompt_text(
-        "Fusion split train,val,test (summa=1.0)",
-        default=split_default,
-    ).strip()
+    if sys.stdin.isatty():
+        args.fusion_split = prompt_prefilled_text(
+            "Fusion split train,val,test (summa=1.0)",
+            split_default,
+        ).strip()
+    else:
+        args.fusion_split = prompt_text(
+            "Fusion split train,val,test (summa=1.0)",
+            default=split_default,
+        ).strip()
 
     args.include_partial_datasets = _prompt_yes_no(
         "Include partial datasets (--include-partial-datasets)",
@@ -1087,7 +1096,7 @@ def main(argv=None):
             output_dataset_name = out_key
     replay_cmd = None
     if interactive_mode:
-        replay_cmd = build_non_interactive_command("fusion", parser, args)
+        replay_cmd = build_non_interactive_command("merge", parser, args)
         print_replay_command("before launch", replay_cmd)
 
     try:

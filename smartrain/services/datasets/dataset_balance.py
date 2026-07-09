@@ -15,7 +15,13 @@ from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_multi_choice_csv, prompt_text, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_prompts import (
+    prompt_choice,
+    prompt_multi_choice_csv,
+    prompt_prefilled_text,
+    prompt_text,
+    prompt_yes_no,
+)
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_cli_catalog import (
@@ -327,7 +333,11 @@ def _interactive_fill(args, dataset_names: list[str], catalog: dict) -> None:
     if args.strategy == "hybrid-aug":
         # Apply product defaults in interactive mode as a starting point.
         _apply_hybrid_aug_default_mode(args, set())
-    args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
+    output_default = str(args.output_name or "").strip()
+    if output_default:
+        args.output_name = prompt_prefilled_text("Output dataset name", output_default).strip() or None
+    else:
+        args.output_name = prompt_text("Output dataset name (empty=auto)", default="").strip() or None
     args.target = float(
         prompt_text("train size multiplier (--target)", default=str(args.target)).strip() or str(args.target)
     )

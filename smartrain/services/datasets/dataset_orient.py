@@ -115,11 +115,15 @@ def build_orient_arg_parser() -> argparse.ArgumentParser:
 def _interactive_fill(args, *, dataset_names: list[str]) -> None:
     from prompt_toolkit import prompt
     from prompt_toolkit.completion import WordCompleter
-    from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_text
+    from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_prefilled_text, prompt_text
 
     print("[INFO] Interactive mode orient")
     args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
-    args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")) or None
+    output_default = str(args.output_name or "").strip()
+    if output_default:
+        args.output_name = prompt_prefilled_text("Output dataset name", output_default).strip() or None
+    else:
+        args.output_name = prompt_text("Output dataset name (empty=auto)", default="").strip() or None
     args.method = prompt_choice("Method", list(METHODS), default=str(getattr(args, "method", "reference")))
 
     if args.method == "reference":

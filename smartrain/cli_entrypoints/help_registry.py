@@ -45,6 +45,14 @@ COMMANDS: dict[str, CommandHelp] = {
             "normalize metadata, and update datasets/ catalog files."
         ),
     ),
+    "sync": CommandHelp(
+        name="sync",
+        summary="Safely sync missing workspace artifacts from another copy.",
+        description=(
+            "Copy only missing datasets/raw_data/runs/models from another workspace, skip conflicts, "
+            "repair portable paths, and run final scan in target workspace."
+        ),
+    ),
     "normalize-data-yaml": CommandHelp(
         name="normalize-data-yaml",
         summary="Rewrite datasets/*/data.yaml to portable Ultralytics layout.",
@@ -53,12 +61,19 @@ COMMANDS: dict[str, CommandHelp] = {
             "under each dataset directory."
         ),
     ),
-    "fusion": CommandHelp(
-        name="fusion",
+    "merge": CommandHelp(
+        name="merge",
         summary="Merge multiple source datasets into one training dataset.",
         description=(
             "Build a merged dataset from catalog entries with class filtering, remapping, and "
             "optional output naming under workspace datasets/."
+        ),
+    ),
+    "fusion": CommandHelp(
+        name="fusion",
+        summary="Deprecated alias for merge.",
+        description=(
+            "Backward-compatible alias for `smartrain merge`. New workflows should use merge."
         ),
     ),
     "split": CommandHelp(
@@ -283,13 +298,14 @@ COMMANDS: dict[str, CommandHelp] = {
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Workspace",
-        ["deploy", "info", "quickstart"],
+        ["deploy", "info", "quickstart", "sync"],
     ),
     (
         "Dataset catalog and preparation",
         [
             "scan",
             "normalize-data-yaml",
+            "merge",
             "fusion",
             "split",
             "augment",

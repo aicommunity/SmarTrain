@@ -17,7 +17,7 @@ Rewrites every `datasets/**/data.yaml`: drops `path`, makes split paths relative
 
 Example: `smartrain normalize-data-yaml --workspace /path/to/workspace` or `--datasets-dir ... --dry-run`.
 
-## `fusion`
+## `merge` (alias: `fusion`)
 
 Collects a new dataset from several sources:
 
@@ -25,12 +25,12 @@ Collects a new dataset from several sources:
 - class management: `--classes`, `--exclude-classes`, `--merge-classes`, `--common-classes-only`;
 - split: `--fusion-split train,val,test`;
 - **`--strip-unused-classes`**: after merge, drop output classes with zero instances (remap `class_id` in `.txt`).
-- Interactive mode (`smartrain fusion` from TTY) now supports merge setup: it asks for class list and lets you add `sources -> target` rules that map to repeatable `--merge-classes` flags in replay.
+- Interactive mode (`smartrain merge` from TTY) supports merge setup: it asks for class list and lets you add `sources -> target` rules that map to repeatable `--merge-classes` flags in replay.
 
 Example non-interactive equivalent:
 
 ```bash
-smartrain fusion --dataset ds_a --dataset ds_b --classes "class_ab,other" --merge-classes "class_a,class_b" class_ab
+smartrain merge --dataset ds_a --dataset ds_b --classes "class_ab,other" --merge-classes "class_a,class_b" class_ab
 ```
 
 ## `split`
@@ -42,7 +42,7 @@ smartrain split --dataset my_dataset --split-ratio 0.7,0.2,0.1
 smartrain split --dataset my_dataset --exclude-test --output-name my_dataset_resplit
 ```
 
-- `--split-ratio train,val,test` — random repartition within each input bucket (default `0.8,0.1,0.1`; same algorithm as `fusion --fusion-split`);
+- `--split-ratio train,val,test` — random repartition within each input bucket (default `0.8,0.1,0.1`; same algorithm as `merge --fusion-split`);
 - `--exclude-test` — skip test buckets from the source input;
 - writes a new dataset under `datasets/` with `data.yaml` and updates `datasets_info.json`.
 
@@ -96,7 +96,7 @@ smartrain filter --dataset my_dataset --no-edge-filter --size-filter --size-dims
 
 Labels use `class_id x1 y1 x2 y2 ...` (normalized polygon vertices). See [data formats](../reference/data-formats.md).
 
-**Supported today:** `rotate`, `orient`, `roi --mode yolo_segment`, `report` (GT polygon preview), `fusion` (class filter pass-through).
+**Supported today:** `rotate`, `orient`, `roi --mode yolo_segment`, `report` (GT polygon preview), `merge` (class filter pass-through; `fusion` remains alias).
 
 **Limitations (see also [tech debt register](../refactor/tech-debt-instance-segmentation.md)):**
 

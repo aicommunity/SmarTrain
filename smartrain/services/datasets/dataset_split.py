@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.cli_entrypoints.support.cli_prompts import prompt_text
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text, prompt_text
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
@@ -75,9 +75,13 @@ def _interactive_fill(args: argparse.Namespace, dataset_names: list[str]) -> Non
     from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice
 
     args.dataset = prompt_choice("Dataset", dataset_names, default=(args.dataset or dataset_names[0]))
-    args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
+    output_default = str(args.output_name or "").strip()
+    if output_default:
+        args.output_name = prompt_prefilled_text("Output dataset name", output_default).strip() or None
+    else:
+        args.output_name = prompt_text("Output dataset name (empty=auto)", default="").strip() or None
     split_default = args.split_ratio or f"{TRAIN_PART},{VAL_PART},{TEST_PART}"
-    args.split_ratio = prompt_text("Split ratio train,val,test", default=split_default).strip() or split_default
+    args.split_ratio = prompt_prefilled_text("Split ratio train,val,test", split_default).strip() or split_default
 
 
 def _ensure_split_dirs(out_dir: str) -> None:
