@@ -9,14 +9,15 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `dataset report`, `dataset rename`
 - Training: `train`, `clearml-upload`
 - Providers: `providers`
-- Info: `info`
+- Workspace: `deploy`, `quickstart`, `info`, `sync`
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
 - Models: `model convert`, `model release`, `model rename`
 - Dataset catalog: `dataset report`, `dataset rename`
-- Format tools: `dataset convert`, `sahi`, `heatmap`
+- Format tools: `dataset convert`, `sahi`, `heatmap`, `vis`
 - Migration: `migrate`, `migrate-models`
+- Maintenance: `deps sync-torch`
 
 ## Reference
 
@@ -46,6 +47,13 @@ Unified interactive contract:
 - for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model rename`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
+
+Completion:
+
+- auto: best-effort setup runs on first `smartrain` launch;
+- manual fallback:
+  - `smartrain --install-completion`
+  - `smartrain --show-completion`
 
 `smartrain info` highlights:
 

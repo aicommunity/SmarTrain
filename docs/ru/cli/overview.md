@@ -9,14 +9,15 @@
 - Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `dataset report`, `dataset rename`
 - Обучение: `train`, `clearml-upload`
 - Провайдеры: `providers`
-- Инфо: `info`
+- Workspace: `deploy`, `quickstart`, `info`, `sync`
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
 - Модели: `model convert`, `model release`, `model rename`
 - Каталог датасетов: `dataset report`, `dataset rename`
-- Инструменты форматов: `dataset convert`, `sahi`, `heatmap`
-- Миграция: `migrate-models`
+- Инструменты форматов: `dataset convert`, `sahi`, `heatmap`, `vis`
+- Миграция: `migrate`, `migrate-models`
+- Обслуживание: `deps sync-torch`
 
 ## Справка
 
@@ -40,6 +41,13 @@ smartrain model convert --help
 - для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model rename` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
+
+Автодополнение:
+
+- авто: best-effort настройка выполняется при первом запуске `smartrain`;
+- ручной fallback:
+  - `smartrain --install-completion`
+  - `smartrain --show-completion`
 
 Особенности `smartrain info`:
 

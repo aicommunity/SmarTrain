@@ -6,6 +6,13 @@ This guide assumes `smartrain` is already installed and you run commands from th
 
 Run `smartrain` or `smartrain --help` for a grouped command reference. This guide is also available as `smartrain quickstart`.
 
+Completion after install:
+
+- auto: best-effort setup runs on first `smartrain` launch;
+- manual fallback:
+  - `smartrain --install-completion`
+  - `smartrain --show-completion`
+
 ## Main path: train on your dataset and build reports
 
 1. **Create a workspace directory (if it does not exist yet)**
@@ -105,7 +112,7 @@ smartrain analyze all --report-languages en,ru
   ```bash
   smartrain analyze compare --baseline /path/to/run_a --others /path/to/run_b /path/to/run_c
   ```
-- **Dataset operations before training** (when needed): `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`.
+- **Dataset operations before training** (when needed): `merge` (legacy alias: `fusion`), `augment`, `balance`, `prune`, `orient`, `roi`.
 
 ## Where outputs are saved
 

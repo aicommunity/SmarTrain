@@ -13,6 +13,8 @@ def _print_en_quick_start() -> None:
     fallback = (
         "Quick start\n\n"
         "Run from workspace root:\n\n"
+        "  smartrain --install-completion\n"
+        "  smartrain --show-completion\n"
         "  smartrain deploy\n"
         "  smartrain scan\n"
         "  smartrain train --data my_dataset --model yolo11n.pt -y\n"

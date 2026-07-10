@@ -8,12 +8,12 @@ This section reflects the current codebase and is organized by scenarios: gettin
 
 - [Installation](getting-started/installation.md)
 - [Workspace and project directories](getting-started/workspace.md)
-- [Quick workflow `scan -> fusion -> train`](getting-started/quickstart.md)
+- [Quick workflow `scan -> merge -> train`](getting-started/quickstart.md)
 
 ## 2) CLI guide
 
 - [Command overview](cli/overview.md)
-- [Datasets: `scan`, `fusion`, `augment`, `balance`, `orient`, `roi`, `hash`, `stats`, `dataset convert`](cli/datasets.md)
+- [Datasets: `scan`, `merge` (`fusion` alias), `augment`, `balance`, `orient`, `roi`, `hash`, `stats`, `dataset convert`](cli/datasets.md)
 - [Training and evaluation: `train`, `clearml-upload`](cli/training.md)
 - [External providers: `providers`, provider model aliases, train/inference integration](cli/providers.md)
 - [Queue: `queue`, `queue-run`](cli/queue.md)

@@ -19,6 +19,7 @@ from smartrain.cli_entrypoints.support.typer_non_interactive import (
     env_forces_non_interactive_cli,
     strip_typer_meta_non_interactive_flags,
 )
+from smartrain.core.runtime.completion_autoinstall import ensure_completion_auto_setup
 from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
@@ -70,6 +71,7 @@ def _main_callback(
     if getattr(ctx, "resilient_parsing", False):
         return
     _sync_workspace_env(workspace)
+    ensure_completion_auto_setup(sys.argv[1:])
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit(0)
