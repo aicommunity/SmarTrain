@@ -21,5 +21,31 @@ jobs:
       - name: Run Phase 8 guardrails
         run: python "scripts/ci/check_phase8_guardrails.py"
 
+      - name: Install package with dev dependencies
+        run: pip install -e ".[dev]"
+
       - name: Layer boundary import guardrails
         run: python -m pytest tests/regression/test_layer_import_guardrails.py -q
+
+      - name: Full test suite
+        run: python -m pytest -q
+
+      - name: Ruff
+        run: >-
+          python -m ruff check
+          smartrain/workflows/queue/training_queue.py
+          smartrain/services/workspace/workspace_sync_service.py
+          smartrain/services/datasets/data_yaml_writer.py
+          smartrain/services/datasets/augment_transforms.py
+          smartrain/cli_entrypoints/help_texts.py
+          smartrain/cli_entrypoints/cli_forwarding.py
+          smartrain/core/runtime/logging_config.py
+          tests/test_training_queue.py
+          tests/test_workspace_sync_service.py
+
+      - name: Mypy
+        run: >-
+          python -m mypy
+          smartrain/core/runtime/logging_config.py
+          smartrain/services/datasets/data_yaml_writer.py
+          smartrain/services/datasets/augment_transforms.py

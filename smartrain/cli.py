@@ -29,154 +29,23 @@ app = plain_typer(
 )
 
 
-def _print_en_quick_start() -> None:
-    """Print getting-started guide as plain text."""
-    quickstart_path = Path(__file__).resolve().parent.parent / "docs" / "getting-started" / "quickstart.md"
-    fallback = (
-        "Quick start\n\n"
-        "Run from workspace root:\n\n"
-        "  smartrain deploy\n"
-        "  smartrain scan\n"
-        "  smartrain train --data my_dataset --model yolo11n.pt -y\n"
-        "  smartrain dataset report --dataset my_dataset -n 6 --languages en,ru\n"
-        "  smartrain analyze scan\n"
-        "  smartrain analyze all --report-languages en,ru\n"
-    )
-    try:
-        text = quickstart_path.read_text(encoding="utf-8")
-    except OSError:
-        text = fallback
-    typer.echo(text)
-
-HELP_ANALYZE_GROUP = """Analyze training runs: summary tables, comparisons, PR curves, and inference speed.
-
-Quick start:
-  smartrain analyze
-  smartrain analyze all
-  smartrain analyze scan
-  smartrain analyze export-table -o runs_summary.csv
-  smartrain analyze compare --baseline runs/ds_a/2026-01-01_00-00-00 --others runs/ds_a/2026-01-02_00-00-00
-  smartrain analyze inference-benchmark --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml
-  smartrain analyze leaderboard -o analytics/leaderboard.csv
-
-Common patterns:
-  summary CSV: analyze export-table
-  quality compare: analyze compare
-  speed analysis: analyze inference-benchmark + analyze inference-plot
-"""
-
-HELP_QUEUE_GROUP = """Queue management for deferred training runs.
-
-Quick examples:
-  smartrain queue list
-  smartrain queue add --cmd "smartrain train --data my_dataset -y"
-  smartrain queue run --no-gui
-"""
-
-HELP_REGISTRY_GROUP = """Registry of runs and promoted models.
-
-Quick examples:
-  smartrain registry runs-list
-  smartrain registry runs-info --run-dir runs/my_dataset/2026-01-01_00-00-00
-  smartrain registry models-list
-"""
-
-HELP_DATASET_GROUP = """Dataset catalog management and sample reports.
-
-Default report output: workspace `analytics/datasets-reports/<dataset>_<timestamp>/`.
-
-Quick examples:
-  smartrain dataset report --dataset my_dataset
-  smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
-  smartrain dataset rename --dataset old_name --new-name new_name
-  smartrain dataset rename --dataset old_name --new-name new_name --dry-run
-  smartrain dataset rename
-"""
-
-HELP_MODEL_GROUP = """Model conversion tools.
-
-Quick examples:
-  smartrain model convert
-  smartrain model convert --input models/best.pt --format onnx
-  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/2026-01-01_00-00-00.pt --format tensorrt-engine --precision fp16
-  smartrain model convert --input models/my_model.onnx --format tensorrt-trt
-  smartrain model release --run runs/my_ds/2026-01-01_00-00-00
-  smartrain model rename --release models/my_ds/detect_yolov8n_20260115_120000.pt --new-name my_detector_v2
-
-Interactive convert:
-  - choose source model type: pt or onnx
-  - select a file (or enter a manual path)
-  - select one or multiple target models (onnx/engine/trt depending on source; CSV by numbers or values is supported, e.g. 1,3 or onnx,trt)
-  - set batch/imgsz and other export parameters
-  - run sources use canonical artifacts <run_dir>/<run_dir_name>.<ext>; legacy run layouts are canonized automatically
-
-Artifacts:
-  - tensorrt-engine: Ultralytics export to .engine
-  - tensorrt-trt: trtexec export to .trt
-"""
-
-HELP_DEPS_GROUP = """Dependency management helpers.
-
-Quick examples:
-  smartrain deps sync-torch
-"""
-
-ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
-    "smartrain train": (
-        "Examples:\n"
-        "  smartrain train --data 2026-01-01_12-00-00-merged -y\n"
-        "  smartrain train --data my_dataset --model yolo11n.pt --epochs 50\n"
-        "  smartrain train --data my_dataset --batch 16 --img-size 1024\n"
-    ),
-    "smartrain dataset convert": (
-        "Examples:\n"
-        "  smartrain dataset convert\n"
-        "  smartrain dataset convert --source-zip task.zip --to yolo --output-dir datasets/task_yolo\n"
-        "  smartrain dataset convert --source-dir datasets/task_yolo --to cvat11_zip --output-dir task.cvat11.zip\n"
-        "  smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det\n"
-        "  smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --rename-classes white_line line --zip\n"
-    ),
-    "smartrain rotate": (
-        "Examples:\n"
-        "  smartrain rotate\n"
-        "  smartrain rotate --dataset my_dataset --angle 90\n"
-        "  smartrain rotate --dataset my_dataset --angle 270 --output-name my_dataset_rot270\n"
-    ),
-    "smartrain sahi": (
-        "Examples:\n"
-        "  smartrain sahi --model models/best.pt --source images/\n"
-        "  smartrain sahi --model models/best.pt --source image.jpg --output sahi_out\n"
-        "  smartrain sahi --model models/best.pt --source images/ --slice-h 768 --slice-w 768\n"
-    ),
-    "smartrain heatmap": (
-        "Examples:\n"
-        "  smartrain heatmap --model models/best.pt --source image.jpg\n"
-        "  smartrain heatmap --model models/best.pt --source image.jpg --output heatmap.png\n"
-        "  smartrain heatmap --model models/best.pt --source image.jpg --colormap 12\n"
-    ),
-    "smartrain filter": (
-        "Examples:\n"
-        "  smartrain filter --dataset my_dataset\n"
-        "  smartrain filter --dataset my_dataset --stats-only\n"
-        "  smartrain filter --dataset my_dataset --dry-run --baseline-inset-margin 0.01\n"
-        "  smartrain filter --dataset my_dataset --edge-sides horizontal\n"
-        "  smartrain filter --dataset my_dataset --no-edge-filter --size-filter\n"
-        "  smartrain filter --dataset my_dataset --size-filter --size-baseline-mode stable --size-dims width\n"
-    ),
-    "smartrain dataset report": (
-        "Examples:\n"
-        "  smartrain dataset report --dataset my_dataset\n"
-        "  smartrain dataset report --dataset my_dataset -n 6 --languages en,ru\n"
-        "  smartrain dataset report --workspace /data/ws --dataset my_dataset --no-odt\n"
-    ),
-    "smartrain inference": (
-        "Examples:\n"
-        "  smartrain inference --model-name my_promoted_model --data-mode folder --source-dir raw_images\n"
-        "  smartrain inference --model-name my_promoted_model --data-mode dataset-split --dataset my_dataset --split test --limit 200\n"
-        "  smartrain inference --run 1 --data-mode folder --source-dir samples --roi-pre-detect --roi-weights yolo11n.pt\n"
-    ),
-}
-
+from smartrain.cli_entrypoints.cli_forwarding import (
+    _format_columns,
+    _forward_argparse_command,
+    _interactive_flag_env,
+    _invoke_module_main,
+    _is_detection_model_alias,
+)
+from smartrain.cli_entrypoints.help_texts import (
+    ARGPARSE_HELP_EXAMPLES,
+    HELP_ANALYZE_GROUP,
+    HELP_DATASET_GROUP,
+    HELP_DEPS_GROUP,
+    HELP_MODEL_GROUP,
+    HELP_QUEUE_GROUP,
+    HELP_REGISTRY_GROUP,
+    _print_en_quick_start,
+)
 
 def _sync_workspace_env(cli_workspace: Optional[str]) -> None:
     w = (cli_workspace or "").strip()
@@ -283,134 +152,6 @@ def cmd_info(
             typer.echo(f"- {pid}: {repo}")
 
 
-def _format_columns(items: tuple[str, ...], *, max_columns: int = 4) -> list[str]:
-    if not items:
-        return []
-    width = shutil.get_terminal_size(fallback=(100, 20)).columns
-    col_width = max(len(x) for x in items) + 2
-    if col_width <= 0:
-        return list(items)
-    cols = max(1, min(max_columns, width // col_width))
-    if cols <= 1:
-        return list(items)
-    rows_count = (len(items) + cols - 1) // cols
-    lines: list[str] = []
-    for row in range(rows_count):
-        parts: list[str] = []
-        for col in range(cols):
-            idx = col * rows_count + row
-            if idx >= len(items):
-                continue
-            cell = items[idx]
-            if col < cols - 1:
-                parts.append(cell.ljust(col_width))
-            else:
-                parts.append(cell)
-        lines.append("".join(parts).rstrip())
-    return lines
-
-
-def _is_detection_model_alias(alias: str) -> bool:
-    lowered = alias.lower()
-    non_detection_markers = ("-seg", "-cls", "-pose", "-obb")
-    return not any(marker in lowered for marker in non_detection_markers)
-
-
-def _invoke_module_main(module: str, args: list[str]) -> None:
-    m = importlib.import_module(module)
-    fn = getattr(m, "main")
-    # Never pass None: argparse would inspect sys.argv of the top-level command.
-    fn(args)
-
-
-@contextmanager
-def _interactive_flag_env(allowed: bool):
-    prev = os.environ.get(INTERACTIVE_ALLOWED_ENV)
-    os.environ[INTERACTIVE_ALLOWED_ENV] = "1" if allowed else "0"
-    try:
-        yield
-    finally:
-        if prev is None:
-            os.environ.pop(INTERACTIVE_ALLOWED_ENV, None)
-        else:
-            os.environ[INTERACTIVE_ALLOWED_ENV] = prev
-
-
-def _forward_argparse_command(
-    ctx: typer.Context,
-    *,
-    module: str,
-    build_parser: Callable[[], object] | None = None,
-    prog: str | None = None,
-    prepend_args: list[str] | None = None,
-    empty_args_mode: str = "help",
-    ensure_scan: bool = False,
-) -> None:
-    raw = list(prepend_args or []) + list(ctx.args)
-    filtered, meta_stripped = strip_typer_meta_non_interactive_flags(raw)
-    auto_scan_disabled = any(
-        tok == "--no-auto-scan" or tok.startswith("--no-auto-scan=") for tok in raw
-    )
-    legacy_ni = any(tok in raw for tok in ("-y", "--non-interactive"))
-    if meta_stripped or legacy_ni or env_forces_non_interactive_cli():
-        interactive_allowed = False
-    elif len(filtered) == 0 and empty_args_mode in ("invoke", "invoke_if_tty_else_help"):
-        interactive_allowed = True
-    else:
-        # Allow prompts when the user passed flags (e.g. smartrain test --run ...) from a TTY.
-        interactive_allowed = bool(sys.stdin.isatty())
-    def _enhance_parser_help(parser_obj: object) -> None:
-        if prog is None:
-            return
-        examples = ARGPARSE_HELP_EXAMPLES.get(prog)
-        if not examples:
-            return
-        if hasattr(parser_obj, "epilog"):
-            existing = getattr(parser_obj, "epilog", None)
-            setattr(parser_obj, "epilog", f"{existing}\n\n{examples}" if existing else examples)
-
-    if not filtered:
-        if empty_args_mode == "invoke":
-            from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
-
-            maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
-            with _interactive_flag_env(interactive_allowed):
-                _invoke_module_main(module, filtered)
-            return
-        if empty_args_mode == "invoke_if_tty_else_help":
-            if sys.stdin.isatty():
-                from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
-
-                maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
-                with _interactive_flag_env(interactive_allowed):
-                    _invoke_module_main(module, filtered)
-                return
-        if build_parser:
-            parser = build_parser()
-            if prog is not None and hasattr(parser, "prog"):
-                parser.prog = prog
-            _enhance_parser_help(parser)
-            if hasattr(parser, "print_help"):
-                parser.print_help()
-            raise typer.Exit(0)
-
-    if build_parser and any(tok in ("--help", "-h") for tok in filtered):
-        parser = build_parser()
-        if prog is not None and hasattr(parser, "prog"):
-            parser.prog = prog
-        _enhance_parser_help(parser)
-        try:
-            parser.parse_args(filtered)
-        except SystemExit as e:
-            code = e.code
-            if code is None:
-                code = 0
-            raise typer.Exit(code if isinstance(code, int) else 1)
-    from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
-
-    maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
-    with _interactive_flag_env(interactive_allowed):
-        _invoke_module_main(module, filtered)
 
 
 @app.command(

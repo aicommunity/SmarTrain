@@ -31,6 +31,20 @@ from smartrain.cli_entrypoints.support.cli_prompts import (
     prompt_yes_no,
 )
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.services.datasets.augment_transforms import (
+    FlipSpec,
+    OrthogonalSpec,
+    append_conveyor_transforms as _append_conveyor_transforms,
+    compose_for_basic as _compose_for_basic,
+    conveyor_any as _conveyor_any,
+    flip_specs_for_mode as _flip_specs_for_mode,
+    iter_flip_variants as _iter_flip_variants,
+    iter_orthogonal_variants as _iter_orthogonal_variants,
+    normalize_augment_args as _normalize_augment_args,
+    set_conveyor_enabled as _set_conveyor_enabled,
+    sync_conveyor_flags as _sync_conveyor_flags,
+)
+from smartrain.services.datasets.data_yaml_writer import write_data_yaml_from_names
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
@@ -331,205 +345,6 @@ def _parse_yolo_labels(label_path: str) -> list[tuple[int, float, float, float, 
 
 def _serialize_yolo_labels(labels: list[tuple[int, float, float, float, float]]) -> str:
     return legacy_tuples_to_serialized(labels)
-
-
-@dataclass(frozen=True)
-class FlipSpec:
-    mode: Literal["horizontal", "vertical", "both"]
-    tag: str
-
-
-@dataclass(frozen=True)
-class OrthogonalSpec:
-    direction: Literal["cw", "ccw"]
-    tag: str
-
-
-def _flip_specs_for_mode(flip: str) -> list[FlipSpec]:
-    if flip == "horizontal":
-        return [FlipSpec("horizontal", "h")]
-    if flip == "vertical":
-        return [FlipSpec("vertical", "v")]
-    if flip == "both":
-        return [FlipSpec("both", "b")]
-    if flip == "h-and-v":
-        return [FlipSpec("horizontal", "h"), FlipSpec("vertical", "v")]
-    return []
-
-
-def _iter_flip_variants(args, rng: random.Random, *, flip_prob: float | None = None) -> list[FlipSpec]:
-    if not args.enable_flip or str(args.flip) == "none":
-        return []
-    specs = _flip_specs_for_mode(str(args.flip))
-    if not specs:
-        return []
-    if str(getattr(args, "flip_sampling", "probabilistic")) == "exhaustive":
-        return specs
-    p = float(flip_prob if flip_prob is not None else getattr(args, "flip_prob", 0.5))
-    if rng.random() > p:
-        return []
-    if len(specs) == 1:
-        return specs
-    return [rng.choice(specs)]
-
-
-def _iter_orthogonal_variants(args, rng: random.Random, *, orth_prob: float | None = None) -> list[OrthogonalSpec]:
-    if not bool(getattr(args, "enable_orthogonal_rotate", False)):
-        return []
-    if str(getattr(args, "orthogonal_rotate_sampling", "probabilistic")) == "exhaustive":
-        return [OrthogonalSpec("cw", "c"), OrthogonalSpec("ccw", "a")]
-    p = float(orth_prob if orth_prob is not None else getattr(args, "orthogonal_rotate_prob", 0.5))
-    if rng.random() > p:
-        return []
-    d = str(getattr(args, "orthogonal_rotate_direction", "random"))
-    if d == "cw":
-        return [OrthogonalSpec("cw", "c")]
-    if d == "ccw":
-        return [OrthogonalSpec("ccw", "a")]
-    direction = rng.choice(["cw", "ccw"])
-    return [OrthogonalSpec(direction, "c" if direction == "cw" else "a")]
-
-
-def _normalize_augment_args(args, *, argv: list[str] | None = None) -> str | None:
-    if bool(getattr(args, "placement_roi", False)):
-        args.placement_mode = "bbox"
-
-    if bool(getattr(args, "enable_flip", False)) and str(getattr(args, "flip", "horizontal")) == "none":
-        return "[ERROR] --enable-flip conflicts with --flip none."
-    if not 0.0 <= float(getattr(args, "flip_prob", 0.5)) <= 1.0:
-        return "[ERROR] --flip-prob must be in [0, 1]."
-    if not 0.0 <= float(getattr(args, "orthogonal_rotate_prob", 0.5)) <= 1.0:
-        return "[ERROR] --orthogonal-rotate-prob must be in [0, 1]."
-    try:
-        parse_noise_types(getattr(args, "conveyor_noise_types", None))
-    except ValueError as exc:
-        return f"[ERROR] {exc}"
-    if not 0.0 <= float(getattr(args, "conveyor_noise_intensity", 0.35)) <= 1.0:
-        return "[ERROR] --conveyor-noise-intensity must be in [0, 1]."
-
-    anchor_explicit = argv is not None and "--center-rotate-anchor" in argv
-    placement_explicit = argv is not None and ("--placement-mode" in argv or "--placement-roi" in argv)
-    rotate_on = bool(getattr(args, "enable_center_rotate", False))
-    copy_on = bool(getattr(args, "enable_bbox_copy", False))
-
-    if rotate_on and copy_on:
-        if placement_explicit and not anchor_explicit:
-            args.center_rotate_anchor = {
-                "none": "center",
-                "bbox": "bbox",
-                "detector": "detector",
-            }[str(getattr(args, "placement_mode", "none"))]
-        elif anchor_explicit and not placement_explicit:
-            args.placement_mode = {
-                "center": "none",
-                "bbox": "bbox",
-                "detector": "detector",
-            }[str(getattr(args, "center_rotate_anchor", "center"))]
-
-    return None
-
-
-def _conveyor_any(args) -> bool:
-    return any(
-        bool(getattr(args, name, False))
-        for name in (
-            "enable_conveyor_rotate",
-            "enable_conveyor_scale",
-            "enable_conveyor_blur",
-            "enable_conveyor_shift",
-            "enable_conveyor_noise",
-        )
-    )
-
-
-def _sync_conveyor_flags(args, *, argv: list[str] | None = None) -> None:
-    if argv is not None and "--enable-conveyor" in argv:
-        args.enable_conveyor_rotate = True
-        args.enable_conveyor_scale = True
-        args.enable_conveyor_blur = True
-        args.enable_conveyor_shift = True
-        args.enable_conveyor_noise = True
-    args.enable_conveyor = _conveyor_any(args)
-
-
-def _set_conveyor_enabled(args, enabled: bool) -> None:
-    args.enable_conveyor = bool(enabled)
-    if not enabled:
-        args.enable_conveyor_rotate = False
-        args.enable_conveyor_scale = False
-        args.enable_conveyor_blur = False
-        args.enable_conveyor_shift = False
-        args.enable_conveyor_noise = False
-
-
-def _append_conveyor_transforms(t: list[A.BasicTransform], args) -> None:
-    geo = (
-        bool(getattr(args, "enable_conveyor_rotate", False))
-        or bool(getattr(args, "enable_conveyor_scale", False))
-        or bool(getattr(args, "enable_conveyor_shift", False))
-    )
-    if geo:
-        rotate = (-5, 5) if bool(getattr(args, "enable_conveyor_rotate", False)) else 0
-        translate = (
-            {"x": (-0.03, 0.03), "y": (-0.03, 0.03)}
-            if bool(getattr(args, "enable_conveyor_shift", False))
-            else {"x": (0, 0), "y": (0, 0)}
-        )
-        scale = (0.95, 1.05) if bool(getattr(args, "enable_conveyor_scale", False)) else (1.0, 1.0)
-        t.append(
-            A.Affine(
-                translate_percent=translate,
-                scale=scale,
-                rotate=rotate,
-                border_mode=0,
-                p=0.8,
-            )
-        )
-    if bool(getattr(args, "enable_conveyor_noise", False)):
-        noise_tf = build_conveyor_noise_transform(args)
-        if noise_tf is not None:
-            t.append(noise_tf)
-    if bool(getattr(args, "enable_conveyor_blur", False)):
-        t.append(A.MotionBlur(blur_limit=3, p=0.15))
-
-
-def _compose_for_basic(
-    args,
-    *,
-    flip_mode: str | None = None,
-    with_bboxes: bool = True,
-    with_keypoints: bool = False,
-) -> A.Compose:
-    t: list[A.BasicTransform] = []
-    flip = str(flip_mode if flip_mode is not None else getattr(args, "flip", "horizontal"))
-    apply_flip = bool(getattr(args, "enable_flip", False)) or flip_mode is not None
-    if apply_flip:
-        if flip == "horizontal":
-            t.append(A.HorizontalFlip(p=1.0))
-        elif flip == "vertical":
-            t.append(A.VerticalFlip(p=1.0))
-        elif flip == "both":
-            t.append(A.Compose([A.HorizontalFlip(p=1.0), A.VerticalFlip(p=1.0)]))
-    if _conveyor_any(args):
-        _append_conveyor_transforms(t, args)
-    if args.enable_photometric:
-        t.append(
-            A.RandomBrightnessContrast(
-                brightness_limit=float(args.brightness_limit),
-                contrast_limit=float(args.contrast_limit),
-                p=1.0,
-            )
-        )
-    if args.enable_center_rotate:
-        t.append(A.Affine(rotate=(-float(args.center_rotate_deg), float(args.center_rotate_deg)), p=1.0))
-    if not t:
-        return A.Compose([])
-    params: dict = {}
-    if with_bboxes:
-        params["bbox_params"] = A.BboxParams(format="yolo", label_fields=["class_labels"], clip=True)
-    if with_keypoints:
-        params["keypoint_params"] = A.KeypointParams(format="xy", remove_invisible=False)
-    return A.Compose(t, **params)
 
 
 def _sanitize_yolo_box(
@@ -1477,12 +1292,12 @@ def _write_data_yaml(out_dir: str, names: list[str], *, structure: str) -> None:
         train_rel = _split_images_rel(out_dir, "train") or "train/images"
         val_rel = _split_images_rel(out_dir, "val") or _split_images_rel(out_dir, "valid") or train_rel
         test_rel = _split_images_rel(out_dir, "test") or val_rel
-    p = Path(out_dir) / "data.yaml"
-    p.write_text(
-        f"train: {train_rel}\nval: {val_rel}\ntest: {test_rel}\n\n"
-        f"nc: {len(names)}\n"
-        f"names: {names}\n",
-        encoding="utf-8",
+    write_data_yaml_from_names(
+        out_dir,
+        names,
+        train_rel=train_rel,
+        val_rel=val_rel,
+        test_rel=test_rel,
     )
 
 

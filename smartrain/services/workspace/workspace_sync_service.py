@@ -10,8 +10,11 @@ from typing import Any
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text, prompt_yes_no
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.runtime.workspace_path_repair import repair_workspace_paths
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -37,7 +40,8 @@ def _read_json(path: str) -> dict[str, Any]:
         return {}
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to read JSON from %s: %s", path, exc)
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -65,6 +69,8 @@ def _datasets_related(dst_info: dict[str, Any], src_info: dict[str, Any], thresh
     common = dst_keys & src_keys
     if common:
         return True, common
+    if not dst_keys and src_keys:
+        return True, common
     denom = max(len(dst_keys), len(src_keys), 1)
     ratio = len(common) / float(denom)
     return ratio >= float(threshold), common
@@ -90,7 +96,8 @@ def _copy_missing_dir_children(src_root: str, dst_root: str, stats: SyncStats, *
         try:
             _copy_tree_or_file(src, dst, dry_run=dry_run)
             stats.copied += 1
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to copy %s -> %s: %s", src, dst, exc)
             stats.errors += 1
 
 
@@ -145,7 +152,8 @@ def _sync_datasets(
             try:
                 _copy_tree_or_file(src_ds_dir, dst_ds_dir, dry_run=dry_run)
                 stats.copied += 1
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to copy dataset %s -> %s: %s", src_ds_dir, dst_ds_dir, exc)
                 stats.errors += 1
                 continue
         merged_info[key] = src_entry

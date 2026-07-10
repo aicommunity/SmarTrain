@@ -15,6 +15,7 @@ import yaml
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text
 from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.models import tensorrt_checks as trt_checks
 from smartrain.services.testing import model_test_cli_surface as surf
 from smartrain.services.testing.model_test_service import (
@@ -44,6 +45,10 @@ from smartrain.core.runtime.device_selector import (
     resolve_device_request,
     validate_device_available,
 )
+
+logger = get_logger(__name__)
+
+
 def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(
         description="Complete missing test artifacts for runs/models and compare formats (empty call starts interactive mode)."
@@ -148,7 +153,8 @@ def _discover_run_artifact_candidates(root_dir: str, formats: list[str] | None =
                 target_kind="runs",
             )
             out[fmt] = [one]
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to collect artifact for format %s: %s", fmt, exc)
             out[fmt] = []
     # Keep deterministic order by format and path.
     ordered: dict[str, list[str]] = {}
@@ -273,7 +279,8 @@ def _load_json(path: Path) -> dict[str, Any]:
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to read JSON metadata from %s: %s", path, exc)
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -465,8 +472,8 @@ def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | 
                 for key in ("imgsz", "conf", "iou", "batch"):
                     if inf.get(key) is not None:
                         defaults[key] = inf.get(key)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to read training metadata defaults from %s: %s", metadata_path, exc)
     train_args = Path(root_dir) / "train" / "args.yaml"
     if train_args.is_file():
         try:
@@ -477,8 +484,8 @@ def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | 
                 defaults["iou"] = payload.get("iou")
             if defaults["batch"] is None and payload.get("batch") is not None:
                 defaults["batch"] = payload.get("batch")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to read train args defaults from %s: %s", train_args, exc)
     if defaults["imgsz"] is None:
         defaults["imgsz"] = 640
     if defaults["conf"] is None:
@@ -709,7 +716,8 @@ def _collect_interactive_rerun_decisions(
                     format_name=fmt,
                     target_kind=target_kind,
                 )
-            except Exception:
+            except Exception as exc:
+                logger.debug("Skipping format %s while resolving artifacts: %s", fmt, exc)
                 continue
             entries.append((fmt, artifact_path))
 
@@ -795,7 +803,8 @@ def main(argv: list[str] | None = None) -> None:
                 layout=layout,
                 data_cli=None,
             )
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to resolve default data.yaml for %s: %s", root_dir, exc)
             default_data_yaml = None
         if default_data_yaml and sys.stdin.isatty():
             raw_data = prompt_prefilled_text("Dataset path or data.yaml", str(default_data_yaml)).strip()

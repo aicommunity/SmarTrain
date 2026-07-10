@@ -21,6 +21,7 @@ from smartrain.services.datasets.dataset_access import (
 from smartrain.services.datasets.dataset_passport import write_dataset_passport
 from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
 from smartrain.services.datasets.image_label_pairs import collect_label_image_pairs as _collect_label_image_pairs
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
@@ -43,6 +44,8 @@ from smartrain.services.datasets.dataset_split_core import (
 FUSION_DEFAULT_DIR_SUFFIX = "merged"
 parse_fusion_split_arg = parse_split_ratio_arg
 random.seed(DEFAULT_RANDOM_SEED)
+
+logger = get_logger(__name__)
 
 
 def safe_mkdir(path):
@@ -1423,15 +1426,15 @@ def main(argv=None):
                 f"({strip_stats.classes_before} -> {strip_stats.classes_after} classes)"
             )
 
-    print(f"\n[DEBUG] Total label files: {total_labels}")
-    print(f"[DEBUG] Image+label pair processed: {processed_pairs}")
-    print(f"[DEBUG] Skipped equivalent takes: {skipped_equivalent}")
-    print(f"[DEBUG] Markup merges (same image, different labels): {merged_annotations}")
-    print(f"[DEBUG] Removed boxes by IoU-dedup: {iou_dedup_removed_boxes}")
-    print(f"[DEBUG] Unique images after dedup: {len(dedup_map)}")
-    print(f"[DEBUG] Filtered and copied: {copied_count}")
+    logger.debug("Total label files: %s", total_labels)
+    logger.debug("Image+label pair processed: %s", processed_pairs)
+    logger.debug("Skipped equivalent takes: %s", skipped_equivalent)
+    logger.debug("Markup merges (same image, different labels): %s", merged_annotations)
+    logger.debug("Removed boxes by IoU-dedup: %s", iou_dedup_removed_boxes)
+    logger.debug("Unique images after dedup: %s", len(dedup_map))
+    logger.debug("Filtered and copied: %s", copied_count)
     pct = (copied_count / total_labels * 100) if total_labels else 0.0
-    print(f"[DEBUG] Percentage of files used: {pct:.2f}%")
+    logger.debug("Percentage of files used: %.2f%%", pct)
 
     print(f"\n[OK] {copied_count} images with filtered annotations copied.")
 

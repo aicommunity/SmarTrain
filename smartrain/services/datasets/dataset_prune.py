@@ -184,15 +184,11 @@ def _copy_source_dataset(src_root: str, entry: dict[str, Any], out_dir: str, dat
     return copied
 
 
+from smartrain.services.datasets.data_yaml_writer import write_data_yaml_from_class_map
+
+
 def _write_data_yaml(out_dir: str, class_map: dict[str, Any]) -> None:
-    names = [k for k, _ in sorted(((str(k), int(v)) for k, v in class_map.items()), key=lambda kv: kv[1])]
-    val_rel = "valid/images" if (Path(out_dir) / "valid" / "images").is_dir() else "val/images"
-    Path(out_dir, "data.yaml").write_text(
-        f"train: train/images\nval: {val_rel}\ntest: test/images\n\n"
-        f"nc: {len(names)}\n"
-        f"names: {names}\n",
-        encoding="utf-8",
-    )
+    write_data_yaml_from_class_map(out_dir, class_map)
 
 
 def _update_datasets_sidecar(layout: WorkspaceLayout, output_key: str, class_map: dict[str, Any], target_dir: str, output_hash: str) -> None:

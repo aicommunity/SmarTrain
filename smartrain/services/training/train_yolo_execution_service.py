@@ -14,6 +14,7 @@ from smartrain.core.runtime.mpl_runtime import configure_matplotlib_before_ultra
 configure_matplotlib_before_ultralytics()
 from ultralytics import YOLO  # noqa: E402
 
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.runtime.run_artifacts import (
     preferred_run_model_path,
     normalize_ultralytics_run_layout,
@@ -52,6 +53,8 @@ DEFAULT_MODEL_VERSION = "yolov8n"
 DEFAULT_EPOCHS = 50
 DEFAULT_BATCH = 16
 DEFAULT_IMG_SIZE = 640
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -170,8 +173,8 @@ def ensure_confidence_recommendations(
         try:
             with open(format_metrics_path_for_split(model_dir, "val", "pt"), "w", encoding="utf-8") as f:
                 f.write(val_result.to_csv())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to write val metrics CSV for %s: %s", model_dir, exc)
         val_payload = compute_confidence_recommendations(
             val_result,
             split="val",
@@ -193,8 +196,8 @@ def ensure_confidence_recommendations(
         print(f"[WARN] Failed to compute val confidence recommendations: {exc}")
     try:
         normalize_ultralytics_run_layout(model_dir)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to normalize run layout for %s: %s", model_dir, exc)
 
 
 def train_yolo(
@@ -365,12 +368,12 @@ def train_yolo(
         if clearml_task is not None:
             try:
                 clearml_task.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to close ClearML task: %s", exc)
         try:
             normalize_ultralytics_run_layout(model_dir)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to normalize run layout for %s: %s", model_dir, exc)
 
     try:
         best_src = resolve_run_model(model_dir)
@@ -383,10 +386,8 @@ def train_yolo(
         if os.path.exists(model_path):
             print("[OK] Training complete.")
             print(f"[INFO] Model saved at path:\n{model_path}")
-    except Exception:
-        pass
-
-    weights_dest = resolve_run_model(model_dir)
+    except Exception as exc:
+        logger.warning("Failed to report training completion for %s: %s", model_dir, exc)
     training_weights_ok = weights_dest is not None and weights_dest.is_file()
 
     meta_extras = {
@@ -512,7 +513,7 @@ def test_yolo(
     finally:
         try:
             normalize_ultralytics_run_layout(model_dir)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to normalize run layout for %s: %s", model_dir, exc)
 
     return test_start_time, test_end_time, inference_record

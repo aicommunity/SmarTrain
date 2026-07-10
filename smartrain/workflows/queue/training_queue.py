@@ -1,7 +1,8 @@
+import argparse
 import os
+import shlex
 import subprocess
 import time
-import argparse
 from pathlib import Path
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
@@ -78,11 +79,11 @@ def update_status(index, status, tasks):
     save_statuses(tasks, statuses)
 
 
-def start_new_process(cmd, cwd=None):
+def start_new_process(cmd: list[str], cwd=None):
     work_dir = cwd if cwd is not None else os.getcwd()
     process = subprocess.Popen(
         cmd,
-        shell=True,
+        shell=False,
         cwd=work_dir,
     )
     return process.wait()
@@ -98,22 +99,24 @@ def read_txt(txt_file):
     return content
 
 
-def process_line(line):
+def process_line(line) -> list[str] | None:
     try:
         s = line.strip()
         if not s or s.startswith("#"):
             return None
-        arguments = s.split()
+        arguments = shlex.split(s)
+        if not arguments:
+            return None
         first = arguments[0]
         if first == "smartrain" or first.endswith("/smartrain"):
-            return s
+            return arguments
         if first in ("python3", "python"):
-            return s
-        if not first.startswith("python3"):
+            return arguments
+        if not first.startswith("python"):
             arguments.insert(0, "python3")
         if len(arguments) > 1 and not arguments[1].endswith(".py"):
             arguments[1] += ".py"
-        return " ".join(arguments)
+        return arguments
     except Exception as e:
         print(f"[ERROR] Error processing command: {e}")
         return None
@@ -195,13 +198,13 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
             statuses[next_task] = "Running"
             save_statuses(tasks, statuses, status_file=st_file)
 
-            cmd = process_line(next_task)
-            if cmd is None:
+            cmd_args = process_line(next_task)
+            if cmd_args is None:
                 statuses[next_task] = "Error"
                 save_statuses(tasks, statuses, status_file=st_file)
                 continue
 
-            result = start_new_process(cmd, cwd=work_cwd)
+            result = start_new_process(cmd_args, cwd=work_cwd)
             statuses[next_task] = "Done" if result == 0 else "Error"
             save_statuses(tasks, statuses, status_file=st_file)
     finally:
