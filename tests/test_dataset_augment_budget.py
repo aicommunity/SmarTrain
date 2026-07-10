@@ -3,13 +3,21 @@ from __future__ import annotations
 import random
 from types import SimpleNamespace
 
+import math
 import pytest
 from PIL import Image
 
 from smartrain.workflows.datasets.dataset_augment import (
+    AUGMENT_PRESETS,
+    _class_aware_trigger_prob,
+    _collect_class_freq,
     _effective_flip_prob_geo,
+    _effective_orthogonal_prob_geo,
     _geo_photo_trigger,
+    _image_soft_weight,
     _image_tail_priority_score,
+    _inserted_class_delta,
+    _warn_exhaustive_class_aware,
     main as augment_main,
     sum_train_bbox_disk,
 )
@@ -42,6 +50,73 @@ def test_geo_photo_trigger_tail_higher_than_head_empirical() -> None:
     rate_tail = sum(_geo_photo_trigger(args, 4.0, random.Random(i)) for i in range(800)) / 800.0
     rate_head = sum(_geo_photo_trigger(args, 0.08, random.Random(i)) for i in range(800)) / 800.0
     assert rate_tail >= rate_head
+
+
+def test_class_aware_trigger_prob_unified_flip_and_orthogonal() -> None:
+    args = SimpleNamespace(aug_class_aware_geo=True, imbalance_mode="soft", imbalance_strength=1.0)
+    p_flip = _class_aware_trigger_prob(args, 2.0, 0.5)
+    p_orth = _class_aware_trigger_prob(args, 2.0, 0.5)
+    assert abs(p_flip - p_orth) < 1e-9
+    assert _effective_flip_prob_geo(args, 2.0) == _class_aware_trigger_prob(args, 2.0, 0.5)
+    assert _effective_orthogonal_prob_geo(args, 2.0) == _class_aware_trigger_prob(args, 2.0, 0.5)
+
+
+def test_collect_class_freq_train_only_ignores_val_tail(tmp_path) -> None:
+    train_lbl = tmp_path / "train.txt"
+    val_lbl = tmp_path / "val.txt"
+    train_lbl.write_text("1 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    val_lbl.write_text("1 0.5 0.5 0.2 0.2\n" * 50, encoding="utf-8")
+    items = [
+        {"split": "train", "lbl": str(train_lbl)},
+        {"split": "val", "lbl": str(val_lbl)},
+    ]
+    freq_train = _collect_class_freq(items, train_only=True)
+    freq_all = _collect_class_freq(items, train_only=False)
+    assert freq_train == {1: 1}
+    assert freq_all[1] == 51
+    w_train_only = _image_soft_weight({1}, freq_train, 1.0)
+    w_all = _image_soft_weight({1}, freq_all, 1.0)
+    assert w_train_only > w_all
+
+
+def test_inserted_class_delta_counts_only_new_bbox() -> None:
+    original = {0: 2, 1: 1}
+    new_labels = [(0, 0.5, 0.5, 0.2, 0.2)] * 2 + [(1, 0.5, 0.5, 0.2, 0.2)] + [(2, 0.5, 0.5, 0.2, 0.2)]
+    delta_total, delta_by_class = _inserted_class_delta(original, new_labels)
+    assert delta_total == 1
+    assert delta_by_class == {2: 1}
+
+
+def test_warn_exhaustive_class_aware(capsys) -> None:
+    args = SimpleNamespace(
+        enable_flip=True,
+        flip_sampling="exhaustive",
+        enable_orthogonal_rotate=False,
+        aug_class_aware_geo=True,
+        imbalance_mode="soft",
+    )
+    _warn_exhaustive_class_aware(args)
+    assert "exhaustive" in capsys.readouterr().out.lower()
+
+
+def test_augment_preset_tail_safe_applies_cap(capsys, workspace_two_train_images) -> None:
+    augment_main(
+        [
+            "--workspace",
+            str(workspace_two_train_images),
+            "--dataset",
+            "ds_cap",
+            "--preset",
+            "augment-tail-safe",
+            "--enable-flip",
+            "--flip-prob",
+            "1.0",
+            "--disable-center-rotate",
+        ]
+    )
+    out = workspace_two_train_images / "datasets" / "ds_cap_aug"
+    assert sum_train_bbox_disk(str(out)) <= int(math.ceil(1.10 * 2))
+    assert "augment-tail-safe" in AUGMENT_PRESETS
 
 
 def test_image_tail_priority_score_prefers_rare_class_on_frame(tmp_path_factory: pytest.TempPathFactory) -> None:

@@ -119,6 +119,7 @@ def write_speed_quality_artifacts(
     scatter_y: str,
     run_data_yaml_map: dict[str, str] | None,
     read_test_metrics_for_run: Callable[[str], dict[str, Any]],
+    display_labels: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     if not os.path.isfile(inference_csv):
         return None
@@ -130,6 +131,7 @@ def write_speed_quality_artifacts(
         source_map = metric_sources_payload.get("sources") or {}
     rows: list[dict[str, Any]] = []
     run_data_yaml_map = run_data_yaml_map or {}
+    display_labels = display_labels or {}
     df_with_name = df.copy()
     if "run_name" not in df_with_name.columns:
         if "run_dir" in df_with_name.columns:
@@ -151,25 +153,27 @@ def write_speed_quality_artifacts(
             ["_status_score", "_val_score"], ascending=[True, True]
         )
         rec = sub.iloc[0].to_dict()
-        base_metrics = read_test_metrics_for_run(run_dir)
-        recomputed_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
-        if os.path.isfile(recomputed_csv):
-            try:
-                rdf = pd.read_csv(recomputed_csv)
-                if len(rdf) > 0:
-                    base_metrics.update(rdf.iloc[0].to_dict())
-            except Exception:
-                pass
+        base_metrics = dict(read_test_metrics_for_run(run_dir))
         quality = base_metrics.get(scatter_y)
         q_num = pd.to_numeric(quality, errors="coerce")
         s_num = pd.to_numeric(rec.get(scatter_x), errors="coerce")
         if pd.isna(q_num) or pd.isna(s_num):
             continue
         q_src = (source_map.get(run_dir) or {}).get(scatter_y, "original")
+        run_abs = os.path.abspath(run_dir.rstrip(os.sep))
+        run_name = os.path.basename(run_abs)
+        raw_model = str(rec.get("model") or run_name)
+        display = (
+            display_labels.get(run_abs)
+            or display_labels.get(run_name)
+            or display_labels.get(raw_model)
+            or raw_model
+        )
         rows.append(
             {
                 "run_dir": run_dir,
-                "model": rec.get("model") or os.path.basename(run_dir.rstrip(os.sep)),
+                "model": display,
+                "run_name": run_name,
                 "scatter_x_metric": scatter_x,
                 "scatter_y_metric": scatter_y,
                 "scatter_x_value": float(s_num),

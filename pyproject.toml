@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smartrain"
-version = "0.0.3"
+version = "0.0.4"
 description = "YOLO datasets, training queue, runs analytics — workspace-first CLI"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,8 +22,6 @@ dependencies = [
     "prompt_toolkit>=3.0.0",
     "fpdf2>=2.7.0",
     "odfpy>=1.4.0",
-    "pypandoc-binary>=1.14.0",
-    "weasyprint>=60.0",
 ]
 
 [project.scripts]
@@ -36,12 +34,18 @@ include = ["smartrain*"]
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
+    "ruff>=0.9.0",
+    "mypy>=1.13.0",
 ]
 clearml = [
     "clearml>=1.14.0",
 ]
 sahi = [
     "sahi>=0.11.0",
+]
+export = [
+    "pypandoc-binary>=1.14.0",
+    "weasyprint>=60.0",
 ]
 
 [tool.pytest.ini_options]
@@ -53,3 +57,28 @@ filterwarnings = [
     "ignore:The distutils package is deprecated and slated for removal in Python 3\\.12\\.:DeprecationWarning:redis\\.connection",
     "ignore::UserWarning:torch\\.autograd\\.graph",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E402", "E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = false
+warn_unused_ignores = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+files = [
+    "smartrain/core/runtime",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "smartrain.backends.*",
+    "smartrain.run_model_contract.*",
+]
+ignore_errors = true

@@ -11,27 +11,61 @@ import random
 import shutil
 import sys
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import albumentations as A
 import cv2
 import numpy as np
 from PIL import Image
-from prompt_toolkit import prompt
-from prompt_toolkit.completion import WordCompleter
 from tqdm import tqdm
 from ultralytics import YOLO
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_prompts import (
+    prompt_choice,
+    prompt_multi_choice_csv,
+    prompt_prefilled_text,
+    prompt_text,
+    prompt_yes_no,
+)
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.services.datasets.augment_transforms import (
+    FlipSpec,
+    OrthogonalSpec,
+    append_conveyor_transforms as _append_conveyor_transforms,
+    compose_for_basic as _compose_for_basic,
+    conveyor_any as _conveyor_any,
+    flip_specs_for_mode as _flip_specs_for_mode,
+    iter_flip_variants as _iter_flip_variants,
+    iter_orthogonal_variants as _iter_orthogonal_variants,
+    normalize_augment_args as _normalize_augment_args,
+    set_conveyor_enabled as _set_conveyor_enabled,
+    sync_conveyor_flags as _sync_conveyor_flags,
+)
+from smartrain.services.datasets.data_yaml_writer import write_data_yaml_from_names
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
+from smartrain.services.datasets.noise_augment import build_conveyor_noise_transform, parse_noise_types
+from smartrain.services.datasets.yolo_image_rotate import apply_orthogonal_rotate
+from smartrain.services.datasets.yolo_augment_geom import (
+    apply_albumentations_to_labels,
+    count_label_instances,
+    infer_label_kind,
+    labels_to_legacy_tuples,
+    legacy_tuples_to_serialized,
+    read_augment_label_file,
+    resolve_label_kind,
+    rotate_labels_with_matrix,
+    write_augment_label_file,
+)
+from smartrain.services.datasets.yolo_labels import YoloLabel, read_yolo_labels, serialize_yolo_labels
 from smartrain.services.datasets.dataset_cli_catalog import (
     EMPTY_DATASETS_INFO_MESSAGE,
     load_datasets_catalog,
-    sorted_class_names_union_from_catalog,
+    sorted_class_names_for_dataset,
     try_prompt_dataset_interactive,
 )
 from smartrain.services.datasets.dataset_cli_common import (
@@ -47,19 +81,90 @@ SPLIT_ALIASES = {"train": "train", "val": "val", "valid": "valid", "test": "test
 _BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 _ROI_MODEL_CACHE: dict[str, YOLO] = {}
 
+AUGMENT_PRESETS: dict[str, dict[str, object]] = {
+    "augment-tail-safe": {
+        "aug_class_aware_geo": True,
+        "aug_total_bbox_cap_mult": 1.10,
+        "aug_budget_tail_first": True,
+        "aug_budget_tail_gamma": 1.0,
+    },
+}
+
 
 def build_augment_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(description="Offline augmentation of a dataset into a new datasets/<name>")
+    # --- source ---
     p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (aka {WORKSPACE_ENV_VAR})")
     p.add_argument("--dataset", type=str, default=None, help="Name of source dataset from datasets_info.json")
+    p.add_argument(
+        "--label-type",
+        choices=("auto", "bbox", "segment"),
+        default="auto",
+        help="Label interpretation for augment: auto-detect, force bbox, or force segment (polygons).",
+    )
     p.add_argument("--output-name", type=str, default=None, help="Name of output dataset (default <dataset>_aug)")
+    p.add_argument("--splits", type=str, default="train", help="CSV: train,val,test")
+    p.add_argument("--classes", type=str, default=None, help="Limit augmentation to CSV classes")
+    p.add_argument("--seed", type=int, default=12345)
+    p.add_argument(
+        "--preset",
+        choices=tuple(AUGMENT_PRESETS.keys()),
+        default=None,
+        help=(
+            "Preset with tuned augment balancing. "
+            "augment-tail-safe: class-aware geo, bbox cap 1.10× baseline, tail-first budget "
+            "(aligned with hybrid-aug-tail-budget defaults; standalone augment defaults stay unchanged)."
+        ),
+    )
+    # --- flip ---
     p.add_argument("--enable-flip", action="store_true", help="Enable flip augmentation")
-    p.add_argument("--flip-prob", type=float, default=0.5, help="Probability of creating a flip variant per frame [0..1]")
-    p.add_argument("--enable-photometric", action="store_true", help="Enable brightness/contrast")
-    p.add_argument("--enable-conveyor", action="store_true", help="Enable pipeline noise/blur/shift/rotate")
+    p.add_argument(
+        "--flip",
+        choices=("horizontal", "vertical", "both", "h-and-v", "none"),
+        default="horizontal",
+        help="Flip mode: horizontal|vertical|both (combined H+V)|h-and-v (separate files)|none",
+    )
+    p.add_argument(
+        "--flip-sampling",
+        choices=("probabilistic", "exhaustive"),
+        default="probabilistic",
+        help=(
+            "probabilistic: at most one flip per frame via --flip-prob; exhaustive: always all variants for --flip. "
+            "With --aug-class-aware-geo, exhaustive bypasses per-frame probability scaling (see startup WARN)."
+        ),
+    )
+    p.add_argument(
+        "--flip-prob",
+        type=float,
+        default=0.5,
+        help="Probability of creating a flip variant per frame [0..1] (ignored when --flip-sampling exhaustive)",
+    )
+    # --- orthogonal ±90° ---
+    p.add_argument("--enable-orthogonal-rotate", action="store_true", help="Enable ±90° orthogonal rotation augmentation")
+    p.add_argument(
+        "--orthogonal-rotate-sampling",
+        choices=("probabilistic", "exhaustive"),
+        default="probabilistic",
+        help=(
+            "probabilistic: at most one ±90° variant; exhaustive: always both +90° and -90°. "
+            "With --aug-class-aware-geo, exhaustive bypasses per-frame probability scaling (see startup WARN)."
+        ),
+    )
+    p.add_argument(
+        "--orthogonal-rotate-prob",
+        type=float,
+        default=0.5,
+        help="Probability of orthogonal rotate variant [0..1] (ignored when exhaustive)",
+    )
+    p.add_argument(
+        "--orthogonal-rotate-direction",
+        choices=("random", "cw", "ccw"),
+        default="random",
+        help="Direction for probabilistic orthogonal rotate: random|cw (+90°)|ccw (-90°)",
+    )
+    # --- center-rotate ---
     p.add_argument("--enable-center-rotate", action="store_true", dest="enable_center_rotate", help="Enable frame rotation around the center")
     p.add_argument("--disable-center-rotate", action="store_false", dest="enable_center_rotate", help="Disable frame rotation around center")
-    p.set_defaults(enable_center_rotate=True)
     p.add_argument("--center-rotate-deg", type=float, default=5.0, help="Maximum rotation angle in both directions")
     p.add_argument("--rotate-copies", type=int, default=1, help="Number of rotate options per frame")
     p.add_argument(
@@ -68,12 +173,46 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
         default="center",
         help="Rotation center source: frame center, bbox markup or ROI detector",
     )
-    p.add_argument("--enable-bbox-copy", action="store_true", help="Enable bbox-copy augmentation")
-    p.add_argument("--bbox-copy-copies", type=int, default=1, help="Number of bbox_copy options per frame")
-    p.add_argument("--flip", choices=("horizontal", "vertical", "both", "none"), default="horizontal")
+    # --- photometric ---
+    p.add_argument("--enable-photometric", action="store_true", help="Enable brightness/contrast")
     p.add_argument("--brightness-limit", type=float, default=0.1, help="For policy=basic: brightness range")
     p.add_argument("--contrast-limit", type=float, default=0.1, help="For policy=basic: range contrast")
-    p.add_argument("--copy-paste-count", type=int, default=1, help="For policy=bbox_copy: number of inserts per image")
+    # --- conveyor ---
+    p.add_argument(
+        "--enable-conveyor",
+        action="store_true",
+        help="Enable all conveyor effects (rotate, scale, blur, shift, noise); alias for all --enable-conveyor-* flags",
+    )
+    p.add_argument("--enable-conveyor-rotate", action="store_true", help="Conveyor Affine rotate (±5°)")
+    p.add_argument("--enable-conveyor-scale", action="store_true", help="Conveyor Affine scale (0.95–1.05)")
+    p.add_argument("--enable-conveyor-blur", action="store_true", help="Conveyor motion blur")
+    p.add_argument("--enable-conveyor-shift", action="store_true", help="Conveyor Affine shift (±3%% translate)")
+    p.add_argument(
+        "--enable-conveyor-noise",
+        action="store_true",
+        help="Conveyor sensor noise (see --conveyor-noise-types)",
+    )
+    p.add_argument(
+        "--conveyor-noise-types",
+        type=str,
+        default="iso,shot,gaussian",
+        help="CSV noise types: gaussian,iso,shot,poisson-gaussian,multiplicative,impulse",
+    )
+    p.add_argument(
+        "--conveyor-noise-intensity",
+        type=float,
+        default=0.35,
+        help="Overall noise strength [0..1]",
+    )
+    p.add_argument(
+        "--conveyor-noise-selection",
+        choices=("random", "stack"),
+        default="random",
+        help="random: one noise type per frame; stack: apply all selected types",
+    )
+    # --- bbox copy ---
+    p.add_argument("--enable-bbox-copy", action="store_true", help="Enable bbox-copy augmentation")
+    p.add_argument("--bbox-copy-copies", type=int, default=1, help="Number of bbox_copy options per frame")
     p.add_argument("--copy-paste-rotation", type=float, default=0.0, help="For policy=bbox_copy: max |angle| to rotate the insert")
     p.add_argument("--copy-paste-scale-min", type=float, default=1.0, help="For policy=bbox_copy: min scale (inner)")
     p.add_argument("--copy-paste-scale-max", type=float, default=1.0, help="For policy=bbox_copy: max scale (inner)")
@@ -109,17 +248,20 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
         default=0.16,
         help="For bbox_copy: seam smoothing strength [0..0.5], 0=no feather",
     )
+    p.add_argument("--copy-paste-count", type=int, default=1, help="For policy=bbox_copy: number of inserts per image")
+    # --- placement / ROI ---
     p.add_argument(
         "--placement-mode",
         choices=("none", "bbox", "detector"),
-        default="detector",
-        help="ROI placement mode for bbox_copy: none|bbox|detector (default detector)",
+        default="none",
+        help="ROI placement mode for bbox_copy and rotation pivot: none|bbox|detector (default none)",
     )
     p.add_argument("--placement-roi", action="store_true", help="Legacy: same as --placement-mode bbox")
     p.add_argument("--roi-model", type=str, default="yolo11n.pt", help="ROI detector model for --placement-mode detector")
     p.add_argument("--roi-conf", type=float, default=0.25, help="Confidence threshold for ROI detector")
     p.add_argument("--roi-class-ids", type=str, default=None, help="CSV class ids for ROI detector (empty=all)")
     p.add_argument("--side-tolerance-px", type=float, default=3.0, help="Tolerance in px for ROI side classification")
+    # --- balancing / budget ---
     p.add_argument("--imbalance-mode", choices=("off", "soft"), default="soft", help="Balancing according to scarce classes")
     p.add_argument("--imbalance-strength", type=float, default=1.0, help="Balancing strength >=0")
     p.add_argument(
@@ -156,13 +298,21 @@ def build_augment_arg_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Exponent γ for tail priority when --aug-budget-tail-first (default 1.0).",
     )
+    p.add_argument(
+        "--aug-per-class-bbox-cap-mult",
+        type=float,
+        default=0.0,
+        help=(
+            "If >0: per-class train bbox cap = ceil(mult × baseline n_c); extra variants that would exceed "
+            "class slack are skipped. Complements --aug-total-bbox-cap-mult and tail-first ordering."
+        ),
+    )
     p.add_argument("--min-diversity-iou", type=float, default=0.97, help="bbox similarity threshold (higher -> almost duplicate)")
     p.add_argument("--min-angle-delta", type=float, default=1.0, help="Minimum angle difference between rotate options")
-    p.add_argument("--splits", type=str, default="train", help="CSV: train,val,test")
-    p.add_argument("--classes", type=str, default=None, help="Limit augmentation to CSV classes")
-    p.add_argument("--seed", type=int, default=12345)
+    # --- service ---
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-legend", action="store_true")
+    p.set_defaults(enable_center_rotate=True)
     return p
 
 
@@ -190,61 +340,11 @@ def _read_yolo_classes(label_path: str) -> set[int]:
 
 
 def _parse_yolo_labels(label_path: str) -> list[tuple[int, float, float, float, float]]:
-    out: list[tuple[int, float, float, float, float]] = []
-    if not os.path.isfile(label_path):
-        return out
-    for raw in Path(label_path).read_text(encoding="utf-8").splitlines():
-        parts = raw.split()
-        if len(parts) < 5:
-            continue
-        try:
-            out.append((int(float(parts[0])), float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])))
-        except ValueError:
-            continue
-    return out
+    return labels_to_legacy_tuples(read_augment_label_file(label_path))
 
 
 def _serialize_yolo_labels(labels: list[tuple[int, float, float, float, float]]) -> str:
-    return "".join(f"{cls} {x:.8f} {y:.8f} {w:.8f} {h:.8f}\n" for cls, x, y, w, h in labels)
-
-
-def _compose_for_basic(args) -> A.Compose:
-    t: list[A.BasicTransform] = []
-    if args.enable_flip:
-        if args.flip == "horizontal":
-            t.append(A.HorizontalFlip(p=1.0))
-        elif args.flip == "vertical":
-            t.append(A.VerticalFlip(p=1.0))
-        elif args.flip == "both":
-            t.append(A.Compose([A.HorizontalFlip(p=1.0), A.VerticalFlip(p=1.0)]))
-    if args.enable_conveyor:
-        t.extend(
-            [
-                A.Affine(
-                    translate_percent={"x": (-0.03, 0.03), "y": (-0.03, 0.03)},
-                    scale=(0.95, 1.05),
-                    rotate=(-5, 5),
-                    border_mode=0,
-                    p=0.8,
-                ),
-                A.GaussNoise(p=0.3),
-                A.MotionBlur(blur_limit=3, p=0.15),
-            ]
-        )
-    if args.enable_photometric:
-        t.append(
-            A.RandomBrightnessContrast(
-                brightness_limit=float(args.brightness_limit),
-                contrast_limit=float(args.contrast_limit),
-                p=1.0,
-            )
-        )
-    if args.enable_center_rotate:
-        t.append(A.Affine(rotate=(-float(args.center_rotate_deg), float(args.center_rotate_deg)), p=1.0))
-    return A.Compose(
-        t,
-        bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"], clip=True),
-    )
+    return legacy_tuples_to_serialized(labels)
 
 
 def _sanitize_yolo_box(
@@ -282,21 +382,28 @@ def _base36(num: int) -> str:
 
 
 def _variant_code(args) -> str:
-    if args.enable_conveyor:
+    if _conveyor_any(args):
         return "s"
     if args.enable_photometric:
         return "l"
     return "n"
 
 
-def _flip_code(args) -> str:
-    if not args.enable_flip:
-        return "n"
-    return {"horizontal": "h", "vertical": "v", "both": "b", "none": "n"}[args.flip]
-
-
-def _aug_stem(stem: str, args, idx: int, mode: str) -> str:
-    return f"{stem}__a-{mode}{_flip_code(args)}{_variant_code(args)}{_base36(idx)}"
+def _aug_stem(
+    stem: str,
+    args,
+    idx: int,
+    mode: str,
+    *,
+    flip_tag: str = "n",
+    orth_tag: str = "",
+) -> str:
+    extra = ""
+    if mode == "o":
+        extra = orth_tag
+    elif mode == "f":
+        extra = flip_tag
+    return f"{stem}__a-{mode}{extra}{_variant_code(args)}{_base36(idx)}"
 
 
 def _labels_signature_iou(
@@ -315,12 +422,43 @@ def _labels_signature_iou(
     return float(sum(sims) / len(sims)) if sims else 0.0
 
 
-def _collect_class_freq(items: list[dict]) -> dict[int, int]:
+def _collect_class_freq(items: list[dict], *, train_only: bool = True) -> dict[int, int]:
     freq: dict[int, int] = {}
     for it in items:
+        if train_only:
+            split_norm = SPLIT_ALIASES.get(str(it.get("split", "")).strip().lower(), str(it.get("split", "")).strip().lower())
+            if split_norm != "train":
+                continue
         for cls, *_ in _parse_yolo_labels(it["lbl"]):
             freq[int(cls)] = freq.get(int(cls), 0) + 1
     return freq
+
+
+def _label_class_counts(lbl_path: str) -> dict[int, int]:
+    ctr: dict[int, int] = defaultdict(int)
+    for cls, *_ in _parse_yolo_labels(lbl_path):
+        ctr[int(cls)] += 1
+    return dict(ctr)
+
+
+def _labels_class_counts(labels: list[tuple[int, float, float, float, float]]) -> dict[int, int]:
+    ctr: dict[int, int] = defaultdict(int)
+    for cls, *_ in labels:
+        ctr[int(cls)] += 1
+    return dict(ctr)
+
+
+def _inserted_class_delta(
+    original: dict[int, int],
+    new_labels: list[tuple[int, float, float, float, float]],
+) -> tuple[int, dict[int, int]]:
+    new_counts = _labels_class_counts(new_labels)
+    delta_by_class: dict[int, int] = {}
+    for c in set(original) | set(new_counts):
+        d = int(new_counts.get(c, 0)) - int(original.get(c, 0))
+        if d > 0:
+            delta_by_class[c] = d
+    return sum(delta_by_class.values()), delta_by_class
 
 
 def _image_soft_weight(class_ids: set[int], class_freq: dict[int, int], alpha: float) -> float:
@@ -345,15 +483,8 @@ def _scaled_copies(base: int, image_weight: float, args) -> int:
 
 
 def count_yolo_bbox_lines(lbl_path: str) -> int:
-    """Number of bbox lines (non-empty) in a YOLO label file."""
-    if not os.path.isfile(lbl_path):
-        return 0
-    n = 0
-    with open(lbl_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip().split():
-                n += 1
-    return n
+    """Number of label instances (bbox or polygon lines) in a YOLO label file."""
+    return count_label_instances(lbl_path)
 
 
 def _train_split_class_bbox_counts(items: list[dict[str, str]]) -> dict[int, int]:
@@ -425,12 +556,14 @@ def _reorder_items_for_bbox_budget(
     return [items[j] for j in order]
 
 
-def _effective_flip_prob_geo(args, image_weight: float) -> float:
-    """Higher probability for tail-heavy frames when aug-class-aware-geo + imbalance soft."""
-    base = float(getattr(args, "flip_prob", 0.5))
-    if not bool(getattr(args, "aug_class_aware_geo", False)):
-        return base
-    if str(getattr(args, "imbalance_mode", "soft")) != "soft":
+def _class_aware_enabled(args) -> bool:
+    return bool(getattr(args, "aug_class_aware_geo", False)) and str(getattr(args, "imbalance_mode", "soft")) == "soft"
+
+
+def _class_aware_trigger_prob(args, image_weight: float, base_prob: float) -> float:
+    """Unified class-aware trigger probability for flip / photo / orthogonal geo branches."""
+    base = float(base_prob)
+    if not _class_aware_enabled(args):
         return base
     strength = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
     w = max(1e-9, float(image_weight))
@@ -439,15 +572,19 @@ def _effective_flip_prob_geo(args, image_weight: float) -> float:
     return float(min(1.0, max(0.02, p)))
 
 
+def _effective_orthogonal_prob_geo(args, image_weight: float) -> float:
+    return _class_aware_trigger_prob(args, image_weight, float(getattr(args, "orthogonal_rotate_prob", 0.5)))
+
+
+def _effective_flip_prob_geo(args, image_weight: float) -> float:
+    return _class_aware_trigger_prob(args, image_weight, float(getattr(args, "flip_prob", 0.5)))
+
+
 def _geo_photo_trigger(args, image_weight: float, rng: random.Random) -> bool:
     """Whether to emit photometric/conveyor variant for this frame (class-aware)."""
-    if not bool(getattr(args, "aug_class_aware_geo", False)):
+    if not _class_aware_enabled(args):
         return True
-    if str(getattr(args, "imbalance_mode", "soft")) != "soft":
-        return True
-    strength = max(0.0, float(getattr(args, "imbalance_strength", 1.0)))
-    w = float(image_weight)
-    p = min(1.0, max(0.0, (w * strength) / (1.0 + strength)))
+    p = _class_aware_trigger_prob(args, image_weight, 1.0)
     return bool(rng.random() < p)
 
 
@@ -459,16 +596,74 @@ def _aug_extra_budget_allow(extra_used: int, delta: int, extra_budget: int | Non
 
 
 def sum_train_bbox_disk(dataset_root: str) -> int:
-    """Sum bbox lines across train/labels/*.txt under dataset_root."""
-    lbl_dir = os.path.join(dataset_root, "train", "labels")
-    if not os.path.isdir(lbl_dir):
-        return 0
-    s = 0
-    for name in os.listdir(lbl_dir):
-        if not name.endswith(".txt"):
+    """Sum bbox lines across train labels (split layout) or root labels/ (flat layout)."""
+    for rel in ("train/labels", "labels"):
+        lbl_dir = os.path.join(dataset_root, rel)
+        if not os.path.isdir(lbl_dir):
             continue
-        s += count_yolo_bbox_lines(os.path.join(lbl_dir, name))
-    return s
+        s = 0
+        for name in os.listdir(lbl_dir):
+            if not name.endswith(".txt"):
+                continue
+            s += count_yolo_bbox_lines(os.path.join(lbl_dir, name))
+        return s
+    return 0
+
+
+def sum_train_class_bbox_disk(dataset_root: str) -> dict[int, int]:
+    """Per-class bbox counts on train split (or flat labels/)."""
+    ctr: dict[int, int] = defaultdict(int)
+    for rel in ("train/labels", "labels"):
+        lbl_dir = os.path.join(dataset_root, rel)
+        if not os.path.isdir(lbl_dir):
+            continue
+        for name in os.listdir(lbl_dir):
+            if not name.endswith(".txt"):
+                continue
+            for cls, *_ in _parse_yolo_labels(os.path.join(lbl_dir, name)):
+                ctr[int(cls)] += 1
+        return dict(ctr)
+    return {}
+
+
+def _provided_augment_flags(argv: list[str]) -> set[str]:
+    out: set[str] = set()
+    for tok in argv:
+        if tok.startswith("--"):
+            out.add(tok.split("=", 1)[0])
+    return out
+
+
+def _apply_augment_preset_defaults(args: argparse.Namespace, provided_flags: set[str]) -> None:
+    if not getattr(args, "preset", None):
+        return
+    preset_cfg = AUGMENT_PRESETS.get(str(args.preset), {})
+    flag_for_attr = {
+        "aug_class_aware_geo": "--aug-class-aware-geo",
+        "aug_total_bbox_cap_mult": "--aug-total-bbox-cap-mult",
+        "aug_budget_tail_first": "--aug-budget-tail-first",
+        "aug_budget_tail_gamma": "--aug-budget-tail-gamma",
+    }
+    for attr, value in preset_cfg.items():
+        flag = flag_for_attr.get(attr)
+        if flag and flag in provided_flags:
+            continue
+        setattr(args, attr, value)
+
+
+def _warn_exhaustive_class_aware(args) -> None:
+    if not _class_aware_enabled(args):
+        return
+    flip_ex = bool(getattr(args, "enable_flip", False)) and str(getattr(args, "flip_sampling", "probabilistic")) == "exhaustive"
+    orth_ex = bool(getattr(args, "enable_orthogonal_rotate", False)) and str(
+        getattr(args, "orthogonal_rotate_sampling", "probabilistic")
+    ) == "exhaustive"
+    if flip_ex or orth_ex:
+        print(
+            "[WARN] augment: --aug-class-aware-geo is active but flip/orthogonal use exhaustive sampling; "
+            "per-frame probability scaling is bypassed (all variants are emitted). "
+            "Use probabilistic sampling or disable class-aware geo for head-tail control."
+        )
 
 
 def _to_xyxy(box: tuple[int, float, float, float, float], w: int, h: int) -> tuple[int, int, int, int]:
@@ -657,12 +852,10 @@ def _apply_geom_aug(
     enable_photometric: bool | None = None,
     enable_conveyor: bool | None = None,
     enable_center_rotate: bool | None = None,
+    flip_mode: str | None = None,
 ) -> list[tuple[int, float, float, float, float]]:
     image = np.array(Image.open(image_path).convert("RGB"))
-    raw_labels = _parse_yolo_labels(label_path)
-    labels = [x for x in (_sanitize_yolo_box(lb) for lb in raw_labels) if x is not None]
-    bboxes = [(x, y, w, h) for _, x, y, w, h in labels]
-    class_labels = [cls for cls, *_ in labels]
+    raw_labels = read_augment_label_file(label_path)
     # Locally disable/enable individual blocks without mutating the main args.
     class _LocalArgs:
         pass
@@ -675,22 +868,27 @@ def _apply_geom_aug(
     if enable_photometric is not None:
         local.enable_photometric = bool(enable_photometric)
     if enable_conveyor is not None:
-        local.enable_conveyor = bool(enable_conveyor)
+        _set_conveyor_enabled(local, bool(enable_conveyor))
     if enable_center_rotate is not None:
         local.enable_center_rotate = bool(enable_center_rotate)
 
-    pipeline = _compose_for_basic(local)
-    transformed = pipeline(image=image, bboxes=bboxes, class_labels=class_labels)
-    new_img = transformed["image"]
-    new_labels_raw = [
-        (int(cls), float(x), float(y), float(w), float(h))
-        for cls, (x, y, w, h) in zip(transformed["class_labels"], transformed["bboxes"])
-    ]
-    new_labels = [x for x in (_sanitize_yolo_box(lb) for lb in new_labels_raw) if x is not None]
+    kind = infer_label_kind(raw_labels)
+    pipeline = _compose_for_basic(
+        local,
+        flip_mode=flip_mode,
+        with_bboxes=kind in {"bbox", "mixed"},
+        with_keypoints=kind in {"segment", "mixed"},
+    )
+    if not list(getattr(pipeline, "transforms", []) or []):
+        shutil.copy2(image_path, out_img)
+        shutil.copy2(label_path, out_lbl)
+        return _parse_yolo_labels(out_lbl)
+    new_img, new_label_objs = apply_albumentations_to_labels(image, raw_labels, pipeline)
+    new_labels = labels_to_legacy_tuples(new_label_objs)
     os.makedirs(os.path.dirname(out_img), exist_ok=True)
     os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
     Image.fromarray(new_img).save(out_img)
-    Path(out_lbl).write_text(_serialize_yolo_labels(new_labels), encoding="utf-8")
+    write_augment_label_file(out_lbl, new_label_objs)
     return new_labels
 
 
@@ -706,12 +904,12 @@ def _apply_exact_center_rotate(
 ) -> list[tuple[int, float, float, float, float]] | None:
     img = Image.open(image_path).convert("RGB")
     w, h = img.size
-    labels = _parse_yolo_labels(label_path)
-    rotate_anchor = str(getattr(args, "center_rotate_anchor", "detector"))
+    labels = read_augment_label_file(label_path)
+    rotate_anchor = str(getattr(args, "center_rotate_anchor", "center"))
     rotate_use_roi = rotate_anchor in ("bbox", "detector")
     roi: tuple[int, int, int, int] | None = None
     if rotate_use_roi and rotate_anchor == "bbox":
-        roi = _roi_from_labels(labels, w, h)
+        roi = _roi_from_labels(_parse_yolo_labels(label_path), w, h)
     elif rotate_use_roi and rotate_anchor == "detector":
         roi = detector_roi
     if rotate_use_roi and roi is None:
@@ -725,23 +923,12 @@ def _apply_exact_center_rotate(
     m = cv2.getRotationMatrix2D((cx, cy), float(angle), 1.0)
     src = np.array(img.convert("RGB"))
     dst = cv2.warpAffine(src, m, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    new_labels: list[tuple[int, float, float, float, float]] = []
-    for lb in labels:
-        cls, *_ = lb
-        x1, y1, x2, y2 = _to_xyxy(lb, w, h)
-        corners = np.array([[x1, y1, 1.0], [x2, y1, 1.0], [x2, y2, 1.0], [x1, y2, 1.0]], dtype=np.float32)
-        tr = (m @ corners.T).T
-        nx1 = max(0, min(w, int(np.floor(np.min(tr[:, 0])))))
-        ny1 = max(0, min(h, int(np.floor(np.min(tr[:, 1])))))
-        nx2 = max(0, min(w, int(np.ceil(np.max(tr[:, 0])))))
-        ny2 = max(0, min(h, int(np.ceil(np.max(tr[:, 1])))))
-        if nx2 <= nx1 or ny2 <= ny1:
-            continue
-        new_labels.append(_to_yolo(int(cls), (nx1, ny1, nx2, ny2), w, h))
+    new_label_objs = rotate_labels_with_matrix(labels, m, w=w, h=h)
+    new_labels = labels_to_legacy_tuples(new_label_objs)
     os.makedirs(os.path.dirname(out_img), exist_ok=True)
     os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
     Image.fromarray(dst).save(out_img)
-    Path(out_lbl).write_text(_serialize_yolo_labels(new_labels), encoding="utf-8")
+    write_augment_label_file(out_lbl, new_label_objs)
     return new_labels
 
 
@@ -863,7 +1050,7 @@ def _apply_copy_paste(
     img = Image.open(image_path).convert("RGB")
     w, h = img.size
     labels = _parse_yolo_labels(label_path)
-    placement_mode = str(getattr(args, "placement_mode", "detector"))
+    placement_mode = str(getattr(args, "placement_mode", "none"))
     roi: tuple[int, int, int, int] | None = None
     if placement_mode == "bbox":
         roi = _roi_from_labels(labels, w, h)
@@ -1002,14 +1189,115 @@ def _apply_copy_paste(
     return True, labels
 
 
-def _write_data_yaml(out_dir: str, names: list[str]) -> None:
-    p = Path(out_dir) / "data.yaml"
-    val_rel = "valid/images" if (Path(out_dir) / "valid" / "images").is_dir() else "val/images"
-    p.write_text(
-        f"train: train/images\nval: {val_rel}\ntest: test/images\n\n"
-        f"nc: {len(names)}\n"
-        f"names: {names}\n",
-        encoding="utf-8",
+def _split_images_rel(out_dir: str, split: str) -> str | None:
+    base = Path(out_dir)
+    for rel in (f"{split}/images", f"images/{split}", split):
+        p = base / rel
+        if p.is_dir() and any(p.iterdir()):
+            return rel
+    return None
+
+
+_AUGMENT_FLAT_SOURCE_STRUCTURES = frozenset({"cvat11", "flat"})
+
+
+def augment_output_structure(source_structure: str) -> str:
+    """Map datasets_info structure to on-disk layout produced by augment."""
+    s = str(source_structure).strip().lower()
+    if s in _AUGMENT_FLAT_SOURCE_STRUCTURES:
+        return "flat"
+    if s in ("subset_flat", "nested_split", "split"):
+        return s
+    return "split"
+
+
+def _swap_images_labels_rel(rel_path: str) -> str:
+    rel = rel_path.replace("\\", "/")
+    parts = rel.split("/")
+    for i, part in enumerate(parts):
+        if part == "images":
+            parts[i] = "labels"
+            return "/".join(parts)
+    return os.path.join("labels", os.path.basename(rel_path))
+
+
+def _augment_ensure_base_dirs(out_dir: str, structure: str, splits_present: list[str]) -> None:
+    base = Path(out_dir)
+    if structure in ("flat", "subset_flat"):
+        (base / "images").mkdir(parents=True, exist_ok=True)
+        (base / "labels").mkdir(parents=True, exist_ok=True)
+        return
+    if structure == "nested_split":
+        for split in splits_present:
+            (base / "images" / split).mkdir(parents=True, exist_ok=True)
+            (base / "labels" / split).mkdir(parents=True, exist_ok=True)
+        return
+    for split in splits_present:
+        (base / split / "images").mkdir(parents=True, exist_ok=True)
+        (base / split / "labels").mkdir(parents=True, exist_ok=True)
+
+
+def _augment_output_paths(
+    out_dir: str,
+    structure: str,
+    src_root: str,
+    img_src: str,
+    lbl_src: str,
+    stem: str,
+    ext: str,
+) -> tuple[str, str]:
+    if structure == "flat":
+        return (
+            os.path.join(out_dir, "images", f"{stem}{ext}"),
+            os.path.join(out_dir, "labels", f"{stem}.txt"),
+        )
+    rel_img = os.path.relpath(img_src, src_root)
+    rel_img_dir = os.path.dirname(rel_img)
+    dst_img = (
+        os.path.join(out_dir, rel_img_dir, f"{stem}{ext}")
+        if rel_img_dir
+        else os.path.join(out_dir, f"{stem}{ext}")
+    )
+    if structure == "subset_flat":
+        rel_lbl = _swap_images_labels_rel(rel_img)
+        rel_lbl_dir = os.path.dirname(rel_lbl)
+        dst_lbl = (
+            os.path.join(out_dir, rel_lbl_dir, f"{stem}.txt")
+            if rel_lbl_dir
+            else os.path.join(out_dir, f"{stem}.txt")
+        )
+        return dst_img, dst_lbl
+    try:
+        rel_lbl = os.path.relpath(lbl_src, src_root)
+    except ValueError:
+        rel_lbl = _swap_images_labels_rel(rel_img)
+    rel_lbl_dir = os.path.dirname(rel_lbl)
+    dst_lbl = (
+        os.path.join(out_dir, rel_lbl_dir, f"{stem}.txt")
+        if rel_lbl_dir
+        else os.path.join(out_dir, f"{stem}.txt")
+    )
+    return dst_img, dst_lbl
+
+
+def _write_data_yaml(out_dir: str, names: list[str], *, structure: str) -> None:
+    out_structure = augment_output_structure(structure)
+    if out_structure in ("flat", "subset_flat"):
+        train_rel = val_rel = test_rel = "images"
+    elif out_structure == "nested_split":
+        train_rel = _split_images_rel(out_dir, "train") or "images/train"
+        val_rel = _split_images_rel(out_dir, "val") or _split_images_rel(out_dir, "valid") or train_rel
+        test_rel = _split_images_rel(out_dir, "test") or val_rel
+    else:
+        train_rel = _split_images_rel(out_dir, "train") or "train/images"
+        val_rel = _split_images_rel(out_dir, "val") or _split_images_rel(out_dir, "valid") or train_rel
+        test_rel = _split_images_rel(out_dir, "test") or val_rel
+    write_data_yaml_from_names(
+        out_dir,
+        names,
+        train_rel=train_rel,
+        val_rel=val_rel,
+        test_rel=test_rel,
     )
 
 
@@ -1019,6 +1307,7 @@ def _update_datasets_sidecar(
     class_map: dict[str, int],
     target_dir: str,
     output_hash: str,
+    structure: str,
 ) -> None:
     update_datasets_sidecar(
         layout=layout,
@@ -1026,6 +1315,7 @@ def _update_datasets_sidecar(
         class_map=class_map,
         target_dir=target_dir,
         output_hash=output_hash,
+        structure=structure,
     )
 
 
@@ -1041,38 +1331,107 @@ def _list_workspace_detector_models(workspace_root: str) -> list[str]:
     return out
 
 
-def _interactive_fill(args, dataset_names: list[str], classes: list[str], workspace_root: str) -> None:
+def _augment_roi_prompt_label(*, enable_center_rotate: bool, enable_bbox_copy: bool) -> str:
+    if enable_center_rotate and enable_bbox_copy:
+        return "Placement mode for rotation pivot and bbox_copy paste area (--placement-mode)"
+    if enable_center_rotate:
+        return "Rotation pivot (--placement-mode)"
+    return "Paste area for bbox_copy (--placement-mode)"
+
+
+def _print_augment_placement_mode_help(*, enable_center_rotate: bool, enable_bbox_copy: bool) -> None:
+    if enable_center_rotate and enable_bbox_copy:
+        print("[INFO] Shared placement mode for rotation and bbox_copy:")
+    elif enable_center_rotate:
+        print("[INFO] Where to take the rotation axis from (not always the image center):")
+    else:
+        print("[INFO] Where bbox_copy may place pasted objects:")
+    print("  none     - image center; simple ±rotation, no ROI detector needed")
+    print("  bbox     - center of YOLO boxes on the frame")
+    print("  detector - center/region from ROI detector (--roi-model), e.g. belt or conveyor zone")
+
+
+def _default_placement_mode_for_interactive(*, enable_center_rotate: bool, enable_bbox_copy: bool, current: str) -> str:
+    _ = enable_center_rotate, enable_bbox_copy
+    cur = str(current or "none")
+    if cur in {"none", "bbox", "detector"}:
+        return cur
+    return "none"
+
+
+def _augment_balancing_block_title(*, enable_center_rotate: bool, enable_bbox_copy: bool) -> str:
+    if enable_center_rotate and enable_bbox_copy:
+        return "[INFO] Block: Balancing/Variety (center rotation and bbox_copy)"
+    if enable_center_rotate:
+        return "[INFO] Block: Balancing/Variety (center rotation)"
+    return "[INFO] Block: Balancing/Variety (bbox_copy)"
+
+
+def _interactive_fill(args, dataset_names: list[str], catalog: dict, workspace_root: str) -> None:
     print("[INFO] Interactive augment mode")
-    print("[INFO] Available classes:")
-    for c in classes:
-        print(f"  - {c}")
     args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
-    args.classes = (
-        prompt(
-            "Classes separated by commas (empty=all): ",
-            default="",
-            completer=WordCompleter(classes, ignore_case=True),
-            complete_while_typing=True,
-        ).strip()
-        or None
-    )
-    args.output_name = prompt_text("Output dataset name (empty=auto)", default=(args.output_name or "")).strip() or None
+    class_names = sorted_class_names_for_dataset(catalog, str(args.dataset))
+    if class_names:
+        picked = prompt_multi_choice_csv(
+            "Classes (--classes; empty=all)",
+            class_names,
+            default_values=[],
+        )
+        args.classes = ",".join(picked) if picked else None
+    else:
+        print("[WARN] No classes in dataset catalog; --classes filter unavailable.")
+        args.classes = None
+    output_default = str(args.output_name or "").strip()
+    if output_default:
+        args.output_name = prompt_prefilled_text("Output dataset name", output_default).strip() or None
+    else:
+        args.output_name = prompt_text("Output dataset name (empty=auto)", default="").strip() or None
     print("[INFO] Block: flip")
     args.enable_flip = prompt_yes_no("Turn on flip?", default=bool(args.enable_flip))
     if args.enable_flip:
         args.flip = prompt_choice(
             "Flip mode (--flip)",
-            ["horizontal", "vertical", "both", "none"],
-            default=args.flip,
+            ["horizontal", "vertical", "both", "h-and-v", "none"],
+            default=str(getattr(args, "flip", "horizontal")),
         )
-        args.flip_prob = float(
-            prompt_text("Probability of flip [0..1] (--flip-prob)", default=str(getattr(args, "flip_prob", 0.5))).strip()
-            or str(getattr(args, "flip_prob", 0.5))
+        args.flip_sampling = prompt_choice(
+            "Flip sampling (--flip-sampling)",
+            ["probabilistic", "exhaustive"],
+            default=str(getattr(args, "flip_sampling", "probabilistic")),
         )
-    print("[INFO] Block: photometric/conveyor")
-    args.enable_photometric = prompt_yes_no("Enable brightness/contrast?", default=bool(args.enable_photometric))
-    args.enable_conveyor = prompt_yes_no("Enable conveyor noise/blur/shift/rotate?", default=bool(args.enable_conveyor))
-    args.enable_center_rotate = prompt_yes_no("Enable frame rotation around the center?", default=bool(args.enable_center_rotate))
+        if str(args.flip_sampling) == "probabilistic":
+            args.flip_prob = float(
+                prompt_text("Probability of flip [0..1] (--flip-prob)", default=str(getattr(args, "flip_prob", 0.5))).strip()
+                or str(getattr(args, "flip_prob", 0.5))
+            )
+    print("[INFO] Block: orthogonal rotate (±90°)")
+    args.enable_orthogonal_rotate = prompt_yes_no(
+        "Enable orthogonal ±90° rotate?",
+        default=bool(getattr(args, "enable_orthogonal_rotate", False)),
+    )
+    if args.enable_orthogonal_rotate:
+        args.orthogonal_rotate_sampling = prompt_choice(
+            "Orthogonal sampling (--orthogonal-rotate-sampling)",
+            ["probabilistic", "exhaustive"],
+            default=str(getattr(args, "orthogonal_rotate_sampling", "probabilistic")),
+        )
+        if str(args.orthogonal_rotate_sampling) == "probabilistic":
+            args.orthogonal_rotate_prob = float(
+                prompt_text(
+                    "Orthogonal probability [0..1] (--orthogonal-rotate-prob)",
+                    default=str(getattr(args, "orthogonal_rotate_prob", 0.5)),
+                ).strip()
+                or str(getattr(args, "orthogonal_rotate_prob", 0.5))
+            )
+            args.orthogonal_rotate_direction = prompt_choice(
+                "Orthogonal direction (--orthogonal-rotate-direction)",
+                ["random", "cw", "ccw"],
+                default=str(getattr(args, "orthogonal_rotate_direction", "random")),
+            )
+    args.enable_center_rotate = prompt_yes_no(
+        "Enable frame rotation augmentation (--enable-center-rotate)?",
+        default=bool(args.enable_center_rotate),
+    )
     if args.enable_center_rotate:
         print("[INFO] Block: center-rotate")
         args.center_rotate_deg = float(
@@ -1083,59 +1442,20 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             prompt_text("Number of rotate-options per frame (--rotate-copies)", default=str(getattr(args, "rotate_copies", 1))).strip()
             or str(getattr(args, "rotate_copies", 1))
         )
-    args.enable_bbox_copy = prompt_yes_no("Enable bbox_copy?", default=bool(args.enable_bbox_copy))
-    if args.enable_center_rotate or args.enable_bbox_copy:
-        print("[INFO] Block: ROI source (general)")
-        roi_mode_default = "detector" if str(getattr(args, "placement_mode", "detector")) == "detector" else (
-            "bbox" if str(getattr(args, "placement_mode", "detector")) == "bbox" else "none"
-        )
-        roi_mode = prompt_choice(
-            "ROI mode to rotate/bbox_copy (--placement-mode)",
-            ["none", "bbox", "detector"],
-            default=roi_mode_default,
-        )
-        args.placement_mode = roi_mode
-        args.center_rotate_anchor = {"none": "center", "bbox": "bbox", "detector": "detector"}[roi_mode]
-        if roi_mode == "detector":
-            models = _list_workspace_detector_models(workspace_root)
-            if models:
-                print("[INFO] ROI detectors in the workspace root:")
-                for m in models:
-                    print(f"  - {m}")
-            args.roi_model = prompt_text(
-                "ROI detector model (--roi-model)",
-                default=str(getattr(args, "roi_model", "yolo11n.pt")),
-                choices=models if models else None,
-            ).strip() or str(getattr(args, "roi_model", "yolo11n.pt"))
-            args.roi_conf = float(
-                prompt_text("ROI threshold conf (--roi-conf)", default=str(getattr(args, "roi_conf", 0.25))).strip()
-                or str(getattr(args, "roi_conf", 0.25))
-            )
-            args.roi_class_ids = (
-                prompt_text("ROI class ids CSV (--roi-class-ids, empty=all)", default=str(getattr(args, "roi_class_ids", "") or "")).strip()
-                or None
-            )
-    # The soft-balance and diversity options are only relevant to rotate/bbox_copy.
-    if args.enable_center_rotate or args.enable_bbox_copy:
-        print("[INFO] Block: Balancing/Variety")
-        args.imbalance_mode = prompt_choice(
-            "Class balancing (--imbalance-mode)",
-            ["off", "soft"],
-            default=str(getattr(args, "imbalance_mode", "soft")),
-        )
-        args.imbalance_strength = float(
-            prompt_text("Balancing strength (>=0) (--imbalance-strength)", default=str(getattr(args, "imbalance_strength", 1.0))).strip()
-            or str(getattr(args, "imbalance_strength", 1.0))
-        )
-        args.min_diversity_iou = float(
-            prompt_text("IoU duplicate threshold [0..1] (--min-diversity-iou)", default=str(getattr(args, "min_diversity_iou", 0.97))).strip()
-            or str(getattr(args, "min_diversity_iou", 0.97))
-        )
-    if args.enable_center_rotate:
         args.min_angle_delta = float(
-            prompt_text("Min. angle difference (degrees) (--min-angle-delta)", default=str(getattr(args, "min_angle_delta", 1.0))).strip()
+            prompt_text(
+                (
+                    "Min angle between center-rotate variants on one frame (degrees) "
+                    "(--min-angle-delta); avoids nearly identical rotations"
+                ),
+                default=str(getattr(args, "min_angle_delta", 1.0)),
+            ).strip()
             or str(getattr(args, "min_angle_delta", 1.0))
         )
+    args.enable_bbox_copy = prompt_yes_no(
+        "Enable bbox_copy paste augmentation (--enable-bbox-copy)?",
+        default=bool(args.enable_bbox_copy),
+    )
     if args.enable_bbox_copy:
         print("[INFO] Block: bbox_copy")
         args.class_balance = prompt_choice(
@@ -1172,6 +1492,158 @@ def _interactive_fill(args, dataset_names: list[str], classes: list[str], worksp
             prompt_text("Number of bbox_copy-options per frame (--bbox-copy-copies)", default=str(getattr(args, "bbox_copy_copies", 1))).strip()
             or str(getattr(args, "bbox_copy_copies", 1))
         )
+    if args.enable_center_rotate or args.enable_bbox_copy:
+        print("[INFO] Block: placement / ROI")
+        _print_augment_placement_mode_help(
+            enable_center_rotate=bool(args.enable_center_rotate),
+            enable_bbox_copy=bool(args.enable_bbox_copy),
+        )
+        roi_mode_default = _default_placement_mode_for_interactive(
+            enable_center_rotate=bool(args.enable_center_rotate),
+            enable_bbox_copy=bool(args.enable_bbox_copy),
+            current=str(getattr(args, "placement_mode", "none")),
+        )
+        roi_mode = prompt_choice(
+            _augment_roi_prompt_label(
+                enable_center_rotate=bool(args.enable_center_rotate),
+                enable_bbox_copy=bool(args.enable_bbox_copy),
+            ),
+            ["none", "bbox", "detector"],
+            default=roi_mode_default,
+        )
+        args.placement_mode = roi_mode
+        args.center_rotate_anchor = {"none": "center", "bbox": "bbox", "detector": "detector"}[roi_mode]
+        if roi_mode == "detector":
+            models = _list_workspace_detector_models(workspace_root)
+            if models:
+                print("[INFO] ROI detectors in the workspace root:")
+                for m in models:
+                    print(f"  - {m}")
+            args.roi_model = prompt_text(
+                "ROI detector model (--roi-model)",
+                default=str(getattr(args, "roi_model", "yolo11n.pt")),
+                choices=models if models else None,
+            ).strip() or str(getattr(args, "roi_model", "yolo11n.pt"))
+            args.roi_conf = float(
+                prompt_text("ROI threshold conf (--roi-conf)", default=str(getattr(args, "roi_conf", 0.25))).strip()
+                or str(getattr(args, "roi_conf", 0.25))
+            )
+            args.roi_class_ids = (
+                prompt_text("ROI class ids CSV (--roi-class-ids, empty=all)", default=str(getattr(args, "roi_class_ids", "") or "")).strip()
+                or None
+            )
+    print("[INFO] Block: photometric/conveyor")
+    args.enable_photometric = prompt_yes_no("Enable brightness/contrast?", default=bool(args.enable_photometric))
+    args.enable_conveyor_rotate = prompt_yes_no(
+        "Enable conveyor rotate (±5°)?",
+        default=bool(getattr(args, "enable_conveyor_rotate", False)),
+    )
+    args.enable_conveyor_scale = prompt_yes_no(
+        "Enable conveyor scale (0.95–1.05)?",
+        default=bool(getattr(args, "enable_conveyor_scale", False)),
+    )
+    args.enable_conveyor_blur = prompt_yes_no(
+        "Enable conveyor motion blur?",
+        default=bool(getattr(args, "enable_conveyor_blur", False)),
+    )
+    args.enable_conveyor_shift = prompt_yes_no(
+        "Enable conveyor shift (±3% translate)?",
+        default=bool(getattr(args, "enable_conveyor_shift", False)),
+    )
+    args.enable_conveyor_noise = prompt_yes_no(
+        "Enable conveyor noise?",
+        default=False,
+    )
+    if args.enable_conveyor_noise:
+        args.conveyor_noise_types = prompt_text(
+            "Noise types CSV (--conveyor-noise-types)",
+            default=str(getattr(args, "conveyor_noise_types", "iso,shot,gaussian")),
+        ).strip() or "iso,shot,gaussian"
+        args.conveyor_noise_intensity = float(
+            prompt_text(
+                "Noise intensity [0..1] (--conveyor-noise-intensity)",
+                default=str(getattr(args, "conveyor_noise_intensity", 0.35)),
+            ).strip()
+            or str(getattr(args, "conveyor_noise_intensity", 0.35))
+        )
+        args.conveyor_noise_selection = prompt_choice(
+            "Noise selection (--conveyor-noise-selection)",
+            ["random", "stack"],
+            default=str(getattr(args, "conveyor_noise_selection", "random")),
+        )
+    args.enable_conveyor = _conveyor_any(args)
+    imbalance_soft = str(getattr(args, "imbalance_mode", "soft")) == "soft"
+    geo_copies_enabled = bool(args.enable_center_rotate or args.enable_bbox_copy)
+    if geo_copies_enabled:
+        print(_augment_balancing_block_title(
+            enable_center_rotate=bool(args.enable_center_rotate),
+            enable_bbox_copy=bool(args.enable_bbox_copy),
+        ))
+        args.imbalance_mode = prompt_choice(
+            (
+                "Class balancing (--imbalance-mode): off=equal copies per frame; "
+                "soft=extra rotate/bbox_copy on frames with rare classes"
+            ),
+            ["off", "soft"],
+            default=str(getattr(args, "imbalance_mode", "soft")),
+        )
+        imbalance_soft = str(args.imbalance_mode) == "soft"
+        if imbalance_soft:
+            args.imbalance_strength = float(
+                prompt_text(
+                    (
+                        "Balancing strength (>=0) (--imbalance-strength): scales extra "
+                        "rotate/bbox_copy on rare-class frames (0=none, 1=default, higher=stronger)"
+                    ),
+                    default=str(getattr(args, "imbalance_strength", 1.0)),
+                ).strip()
+                or str(getattr(args, "imbalance_strength", 1.0))
+            )
+        print("[INFO] Sub-block: deduplication (drop near-duplicate variants)")
+        args.min_diversity_iou = float(
+            prompt_text(
+                (
+                    "Skip variant if label IoU vs any saved variant >= threshold [0..1] "
+                    "(--min-diversity-iou); higher rejects more (0.97≈almost identical)"
+                ),
+                default=str(getattr(args, "min_diversity_iou", 0.97)),
+            ).strip()
+            or str(getattr(args, "min_diversity_iou", 0.97))
+        )
+    print("[INFO] Block: budget / class-aware")
+    if geo_copies_enabled and not imbalance_soft:
+        print("[INFO] Class-aware geo augment skipped (--imbalance-mode off)")
+        args.aug_class_aware_geo = False
+    else:
+        args.aug_class_aware_geo = prompt_yes_no(
+            (
+                "Reduce flip/photo/conveyor rate on majority-class frames "
+                "(--aug-class-aware-geo; requires --imbalance-mode soft)?"
+            ),
+            default=bool(getattr(args, "aug_class_aware_geo", False)),
+        )
+    args.aug_total_bbox_cap_mult = float(
+        prompt_text(
+            (
+                "Train bbox budget: max total bbox = mult × baseline B₀ "
+                "(--aug-total-bbox-cap-mult; 0=unlimited, 1.0=no extra bbox beyond baseline)"
+            ),
+            default=str(getattr(args, "aug_total_bbox_cap_mult", 0.0)),
+        ).strip()
+        or str(getattr(args, "aug_total_bbox_cap_mult", 0.0))
+    )
+    if float(args.aug_total_bbox_cap_mult) > 0:
+        args.aug_budget_tail_first = prompt_yes_no(
+            "Tail-first budget ordering (--aug-budget-tail-first)?",
+            default=bool(getattr(args, "aug_budget_tail_first", True)),
+        )
+        args.aug_budget_tail_gamma = float(
+            prompt_text(
+                "Tail priority gamma (--aug-budget-tail-gamma)",
+                default=str(getattr(args, "aug_budget_tail_gamma", 1.0)),
+            ).strip()
+            or str(getattr(args, "aug_budget_tail_gamma", 1.0))
+        )
     args.splits = prompt_text("Splits separated by commas (train,val,test)", default=args.splits).strip() or args.splits
     args.dry_run = prompt_yes_no("Do dry-run (--dry-run)?", default=bool(args.dry_run))
 
@@ -1180,6 +1652,9 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = build_augment_arg_parser()
     args = parser.parse_args(argv)
+    provided_flags = _provided_augment_flags(argv)
+    _apply_augment_preset_defaults(args, provided_flags)
+    _sync_conveyor_flags(args, argv=argv)
     interactive_allowed = is_interactive_allowed(argv)
     if args.dataset is None and not interactive_allowed:
         print("[ERROR] Incomplete arguments: specify --dataset.")
@@ -1199,14 +1674,20 @@ def main(argv=None):
         fill=lambda: _interactive_fill(
             args,
             sorted(catalog.keys()),
-            sorted_class_names_union_from_catalog(catalog),
+            catalog,
             layout.root,
         ),
     )
+    _sync_conveyor_flags(args)
 
     if not args.dataset:
         print("[ERROR] Incomplete arguments: specify --dataset.")
         return
+    norm_err = _normalize_augment_args(args, argv=argv)
+    if norm_err:
+        print(norm_err)
+        return
+    _warn_exhaustive_class_aware(args)
     if args.dataset not in catalog:
         print(f"[ERROR] Unknown dataset: {args.dataset}")
         return
@@ -1214,8 +1695,6 @@ def main(argv=None):
     if interactive_used:
         replay_cmd = build_non_interactive_command("augment", parser, args)
         print_replay_command("before launch", replay_cmd)
-    if bool(getattr(args, "placement_roi", False)):
-        args.placement_mode = "bbox"
 
     entry = catalog[args.dataset]
     src_root = resolve_dataset_root_for_entry(
@@ -1247,6 +1726,8 @@ def main(argv=None):
         temp_root=os.path.join(layout.root, "tmp"),
         exclude_test=False,
     )
+    source_structure = str(entry.get("structure", "split"))
+    output_structure = augment_output_structure(source_structure)
     copied = 0
     augmented = 0
     skipped_roi_missing = 0
@@ -1266,17 +1747,31 @@ def main(argv=None):
                     "lbl": os.path.join(labels_path, f"{stem}.txt"),
                 }
             )
+    if not items:
+        print("[ERROR] No images found for augment.")
+        return
+    label_kinds: set[str] = set()
+    for it in items:
+        kind = resolve_label_kind(it["lbl"], label_type=str(getattr(args, "label_type", "auto")))
+        if kind != "empty":
+            label_kinds.add(kind)
+    if "segment" in label_kinds or "mixed" in label_kinds:
+        if bool(args.enable_bbox_copy):
+            print("[ERROR] --enable-bbox-copy is not supported for polygon (segmentation) label files.")
+            return
+        if "mixed" in label_kinds:
+            print(
+                "[WARN] Mixed bbox and polygon labels detected; geometric augment applies both bbox and keypoint transforms."
+            )
     if not args.dry_run:
         splits_present = sorted({str(it["split"]) for it in items}) or ["train", "val", "test"]
-        for split in splits_present:
-            os.makedirs(os.path.join(out_dir, split, "images"), exist_ok=True)
-            os.makedirs(os.path.join(out_dir, split, "labels"), exist_ok=True)
+        _augment_ensure_base_dirs(out_dir, output_structure, splits_present)
     donors = _build_donor_pool(items, args) if args.enable_bbox_copy else []
     detector_roi_cache: dict[str, tuple[int, int, int, int] | None] = {}
     need_detector_for_rotate = bool(args.enable_center_rotate) and str(
-        getattr(args, "center_rotate_anchor", "detector")
+        getattr(args, "center_rotate_anchor", "center")
     ) == "detector"
-    need_detector_for_copy = bool(args.enable_bbox_copy) and str(getattr(args, "placement_mode", "detector")) == "detector"
+    need_detector_for_copy = bool(args.enable_bbox_copy) and str(getattr(args, "placement_mode", "none")) == "detector"
     if need_detector_for_rotate or need_detector_for_copy:
         setattr(
             args,
@@ -1295,6 +1790,13 @@ def main(argv=None):
     extra_budget: int | None = None
     if bbox_cap_total is not None:
         extra_budget = max(0, bbox_cap_total - train_baseline_bbox)
+    per_class_cap_mult = float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0))
+    per_class_extra_budget: dict[int, int] | None = None
+    train_extra_bbox_by_class: dict[int, int] = defaultdict(int)
+    if per_class_cap_mult > 0 and train_cls_counts:
+        per_class_extra_budget = {
+            c: max(0, int(math.ceil(per_class_cap_mult * int(n))) - int(n)) for c, n in train_cls_counts.items()
+        }
     train_extra_bbox_used = 0
     train_cls_counts = _train_split_class_bbox_counts(items)
     items = _reorder_items_for_bbox_budget(
@@ -1325,8 +1827,11 @@ def main(argv=None):
             continue
         bi = count_yolo_bbox_lines(lbl_src)
         if not args.dry_run:
-            dst_img = os.path.join(out_dir, split, "images", f"{stem}{ext}")
-            dst_lbl = os.path.join(out_dir, split, "labels", f"{stem}.txt")
+            dst_img, dst_lbl = _augment_output_paths(
+                out_dir, output_structure, src_root, img_src, lbl_src, stem, ext
+            )
+            os.makedirs(os.path.dirname(dst_img), exist_ok=True)
+            os.makedirs(os.path.dirname(dst_lbl), exist_ok=True)
             shutil.copy2(img_src, dst_img)
             if os.path.isfile(lbl_src):
                 shutil.copy2(lbl_src, dst_lbl)
@@ -1337,56 +1842,87 @@ def main(argv=None):
             continue
 
         image_weight = _image_soft_weight(classes_in_image, class_freq, alpha)
+        image_class_counts = _label_class_counts(lbl_src)
         seen_labels: list[list[tuple[int, float, float, float, float]]] = []
 
-        def _budget_ok(delta_total: int) -> bool:
+        def _budget_ok(delta_total: int, delta_by_class: dict[int, int] | None = None) -> bool:
             if split_norm != "train":
                 return True
             if args.dry_run:
                 return True
+            if delta_by_class and per_class_extra_budget is not None:
+                for c, d in delta_by_class.items():
+                    if d <= 0:
+                        continue
+                    if train_extra_bbox_by_class.get(c, 0) + d > per_class_extra_budget.get(c, 0):
+                        return False
             return _aug_extra_budget_allow(train_extra_bbox_used, delta_total, extra_budget)
 
-        def _consume_extra(delta_total: int) -> None:
+        def _consume_extra(delta_total: int, delta_by_class: dict[int, int] | None = None) -> None:
             nonlocal train_extra_bbox_used
             if split_norm != "train" or args.dry_run:
                 return
             train_extra_bbox_used += delta_total
+            if delta_by_class:
+                for c, d in delta_by_class.items():
+                    if d > 0:
+                        train_extra_bbox_by_class[c] = train_extra_bbox_by_class.get(c, 0) + d
 
         crc_img = zlib.crc32(img_src.encode("utf-8"))
         flip_rng = random.Random(int(args.seed) + crc_img)
         flip_p = _effective_flip_prob_geo(args, image_weight)
 
-        if args.enable_flip and flip_rng.random() <= flip_p and _budget_ok(bi):
-            aug_stem = _aug_stem(stem, args, 1, "f")
-            if not args.dry_run:
-                out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
-                new_labels = _apply_geom_aug(
-                    img_src,
-                    lbl_src,
-                    out_img,
-                    out_lbl,
-                    args,
-                    enable_flip=True,
-                    enable_photometric=False,
-                    enable_conveyor=False,
-                    enable_center_rotate=False,
-                )
-                seen_labels.append(new_labels)
-                if split_norm == "train":
-                    _consume_extra(count_yolo_bbox_lines(out_lbl))
+        for fi, flip_spec in enumerate(_iter_flip_variants(args, flip_rng, flip_prob=flip_p), start=1):
+            if not _budget_ok(bi, image_class_counts):
+                break
+            aug_stem = _aug_stem(stem, args, fi, "f", flip_tag=flip_spec.tag)
+            if args.dry_run:
                 augmented += 1
-            else:
-                augmented += 1
+                continue
+            out_img, out_lbl = _augment_output_paths(
+                out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
+            )
+            os.makedirs(os.path.dirname(out_img), exist_ok=True)
+            os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
+            new_labels = _apply_geom_aug(
+                img_src,
+                lbl_src,
+                out_img,
+                out_lbl,
+                args,
+                enable_flip=True,
+                enable_photometric=False,
+                enable_conveyor=False,
+                enable_center_rotate=False,
+                flip_mode=flip_spec.mode,
+            )
+            if any(
+                _labels_signature_iou(prev, new_labels, 1000, 1000)
+                >= float(getattr(args, "min_diversity_iou", 0.97))
+                for prev in seen_labels
+            ):
+                try:
+                    os.remove(out_img)
+                    os.remove(out_lbl)
+                except OSError:
+                    pass
+                continue
+            seen_labels.append(new_labels)
+            if split_norm == "train":
+                _consume_extra(bi, image_class_counts)
+            augmented += 1
 
         photo_rng = random.Random(int(args.seed) + 901 + crc_img)
         if (args.enable_photometric or args.enable_conveyor) and _geo_photo_trigger(args, image_weight, photo_rng):
             geom_mode = "c" if args.enable_conveyor else "b"
             aug_stem = _aug_stem(stem, args, 1, geom_mode)
-            if _budget_ok(bi):
+            if _budget_ok(bi, image_class_counts):
                 if not args.dry_run:
-                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                    out_img, out_lbl = _augment_output_paths(
+                        out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
+                    )
+                    os.makedirs(os.path.dirname(out_img), exist_ok=True)
+                    os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
                     new_labels = _apply_geom_aug(
                         img_src,
                         lbl_src,
@@ -1411,10 +1947,53 @@ def main(argv=None):
                     else:
                         seen_labels.append(new_labels)
                         if split_norm == "train":
-                            _consume_extra(count_yolo_bbox_lines(out_lbl))
+                            _consume_extra(bi, image_class_counts)
                         augmented += 1
                 else:
                     augmented += 1
+
+        orth_rng = random.Random(int(args.seed) + 7001 + crc_img)
+        orth_p = _effective_orthogonal_prob_geo(args, image_weight)
+        for oi, orth_spec in enumerate(_iter_orthogonal_variants(args, orth_rng, orth_prob=orth_p), start=1):
+            if not _budget_ok(bi, image_class_counts):
+                break
+            aug_stem = _aug_stem(stem, args, oi, "o", orth_tag=orth_spec.tag)
+            if args.dry_run:
+                augmented += 1
+                continue
+            out_img, out_lbl = _augment_output_paths(
+                out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
+            )
+            new_labels = apply_orthogonal_rotate(
+                img_src,
+                lbl_src,
+                out_img,
+                out_lbl,
+                direction=orth_spec.direction,
+            )
+            orth_tot = len(new_labels)
+            if not _budget_ok(orth_tot, image_class_counts):
+                try:
+                    os.remove(out_img)
+                    os.remove(out_lbl)
+                except OSError:
+                    pass
+                continue
+            if any(
+                _labels_signature_iou(prev, new_labels, 1000, 1000)
+                >= float(getattr(args, "min_diversity_iou", 0.97))
+                for prev in seen_labels
+            ):
+                try:
+                    os.remove(out_img)
+                    os.remove(out_lbl)
+                except OSError:
+                    pass
+                continue
+            seen_labels.append(new_labels)
+            if split_norm == "train":
+                _consume_extra(orth_tot, image_class_counts)
+            augmented += 1
 
         if args.enable_center_rotate:
             rot_copies = _scaled_copies(int(getattr(args, "rotate_copies", 1)), image_weight, args)
@@ -1434,8 +2013,11 @@ def main(argv=None):
                 used_angles.append(angle)
                 aug_stem = _aug_stem(stem, args, rot_saved + 1, "r")
                 if not args.dry_run:
-                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                    out_img, out_lbl = _augment_output_paths(
+                        out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
+                    )
+                    os.makedirs(os.path.dirname(out_img), exist_ok=True)
+                    os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
                     new_labels = _apply_exact_center_rotate(
                         img_src,
                         lbl_src,
@@ -1450,7 +2032,7 @@ def main(argv=None):
                             skipped_roi_missing += 1
                         continue
                     rot_tot = len(new_labels)
-                    if not _budget_ok(rot_tot):
+                    if not _budget_ok(rot_tot, image_class_counts):
                         try:
                             os.remove(out_img)
                             os.remove(out_lbl)
@@ -1470,7 +2052,7 @@ def main(argv=None):
                         continue
                     seen_labels.append(new_labels)
                     if split_norm == "train":
-                        _consume_extra(rot_tot)
+                        _consume_extra(rot_tot, image_class_counts)
                     rot_saved += 1
                     augmented += 1
                 else:
@@ -1482,8 +2064,11 @@ def main(argv=None):
             for i in range(cp_copies):
                 aug_stem = _aug_stem(stem, args, i + 1, "p")
                 if not args.dry_run:
-                    out_img = os.path.join(out_dir, split, "images", f"{aug_stem}{ext}")
-                    out_lbl = os.path.join(out_dir, split, "labels", f"{aug_stem}.txt")
+                    out_img, out_lbl = _augment_output_paths(
+                        out_dir, output_structure, src_root, img_src, lbl_src, aug_stem, ext
+                    )
+                    os.makedirs(os.path.dirname(out_img), exist_ok=True)
+                    os.makedirs(os.path.dirname(out_lbl), exist_ok=True)
                     ok, new_labels = _apply_copy_paste(
                         img_src,
                         lbl_src,
@@ -1497,7 +2082,7 @@ def main(argv=None):
                         detector_roi=detector_roi_cache.get(img_src),
                     )
                     if ok:
-                        delta_bb = len(new_labels)
+                        delta_bb, delta_by_class = _inserted_class_delta(image_class_counts, new_labels)
                         if any(
                             _labels_signature_iou(prev, new_labels, 1000, 1000)
                             >= float(getattr(args, "min_diversity_iou", 0.97))
@@ -1509,7 +2094,7 @@ def main(argv=None):
                             except OSError:
                                 pass
                             continue
-                        if not _budget_ok(delta_bb):
+                        if not _budget_ok(delta_bb, delta_by_class):
                             try:
                                 os.remove(out_img)
                                 os.remove(out_lbl)
@@ -1518,7 +2103,7 @@ def main(argv=None):
                             continue
                         seen_labels.append(new_labels)
                         if split_norm == "train":
-                            _consume_extra(delta_bb)
+                            _consume_extra(delta_bb, delta_by_class)
                         augmented += 1
                     elif args.placement_mode in ("bbox", "detector"):
                         skipped_roi_missing += 1
@@ -1539,9 +2124,16 @@ def main(argv=None):
         return
 
     all_names = [str(x) for _, x in sorted(names_by_id.items())]
-    _write_data_yaml(out_dir, all_names)
+    _write_data_yaml(out_dir, all_names, structure=source_structure)
     out_hash = calculate_dataset_hash(out_dir)
-    _update_datasets_sidecar(layout, out_name, class_map if isinstance(class_map, dict) else {}, out_dir, out_hash)
+    _update_datasets_sidecar(
+        layout,
+        out_name,
+        class_map if isinstance(class_map, dict) else {},
+        out_dir,
+        out_hash,
+        output_structure,
+    )
     passport_path = write_dataset_passport(
         output_dataset_dir=out_dir,
         command="augment",
@@ -1559,12 +2151,25 @@ def main(argv=None):
                 "enable_flip": bool(args.enable_flip),
                 "flip_prob": float(getattr(args, "flip_prob", 0.5)),
                 "flip": args.flip,
+                "flip_sampling": str(getattr(args, "flip_sampling", "probabilistic")),
+                "enable_orthogonal_rotate": bool(getattr(args, "enable_orthogonal_rotate", False)),
+                "orthogonal_rotate_sampling": str(getattr(args, "orthogonal_rotate_sampling", "probabilistic")),
+                "orthogonal_rotate_prob": float(getattr(args, "orthogonal_rotate_prob", 0.5)),
+                "orthogonal_rotate_direction": str(getattr(args, "orthogonal_rotate_direction", "random")),
                 "enable_photometric": bool(args.enable_photometric),
                 "enable_conveyor": bool(args.enable_conveyor),
+                "enable_conveyor_rotate": bool(getattr(args, "enable_conveyor_rotate", False)),
+                "enable_conveyor_scale": bool(getattr(args, "enable_conveyor_scale", False)),
+                "enable_conveyor_blur": bool(getattr(args, "enable_conveyor_blur", False)),
+                "enable_conveyor_shift": bool(getattr(args, "enable_conveyor_shift", False)),
+                "enable_conveyor_noise": bool(getattr(args, "enable_conveyor_noise", False)),
+                "conveyor_noise_types": str(getattr(args, "conveyor_noise_types", "iso,shot,gaussian")),
+                "conveyor_noise_intensity": float(getattr(args, "conveyor_noise_intensity", 0.35)),
+                "conveyor_noise_selection": str(getattr(args, "conveyor_noise_selection", "random")),
                 "enable_center_rotate": bool(args.enable_center_rotate),
                 "center_rotate_deg": float(getattr(args, "center_rotate_deg", 5.0)),
                 "rotate_copies": int(getattr(args, "rotate_copies", 1)),
-                "center_rotate_anchor": str(getattr(args, "center_rotate_anchor", "detector")),
+                "center_rotate_anchor": str(getattr(args, "center_rotate_anchor", "center")),
                 "enable_bbox_copy": bool(args.enable_bbox_copy),
                 "bbox_copy_copies": int(getattr(args, "bbox_copy_copies", 1)),
                 "copy_paste_min_center_dist": float(getattr(args, "copy_paste_min_center_dist", 0.15)),

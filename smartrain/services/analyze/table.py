@@ -6,14 +6,14 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from smartrain.core.analyze.run_metrics_discovery import resolve_recomputed_metrics_csv
+
 
 def run_scan_command(
     *,
-    models_root: str,
-    find_run_directories_fn: Callable[[str], list[str]],
+    runs: list[str],
     flat_row_for_run: Callable[[str], dict[str, Any]],
 ) -> None:
-    runs = find_run_directories_fn(models_root)
     scan_runs(runs=runs, flat_row_for_run=flat_row_for_run)
 
 
@@ -23,9 +23,9 @@ def scan_runs(
     flat_row_for_run: Callable[[str], dict[str, Any]],
 ) -> None:
     if not runs:
-        print("(no runs with training_metadata.json found)")
+        print("(no runs or promoted models found)")
         return
-    print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'run_dir'}")
+    print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'path'}")
     print("-" * 100)
     for i, run_dir in enumerate(runs, start=1):
         try:
@@ -54,6 +54,8 @@ def export_runs_table(
             print(f"[WARN] {run_dir}: {exc}", file=sys.stderr)
             continue
         test_metrics_path = latest_test_metrics_path(run_dir)
+        if not test_metrics_path:
+            test_metrics_path = resolve_recomputed_metrics_csv(run_dir)
         if test_metrics_path:
             try:
                 test_df = pd.read_csv(test_metrics_path)

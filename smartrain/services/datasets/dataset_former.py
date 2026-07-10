@@ -19,7 +19,9 @@ from smartrain.services.datasets.dataset_access import (
     resolve_dataset_root_for_entry,
 )
 from smartrain.services.datasets.dataset_passport import write_dataset_passport
+from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
 from smartrain.services.datasets.image_label_pairs import collect_label_image_pairs as _collect_label_image_pairs
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
@@ -29,40 +31,21 @@ from smartrain.core.runtime.workspace_paths import (
     CLASS_NAMES_FILE,
 )
 
-# Default directory name suffix in workspace (prefix is ​​date-time, see main).
+from smartrain.services.datasets.dataset_split_core import (
+    DEFAULT_RANDOM_SEED,
+    TEST_PART,
+    TRAIN_PART,
+    VAL_PART,
+    parse_split_ratio_arg,
+    split_pairs_by_ratio,
+)
+
+# Default directory name suffix in workspace (prefix is date-time, see main).
 FUSION_DEFAULT_DIR_SUFFIX = "merged"
-TRAIN_PART = 0.8  # 80%
-VAL_PART = 0.1    # 10%
-TEST_PART = 0.1   # 10%
-RANDOM_SEED = random.seed(12345)
+parse_fusion_split_arg = parse_split_ratio_arg
+random.seed(DEFAULT_RANDOM_SEED)
 
-_SPLIT_SUM_EPS = 1e-5
-
-
-def parse_fusion_split_arg(value: str | None) -> tuple[float, float, float]:
-    """
-    Three parts train, val, test for repartitioning frames within each bucket during fusion.
-    The sum must be 1.0 (with tolerance). If value is None - module constants.
-    """
-    if value is None or not str(value).strip():
-        return TRAIN_PART, VAL_PART, TEST_PART
-    raw = [x.strip() for x in str(value).split(",")]
-    if len(raw) != 3:
-        raise ValueError(
-            "Exactly three numbers separated by commas are expected: train,val,test (for example 0.8,0.1,0.1)."
-        )
-    try:
-        tr, va, te = (float(x) for x in raw)
-    except ValueError as e:
-        raise ValueError(f"Invalid numbers in --fusion-split: {value!r}") from e
-    if tr < 0 or va < 0 or te < 0:
-        raise ValueError("Shares in --fusion-split cannot be negative.")
-    s = tr + va + te
-    if abs(s - 1.0) > _SPLIT_SUM_EPS:
-        raise ValueError(
-            f"Sum of --fusion-split should be 1.0 (currently {s:.6f}): {value!r}"
-        )
-    return tr, va, te
+logger = get_logger(__name__)
 
 
 def safe_mkdir(path):
@@ -190,6 +173,11 @@ def build_dataset_former_arg_parser() -> argparse.ArgumentParser:
         help="After merging, remove image+label pairs in the output directory without a single valid YOLO line in .txt",
     )
     parser.add_argument(
+        "--strip-unused-classes",
+        action="store_true",
+        help="After merging, remove output classes with zero label instances (remaps class ids in .txt)",
+    )
+    parser.add_argument(
         "--tmp-dir",
         type=str,
         default=None,
@@ -253,15 +241,158 @@ def _prompt_yes_no(label: str, default: bool = False) -> bool:
     return prompt_yes_no(label, default=default)
 
 
+def _validate_interactive_merge_rules(
+    merge_rules: list[list[str]],
+    *,
+    class_names_map: dict,
+    selected_classes: list[str],
+    class_candidates: list[str],
+) -> tuple[bool, str | None]:
+    if not merge_rules:
+        return True, None
+    unknown_targets = []
+    for _sources_csv, target in merge_rules:
+        t = str(target).strip()
+        if t and _normalize_name(t, class_names_map) not in {
+            _normalize_name(cls, class_names_map) for cls in selected_classes
+        }:
+            unknown_targets.append(t)
+    if unknown_targets:
+        return (
+            False,
+            "Merge targets are missing in selected classes: "
+            + ", ".join(sorted(set(unknown_targets)))
+            + ".",
+        )
+
+    flat_sources: list[str] = []
+    for sources_csv, _target in merge_rules:
+        flat_sources.extend(_parse_csv_classes(sources_csv))
+    if flat_sources:
+        ok_sources, missing_sources = _validate_requested_classes(
+            flat_sources,
+            class_candidates,
+            class_names_map,
+        )
+        if not ok_sources:
+            return (
+                False,
+                "Merge sources contain unknown classes: "
+                + ", ".join(missing_sources)
+                + ".",
+            )
+
+    try:
+        build_merge_config(merge_rules, class_names_map, selected_classes)
+    except ValueError as exc:
+        return False, str(exc)
+    return True, None
+
+
+def _derive_auto_classes_with_merge(
+    class_candidates: list[str],
+    merge_rules: list[list[str]] | None,
+    class_names_map: dict,
+) -> list[str]:
+    if not merge_rules:
+        return list(class_candidates)
+    source_norm: set[str] = set()
+    target_order: list[str] = []
+    seen_targets: set[str] = set()
+    for sources_csv, target in merge_rules:
+        for src in _parse_csv_classes(sources_csv):
+            source_norm.add(_normalize_name(src, class_names_map))
+        tgt = str(target).strip()
+        if not tgt:
+            continue
+        tgt_norm = _normalize_name(tgt, class_names_map)
+        if tgt_norm not in seen_targets:
+            seen_targets.add(tgt_norm)
+            target_order.append(tgt)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for cls in class_candidates:
+        n = _normalize_name(cls, class_names_map)
+        if n in source_norm:
+            continue
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(cls)
+    for tgt in target_order:
+        n = _normalize_name(tgt, class_names_map)
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(tgt)
+    return out
+
+
+def _prompt_interactive_merge_rules(
+    *,
+    class_names_map: dict,
+    selected_classes: list[str],
+    class_candidates: list[str],
+    initial_rules: list[list[str]] | None = None,
+    auto_mode: bool = False,
+) -> list[list[str]] | None:
+    from smartrain.cli_entrypoints.support.cli_prompts import prompt_text
+
+    rules: list[list[str]] = [list(x) for x in (initial_rules or [])]
+    if not class_candidates:
+        print("[WARN] Merge classes is skipped: no available classes.")
+        return None
+    print("[INFO] Configure --merge-classes (sources_csv -> target).")
+    print("[INFO] Example: class_a,class_b -> class_ab")
+    if auto_mode:
+        print(
+            "[INFO] Auto classes mode: classes not listed as merge sources are kept. "
+            "Only source classes are replaced by their merge targets."
+        )
+    while True:
+        raw = prompt_text("Merge rule (empty = finish)", default="").strip()
+        if not raw:
+            break
+        if "->" not in raw:
+            print("[WARN] Invalid format. Use: source1,source2 -> target")
+            continue
+        sources_raw, target_raw = raw.split("->", 1)
+        target = target_raw.strip()
+        sources = _parse_csv_classes(sources_raw)
+        if not sources or not target:
+            print("[WARN] Sources and target are required.")
+            continue
+        candidate = rules + [[",".join(sources), target]]
+        selected_for_validation = (
+            _derive_auto_classes_with_merge(class_candidates, candidate, class_names_map)
+            if auto_mode
+            else selected_classes
+        )
+        ok, err = _validate_interactive_merge_rules(
+            candidate,
+            class_names_map=class_names_map,
+            selected_classes=selected_for_validation,
+            class_candidates=class_candidates,
+        )
+        if not ok:
+            print(f"[WARN] {err}")
+            continue
+        rules = candidate
+        print(f"[INFO] Added merge rule: {','.join(sources)} -> {target}")
+    return rules or None
+
+
 def _prompt_interactive_options(
     args,
     *,
     default_output_name: str,
     class_candidates: list[str],
+    class_names_map: dict,
 ) -> None:
-    from smartrain.cli_entrypoints.support.cli_prompts import prompt_text
+    from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text, prompt_text
 
-    print("[INFO] Interactively configure fusion parameters (Enter = default value).")
+    print("[INFO] Interactively configure merge parameters (Enter = default value).")
     if class_candidates:
         print(
             "[INFO] Available classes of selected datasets: "
@@ -269,7 +400,10 @@ def _prompt_interactive_options(
         )
     else:
         print("[WARN] No classes were found in the metadata for the selected datasets.")
-    out_name = prompt_text("Output dataset name", default=default_output_name).strip()
+    if sys.stdin.isatty():
+        out_name = prompt_prefilled_text("Output dataset name", default_output_name).strip()
+    else:
+        out_name = prompt_text("Output dataset name", default=default_output_name).strip()
     args.output_name = out_name or default_output_name
 
     classes_raw = prompt_text(
@@ -285,11 +419,46 @@ def _prompt_interactive_options(
     ).strip()
     args.exclude_classes = exclude_classes_raw or None
 
+    enable_merge = _prompt_yes_no(
+        "Configure class merge rules (--merge-classes)",
+        default=bool(args.merge_classes),
+    )
+    if enable_merge:
+        auto_mode = not bool(_parse_csv_classes(args.classes))
+        selected_classes = _parse_csv_classes(args.classes) or list(class_candidates)
+        args.merge_classes = _prompt_interactive_merge_rules(
+            class_names_map=class_names_map,
+            selected_classes=selected_classes,
+            class_candidates=class_candidates,
+            initial_rules=args.merge_classes,
+            auto_mode=auto_mode,
+        )
+        if auto_mode and args.merge_classes:
+            auto_classes = _derive_auto_classes_with_merge(
+                class_candidates,
+                args.merge_classes,
+                class_names_map,
+            )
+            args.classes = ",".join(auto_classes)
+            print(
+                "[INFO] Auto-selected output classes after merge "
+                "(all non-source classes are preserved): "
+                + ", ".join(auto_classes)
+            )
+    else:
+        args.merge_classes = None
+
     split_default = args.fusion_split or f"{TRAIN_PART},{VAL_PART},{TEST_PART}"
-    args.fusion_split = prompt_text(
-        "Fusion split train,val,test (summa=1.0)",
-        default=split_default,
-    ).strip()
+    if sys.stdin.isatty():
+        args.fusion_split = prompt_prefilled_text(
+            "Fusion split train,val,test (summa=1.0)",
+            split_default,
+        ).strip()
+    else:
+        args.fusion_split = prompt_text(
+            "Fusion split train,val,test (summa=1.0)",
+            default=split_default,
+        ).strip()
 
     args.include_partial_datasets = _prompt_yes_no(
         "Include partial datasets (--include-partial-datasets)",
@@ -737,7 +906,9 @@ def _union_label_objects(
 
 def _write_label_objects(path: str, objs: list[tuple[int, tuple[float, ...]]]) -> bool:
     if not objs:
-        return False
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("")
+        return True
     lines = []
     for cls_id, coords in sorted(objs):
         if coords:
@@ -917,6 +1088,7 @@ def main(argv=None):
                 args,
                 default_output_name=output_dataset_name,
                 class_candidates=class_candidates,
+                class_names_map=class_names_map,
             )
         except Exception as e:
             print(f"[ERROR] Error interacting with fusion parameters: {e}")
@@ -927,7 +1099,7 @@ def main(argv=None):
             output_dataset_name = out_key
     replay_cmd = None
     if interactive_mode:
-        replay_cmd = build_non_interactive_command("fusion", parser, args)
+        replay_cmd = build_non_interactive_command("merge", parser, args)
         print_replay_command("before launch", replay_cmd)
 
     try:
@@ -1174,15 +1346,9 @@ def main(argv=None):
                     if not pairs:
                         continue
 
-                    random.shuffle(pairs)
-                    n = len(pairs)
-                    train_split = pairs[: int(n * train_part)]
-                    val_split = pairs[
-                        int(n * train_part) : int(n * (train_part + val_part))
-                    ]
-                    test_split = pairs[int(n * (val_part + train_part)) :]
-
-                    splits_data = {"train": train_split, "valid": val_split, "test": test_split}
+                    splits_data = split_pairs_by_ratio(
+                        pairs, train_part, val_part, test_part, rng=random
+                    )
 
                     for split_name, split_pairs in splits_data.items():
                         for image_src, label_src in split_pairs:
@@ -1194,7 +1360,7 @@ def main(argv=None):
                                 selected_classes,
                                 normalized_to_output_name,
                             )
-                            if not objs:
+                            if not objs and args.drop_empty_images:
                                 pbar.update(1)
                                 continue
                             img_hash = _image_content_hash(image_src)
@@ -1243,15 +1409,32 @@ def main(argv=None):
             print(f"[INFO] --drop-empty-images: pairs without objects removed: {pruned}")
             copied_count = max(0, copied_count - pruned)
 
-    print(f"\n[DEBUG] Total label files: {total_labels}")
-    print(f"[DEBUG] Image+label pair processed: {processed_pairs}")
-    print(f"[DEBUG] Skipped equivalent takes: {skipped_equivalent}")
-    print(f"[DEBUG] Markup merges (same image, different labels): {merged_annotations}")
-    print(f"[DEBUG] Removed boxes by IoU-dedup: {iou_dedup_removed_boxes}")
-    print(f"[DEBUG] Unique images after dedup: {len(dedup_map)}")
-    print(f"[DEBUG] Filtered and copied: {copied_count}")
+    if args.strip_unused_classes:
+        class_map_pre = {name: idx for idx, name in enumerate(selected_classes)}
+        strip_stats = strip_unused_classes(
+            target_dir,
+            "split",
+            {"classes": class_map_pre},
+            class_names_map=class_names_map,
+        )
+        if strip_stats.removed_class_names:
+            selected_classes = [
+                k for k, _ in sorted(strip_stats.new_class_map.items(), key=lambda kv: kv[1])
+            ]
+            print(
+                f"[INFO] --strip-unused-classes: removed {strip_stats.removed_class_names} "
+                f"({strip_stats.classes_before} -> {strip_stats.classes_after} classes)"
+            )
+
+    logger.debug("Total label files: %s", total_labels)
+    logger.debug("Image+label pair processed: %s", processed_pairs)
+    logger.debug("Skipped equivalent takes: %s", skipped_equivalent)
+    logger.debug("Markup merges (same image, different labels): %s", merged_annotations)
+    logger.debug("Removed boxes by IoU-dedup: %s", iou_dedup_removed_boxes)
+    logger.debug("Unique images after dedup: %s", len(dedup_map))
+    logger.debug("Filtered and copied: %s", copied_count)
     pct = (copied_count / total_labels * 100) if total_labels else 0.0
-    print(f"[DEBUG] Percentage of files used: {pct:.2f}%")
+    logger.debug("Percentage of files used: %.2f%%", pct)
 
     print(f"\n[OK] {copied_count} images with filtered annotations copied.")
 
@@ -1301,9 +1484,10 @@ def main(argv=None):
                         "common_classes_only": bool(args.common_classes_only),
                         "exclude_test": bool(args.exclude_test),
                         "drop_empty_images": bool(args.drop_empty_images),
+                        "strip_unused_classes": bool(args.strip_unused_classes),
                     }
                 ],
-                random_seed=12345,
+                random_seed=DEFAULT_RANDOM_SEED,
                 stats_before={"total_labels": total_labels},
                 stats_after={
                     "copied_images": copied_count,

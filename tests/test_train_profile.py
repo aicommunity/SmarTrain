@@ -120,6 +120,18 @@ def test_merge_sources_ignores_cfg_key_from_ultralytics_yaml():
     assert u_cfg["epochs"] == 25
 
 
+def test_merge_sources_ignores_path_like_keys_from_ultralytics_yaml():
+    args = argparse.Namespace(model=None, epochs=None, batch=None, img_size=None, task=None)
+    u_cfg, _sm_opts = merge_sources_with_priority(
+        config_profile={},
+        ultralytics_profile={"save_dir": "/mnt/sda1", "runs_dir": "/mnt/sda2", "epochs": 25},
+        args=args,
+    )
+    assert "save_dir" not in u_cfg
+    assert "runs_dir" not in u_cfg
+    assert u_cfg["epochs"] == 25
+
+
 def test_finalize_train_kwargs_forces_dataset_and_run_paths():
     out = finalize_train_kwargs(
         {"data": "/tmp/from_yaml.yaml", "project": "/tmp/proj", "name": "custom", "exist_ok": True, "epochs": 2},
@@ -133,6 +145,17 @@ def test_finalize_train_kwargs_forces_dataset_and_run_paths():
     assert out["epochs"] == 2
 
 
+def test_finalize_train_kwargs_ignores_path_like_keys():
+    out = finalize_train_kwargs(
+        {"save_dir": "/mnt/sda1", "output_dir": "/mnt/sda2", "epochs": 2},
+        data_yaml="/dataset/data.yaml",
+        model_dir="/runs/out",
+    )
+    assert "save_dir" not in out
+    assert "output_dir" not in out
+    assert out["project"] == "/runs/out"
+
+
 def test_test_yolo_val_kwargs_use_exist_ok_true() -> None:
     import inspect
 
@@ -140,6 +163,21 @@ def test_test_yolo_val_kwargs_use_exist_ok_true() -> None:
 
     source = inspect.getsource(train_exec.test_yolo)
     assert '"exist_ok": True' in source or "'exist_ok': True" in source
+
+
+def test_validate_train_launch_paths_rejects_unexpected_project():
+    from smartrain.services.training.train_yolo_execution_service import validate_train_launch_paths
+
+    try:
+        validate_train_launch_paths(
+            train_kw={"project": "/mnt/sda1", "data": "/tmp/runtime_data.yaml"},
+            model_dir="/tmp/runs/out",
+            data_yaml="/tmp/runtime_data.yaml",
+        )
+    except RuntimeError as exc:
+        assert "unexpected project path" in str(exc)
+    else:
+        raise AssertionError("validate_train_launch_paths must reject mismatched project path")
 
 
 def test_merge_cli_sets_default_device_when_missing():

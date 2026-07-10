@@ -8,17 +8,39 @@ Core training/validation team.
 
 ```bash
 smartrain train --data my_dataset -y
+smartrain train --data my_seg_dataset --task segment --model yolo11s-seg.pt -y
 smartrain train --test-only --model-dir /path/to/run --data /path/to/dataset
 ```
+
+### Instance segmentation
+
+- Use `--task segment` (or `segmentation` in metadata) with a `*-seg.pt` model alias (e.g. `yolo11s-seg.pt`).
+- Dataset labels must be YOLO polygons (`class_id x1 y1 x2 y2 ...`). See [data formats](../reference/data-formats.md).
+- Interactive mode filters model list to `-seg` aliases when task is segment.
+- Post-train smoke test uses Ultralytics `val`; full plot bundle: `smartrain test --formats pt --task segment`.
+- Native ONNX/engine/TRT test for segmentation is skipped by default (bbox-only native eval). Use PT test for mask metrics.
+- Experimental bypass: `smartrain test --formats onnx --task segment --force-native-seg-test` (bbox-shaped native eval; mask metrics unreliable).
 
 Parameter sources and priority:
 
 `CLI > --ultralytics_yaml > --config > defaults`
 
 The `data` field from `--ultralytics_yaml` is ignored, the selected `--data` is used.
-Also ignored from `--ultralytics_yaml`: `project`, `name`, `exist_ok`, `cfg`, `device`, `model_dir`, `target_path`, `workspace`.
+Also ignored from `--ultralytics_yaml`: `project`, `name`, `exist_ok`, `cfg`, `device`, `model_dir`, `target_path`, `workspace`, `save_dir`, `runs_dir`, `output_dir`.
 
 That is, command line options always have the highest priority.
+
+Two-stage safety for external YAML:
+
+1. Merge stage ignores service/path keys from `--ultralytics_yaml`.
+2. Finalize stage forces runtime values before `YOLO.train(...)`: `data`, `project`, `name`, `exist_ok`.
+
+This prevents external `args.yaml` from redirecting runs to foreign paths.
+
+Path portability note:
+
+- Avoid absolute machine-specific paths (for example `/mnt/*`) in external `args.yaml`.
+- `--device` from CLI should be used for device selection; `device` in `--ultralytics_yaml` is ignored.
 
 Model selection:
 

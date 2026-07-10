@@ -62,6 +62,7 @@ def test_train_model_catalog_is_populated_from_backend_spec() -> None:
 def test_external_provider_catalog_uses_provider_specific_aliases() -> None:
     aliases = TrainModelCatalog(provider="dr-yolo").supported_aliases()
     assert "yolov8n" in aliases
+    assert "yolov8n-seg" in aliases
 
 
 def test_mfel_catalog_reads_custom_yaml_aliases(tmp_path) -> None:

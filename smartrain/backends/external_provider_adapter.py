@@ -90,6 +90,7 @@ class ExternalProviderAdapter:
         device: str | None = None,
         target_dir: str | None = None,
         run_name: str | None = None,
+        task_type: str | None = None,
     ) -> int:
         if self.train_runner is not None:
             return int(
@@ -105,6 +106,7 @@ class ExternalProviderAdapter:
                     device=device,
                     target_dir=target_dir,
                     run_name=run_name,
+                    task_type=task_type,
                 )
             )
         return run_external_train(
@@ -119,6 +121,7 @@ class ExternalProviderAdapter:
             device=device,
             target_dir=target_dir,
             run_name=run_name,
+            task_type=task_type,
         )
 
     def infer(self, *, request: Any) -> BackendExecutionResult:

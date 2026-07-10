@@ -2,16 +2,51 @@
 
 # CLI: inference
 
-`smartrain inference` runs object detection inference on either a folder or a dataset split.
+`smartrain inference` runs inference on a folder or a dataset split (detection, instance segmentation, classification depending on model/task).
 
 It writes:
 
 - `inference_results.json` (main report)
 - `environment_profile.json` (machine/runtime profile)
+- by default a YOLO autolabel dataset under `<basename>_autolabeled/` (pseudo-labels from predictions)
+- optional `pred_overlays/` with rendered predictions (default on when dataset export is on)
+- optional polygon overlay images when `--save-overlay` is set (instance segmentation, legacy)
 
-Both files are saved under:
+Both primary JSON files are saved under:
 
 - `workspace/inference/<model>/<timestamp-source>/`
+
+## YOLO autolabel export
+
+Enabled by default (`--export-dataset`, disable with `--no-export-dataset`).
+
+Directory layout `<basename>_autolabeled/` (inside the inference run folder):
+
+```
+<basename>_autolabeled/
+  images/
+  labels/
+  data.yaml
+  autolabel_manifest.json
+```
+
+- **`basename`** is the source folder name (`--source-dir`) or `{dataset}-{split}` for `dataset-split`.
+- Only frames with **≥1 detection/segment** after the export confidence filter are included.
+- **`autolabel_manifest.json`** records model, inference/export parameters, summary stats, and `file_mapping`.
+
+Export flags:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--export-dataset` / `--no-export-dataset` | on | Export YOLO dataset |
+| `--export-label-conf-min` | `0.25` | Min confidence for label export |
+| `--export-label-conf-max` | `1.0` | Max confidence for label export |
+| `--export-visualize` / `--no-export-visualize` | on when export-dataset | `pred_overlays/` vis-style renders |
+
+`--conf` is the inference threshold; `--export-label-conf-*` further filters labels written to the dataset from predictions already returned by the model.
+
+- Classification is not exported to YOLO (warning, no dataset folder created).
+- If no images pass the export confidence filter, `<basename>_autolabeled/` and `pred_overlays/` are not created.
 
 ## External provider capability matrix (task × payload)
 
@@ -44,8 +79,19 @@ Note: `pt_uni` is an internal metrics-comparison mode (PT vs PT-uni, test/val) a
 
 ```bash
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
+smartrain inference --model-name my_model --data-mode folder --source-dir ./images --no-export-dataset
+smartrain inference --model-name my_model --data-mode folder --source-dir ./images --export-label-conf-min 0.4 --export-label-conf-max 0.9
 smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mode folder --source-dir ./images
 smartrain inference --weights dr-yolo:yolov8n --external-repo /opt/dr-yolo --data-mode folder --source-dir ./images
+smartrain inference --weights yolo11s-seg.pt --data-mode folder --source-dir ./images --save-overlay
+```
+
+### Instance segmentation overlay
+
+For `*-seg.pt` models, inference JSON includes per-image `segments` (polygon vertices). Use `--save-overlay` to write RGB preview images with GT-style polygon outlines next to the JSON report (under the same `workspace/inference/...` output directory).
+
+```bash
+smartrain inference --weights runs/ds/run_seg/models/best-seg.pt --data-mode folder --source-dir ./images --save-overlay
 ```
 
 ## Device selection
@@ -93,6 +139,17 @@ Latency stats format (for both `end_to_end` and `infer_only`):
 - `path_absolute`
 - `path_relative`
 
+`artifacts.autolabel_dataset` (when `--export-dataset`):
+
+- `path_absolute`, `path_relative`
+- `manifest_absolute` → `autolabel_manifest.json`
+- `images_exported`, `labels_total`
+
+`artifacts.pred_overlays` (when `--export-visualize`):
+
+- `path_absolute`, `path_relative`
+- `images_rendered`
+
 `environment_profile.json` includes:
 
 - host/OS info (platform, kernel, cpu count, machine)
@@ -106,3 +163,5 @@ Latency stats format (for both `end_to_end` and `infer_only`):
 - Stage breakdown is backend-dependent and can be partially populated.
 - Cross-backend comparisons must account for runtime differences (provider selection, CUDA/TRT runtime, precision, and model export specifics).
 - `infer_only` is useful for backend-level comparison, while `end_to_end` is better for user-facing pipeline latency.
+- Exported labels are pseudo-labels from the model, not ground truth.
+- With export-dataset enabled, `pred_overlays/` contains only frames written to the autolabel dataset.

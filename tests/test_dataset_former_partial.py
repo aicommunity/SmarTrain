@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.workflows.datasets.dataset_former import _collect_label_image_pairs, main as fusion_main, prune_output_empty_label_pairs
+from smartrain.workflows.datasets.dataset_former import (
+    _collect_label_image_pairs,
+    _prompt_interactive_merge_rules,
+    _validate_interactive_merge_rules,
+    main as fusion_main,
+    prune_output_empty_label_pairs,
+)
 from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, WORKSPACE_ENV_VAR, deploy_workspace
 
 
@@ -305,7 +311,7 @@ def test_fusion_interactive_options_apply_defaults(tmp_path: Path, monkeypatch: 
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
 
-    def _fake_options(args, default_output_name, class_candidates):
+    def _fake_options(args, default_output_name, class_candidates, class_names_map):
         args.output_name = "merged_from_interactive"
         args.classes = "cat,dog"
         args.include_partial_datasets = True
@@ -315,6 +321,96 @@ def test_fusion_interactive_options_apply_defaults(tmp_path: Path, monkeypatch: 
 
     fusion_main([])
     assert (tmp_path / "datasets" / "merged_from_interactive" / "data.yaml").is_file()
+
+
+def test_validate_interactive_merge_rules_duplicate_source_rejected() -> None:
+    ok, err = _validate_interactive_merge_rules(
+        [["a,b", "ab"], ["b,c", "bc"]],
+        class_names_map={"a": "a", "b": "b", "c": "c", "ab": "ab", "bc": "bc"},
+        selected_classes=["ab", "bc"],
+        class_candidates=["a", "b", "c", "ab", "bc"],
+    )
+    assert not ok
+    assert err is not None
+    assert "participates in more than one --merge-classes group" in err
+
+
+def test_prompt_interactive_merge_rules_retries_until_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    answers = iter(
+        [
+            "a,b -> missing_target",  # invalid target
+            "a,b -> ab",  # valid
+            "b,c -> bc",  # invalid duplicate source
+            "c -> bc",  # valid
+            "",  # finish
+        ]
+    )
+    monkeypatch.setattr(
+        "smartrain.cli_entrypoints.support.cli_prompts.prompt_text",
+        lambda *_args, **_kwargs: next(answers),
+    )
+    result = _prompt_interactive_merge_rules(
+        class_names_map={"a": "a", "b": "b", "c": "c", "ab": "ab", "bc": "bc"},
+        selected_classes=["ab", "bc"],
+        class_candidates=["a", "b", "c", "ab", "bc"],
+    )
+    assert result == [["a,b", "ab"], ["c", "bc"]]
+
+
+def test_prompt_interactive_options_merge_does_not_narrow_auto_classes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from argparse import Namespace
+
+    answers = iter(
+        [
+            "merged_out",  # output name
+            "",  # classes -> auto-union
+            "",  # exclude classes
+            "a,b -> ab",  # merge rule
+            "",  # finish merge rules
+            "0.8,0.1,0.1",  # split
+            "",  # tmp dir
+        ]
+    )
+    yes_no_answers = iter(
+        [
+            True,  # configure merge rules
+            True,  # include partial
+            False,  # common classes only
+            False,  # exclude test
+            False,  # drop empty
+        ]
+    )
+    monkeypatch.setattr(
+        "smartrain.cli_entrypoints.support.cli_prompts.prompt_text",
+        lambda *_args, **_kwargs: next(answers),
+    )
+    monkeypatch.setattr(
+        "smartrain.cli_entrypoints.support.cli_prompts.prompt_yes_no",
+        lambda *_args, **_kwargs: next(yes_no_answers),
+    )
+
+    args = Namespace(
+        output_name=None,
+        classes=None,
+        exclude_classes=None,
+        merge_classes=None,
+        fusion_split=None,
+        include_partial_datasets=True,
+        common_classes_only=False,
+        exclude_test=False,
+        drop_empty_images=False,
+        tmp_dir=None,
+    )
+    from smartrain.workflows.datasets.dataset_former import _prompt_interactive_options
+
+    _prompt_interactive_options(
+        args,
+        default_output_name="default_merged",
+        class_candidates=["a", "b", "ab", "other"],
+        class_names_map={"a": "a", "b": "b", "ab": "ab", "other": "other"},
+    )
+    assert args.classes == "ab,other"
+    assert args.merge_classes == [["a,b", "ab"]]
 
 
 def test_prune_output_empty_label_pairs_removes_orphans(tmp_path: Path) -> None:
@@ -376,6 +472,113 @@ def test_fusion_dedup_same_image_and_equivalent_labels_keeps_one(tmp_path: Path)
     labels = list(out.glob("*/labels/*.txt"))
     assert len(labels) == 1
     assert labels[0].read_text(encoding="utf-8").count("\n") == 1
+
+
+def test_fusion_preserves_empty_label_pairs_by_default(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds = sd / "ds_bg"
+    _write_jpg(ds / "train" / "images" / "bg.jpg", color=(30, 30, 30))
+    _write_jpg(ds / "train" / "images" / "obj.jpg", color=(60, 60, 60))
+    (ds / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "labels" / "bg.txt").write_text("", encoding="utf-8")
+    (ds / "train" / "labels" / "obj.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps({"ds_bg": {"classes": {"cat": 0}, "structure": "split"}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(json.dumps({"cat": "cat"}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_with_bg",
+            "--dataset",
+            "ds_bg",
+            "--classes",
+            "cat",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "merged_with_bg"
+    labels = list(out.glob("*/labels/*.txt"))
+    assert len(labels) == 2
+    assert sum(1 for p in labels if p.stat().st_size == 0) == 1
+
+
+def test_fusion_strip_unused_classes(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds = sd / "ds_cat"
+    _write_jpg(ds / "train" / "images" / "a.jpg", color=(40, 40, 40))
+    (ds / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps(
+            {"ds_cat": {"classes": {"cat": 0, "dog": 1, "bird": 2}, "structure": "split"}},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(json.dumps({"cat": "cat"}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_strip",
+            "--dataset",
+            "ds_cat",
+            "--classes",
+            "cat,dog,bird",
+            "--strip-unused-classes",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "merged_strip"
+    import yaml
+
+    cfg = yaml.safe_load((out / "data.yaml").read_text(encoding="utf-8"))
+    assert cfg["names"] == ["cat"]
+
+
+def test_fusion_drop_empty_images_removes_background_pairs(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    sd = tmp_path / "datasets"
+    ds = sd / "ds_bg"
+    _write_jpg(ds / "train" / "images" / "bg.jpg", color=(30, 30, 30))
+    _write_jpg(ds / "train" / "images" / "obj.jpg", color=(60, 60, 60))
+    (ds / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "labels" / "bg.txt").write_text("", encoding="utf-8")
+    (ds / "train" / "labels" / "obj.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (sd / DATASETS_INFO_FILE).write_text(
+        json.dumps({"ds_bg": {"classes": {"cat": 0}, "structure": "split"}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (sd / CLASS_NAMES_FILE).write_text(json.dumps({"cat": "cat"}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    fusion_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_no_bg",
+            "--dataset",
+            "ds_bg",
+            "--classes",
+            "cat",
+            "--drop-empty-images",
+        ]
+    )
+
+    out = tmp_path / "datasets" / "merged_no_bg"
+    labels = list(out.glob("*/labels/*.txt"))
+    assert len(labels) == 1
+    assert labels[0].read_text(encoding="utf-8").strip() != ""
 
 
 def test_fusion_dedup_different_image_same_labels_keeps_both(tmp_path: Path) -> None:

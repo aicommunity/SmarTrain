@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import hashlib
 import json
 import os
 import sys
@@ -12,7 +13,9 @@ from typing import Any
 import yaml
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text
 from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.models import tensorrt_checks as trt_checks
 from smartrain.services.testing import model_test_cli_surface as surf
 from smartrain.services.testing.model_test_service import (
@@ -26,6 +29,7 @@ from smartrain.services.testing.model_test_runner import run_model_test_after_se
 from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
 from smartrain.core.workflow_adapters.training_runtime_api import resolve_dataset_path_for_resume
+from smartrain.core.testing.artifact_paths import TEST_EVAL_SLOT_ENV
 from smartrain.core.runtime.run_artifacts import (
     ensure_run_layout,
     is_internal_conversion_artifact,
@@ -41,6 +45,10 @@ from smartrain.core.runtime.device_selector import (
     resolve_device_request,
     validate_device_available,
 )
+
+logger = get_logger(__name__)
+
+
 def build_model_test_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(
         description="Complete missing test artifacts for runs/models and compare formats (empty call starts interactive mode)."
@@ -59,6 +67,11 @@ def build_model_test_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--missing-only", action="store_true", help="Only build artifacts that are currently missing.")
     p.add_argument("--force", action="store_true", help="Force re-test even if matching artifacts already exist.")
+    p.add_argument(
+        "--force-native-seg-test",
+        action="store_true",
+        help="Allow native ONNX/engine/TRT test for segmentation (experimental; bbox-only eval, not mask metrics).",
+    )
     p.add_argument("--imgsz", type=int, default=None, help="Validation image size.")
     p.add_argument("--conf", type=float, default=None, help="Validation confidence threshold.")
     p.add_argument("--iou", type=float, default=None, help="Validation IoU threshold.")
@@ -140,7 +153,8 @@ def _discover_run_artifact_candidates(root_dir: str, formats: list[str] | None =
                 target_kind="runs",
             )
             out[fmt] = [one]
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to collect artifact for format %s: %s", fmt, exc)
             out[fmt] = []
     # Keep deterministic order by format and path.
     ordered: dict[str, list[str]] = {}
@@ -258,6 +272,17 @@ def _normalize_data_to_yaml(data_value: str) -> str:
             hint = " Path contains '...'; replace with full real path."
         raise FileNotFoundError(f"data.yaml not found for dataset: {candidate}.{hint}")
     return str(data_yaml)
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.debug("Failed to read JSON metadata from %s: %s", path, exc)
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _suggest_convert_cmd(input_path: str, fmt: str) -> str:
@@ -402,6 +427,24 @@ def _resolve_data_yaml_for_target(
     raise RuntimeError("Dataset path is required for models/weights targets. Pass --data.")
 
 
+def _normalize_abs(path: str) -> str:
+    return str(Path(path).expanduser().resolve())
+
+
+def _eval_slot_from_dataset_yaml(layout: WorkspaceLayout, data_yaml: str) -> tuple[str, str]:
+    abs_yaml = _normalize_abs(data_yaml)
+    datasets_info = _load_json(Path(layout.datasets) / "datasets_info.json")
+    for key, entry in datasets_info.items():
+        if not isinstance(entry, dict):
+            continue
+        root = Path(layout.root) / str(entry.get("data_path") or "")
+        y = root / "data.yaml"
+        if y.is_file() and _normalize_abs(str(y)) == abs_yaml:
+            return key, "catalog"
+    h = hashlib.sha1(abs_yaml.encode("utf-8")).hexdigest()[:8]
+    return f"external__{h}", "external"
+
+
 def _print_test_plan(
     *,
     target_kind: str,
@@ -429,8 +472,8 @@ def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | 
                 for key in ("imgsz", "conf", "iou", "batch"):
                     if inf.get(key) is not None:
                         defaults[key] = inf.get(key)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to read training metadata defaults from %s: %s", metadata_path, exc)
     train_args = Path(root_dir) / "train" / "args.yaml"
     if train_args.is_file():
         try:
@@ -441,8 +484,8 @@ def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | 
                 defaults["iou"] = payload.get("iou")
             if defaults["batch"] is None and payload.get("batch") is not None:
                 defaults["batch"] = payload.get("batch")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to read train args defaults from %s: %s", train_args, exc)
     if defaults["imgsz"] is None:
         defaults["imgsz"] = 640
     if defaults["conf"] is None:
@@ -673,7 +716,8 @@ def _collect_interactive_rerun_decisions(
                     format_name=fmt,
                     target_kind=target_kind,
                 )
-            except Exception:
+            except Exception as exc:
+                logger.debug("Skipping format %s while resolving artifacts: %s", fmt, exc)
                 continue
             entries.append((fmt, artifact_path))
 
@@ -759,9 +803,13 @@ def main(argv: list[str] | None = None) -> None:
                 layout=layout,
                 data_cli=None,
             )
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to resolve default data.yaml for %s: %s", root_dir, exc)
             default_data_yaml = None
-        raw_data = surf.prompt_text("Dataset path or data.yaml", default=(default_data_yaml or "")).strip()
+        if default_data_yaml and sys.stdin.isatty():
+            raw_data = prompt_prefilled_text("Dataset path or data.yaml", str(default_data_yaml)).strip()
+        else:
+            raw_data = surf.prompt_text("Dataset path or data.yaml", default=(str(default_data_yaml or ""))).strip()
         try:
             data_yaml = _resolve_data_yaml_for_target(
                 target_kind=target_kind,
@@ -831,32 +879,50 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(str(exc))
     print(f"[INFO] Test device: {device_display_name(args.device)}")
 
-    run_model_test_after_setup(
-        parser=parser,
-        args=args,
-        request=request,
-        workspace_root=workspace_root,
-        interactive=interactive,
-        root_dir=root_dir,
-        primary_path=primary_path,
-        target_kind=target_kind,
-        target_label=target_label,
-        data_yaml=data_yaml,
-        formats=formats,
-        onnx_provider_policy=onnx_provider_policy,
-        requested_imgsz=requested_imgsz,
-        requested_conf=requested_conf,
-        requested_iou=requested_iou,
-    )
+    eval_slot_key: str | None = None
+    eval_source: str | None = None
+    if target_kind == "runs":
+        try:
+            default_train_yaml = _resolve_data_yaml_for_target(
+                target_kind=target_kind,
+                root_dir=root_dir,
+                layout=layout,
+                data_cli=None,
+            )
+        except Exception as exc:
+            logger.debug("Failed to resolve default train data.yaml for %s: %s", root_dir, exc)
+            default_train_yaml = None
+        if default_train_yaml and _normalize_abs(default_train_yaml) != _normalize_abs(data_yaml):
+            eval_slot_key, eval_source = _eval_slot_from_dataset_yaml(layout, data_yaml)
+    elif args.data:
+        eval_slot_key, eval_source = _eval_slot_from_dataset_yaml(layout, data_yaml)
+    if eval_slot_key:
+        os.environ[TEST_EVAL_SLOT_ENV] = eval_slot_key
+        print(f"[INFO] Test scope: eval slot '{eval_slot_key}' ({eval_source}).")
+    else:
+        os.environ.pop(TEST_EVAL_SLOT_ENV, None)
+        print("[INFO] Test scope: primary dataset.")
 
-
-surf._check_onnx_format_preflight = _check_onnx_format_preflight
-surf._check_native_format_preflight = _check_native_format_preflight
-surf._pick_interactive_target = _pick_interactive_target
-surf._prompt_export_backends_interactive = _prompt_export_backends_interactive
-surf._prompt_artifact_selection_interactive = _prompt_artifact_selection_interactive
-surf._resolve_existing_artifact = _resolve_existing_artifact
-surf._run_native_backend_isolated = _run_native_backend_isolated
+    try:
+        run_model_test_after_setup(
+            parser=parser,
+            args=args,
+            request=request,
+            workspace_root=workspace_root,
+            interactive=interactive,
+            root_dir=root_dir,
+            primary_path=primary_path,
+            target_kind=target_kind,
+            target_label=target_label,
+            data_yaml=data_yaml,
+            formats=formats,
+            onnx_provider_policy=onnx_provider_policy,
+            requested_imgsz=requested_imgsz,
+            requested_conf=requested_conf,
+            requested_iou=requested_iou,
+        )
+    finally:
+        os.environ.pop(TEST_EVAL_SLOT_ENV, None)
 
 
 if __name__ == "__main__":

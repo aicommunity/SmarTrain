@@ -365,6 +365,10 @@ def resolve_run_model(run_dir: str, ext: str = ".pt") -> Path | None:
     root_named = root / f"{root.name}{suffix}"
     if root_named.is_file():
         return root_named
+    # Released models: weights live next to the bundle dir (models/<ds>/<stem>.pt).
+    sibling = root.parent / f"{root.name}{suffix}"
+    if sibling.is_file():
+        return sibling
     return None
 
 

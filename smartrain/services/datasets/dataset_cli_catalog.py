@@ -11,6 +11,7 @@ from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
 from smartrain.services.datasets.dataset_cli_common import (
     load_dataset_catalog,
+    sorted_class_names_for_dataset,
     sorted_class_names_union_from_catalog,
 )
 
@@ -44,6 +45,7 @@ def try_prompt_dataset_interactive(
 __all__ = [
     "EMPTY_DATASETS_INFO_MESSAGE",
     "load_datasets_catalog",
+    "sorted_class_names_for_dataset",
     "sorted_class_names_union_from_catalog",
     "try_prompt_dataset_interactive",
 ]

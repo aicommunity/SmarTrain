@@ -5,7 +5,13 @@ import json
 import os
 from typing import Any
 
-from smartrain.core.runtime.run_discovery import find_run_directories
+from smartrain.core.analyze.run_metrics_discovery import (
+    METRIC_AGG_COLUMNS,
+    latest_test_metrics_path,
+    resolve_recomputed_metrics_csv,
+)
+from smartrain.core.runtime.run_discovery import discover_analysis_targets
+from smartrain.run_model_contract.io.read.resolvers import infer_source_kind
 from smartrain.services.analyze.models import RunRecord
 
 
@@ -22,14 +28,15 @@ def build_run_record_unified(
 ) -> RunRecord:
     from smartrain.run_model_contract.gateway import load_target
 
-    payload = load_target(run_dir, source_kind="run")
+    source_kind = infer_source_kind(run_dir)
+    payload = load_target(run_dir, source_kind=source_kind)
     model_name: str | None = None
     dataset_name: str | None = None
     if payload.models:
         model_name = str(payload.models[0].model_id or "").strip() or None
     if payload.runs:
         dataset_name = str(payload.runs[0].dataset_ref or "").strip() or None
-    metrics = read_test_metrics_for_run_cb(run_dir)
+    metrics = read_test_metrics_for_run_cb(run_dir, source_kind=source_kind)
     return RunRecord(
         run_dir=run_dir,
         model=model_name,
@@ -42,15 +49,72 @@ def build_run_record_unified(
     )
 
 
-def read_test_metrics_for_run(run_dir: str, *, format_name: str = "pt") -> dict[str, Any]:
+def read_test_metrics_for_run(
+    run_dir: str,
+    *,
+    format_name: str = "pt",
+    source_kind: str | None = None,
+) -> dict[str, Any]:
     from smartrain.run_model_contract.gateway import load_metrics
 
-    metric_refs = load_metrics(run_dir, source_kind="run", format_name=format_name)
-    if metric_refs:
-        out = dict(metric_refs[0].primary_metrics or {})
-        out.update(dict(metric_refs[0].secondary_metrics or {}))
-        return out
-    return {}
+    sk = (source_kind or "").strip().lower() or infer_source_kind(run_dir)
+    out: dict[str, Any] = {}
+    try:
+        metric_refs = load_metrics(run_dir, source_kind=sk, format_name=format_name)
+        if metric_refs:
+            out = dict(metric_refs[0].primary_metrics or {})
+            out.update(dict(metric_refs[0].secondary_metrics or {}))
+    except Exception:
+        out = {}
+    if not out:
+        for metrics_path in (
+            latest_test_metrics_path(run_dir),
+            resolve_recomputed_metrics_csv(run_dir),
+        ):
+            if not metrics_path:
+                continue
+            row = _read_metrics_row_from_csv(metrics_path)
+            if row:
+                out.update(row)
+                break
+    else:
+        recomputed_csv = resolve_recomputed_metrics_csv(run_dir)
+        if recomputed_csv:
+            try:
+                row = _read_metrics_row_from_csv(recomputed_csv)
+                if row:
+                    out.update(row)
+            except Exception:
+                pass
+    return out
+
+
+def _read_metrics_row_from_csv(metrics_path: str) -> dict[str, Any]:
+    import pandas as pd
+
+    if not metrics_path or not os.path.isfile(metrics_path):
+        return {}
+    try:
+        df = pd.read_csv(metrics_path)
+    except Exception:
+        return {}
+    if len(df) == 0:
+        return {}
+    df.columns = [str(c).strip() for c in df.columns]
+    if "Class" in df.columns:
+        cls = df["Class"].astype(str).str.strip().str.lower()
+        all_mask = cls.eq("all")
+        if bool(all_mask.any()):
+            return df.loc[all_mask].iloc[0].to_dict()
+    if "Class" in df.columns and len(df) > 1:
+        agg_cols = [c for c in METRIC_AGG_COLUMNS if c in df.columns]
+        if agg_cols:
+            out: dict[str, Any] = {}
+            for col in agg_cols:
+                out[col] = pd.to_numeric(df[col], errors="coerce").mean()
+            out["Class"] = "all"
+            return out
+    return df.iloc[0].to_dict()
 
 
 def _system_profile_flat_from_training_metadata(run_dir: str) -> dict[str, Any]:
@@ -112,7 +176,10 @@ def filtered_run_records(
     *,
     build_run_record_cb: Any,
 ) -> list[tuple[str, Any]]:
-    runs = find_run_directories(args.models_root)
+    runs = discover_analysis_targets(
+        workspace_cli=getattr(args, "workspace", None),
+        models_root_cli=getattr(args, "models_root_cli", None),
+    )
     recs: list[tuple[str, Any]] = []
     filter_dataset = getattr(args, "filter_dataset", None)
     filter_model = getattr(args, "filter_model", None)

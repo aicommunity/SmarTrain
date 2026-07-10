@@ -21,7 +21,9 @@ def run_compare_workflow(
     results_csv_path: Callable[[str], str | None],
     pick_map_column: Callable[[pd.DataFrame], str | None],
     default_map_col: str,
+    display_labels: dict[str, str] | None = None,
 ) -> tuple[str | None, list[dict[str, Any]]]:
+    display_labels = display_labels or {}
     base_metrics = read_test_metrics_for_run(baseline)
     other_rows = [read_test_metrics_for_run(other) for other in others]
     delta_rows = build_delta_rows(baseline, base_metrics, others, other_rows)
@@ -42,7 +44,13 @@ def run_compare_workflow(
     labels: list[str] = []
     for run_dir in all_runs:
         results_csv = results_csv_path(run_dir)
-        label = os.path.basename(run_dir.rstrip(os.sep))[:40]
+        run_abs = os.path.abspath(run_dir.rstrip(os.sep))
+        run_name = os.path.basename(run_abs)
+        label = (
+            display_labels.get(run_abs)
+            or display_labels.get(run_name)
+            or os.path.basename(run_dir.rstrip(os.sep))[:40]
+        )
         labels.append(label)
         if not results_csv:
             print(f"[WARN] Missing train/results.csv: {run_dir}")

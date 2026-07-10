@@ -89,6 +89,32 @@ def test_runtime_data_yaml_cvat_style_shared_images_bucket(tmp_path: Path) -> No
     assert cfg["test"] == "images"
 
 
+def test_runtime_data_yaml_train_only_aug_dataset_falls_back_val_to_train(tmp_path: Path) -> None:
+    """Augment output with only train/ must remain trainable (val -> train)."""
+    ds = tmp_path / "datasets" / "ds_aug"
+    _touch_jpg(ds / "train" / "images" / "a.jpg")
+    (ds / "data.yaml").write_text(
+        "train: train/images\nval: val/images\ntest: test/images\nnc: 1\nnames: [belt_side]\n",
+        encoding="utf-8",
+    )
+
+    run_dir = tmp_path / "runs" / "r1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    out = build_runtime_data_yaml(
+        str(ds),
+        str(run_dir),
+        stage="train",
+        ensure_run_layout_cb=ensure_run_layout,
+        run_tmp_dir_cb=run_tmp_dir,
+    )
+
+    with open(out, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    assert cfg["train"] == "train/images"
+    assert cfg["val"] == "train/images"
+    assert cfg["test"] == "train/images"
+
+
 def test_train_yolo_builds_runtime_yaml_under_run_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ds = tmp_path / "datasets" / "ds"
     ds.mkdir(parents=True)

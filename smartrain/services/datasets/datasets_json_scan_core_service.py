@@ -3,8 +3,15 @@ from __future__ import annotations
 import os
 import yaml
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import List, Optional
 
+from smartrain.services.datasets.cvat11_converter import load_cvat11_label_names_from_xml
+from smartrain.services.datasets.cvsdcldet_converter import (
+    collect_cvsdcldet_class_names,
+    collect_cvsdcldet_pairs,
+    is_cvsdcldet_dir,
+)
 from smartrain.services.datasets.dataset_scan import (
     find_obj_data_file,
     find_obj_names_file,
@@ -14,6 +21,74 @@ from smartrain.services.datasets.dataset_scan import (
 
 
 IMAGE_EXTS_FLAT = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+
+
+def _is_image_filename(name: str) -> bool:
+    return str(name).lower().endswith(IMAGE_EXTS_FLAT)
+
+
+def _count_yolo_pairs(img_dir: str, lbl_dir: str) -> tuple[int, int, int]:
+    """
+    Count image/label pairs by relative path stem between two directory trees.
+    Returns (images_count, labels_count, pairs_count).
+    """
+    images: set[str] = set()
+    labels: set[str] = set()
+
+    if os.path.isdir(img_dir):
+        for root, _, files in os.walk(img_dir):
+            rel_root = os.path.relpath(root, img_dir)
+            rel_root = "" if rel_root == "." else rel_root
+            for name in files:
+                if not _is_image_filename(name):
+                    continue
+                stem = os.path.splitext(name)[0]
+                rel_stem = os.path.join(rel_root, stem) if rel_root else stem
+                images.add(rel_stem.replace("\\", "/"))
+
+    if os.path.isdir(lbl_dir):
+        for root, _, files in os.walk(lbl_dir):
+            rel_root = os.path.relpath(root, lbl_dir)
+            rel_root = "" if rel_root == "." else rel_root
+            for name in files:
+                if not str(name).lower().endswith(".txt"):
+                    continue
+                stem = os.path.splitext(name)[0]
+                rel_stem = os.path.join(rel_root, stem) if rel_root else stem
+                labels.add(rel_stem.replace("\\", "/"))
+
+    return len(images), len(labels), len(images & labels)
+
+
+def _scan_split_buckets(folder_path: str) -> tuple[int, int, int]:
+    images_count = 0
+    labels_count = 0
+    pairs_count = 0
+    for dir_name in os.listdir(folder_path):
+        dir_path = os.path.join(folder_path, dir_name)
+        if not os.path.isdir(dir_path):
+            continue
+        img_dir = os.path.join(dir_path, "images")
+        lbl_dir = os.path.join(dir_path, "labels")
+        ic, lc, pc = _count_yolo_pairs(img_dir, lbl_dir)
+        images_count += ic
+        labels_count += lc
+        pairs_count += pc
+    return images_count, labels_count, pairs_count
+
+
+def _scan_nested_split_buckets(folder_path: str) -> tuple[int, int, int]:
+    images_count = 0
+    labels_count = 0
+    pairs_count = 0
+    for split in ("train", "val", "test"):
+        img_dir = os.path.join(folder_path, "images", split)
+        lbl_dir = os.path.join(folder_path, "labels", split)
+        ic, lc, pc = _count_yolo_pairs(img_dir, lbl_dir)
+        images_count += ic
+        labels_count += lc
+        pairs_count += pc
+    return images_count, labels_count, pairs_count
 
 
 def _find_cvat_annotations_xml(folder_path: str) -> Optional[str]:
@@ -69,39 +144,9 @@ def _is_cvat11_images_xml(xml_path: str) -> bool:
 def _load_cvat11_label_names(xml_path: str) -> list[str]:
     """
     CVAT 1.1 (Images task) labels.
-    Prefer meta/task/labels/label/name; fallback to unique box/@label values.
+    Supports meta/task and meta/job exports; fallback to shape @label values.
     """
-    try:
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
-    except Exception:
-        return []
-
-    meta_names: list[str] = []
-    try:
-        for lb in root.findall("./meta/task/labels/label/name"):
-            if lb is not None and lb.text and lb.text.strip():
-                meta_names.append(lb.text.strip())
-    except Exception:
-        meta_names = []
-
-    if meta_names:
-        out: list[str] = []
-        seen = set()
-        for n in meta_names:
-            if n not in seen:
-                seen.add(n)
-                out.append(n)
-        return out
-
-    seen = set()
-    out: list[str] = []
-    for box in root.findall("./image/box"):
-        label = box.attrib.get("label", "")
-        if label and label not in seen:
-            seen.add(label)
-            out.append(label)
-    return sorted(out)
+    return load_cvat11_label_names_from_xml(xml_path)
 
 
 def _is_split_name(dir_name: str) -> bool:
@@ -173,12 +218,13 @@ def detect_structure(folder_path: str) -> str:
     if os.path.exists(obj_train_data_path) and (obj_names_path or obj_data_path):
         return "darknet"
 
-    cvat_xml = _find_cvat_annotations_xml(folder_path)
-    if cvat_xml and _cvat_has_images_dir_near_xml(cvat_xml) and _is_cvat11_images_xml(cvat_xml):
-        return "cvat11"
+    if is_cvsdcldet_dir(folder_path):
+        return "cvsdcldet"
 
     if any(x in subfolders for x in ["train", "val", "test"]):
-        return "split"
+        _ic, _lc, pairs = _scan_split_buckets(folder_path)
+        if pairs > 0:
+            return "split"
 
     if all(os.path.exists(os.path.join(folder_path, subdir)) for subdir in ["images", "labels"]):
         images_path = os.path.join(folder_path, "images")
@@ -187,17 +233,32 @@ def detect_structure(folder_path: str) -> str:
             os.path.isdir(os.path.join(images_path, d)) and _is_split_name(d)
             for d in images_entries
         ):
-            return "nested_split"
+            _ic, _lc, pairs = _scan_nested_split_buckets(folder_path)
+            if pairs > 0:
+                return "nested_split"
 
         buckets = yolo_flat_image_label_buckets(folder_path)
         if not buckets:
-            return "unknown"
+            pass
+        else:
+            images_count = 0
+            labels_count = 0
+            pairs_count = 0
+            for img_dir, lbl_dir in buckets:
+                ic, lc, pc = _count_yolo_pairs(img_dir, lbl_dir)
+                images_count += ic
+                labels_count += lc
+                pairs_count += pc
+            if pairs_count > 0:
+                images_root = os.path.join(folder_path, "images")
+                has_subset = any(img != images_root for img, _ in buckets)
+                if has_subset:
+                    return "subset_flat"
+                return "flat"
 
-        images_root = os.path.join(folder_path, "images")
-        has_subset = any(img != images_root for img, _ in buckets)
-        if has_subset:
-            return "subset_flat"
-        return "flat"
+    cvat_xml = _find_cvat_annotations_xml(folder_path)
+    if cvat_xml and _cvat_has_images_dir_near_xml(cvat_xml) and _is_cvat11_images_xml(cvat_xml):
+        return "cvat11"
 
     return "unknown"
 
@@ -240,30 +301,7 @@ def count_elements(folder_path: str, structure: str):
             images_count = 0
 
     if structure == "split":
-        for dir_name in os.listdir(folder_path):
-            dir_path = os.path.join(folder_path, dir_name)
-            if not os.path.isdir(dir_path):
-                continue
-
-            img_dir = os.path.join(folder_path, dir_name, "images")
-            lbl_dir = os.path.join(folder_path, dir_name, "labels")
-
-            if os.path.exists(img_dir):
-                images_count += len(
-                    [
-                        f
-                        for f in os.listdir(img_dir)
-                        if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
-                    ]
-                )
-            if os.path.exists(lbl_dir):
-                labels_count += len(
-                    [
-                        f
-                        for f in os.listdir(lbl_dir)
-                        if f.lower().endswith(".txt")
-                    ]
-                )
+        images_count, labels_count, _pairs = _scan_split_buckets(folder_path)
 
     elif structure in ("flat", "subset_flat"):
         buckets = yolo_flat_image_label_buckets(folder_path)
@@ -272,43 +310,12 @@ def count_elements(folder_path: str, structure: str):
             lbl_dir = os.path.join(folder_path, "labels")
             buckets = [(img_dir, lbl_dir)]
         for img_dir, lbl_dir in buckets:
-            if os.path.exists(img_dir):
-                images_count += len(
-                    [
-                        f
-                        for f in os.listdir(img_dir)
-                        if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
-                    ]
-                )
-            if os.path.exists(lbl_dir):
-                labels_count += len(
-                    [
-                        f
-                        for f in os.listdir(lbl_dir)
-                        if f.lower().endswith(".txt")
-                    ]
-                )
+            ic, lc, _pc = _count_yolo_pairs(img_dir, lbl_dir)
+            images_count += ic
+            labels_count += lc
 
     elif structure == "nested_split":
-        for split in ["train", "val", "test"]:
-            img_dir = os.path.join(folder_path, "images", split)
-            lbl_dir = os.path.join(folder_path, "labels", split)
-            if os.path.exists(img_dir):
-                images_count += len(
-                    [
-                        f
-                        for f in os.listdir(img_dir)
-                        if any(f.lower().endswith(ext) for ext in IMAGE_EXTS)
-                    ]
-                )
-            if os.path.exists(lbl_dir):
-                labels_count += len(
-                    [
-                        f
-                        for f in os.listdir(lbl_dir)
-                        if f.lower().endswith(".txt")
-                    ]
-                )
+        images_count, labels_count, _pairs = _scan_nested_split_buckets(folder_path)
 
     elif structure == "darknet":
         obj_train_data_path = os.path.join(folder_path, "obj_train_data")
@@ -320,6 +327,11 @@ def count_elements(folder_path: str, structure: str):
             labels_count = len([f for f in files if f.lower().endswith(".txt")])
         else:
             return None
+
+    elif structure == "cvsdcldet":
+        pairs = collect_cvsdcldet_pairs(Path(folder_path))
+        images_count = len(pairs)
+        labels_count = images_count
 
     else:
         return None
@@ -371,6 +383,12 @@ def process_dataset(folder_path: str, folder_name: str):
                 return None
         else:
             print(f"[WARNING] CVAT 1.1: annotations.xml not found - skipping")
+            return None
+
+    if not names and structure == "cvsdcldet":
+        names = collect_cvsdcldet_class_names(Path(folder_path))
+        if not names:
+            print(f"[WARNING] CvsDclDet: no class names found in {folder_name} - skip")
             return None
 
     if not names:

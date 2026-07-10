@@ -66,6 +66,7 @@ def run_all_pr_stage(
             val_imgsz=int(getattr(args, "val_imgsz", 640)),
             val_half=bool(getattr(args, "val_half", True)),
             gpu_only_val=bool(getattr(args, "gpu_only_val", True)),
+            soft_fail=True,
         )
         cmd_pr_curves_cb(pr_ns)
         if os.path.isfile(pr_png):

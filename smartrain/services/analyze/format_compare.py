@@ -18,8 +18,14 @@ from smartrain.core.workflow_adapters.analyze_runtime_api import (
 )
 from smartrain.core.runtime.run_artifacts import resolve_run_model
 from smartrain.run_model_contract.gateway import load_metrics as unified_load_metrics
+from smartrain.tasks.metric_columns import (
+    metric_agg_columns,
+    metric_agg_columns_with_fallback,
+    metric_fields_from_row,
+    read_run_task_type,
+)
 
-METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
+METRIC_AGG_COLUMNS = metric_agg_columns("detection")
 
 
 def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> dict[str, str] | None:
@@ -260,7 +266,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         except Exception:
             return {}
 
-    def _read_metric_row(metrics_path: str | None) -> dict[str, Any]:
+    def _read_metric_row(metrics_path: str | None, *, task_type: str = "detection") -> dict[str, Any]:
         if not metrics_path or not os.path.isfile(metrics_path):
             return {}
         try:
@@ -268,6 +274,8 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
             if len(mdf) == 0:
                 return {}
             mdf.columns = [str(c).strip() for c in mdf.columns]
+            available = set(mdf.columns)
+            agg_cols = metric_agg_columns_with_fallback(task_type, available)
             if "Class" in mdf.columns:
                 cls = mdf["Class"].astype(str).str.strip().str.lower()
                 all_mask = cls.eq("all")
@@ -275,7 +283,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                     return dict(mdf.loc[all_mask].iloc[0].to_dict())
             if "Class" in mdf.columns and len(mdf) > 1:
                 out: dict[str, Any] = {}
-                for col in METRIC_AGG_COLUMNS:
+                for col in agg_cols:
                     if col in mdf.columns:
                         out[col] = pd.to_numeric(mdf[col], errors="coerce").mean()
                 if out:
@@ -314,11 +322,11 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
             return "missing_artifact", raw
         return "unknown", raw
 
-    def _is_invalid_zero_metrics(fmt: str, metric_row: dict[str, Any]) -> bool:
+    def _is_invalid_zero_metrics(fmt: str, metric_row: dict[str, Any], *, task_type: str = "detection") -> bool:
         if fmt not in {"engine", "trt"}:
             return False
         vals: list[float] = []
-        for col in METRIC_AGG_COLUMNS:
+        for col in metric_agg_columns(task_type):
             raw_v = metric_row.get(col)
             if raw_v is None or (isinstance(raw_v, float) and pd.isna(raw_v)):
                 return False
@@ -476,6 +484,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         issues: list[dict[str, Any]] = []
         for run_dir in run_dirs:
             run_name = os.path.basename(run_dir.rstrip(os.sep))
+            task_type = read_run_task_type(run_dir)
             # unified_gateway.load_metrics can trigger legacy-to-unified
             # migration with file moves; recompute legacy paths after migration.
             metrics_ref_by_raw_path: dict[str, dict[str, Any]] = {}
@@ -544,7 +553,9 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                         if split_name != "val" and not has_explicit_failure:
                             continue
                     metric_row = metrics_ref_by_raw_path.get(os.path.abspath(str(metrics_path or "")), {}) if metrics_path else {}
-                    invalid_zero_metrics = metrics_exists and _is_invalid_zero_metrics(fmt, metric_row)
+                    invalid_zero_metrics = metrics_exists and _is_invalid_zero_metrics(
+                        fmt, metric_row, task_type=task_type
+                    )
                     row: dict[str, Any] = {
                         "run_dir": run_dir,
                         "run_name": run_name,
@@ -557,12 +568,10 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                         "gt_source": eval_args.get("gt_source"),
                         "nms_profile": eval_args.get("nms_profile"),
                         "metrics_read_policy": metrics_read_policy,
-                        "mAP50-95": None if invalid_zero_metrics else metric_row.get("mAP50-95"),
-                        "mAP50": None if invalid_zero_metrics else metric_row.get("mAP50"),
-                        "Box-F1": None if invalid_zero_metrics else metric_row.get("Box-F1"),
-                        "Box-P": None if invalid_zero_metrics else metric_row.get("Box-P"),
-                        "Box-R": None if invalid_zero_metrics else metric_row.get("Box-R"),
                     }
+                    row.update(
+                        metric_fields_from_row(metric_row, task_type, nullify=invalid_zero_metrics)
+                    )
                     perf, perf_reason = _resolve_perf_and_reason(run_dir, fmt, var.get("target_path"), var.get("performance"), entry)
                     profile = _perf_context_for_variant(run_dir, fmt, var.get("target_path"))
                     row.update(_extract_perf_details(perf, eval_args, profile))
@@ -649,6 +658,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         for split_name in ("test", "val"):
             for run_dir in run_dirs:
                 run_name = os.path.basename(run_dir.rstrip(os.sep))
+                task_type = read_run_task_type(run_dir)
                 metrics_ref_by_raw_path: dict[str, dict[str, Any]] = {}
                 canonical_metrics_by_format: dict[str, list[dict[str, str]]] = {}
                 for ref in unified_load_metrics(run_dir, source_kind="run", split=split_name):
@@ -729,12 +739,8 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                             "gt_source": eval_args.get("gt_source"),
                             "nms_profile": eval_args.get("nms_profile"),
                             "metrics_read_policy": metrics_read_policy,
-                            "mAP50-95": metric_row.get("mAP50-95"),
-                            "mAP50": metric_row.get("mAP50"),
-                            "Box-F1": metric_row.get("Box-F1"),
-                            "Box-P": metric_row.get("Box-P"),
-                            "Box-R": metric_row.get("Box-R"),
                         }
+                        row.update(metric_fields_from_row(metric_row, task_type))
                         perf, perf_reason = _resolve_perf_and_reason(run_dir, fmt, var.get("target_path"), var.get("performance"), entry)
                         profile = _perf_context_for_variant(run_dir, fmt, var.get("target_path"))
                         row.update(_extract_perf_details(perf, eval_args, profile))

@@ -147,3 +147,42 @@ def test_orient_rotnet_saves_model_in_dataset_and_can_reuse(tmp_path: Path) -> N
     out2 = tmp_path / "datasets" / "ds_o_oriented_2"
     assert (out2 / "orient_stats.csv").is_file()
 
+
+def test_orient_polygon_label_preserved(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    raw = tmp_path / "raw_data" / "ds_poly"
+    (raw / "train" / "images").mkdir(parents=True, exist_ok=True)
+    (raw / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    ref = raw / "train" / "images" / "ref.jpg"
+    bad = raw / "train" / "images" / "bad.jpg"
+    _make_ref_image(ref)
+    _rotate_90cw(ref, bad)
+    (raw / "train" / "labels" / "bad.txt").write_text(
+        "0 0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75\n",
+        encoding="utf-8",
+    )
+    (raw / "data.yaml").write_text("nc: 1\nnames: ['obj']\n", encoding="utf-8")
+    scan_main(["--workspace", str(tmp_path)])
+    orient_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--dataset",
+            "ds_poly",
+            "--reference",
+            str(ref),
+            "--min-score",
+            "1",
+            "--on-uncertain",
+            "fail",
+            "--no-legend",
+        ]
+    )
+    out_lbl = tmp_path / "datasets" / "ds_poly_oriented" / "train" / "labels" / "bad.txt"
+    assert out_lbl.is_file()
+    from smartrain.services.datasets.yolo_labels import YoloSegment, read_yolo_labels
+
+    labels = read_yolo_labels(str(out_lbl))
+    assert len(labels) == 1
+    assert isinstance(labels[0], YoloSegment)
+

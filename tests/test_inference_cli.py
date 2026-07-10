@@ -110,6 +110,13 @@ def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
     assert "infer_only" in report["performance"]
     env_path = Path(report["artifacts"]["environment_profile"]["path_absolute"])
     assert env_path.is_file()
+    out_dir = _latest_report_path(tmp_path).parent
+    autolabel = out_dir / "raw_images_autolabeled"
+    assert autolabel.is_dir()
+    assert (autolabel / "autolabel_manifest.json").is_file()
+    assert (autolabel / "data.yaml").is_file()
+    assert len(list((autolabel / "images").glob("*"))) == 2
+    assert report["artifacts"]["autolabel_dataset"]["images_exported"] == 2
 
 
 def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monkeypatch) -> None:
@@ -886,4 +893,133 @@ def test_resolve_model_falls_back_when_canonical_gateway_fails(tmp_path: Path, m
     args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
     with pytest.raises(RuntimeError):
         _resolve_model(args, WorkspaceLayout(str(tmp_path)))
+
+
+def test_inference_no_export_dataset(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+    out_dir = _latest_report_path(tmp_path).parent
+    assert not (out_dir / "raw_images_autolabeled").exists()
+    assert not (out_dir / "pred_overlays").exists()
+
+
+def test_inference_export_conf_filter(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+
+    class _FakeBoxesMulti:
+        def __init__(self):
+            self.xyxy = _FakeTensor([[10.0, 12.0, 40.0, 48.0], [50.0, 50.0, 60.0, 60.0], [1.0, 1.0, 5.0, 5.0]])
+            self.cls = _FakeTensor([0.0, 0.0, 0.0])
+            self.conf = _FakeTensor([0.2, 0.5, 0.9])
+
+        def __len__(self):
+            return 3
+
+    class _FakeResultMulti:
+        def __init__(self):
+            self.boxes = _FakeBoxesMulti()
+
+    class _FakeYOLOMulti:
+        def __init__(self, _weights: str):
+            self.names = {0: "obj"}
+
+        def predict(self, **_kwargs):
+            return [_FakeResultMulti()]
+
+    fake_mod = __import__("types").ModuleType("ultralytics")
+    fake_mod.YOLO = _FakeYOLOMulti
+    monkeypatch.setitem(sys.modules, "ultralytics", fake_mod)
+
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--export-label-conf-min",
+            "0.4",
+            "--export-label-conf-max",
+            "0.8",
+            "--no-export-visualize",
+        ]
+    )
+    label_path = _latest_report_path(tmp_path).parent / "raw_images_autolabeled" / "labels" / "a.txt"
+    text = label_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(text) == 1
+
+
+def test_inference_visualize_without_dataset(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+    _write_image(src / "b.jpg")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--no-export-dataset",
+            "--export-visualize",
+        ]
+    )
+    out_dir = _latest_report_path(tmp_path).parent
+    overlays = list((out_dir / "pred_overlays").glob("*"))
+    assert len(overlays) == 2
 

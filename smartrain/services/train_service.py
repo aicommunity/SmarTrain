@@ -147,6 +147,7 @@ def _run_external_provider_flow(
         device=str(u_cfg.get("device")) if u_cfg.get("device") is not None else None,
         target_dir=target_dir,
         run_name=run_name,
+        task_type=str(u_cfg.get("task") or "detect"),
     )
     training_end_time = datetime.now()
     dataset_name = os.path.basename(os.path.normpath(data))

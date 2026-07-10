@@ -19,6 +19,7 @@ def run_all_quality_stage(
     run_data_yaml_map: dict[str, str],
     collect_missing_metrics_recompute_plan_cb: Callable[..., dict[str, Any]],
     cmd_test_metrics_plot_cb: Callable[[argparse.Namespace], None],
+    refresh_runs_summary_cb: Callable[[argparse.Namespace], None] | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, Any] | None, bool]:
     artifacts: list[dict[str, str]] = []
     metric_sources_payload: dict[str, Any] | None = None
@@ -101,6 +102,18 @@ def run_all_quality_stage(
                     metric_sources_payload = json.load(f)
             except Exception:
                 metric_sources_payload = None
+
+        if refresh_runs_summary_cb is not None:
+            exp_csv = os.path.join(session_root, "artifacts", "table", "runs_summary.csv")
+            refresh_runs_summary_cb(
+                argparse.Namespace(
+                    output=exp_csv,
+                    workspace=args.workspace,
+                    models_root=args.models_root,
+                    analytics_session=args.analytics_session,
+                )
+            )
+            artifacts.append({"role": "summary_csv", "path": os.path.relpath(exp_csv, session_root)})
 
     return artifacts, metric_sources_payload, recompute_missing_metrics
 

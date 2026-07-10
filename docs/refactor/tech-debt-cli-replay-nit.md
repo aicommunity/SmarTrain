@@ -15,7 +15,7 @@
 |----------|-----|
 | `smartrain/cli_entrypoints/support/cli_contracts.py` | `emit_replay` → `build_non_interactive_command` |
 | `smartrain/workflows/testing/model_test_cli.py` | `emit_replay` |
-| `smartrain/services/model_test_orchestrator.py` | `emit_replay` |
+| `smartrain/services/testing/model_test_runner.py` | `emit_replay` |
 | `smartrain/services/training/train_cli_main.py` | `emit_replay` via callback |
 | `smartrain/workflows/training/training_cli_orchestration_service.py` | `emit_replay_cb` |
 | `smartrain/services/train_service.py` | `emit_replay` |

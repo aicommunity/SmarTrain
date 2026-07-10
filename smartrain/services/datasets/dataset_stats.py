@@ -11,10 +11,13 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 import yaml
 from rich.console import Console
 from rich.table import Table
+
+from smartrain.services.datasets.yolo_labels import YoloBBox, YoloSegment, read_yolo_labels
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
@@ -44,6 +47,8 @@ class DatasetStats:
     duplicate_cross_split_groups: int = 0
     near_duplicate_groups: int = 0
     near_duplicate_cross_split_groups: int = 0
+    bbox_instances: int = 0
+    polygon_instances: int = 0
 
     @property
     def images_total(self) -> int:
@@ -107,34 +112,19 @@ def _resolve_label_path(labels_dir: str, stem: str) -> str:
     return os.path.join(labels_dir, f"{stem}.txt")
 
 
-def _parse_label_file(path: str) -> tuple[int, int, list[int]]:
+def _parse_label_file(path: str) -> tuple[int, int, list[int], int, int]:
     if not os.path.isfile(path):
-        return 0, 0, []
-    valid = 0
-    broken = 0
-    ids: list[int] = []
+        return 0, 0, [], 0, 0
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+        raw_lines = [ln.strip() for ln in Path(path).read_text(encoding="utf-8").splitlines() if ln.strip()]
     except Exception:
-        return 0, 1, []
-    for raw in lines:
-        line = raw.strip()
-        if not line:
-            continue
-        parts = line.split()
-        if len(parts) < 5:
-            broken += 1
-            continue
-        try:
-            class_id = int(float(parts[0]))
-            _ = [float(x) for x in parts[1:5]]
-        except ValueError:
-            broken += 1
-            continue
-        valid += 1
-        ids.append(class_id)
-    return valid, broken, ids
+        return 0, 1, [], 0, 0
+    labels = read_yolo_labels(path)
+    broken = max(0, len(raw_lines) - len(labels))
+    ids = [int(lb.cls_id) for lb in labels]
+    bbox_n = sum(1 for lb in labels if isinstance(lb, YoloBBox))
+    poly_n = sum(1 for lb in labels if isinstance(lb, YoloSegment))
+    return len(labels), broken, ids, bbox_n, poly_n
 
 
 def _file_md5(path: str) -> str:
@@ -178,9 +168,12 @@ def _scan_one_dataset(dataset_dir: str, name: str) -> DatasetStats:
     orphan_images = 0
     orphan_labels = 0
     empty_images = 0
+    bbox_instances = 0
+    polygon_instances = 0
 
     def _scan_pair(images_dir: str, labels_dir: str, split: str) -> None:
         nonlocal broken_label_lines, unknown_class_ids, orphan_images, orphan_labels, empty_images
+        nonlocal bbox_instances, polygon_instances
         image_stems = _list_stems(images_dir, image_mode=True)
         label_stems = _list_stems(labels_dir, image_mode=False)
 
@@ -190,8 +183,10 @@ def _scan_one_dataset(dataset_dir: str, name: str) -> DatasetStats:
 
         for stem in image_stems:
             label_path = _resolve_label_path(labels_dir, stem)
-            valid, broken, ids = _parse_label_file(label_path)
+            valid, broken, ids, bbox_n, poly_n = _parse_label_file(label_path)
             broken_label_lines += broken
+            bbox_instances += bbox_n
+            polygon_instances += poly_n
             split_instances[split] += valid
             if valid == 0:
                 empty_images += 1
@@ -278,6 +273,8 @@ def _scan_one_dataset(dataset_dir: str, name: str) -> DatasetStats:
         orphan_images=orphan_images,
         orphan_labels=orphan_labels,
         empty_images=empty_images,
+        bbox_instances=bbox_instances,
+        polygon_instances=polygon_instances,
     )
 
 
@@ -813,6 +810,7 @@ def _render_datasets_table(
 ) -> None:
     rows = []
     issues_rows: list[dict[str, str]] = []
+    has_polygons = any(scanned[name].polygon_instances > 0 for name in selected_names)
     for name in selected_names:
         ds = scanned[name]
         class_totals = {
@@ -846,6 +844,9 @@ def _render_datasets_table(
             "near_dup": ds.near_duplicate_groups,
             "near_dup_cross": ds.near_duplicate_cross_split_groups,
         }
+        if has_polygons:
+            row["bbox_inst"] = ds.bbox_instances
+            row["poly_inst"] = ds.polygon_instances
         rows.append(row)
         issues_rows.append(
             {
@@ -1039,6 +1040,14 @@ def build_stats_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Export balance-ready metrics to JSON file path",
     )
+    parser.add_argument(
+        "--after-augment",
+        action="store_true",
+        help=(
+            "For datasets with balance_manifest post_augment: compare per-class bbox counts "
+            "after balance (class_counts_after_bbox) vs after augment (class_counts_after_augment)."
+        ),
+    )
     return parser
 
 
@@ -1127,6 +1136,74 @@ def _render_balance_ready(scanned: dict[str, DatasetStats], *, beta: float, tail
     return rows
 
 
+def _load_balance_manifest(dataset_dir: str) -> dict | None:
+    path = os.path.join(dataset_dir, "balance_manifest.json")
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data if isinstance(data, dict) else None
+
+
+def _render_after_augment(selected: list[str], available: dict[str, str]) -> list[dict]:
+    rows: list[dict] = []
+    for name in selected:
+        ds_dir = available.get(name)
+        if not ds_dir:
+            continue
+        manifest = _load_balance_manifest(ds_dir)
+        if not manifest:
+            rows.append({"dataset": name, "error": "no balance_manifest.json"})
+            continue
+        post = manifest.get("post_augment")
+        if not isinstance(post, dict):
+            rows.append({"dataset": name, "error": "no post_augment in manifest (not hybrid-aug output?)"})
+            continue
+        before_raw = manifest.get("class_counts_after_bbox") or {}
+        after_raw = post.get("class_counts_after_augment") or {}
+        before = {str(k): int(v) for k, v in before_raw.items()}
+        after = {str(k): int(v) for k, v in after_raw.items()}
+        all_classes = sorted(set(before) | set(after))
+        class_rows: list[dict] = []
+        for cls in all_classes:
+            b = int(before.get(cls, 0))
+            a = int(after.get(cls, 0))
+            class_rows.append({"class": cls, "after_balance": b, "after_augment": a, "delta": a - b})
+        rows.append(
+            {
+                "dataset": name,
+                "strategy": manifest.get("strategy"),
+                "train_bbox_before_augment": post.get("train_bbox_sum_before_augment"),
+                "train_bbox_after_augment": post.get("train_bbox_sum_after_augment"),
+                "classes": class_rows,
+            }
+        )
+    table = Table(title="Per-class bbox: after balance vs after augment")
+    table.add_column("dataset")
+    table.add_column("class")
+    table.add_column("after_balance")
+    table.add_column("after_augment")
+    table.add_column("delta")
+    for row in rows:
+        if row.get("error"):
+            table.add_row(str(row["dataset"]), str(row["error"]), "", "", "")
+            continue
+        classes = row.get("classes") or []
+        if not classes:
+            table.add_row(str(row["dataset"]), "(no classes)", "", "", "")
+            continue
+        for i, cr in enumerate(classes):
+            table.add_row(
+                str(row["dataset"]) if i == 0 else "",
+                str(cr["class"]),
+                str(cr["after_balance"]),
+                str(cr["after_augment"]),
+                f"{cr['delta']:+d}" if cr["delta"] else "0",
+            )
+    console.print(table)
+    return rows
+
+
 def build_stats_compare_arg_parser() -> argparse.ArgumentParser:
     parser = CliArgumentParser(description="Comparing two datasets from datasets/")
     parser.add_argument(
@@ -1210,6 +1287,18 @@ def _run_stats(args, layout: WorkspaceLayout, *, interactive_allowed: bool) -> i
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump({"generated_at": datetime.now().isoformat(), "datasets": rows}, f, ensure_ascii=False, indent=2)
             console.print(f"[OK] Balance-ready report exported: {out_path}")
+    if bool(getattr(args, "after_augment", False)):
+        after_rows = _render_after_augment(selected, available)
+        out_path = getattr(args, "export_balance_report", None)
+        if out_path:
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"generated_at": datetime.now().isoformat(), "after_augment": after_rows},
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            console.print(f"[OK] After-augment report exported: {out_path}")
     if replay_cmd:
         print_replay_command("after execution", replay_cmd)
     return 0

@@ -129,6 +129,8 @@ def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path
     monkeypatch.setattr("smartrain.run_model_contract.gateway.load_target", lambda *_a, **_k: _P())
     ns = argparse.Namespace(
         models_root=str(tmp_path / "runs"),
+        models_root_cli=None,
+        workspace=str(tmp_path),
         filter_dataset=None,
         filter_model=None,
         filter_training_ok=None,
@@ -139,6 +141,40 @@ def test_filtered_run_records_uses_canonical_gateway_when_enabled(tmp_path: Path
     _rd, rec = rows[0]
     assert rec.model == "canonical_model"
     assert rec.dataset_name == "ds_a"
+
+
+def test_filtered_run_records_includes_promoted_models(tmp_path: Path, monkeypatch) -> None:
+    from smartrain.services.analyze.run_query import filtered_run_records
+
+    release_dir = tmp_path / "models" / "ds_b" / "detect_yolo_20260115"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    (release_dir.parent / "detect_yolo_20260115.pt").write_bytes(b"pt")
+    (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    class _M:
+        model_id = "released_model"
+
+    class _R:
+        dataset_ref = "ds_b"
+
+    class _P:
+        models = [_M()]
+        runs = [_R()]
+
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.load_target", lambda *_a, **_k: _P())
+    monkeypatch.setattr("smartrain.run_model_contract.gateway.load_metrics", lambda *_a, **_k: [])
+
+    ns = argparse.Namespace(
+        workspace=str(tmp_path),
+        models_root_cli=None,
+        filter_dataset=None,
+        filter_model=None,
+        filter_training_ok=None,
+        filter_testing_ok=None,
+    )
+    rows = filtered_run_records(ns, build_run_record_cb=results_analyzer._build_run_record_unified)
+    paths = [rd for rd, _ in rows]
+    assert str(release_dir.resolve()) in paths
 
 
 def test_build_run_record_unified_uses_gateway_metrics(tmp_path: Path, monkeypatch) -> None:
@@ -1233,7 +1269,7 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
 
     def _fake_prompt_text(label: str, default: str = "", **_kwargs) -> str:
         prompt_defaults[label] = default
-        if label == "Other run numbers (comma-separated)":
+        if label == "Other run numbers (comma-separated, leave empty for baseline-only report)":
             return ""
         if label == "Path to data.yaml (required for speed/full)":
             return str(tmp_path / "datasets" / "ds_a" / "data.yaml")
@@ -1260,11 +1296,10 @@ def test_analyze_all_allows_single_run_without_compare_and_shows_relative_run_pa
     )
     out = capsys.readouterr().out
 
-    assert prompt_defaults.get("Other run numbers (comma-separated)") == ""
-    assert "run_dir (relative to runs root)" in out
+    assert prompt_defaults.get("Other run numbers (comma-separated, leave empty for baseline-only report)") == ""
+    assert "path (relative to workspace)" in out.lower()
     first_row = next((line for line in out.splitlines() if line.strip().startswith("1  ")), "")
-    assert "ds_a/run_a" in first_row
-    assert "/runs/" not in first_row
+    assert "runs/ds_a/run_a" in first_row
     assert "No candidate runs selected: compare artifacts are skipped" in out
 
     session_root = tmp_path / "analytics" / "analyze-reports" / "session_single_run"
@@ -2542,6 +2577,71 @@ def test_analyze_all_marks_incomplete_speed_quality_series(
     manifest = json.loads((tmp_path / "analytics" / "analyze-reports" / "session_incomplete_speed" / "session.json").read_text(encoding="utf-8"))
     reasons = [x.get("reason_code") for x in (manifest.get("artifact_failures") or [])]
     assert "benchmark_missing_or_failed" in reasons
+
+
+def test_analyze_all_completes_when_benchmark_has_no_usable_split(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_a = _write_run(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52, box_f1=0.61)
+    run_b = _write_run(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56, box_f1=0.65)
+
+    dataset_dir = tmp_path / "datasets" / "ds_a"
+    train_images = dataset_dir / "train" / "images"
+    train_images.mkdir(parents=True, exist_ok=True)
+    (train_images / "a.jpg").write_bytes(b"img")
+    (dataset_dir / "data.yaml").write_text(
+        "path: .\ntrain: train/images\nval: val/images\ntest: test/images\n",
+        encoding="utf-8",
+    )
+
+    runtime_yaml = run_a / "tmp" / "_runtime_data_train.yaml"
+    runtime_yaml.parent.mkdir(parents=True, exist_ok=True)
+    runtime_yaml.write_text(
+        f"path: {dataset_dir}\ntrain: train/images\nval: val/images\ntest: test/images\n",
+        encoding="utf-8",
+    )
+    (run_a / "train" / "args.yaml").write_text(f"data: {runtime_yaml}\n", encoding="utf-8")
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            pass
+
+        def predict(self, **_kwargs):
+            class _Speed:
+                speed = {"preprocess": 1.0, "inference": 2.0, "postprocess": 0.5}
+
+            return [_Speed()]
+
+    monkeypatch.setattr("ultralytics.YOLO", _FakeYOLO)
+    monkeypatch.setattr(workflow_dispatch, "cmd_export_table", lambda args: Path(args.output).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a)}, {"run_dir": str(run_b)}]).to_csv(args.output, index=False))
+    monkeypatch.setattr(workflow_dispatch, "cmd_leaderboard", lambda args: Path(args.out_csv).parent.mkdir(parents=True, exist_ok=True) or pd.DataFrame([{"run_dir": str(run_a), "composite_score": 1.0}, {"run_dir": str(run_b), "composite_score": 0.9}]).to_csv(args.out_csv, index=False))
+    monkeypatch.setattr(workflow_dispatch, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+
+    analyze_main(
+        [
+            "all",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--baseline",
+            str(run_a),
+            "--others",
+            str(run_b),
+            "--profile",
+            "full",
+            "--analytics-session",
+            "session_no_test_split",
+            "--no-pdf",
+            "--no-odt",
+        ]
+    )
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_no_test_split"
+    assert (session_root / "session.json").is_file()
+    assert (session_root / "ru" / "index.md").is_file()
+    manifest = json.loads((session_root / "session.json").read_text(encoding="utf-8"))
+    assert manifest.get("profile") == "full"
 
 
 def test_test_metrics_plot_saves_unresolved_status_on_recompute_exception(
