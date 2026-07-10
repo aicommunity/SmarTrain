@@ -253,11 +253,6 @@ def export_yolo_dataset(
         )
 
     dataset_dir = resolve_autolabel_dataset_dir(out_root, source_short)
-    images_dir = dataset_dir / "images"
-    labels_dir = dataset_dir / "labels"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
-
     images = report.get("images") if isinstance(report.get("images"), list) else []
     used_stems: set[str] = set()
     file_mapping: list[dict[str, Any]] = []
@@ -266,6 +261,7 @@ def export_yolo_dataset(
     labels_total = 0
     images_exported = 0
     images_skipped_empty = 0
+    pending_exports: list[tuple[str, str, str, list]] = []
 
     for row in images:
         if not isinstance(row, dict):
@@ -285,10 +281,7 @@ def export_yolo_dataset(
         ext = Path(src).suffix.lower() or ".jpg"
         export_image_name = f"{export_stem}{ext}"
         export_label_name = f"{export_stem}.txt"
-        dst_image = images_dir / export_image_name
-        dst_label = labels_dir / export_label_name
-        shutil.copy2(src, dst_image)
-        write_yolo_labels(str(dst_label), yolo_labels)
+        pending_exports.append((src, export_image_name, export_label_name, yolo_labels))
         labels_total += len(yolo_labels)
         images_exported += 1
         exported_paths.add(os.path.abspath(src))
@@ -301,6 +294,32 @@ def export_yolo_dataset(
                 "export_label": f"labels/{export_label_name}",
             }
         )
+
+    if images_exported == 0:
+        print(
+            "[INFO] Autolabel dataset export skipped: no images with labels after confidence filter.",
+            file=sys.stderr,
+        )
+        return (
+            ExportSummary(
+                dataset_dir=None,
+                manifest_path=None,
+                images_exported=0,
+                labels_total=0,
+                images_skipped_empty=images_skipped_empty,
+                overlay_paths=(),
+                overlay_dir=None,
+            ),
+            set(),
+        )
+
+    images_dir = dataset_dir / "images"
+    labels_dir = dataset_dir / "labels"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    for src, export_image_name, export_label_name, yolo_labels in pending_exports:
+        shutil.copy2(src, images_dir / export_image_name)
+        write_yolo_labels(str(labels_dir / export_label_name), yolo_labels)
 
     _write_data_yaml(dataset_dir, all_class_names)
 
@@ -354,9 +373,8 @@ def export_prediction_overlays(
     exported_only: set[str] | None,
     use_export_filter: bool,
     options: ExportOptions,
-) -> tuple[list[str], str]:
+) -> tuple[list[str], str | None]:
     overlay_dir = Path(out_root) / "pred_overlays"
-    overlay_dir.mkdir(parents=True, exist_ok=True)
     task_type = task_to_metadata_task_type(report.get("task_type"))
     images = report.get("images") if isinstance(report.get("images"), list) else []
     color_registry = LabelColorRegistry(Path(layout.root))
@@ -396,12 +414,16 @@ def export_prediction_overlays(
             original_format = im.format
         palette = {name: color_registry.ensure(name) for name in class_names.values()}
         rendered = render_pred_overlay(canvas, render_rows, class_names, label_colors=palette)
+        if not saved:
+            overlay_dir.mkdir(parents=True, exist_ok=True)
         out_path = overlay_dir / Path(src).name
         if out_path.exists():
             out_path = overlay_dir / f"{Path(src).stem}__{len(saved) + 1}{Path(src).suffix.lower() or '.jpg'}"
         save_rendered_image(rendered, out_path, original_format=original_format)
         saved.append(str(out_path.resolve()))
     color_registry.save()
+    if not saved:
+        return [], None
     return saved, str(overlay_dir.resolve())
 
 
@@ -489,10 +511,11 @@ def run_inference_exports(
             options=options,
             layout=layout,
         )
-        print(
-            f"[OK] Autolabel dataset: {summary.dataset_dir} "
-            f"(images={summary.images_exported}, labels={summary.labels_total})"
-        )
+        if summary.dataset_dir:
+            print(
+                f"[OK] Autolabel dataset: {summary.dataset_dir} "
+                f"(images={summary.images_exported}, labels={summary.labels_total})"
+            )
 
     if options.export_visualize:
         overlay_only = exported_paths if options.export_dataset else None

@@ -45,7 +45,8 @@ Export flags:
 
 `--conf` is the inference threshold; `--export-label-conf-*` further filters labels written to the dataset from predictions already returned by the model.
 
-Classification is not exported to YOLO (warning, empty dataset).
+- Classification is not exported to YOLO (warning, no dataset folder created).
+- If no images pass the export confidence filter, `<basename>_autolabeled/` and `pred_overlays/` are not created.
 
 ## External provider capability matrix (task × payload)
 

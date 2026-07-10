@@ -73,6 +73,7 @@ Model convert highlights:
 Inference highlights:
 
 - `smartrain inference` supports local model artifacts `pt`, `onnx`, `engine`, `trt` through unified backend routing, plus external provider references.
+- `smartrain inference` writes `inference/<model>/<timestamp>-<source>/inference_results.json`. By default it also exports a YOLO autolabel dataset under `<basename>_autolabeled/` (with `autolabel_manifest.json`) and optional `pred_overlays/`; use `--no-export-dataset` to skip. Empty exports (no labels after the confidence filter) do not create dataset or overlay folders. The `vis` command runs inference internally with export disabled.
 - Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
 - Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
 - Full inference JSON/artifact contract: [`inference.md`](inference.md).

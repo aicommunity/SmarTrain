@@ -194,7 +194,7 @@ COMMANDS: dict[str, CommandHelp] = {
         summary="Run inference and save JSON report to workspace inference/.",
         description=(
             "Batch inference from folder, dataset split, or promoted model with optional ROI "
-            "pre-detection and structured JSON output."
+            "pre-detection, structured JSON output, and optional YOLO autolabel dataset export."
         ),
     ),
     "vis": CommandHelp(

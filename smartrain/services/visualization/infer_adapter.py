@@ -9,6 +9,25 @@ from smartrain.services.inference_arg_parser import build_inference_arg_parser
 from smartrain.services.inference_service import run_inference_job
 
 
+from smartrain.core.training.train_profile import task_to_metadata_task_type
+
+
+def _predictions_from_row(row: dict[str, Any]) -> list[dict[str, Any]]:
+    task_outputs = row.get("task_outputs") if isinstance(row.get("task_outputs"), dict) else {}
+    task_type = task_to_metadata_task_type(row.get("task_type"))
+    if task_type == "segmentation":
+        segments = task_outputs.get("segments")
+        if isinstance(segments, list) and segments:
+            return [x for x in segments if isinstance(x, dict)]
+    detections = task_outputs.get("detections")
+    if isinstance(detections, list) and detections:
+        return [x for x in detections if isinstance(x, dict)]
+    legacy = row.get("detections")
+    if isinstance(legacy, list):
+        return [x for x in legacy if isinstance(x, dict)]
+    return []
+
+
 def _latest_inference_report(layout: WorkspaceLayout) -> Path:
     all_reports = sorted(Path(layout.root).glob("inference/**/inference_results.json"))
     if not all_reports:
@@ -35,6 +54,8 @@ def run_inference_for_split(
         "folder",
         "--source-dir",
         str(split_dir),
+        "--no-export-dataset",
+        "--no-export-visualize",
     ]
     if conf is not None:
         argv.extend(["--conf", str(conf)])
@@ -58,9 +79,7 @@ def run_inference_for_split(
         ap = row.get("image_path_absolute") or row.get("image_path") or row.get("source_path")
         if not isinstance(ap, str) or not ap.strip():
             continue
-        dets = row.get("detections")
-        if not isinstance(dets, list):
-            dets = []
-        by_path[str(Path(ap).resolve())] = [x for x in dets if isinstance(x, dict)]
+        dets = _predictions_from_row(row)
+        by_path[str(Path(ap).resolve())] = dets
     return by_path
 

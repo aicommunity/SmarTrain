@@ -95,12 +95,26 @@ def _extract_polygon_original_xy(det: dict[str, Any]) -> list[Any] | None:
     return None
 
 
-def task_output_dict_to_yolo_label(det: dict[str, Any], img_w: int, img_h: int) -> YoloLabel | None:
+from smartrain.core.training.train_profile import task_to_metadata_task_type
+
+
+def task_output_dict_to_yolo_label(
+    det: dict[str, Any],
+    img_w: int,
+    img_h: int,
+    *,
+    task_type: str | None = None,
+) -> YoloLabel | None:
     cls_id = _det_class_id(det)
     bbox = _extract_bbox_original_xyxy(det)
+    poly = _extract_polygon_original_xy(det)
+    resolved = task_to_metadata_task_type(task_type)
+    if resolved == "segmentation" and poly is not None:
+        segment = polygon_pixels_to_yolo_segment(cls_id, poly, img_w, img_h)
+        if segment is not None:
+            return segment
     if bbox is not None:
         return xyxy_pixels_to_yolo_bbox(cls_id, bbox[0], bbox[1], bbox[2], bbox[3], img_w, img_h)
-    poly = _extract_polygon_original_xy(det)
     if poly is not None:
         return polygon_pixels_to_yolo_segment(cls_id, poly, img_w, img_h)
     return None
@@ -108,10 +122,11 @@ def task_output_dict_to_yolo_label(det: dict[str, Any], img_w: int, img_h: int) 
 
 def task_outputs_to_yolo_labels(task_type: str, outputs: list[dict[str, Any]], img_w: int, img_h: int) -> list[YoloLabel]:
     labels: list[YoloLabel] = []
+    resolved = task_to_metadata_task_type(task_type)
     for item in outputs:
         if not isinstance(item, dict):
             continue
-        lb = task_output_dict_to_yolo_label(item, img_w, img_h)
+        lb = task_output_dict_to_yolo_label(item, img_w, img_h, task_type=resolved)
         if lb is not None:
             labels.append(lb)
     return labels

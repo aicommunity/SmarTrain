@@ -23,6 +23,8 @@ def wrap_inference_report_v2(payload: dict[str, Any]) -> dict[str, Any]:
         "artifacts": {
             "inference_report": payload.get("output"),
             "environment_profile": (payload.get("artifacts") or {}).get("environment_profile"),
+            "autolabel_dataset": (payload.get("artifacts") or {}).get("autolabel_dataset"),
+            "pred_overlays": (payload.get("artifacts") or {}).get("pred_overlays"),
         },
         "metrics": {
             "namespace": task_type,

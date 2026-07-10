@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.services.datasets.yolo_labels import read_yolo_labels, task_output_dict_to_yolo_label
+from smartrain.services.datasets.yolo_labels import (
+    YoloSegment,
+    read_yolo_labels,
+    task_output_dict_to_yolo_label,
+)
 from smartrain.services.inference_dataset_export import (
     ExportOptions,
     export_yolo_dataset,
@@ -34,6 +38,139 @@ def test_task_output_dict_to_yolo_label_bbox() -> None:
     assert lb.cls_id == 1
     assert lb.cx == pytest.approx(0.2)
     assert lb.cy == pytest.approx(0.3)
+
+
+def test_task_output_dict_to_yolo_label_segmentation_prefers_polygon() -> None:
+    seg = {
+        "polygon_original_xy": [[10.0, 10.0], [30.0, 10.0], [30.0, 30.0], [10.0, 30.0]],
+        "bbox_original_xyxy": [10.0, 10.0, 30.0, 30.0],
+        "class_index": 2,
+        "confidence": 0.88,
+    }
+    lb = task_output_dict_to_yolo_label(seg, 100, 100, task_type="segmentation")
+    assert isinstance(lb, YoloSegment)
+    assert lb.cls_id == 2
+    assert len(lb.points) == 4
+
+
+def test_export_yolo_dataset_segmentation_writes_polygon_labels(tmp_path: Path) -> None:
+    src = tmp_path / "seg_images"
+    src.mkdir()
+    img = src / "a.jpg"
+    Image.new("RGB", (100, 80), color=(1, 2, 3)).save(img)
+    report = {
+        "task_type": "segmentation",
+        "source": {"mode": "folder", "path_absolute": str(src)},
+        "model": {
+            "source": "models",
+            "name": "seg_demo",
+            "weights_absolute": "/w/seg.pt",
+            "provider": {"type": "builtin", "id": "ultralytics"},
+        },
+        "parameters": {"conf": 0.25, "img_size": 640, "device": "cpu", "half": False, "data_mode": "folder", "limit": 0},
+        "images": [
+            {
+                "image_path_absolute": str(img),
+                "image_size": {"width": 100, "height": 80},
+                "task_outputs": {
+                    "segments": [
+                        {
+                            "polygon_original_xy": [[10.0, 12.0], [40.0, 12.0], [40.0, 48.0], [10.0, 48.0]],
+                            "class_index": 0,
+                            "class_name": "obj",
+                            "confidence": 0.91,
+                        }
+                    ]
+                },
+            }
+        ],
+    }
+    out_root = tmp_path / "inference_run"
+    out_root.mkdir()
+    report_path = out_root / "inference_results.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    class _Layout:
+        root = str(tmp_path)
+
+    summary, _ = export_yolo_dataset(
+        report,
+        out_root=out_root,
+        source_short="seg_images",
+        report_path=report_path,
+        options=ExportOptions(True, False, 0.25, 1.0),
+        layout=_Layout(),  # type: ignore[arg-type]
+    )
+    label_path = out_root / "seg_images_autolabeled" / "labels" / "a.txt"
+    assert summary.images_exported == 1
+    assert label_path.is_file()
+    raw = label_path.read_text(encoding="utf-8").strip().split()
+    assert len(raw) > 5
+    labels = read_yolo_labels(str(label_path))
+    assert len(labels) == 1
+    assert isinstance(labels[0], YoloSegment)
+
+
+def test_export_yolo_dataset_does_not_create_dir_when_all_empty(tmp_path: Path) -> None:
+    src = tmp_path / "raw_images"
+    src.mkdir()
+    img = src / "a.jpg"
+    Image.new("RGB", (50, 50)).save(img)
+    report = {
+        "task_type": "detection",
+        "source": {"mode": "folder", "path_absolute": str(src)},
+        "model": {
+            "source": "models",
+            "name": "demo",
+            "weights_absolute": "/w/demo.pt",
+            "provider": {"type": "builtin", "id": "ultralytics"},
+        },
+        "parameters": {"conf": 0.25, "img_size": 640, "device": "cpu", "half": False, "data_mode": "folder", "limit": 0},
+        "images": [
+            {
+                "image_path_absolute": str(img),
+                "image_size": {"width": 50, "height": 50},
+                "task_outputs": {"detections": []},
+            }
+        ],
+    }
+    out_root = tmp_path / "inference_run"
+    out_root.mkdir()
+    report_path = out_root / "inference_results.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    class _Layout:
+        root = str(tmp_path)
+
+    summary, exported = export_yolo_dataset(
+        report,
+        out_root=out_root,
+        source_short="raw_images",
+        report_path=report_path,
+        options=ExportOptions(True, True, 0.25, 1.0),
+        layout=_Layout(),  # type: ignore[arg-type]
+    )
+    assert summary.dataset_dir is None
+    assert summary.images_exported == 0
+    assert not exported
+    assert not (out_root / "raw_images_autolabeled").exists()
+
+
+def test_wrap_inference_report_v2_includes_export_artifacts() -> None:
+    from smartrain.run_model_contract.schema import wrap_inference_report_v2
+
+    payload = {
+        "task_type": "detection",
+        "output": "/tmp/inference_results.json",
+        "artifacts": {
+            "environment_profile": {"path_absolute": "/tmp/environment_profile.json"},
+            "autolabel_dataset": {"path_absolute": "/tmp/raw_autolabeled", "images_exported": 2},
+            "pred_overlays": {"path_absolute": "/tmp/pred_overlays", "images_rendered": 2},
+        },
+    }
+    out = wrap_inference_report_v2(payload)
+    assert out["v2"]["artifacts"]["autolabel_dataset"]["images_exported"] == 2
+    assert out["v2"]["artifacts"]["pred_overlays"]["images_rendered"] == 2
 
 
 def test_filter_task_outputs_conf_range() -> None:
