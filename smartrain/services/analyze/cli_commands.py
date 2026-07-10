@@ -25,6 +25,10 @@ import pandas as pd
 import yaml
 from tqdm import tqdm
 
+from smartrain.services.analyze.data_yaml_splits import (
+    pick_best_data_yaml_candidate,
+    split_dir_exists,
+)
 from smartrain.services.analyze.compare import (
     build_delta_rows,
     compute_composite_score,
@@ -55,7 +59,12 @@ from smartrain.services.analyze.metrics_reader import (
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
-from smartrain.core.runtime.run_discovery import find_run_directories, is_run_directory, resolve_models_scan_root
+from smartrain.core.runtime.run_discovery import (
+    discover_analysis_targets,
+    find_run_directories,
+    is_run_directory,
+    resolve_models_scan_root,
+)
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.training.confidence_recommendation import recommendation_file_path, read_recommendation_file
@@ -160,8 +169,9 @@ from smartrain.services.analyze.leaderboard import (
     write_leaderboard_csv,
 )
 from smartrain.services.analyze.commands.registry import AnalyzeCommandRegistry
+from smartrain.tasks.metric_columns import metric_agg_columns
 
-METRIC_AGG_COLUMNS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
+METRIC_AGG_COLUMNS = metric_agg_columns("detection")
 
 _ANALYZE_COMMAND_REGISTRY = AnalyzeCommandRegistry()
 
@@ -330,19 +340,15 @@ def _collect_data_yaml_candidates_for_run(run_dir: str, workspace_cli: str | Non
 
 
 def _has_split_dir(data_yaml_path: str, split_name: str) -> bool:
-    try:
-        with open(data_yaml_path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-        if not isinstance(cfg, dict):
-            return False
-        split_rel = str(cfg.get(split_name, "")).strip()
-        if not split_rel:
-            return False
-        base_dir = os.path.dirname(os.path.abspath(data_yaml_path))
-        split_path = os.path.abspath(os.path.join(base_dir, split_rel))
-        return os.path.isdir(split_path)
-    except Exception:
-        return False
+    return split_dir_exists(data_yaml_path, split_name)
+
+
+def _pick_data_yaml_candidate(
+    candidates: list[tuple[str, str]],
+    *,
+    preferred_split: str | None = None,
+) -> tuple[str, str] | None:
+    return pick_best_data_yaml_candidate(candidates, preferred_split=preferred_split)
 
 
 def _auto_select_data_yaml(
@@ -351,30 +357,27 @@ def _auto_select_data_yaml(
     workspace_cli: str | None,
     preferred_split: str | None = None,
 ) -> str | None:
-    candidates: list[str] = []
-    source_by_path: dict[str, str] = {}
+    candidate_pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
     for rd in [baseline] + others:
         for p, src in _collect_data_yaml_candidates_for_run(rd, workspace_cli):
-            if p not in candidates:
-                candidates.append(p)
-            source_by_path[p] = src
-    if not candidates:
+            if p in seen:
+                continue
+            seen.add(p)
+            candidate_pairs.append((p, src))
+    if not candidate_pairs:
         return None
-    if preferred_split:
-        viable = [p for p in candidates if _has_split_dir(p, preferred_split)]
-        if viable:
-            candidates = viable
-    if len(candidates) == 1:
-        src = source_by_path.get(candidates[0], "unknown")
-        print(f"[INFO] Auto-detected data.yaml: {candidates[0]} (source: {src})")
-        return candidates[0]
+    picked_pair = _pick_data_yaml_candidate(candidate_pairs, preferred_split=preferred_split)
+    if picked_pair is None:
+        return None
+    picked, src = picked_pair
+    if len(candidate_pairs) == 1:
+        print(f"[INFO] Auto-detected data.yaml: {picked} (source: {src})")
+        return picked
     print("[INFO] Multiple data.yaml candidates detected:")
-    for idx, path in enumerate(candidates, start=1):
-        src = source_by_path.get(path, "unknown")
-        print(f"  {idx}. {path}  [source: {src}]")
-    picked = _workflow_attr("prompt_choice")(
-        "Select data.yaml", candidates, default=candidates[0], show_options=False
-    )
+    for idx, (path, source) in enumerate(candidate_pairs, start=1):
+        print(f"  {idx}. {path}  [source: {source}]")
+    print(f"[INFO] Auto-selected data.yaml: {picked} (source: {src})")
     return picked
 
 
@@ -389,15 +392,12 @@ def _build_run_data_yaml_map(
     unresolved: list[str] = []
     for rd in run_dirs:
         candidates = _collect_data_yaml_candidates_for_run(rd, workspace_cli)
-        if preferred_split:
-            viable = [(p, src) for p, src in candidates if _has_split_dir(p, preferred_split)]
-            if viable:
-                candidates = viable
-        if not candidates:
+        picked = _pick_data_yaml_candidate(candidates, preferred_split=preferred_split)
+        if picked is None:
             unresolved.append(rd)
             continue
-        run_to_yaml[rd] = candidates[0][0]
-        run_to_source[rd] = candidates[0][1]
+        run_to_yaml[rd] = picked[0]
+        run_to_source[rd] = picked[1]
     return run_to_yaml, run_to_source, unresolved
 
 
@@ -466,15 +466,24 @@ def _load_dataset_class_names(data_yaml: str) -> dict[int, str]:
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
+    models_root_cli = getattr(args, "models_root_cli", None)
+    if models_root_cli is None:
+        models_root_cli = getattr(args, "models_root", None)
+    targets = discover_analysis_targets(
+        workspace_cli=getattr(args, "workspace", None),
+        models_root_cli=models_root_cli,
+    )
     run_scan_command(
-        models_root=args.models_root,
-        find_run_directories_fn=find_run_directories,
+        runs=targets,
         flat_row_for_run=_flat_row_for_run,
     )
 
 
 def cmd_export_table(args: argparse.Namespace) -> None:
-    runs = find_run_directories(args.models_root)
+    runs = discover_analysis_targets(
+        workspace_cli=getattr(args, "workspace", None),
+        models_root_cli=getattr(args, "models_root_cli", None),
+    )
     out_path = _default_relative_output(
         args.workspace, args.analytics_session, "table", "runs_summary.csv", args.output
     )
@@ -653,6 +662,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         results_csv_path=results_csv_path,
         pick_map_column=pick_map_column,
         default_map_col=DEFAULT_MAP_COL,
+        display_labels=_build_run_display_labels(all_runs),
     )
 
     _finalize_compare_analytics_session(
@@ -671,8 +681,13 @@ def _build_run_record_unified(run_dir: str) -> RunRecord:
     )
 
 
-def _read_test_metrics_for_run(run_dir: str, *, format_name: str = "pt") -> dict[str, Any]:
-    return _svc_read_test_metrics_for_run(run_dir, format_name=format_name)
+def _read_test_metrics_for_run(
+    run_dir: str,
+    *,
+    format_name: str = "pt",
+    source_kind: str | None = None,
+) -> dict[str, Any]:
+    return _svc_read_test_metrics_for_run(run_dir, format_name=format_name, source_kind=source_kind)
 
 
 def _flat_row_unified(run_dir: str) -> dict[str, Any]:
@@ -737,7 +752,10 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
         args.quality_metric = prompt_text("Quality metric", default="mAP50-95").strip() or "mAP50-95"
     if not getattr(args, "speed_metric", None) and sys.stdin.isatty():
         args.speed_metric = prompt_text("Speed metric", default="avg_inference_fps").strip() or "avg_inference_fps"
-    runs = find_run_directories(args.models_root)
+    runs = discover_analysis_targets(
+        workspace_cli=getattr(args, "workspace", None),
+        models_root_cli=getattr(args, "models_root_cli", None),
+    )
     selected_norm = {
         os.path.abspath(os.path.expanduser(str(p)))
         for p in (getattr(args, "selected_run_dirs", None) or [])
@@ -792,6 +810,7 @@ def _write_speed_quality_artifacts(
     scatter_x: str,
     scatter_y: str,
     run_data_yaml_map: dict[str, str] | None = None,
+    display_labels: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     return write_speed_quality_artifacts(
         session_root=session_root,
@@ -802,6 +821,7 @@ def _write_speed_quality_artifacts(
         scatter_y=scatter_y,
         run_data_yaml_map=run_data_yaml_map,
         read_test_metrics_for_run=_read_test_metrics_for_run,
+        display_labels=display_labels,
     )
 
 
@@ -902,23 +922,22 @@ def _save_recompute_status(
     )
 
 
+def _build_run_display_labels(run_dirs: list[str]) -> dict[str, str]:
+    from smartrain.services.analyze.report_labels import build_run_display_labels
+
+    return build_run_display_labels(run_dirs, build_run_record_cb=_build_run_record_unified)
+
+
 def _build_abbreviations_for_report(run_dirs: list[str]) -> dict[str, str]:
-    out: dict[str, str] = {}
+    out = _build_run_display_labels(run_dirs)
     dataset_to_idx: dict[str, int] = {}
     dataset_counter = 1
-    for idx, rd in enumerate(run_dirs, start=1):
-        run_name = os.path.basename(rd.rstrip(os.sep))
-        if len(run_name) > 22:
-            out[run_name] = f"R{idx}"
+    for rd in run_dirs:
         try:
             rec = _build_run_record_unified(rd)
-            model = str((rec.model or "")).strip()
             dataset_name = str((rec.dataset_name or "")).strip()
         except Exception:
-            model = ""
             dataset_name = ""
-        if model and len(model) > 16:
-            out[model] = f"M{idx}"
         if dataset_name:
             if dataset_name not in dataset_to_idx:
                 dataset_to_idx[dataset_name] = dataset_counter
@@ -1211,6 +1230,19 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
         default="mAP50-95",
         help="Y-axis metric for speed/quality scatter from test metrics",
     )
+    p_all.add_argument(
+        "--ensure-ultralytics-test",
+        dest="ensure_ultralytics_test",
+        action="store_true",
+        default=None,
+        help="Run full PT Ultralytics test when canonical test artifacts are incomplete (default: on for profile full)",
+    )
+    p_all.add_argument(
+        "--no-ensure-ultralytics-test",
+        dest="ensure_ultralytics_test",
+        action="store_false",
+        help="Skip auto PT Ultralytics test before report collection",
+    )
     p_all.add_argument("--val-batch", type=int, default=1, help="Validation batch size for GPU memory-safe val()")
     p_all.add_argument("--val-imgsz", type=int, default=640, help="Validation image size for GPU memory-safe val()")
     p_all.add_argument("--val-half", dest="val_half", action="store_true", default=True, help="Use FP16 for validation on GPU")
@@ -1464,7 +1496,8 @@ def main(argv=None) -> None:
         argv = sys.argv[1:]
     parser = build_analyze_arg_parser()
     args = parser.parse_args(argv)
-    args.models_root = resolve_models_scan_root(args.workspace, args.models_root)
+    args.models_root_cli = getattr(args, "models_root", None)
+    args.models_root = resolve_models_scan_root(args.workspace, args.models_root_cli)
     ws_prune: str | None = None
     try:
         ws_prune = resolve_workspace_root(getattr(args, "workspace", None))

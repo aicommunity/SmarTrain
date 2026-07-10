@@ -15,11 +15,11 @@
 | Команда / область | Вход Typer (`cli.py`) | Argparse / `main` | Оркестрация / сервисы | Заметки |
 |-------------------|----------------------|-------------------|------------------------|---------|
 | `train` | `_forward_argparse_command` → `smartrain.cli_entrypoints.train_app` | `workflows/training/train_entry.py` → `services/training/train_cli_main.py` | `services/train_service.py`, `services/training/*`, `workflows/training/train_wiring.py` (resume) | Профиль: `core/training/train_profile.py` |
-| `test` | → `cli_entrypoints/test_app` | `workflows/testing/model_test_cli.py` | `services/testing/model_test_runner.py`, `services/test_backend_dispatch.py` | Backends: `backends/train_test_registry.py` |
-| `inference` | → `cli_entrypoints/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `workflows/inference/inference_backends.py` | |
-| Подкоманды `analyze` | Typer → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` | `workflows/analyze/analyze_*_service.py`, `services/analyze_*.py` | Контракт run/model: `run_model_contract/gateway.py` |
-| `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | `datasets_json_former.py` | | Пишет `datasets_info.json` |
-| `fusion` | → `workflows/datasets/dataset_former.py` | тот же модуль | | |
+| `test` | → `cli_entrypoints/test_app` | `workflows/testing/model_test_cli.py` | `services/testing/model_test_runner.py`, `services/test_backend_dispatch.py`, `services/testing/backends/format_runners.py` | Dispatch: `core/workflow_adapters/testing_runtime_api.py` |
+| `inference` | → `cli_entrypoints/inference_app` | `workflows/inference/inference_cli.py` | `services/inference_service.py`, `backends/implementations/ultralytics/inference.py` | |
+| Подкоманды `analyze` | Typer → `_invoke_module_main("...analyze_entry", [...])` | `workflows/analyze/analyze_entry.py` → `results_analyzer.py` (фасад) | `services/analyze/*` | Контракт run/model: `run_model_contract/gateway.py` |
+| `scan` | `_forward_argparse_command` → `workflows/datasets/datasets_entry.py` | фасад → `services/datasets/datasets_json_former.py` | | Пишет `datasets_info.json` |
+| `fusion` | → `workflows/datasets/dataset_former.py` (фасад) | `services/datasets/dataset_former.py` | | |
 | `queue` | Typer → `workflows/queue/training_queue_cli.py` (`list`/`add`/…); `queue-run` → `_forward_argparse_command` → `training_queue.py` | `training_queue_cli` / `training_queue` | | Состояние очереди в workspace |
 
 ## CLI: интерактив и replay
@@ -66,12 +66,14 @@ sequenceDiagram
   participant User
   participant CLI as cli.py
   participant Train as train_entry.py
+  participant CliMain as train_cli_main.py
   participant Profile as core/training/train_profile.py
   participant YOLO as ultralytics.YOLO
   User->>CLI: smartrain train ...
   CLI->>Train: main(argv)
-  Train->>Profile: merge параметров
-  Train->>Train: resolve dataset and runtime data.yaml
+  Train->>CliMain: run_train_cli_pipeline
+  CliMain->>Profile: merge параметров
+  CliMain->>CliMain: resolve dataset and runtime data.yaml
   Train->>YOLO: train()
   Train->>YOLO: val()
   Train->>Train: write metrics and training_metadata.json

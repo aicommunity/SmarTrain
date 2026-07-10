@@ -31,6 +31,8 @@ Subpackages (each maps to commands or command groups):
 
 Use-case layer: `analyze/`, `datasets/`, `training/`, `testing/`, `inference_service.py`, `reporting/`. **Must not** import `smartrain.workflows.*` (use `core/workflow_adapters/` where a workflow entry is still required).
 
+Notable analyze helpers: `data_yaml_splits.py` (dataset path and split resolution for benchmark/PR stages).
+
 ## core/
 
 Shared mechanics: `runtime/` (workspace paths, env), `training/` (profiles, catalogs), `workflow_adapters/` (thin facades to workflows for services), `inference/` (shared inference helpers).

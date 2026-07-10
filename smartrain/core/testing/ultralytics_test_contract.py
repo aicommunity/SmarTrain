@@ -45,6 +45,22 @@ def ultralytics_pt_rich_files_required(task_type: str | None) -> tuple[str, ...]
     return base + detect_style
 
 
+# Recommended but not required for completeness (Ultralytics version-dependent).
+ULTRALYTICS_PT_MASK_PLOTS_OPTIONAL: tuple[str, ...] = (
+    "MaskPR_curve.png",
+    "MaskF1_curve.png",
+    "MaskP_curve.png",
+    "MaskR_curve.png",
+)
+
+
+def ultralytics_pt_mask_plots_optional(task_type: str | None) -> tuple[str, ...]:
+    t = (task_type or "detect").strip().lower()
+    if t in {"segmentation", "segment", "seg"}:
+        return ULTRALYTICS_PT_MASK_PLOTS_OPTIONAL
+    return ()
+
+
 def native_format_rich_files_required() -> tuple[str, ...]:
     """Rich artifact names for ONNX/engine/TRT native eval (unchanged contract)."""
     return (
@@ -84,5 +100,6 @@ def _read_training_task_type(root_dir: str) -> str | None:
 def rich_files_required_for_format(root_dir: str, format_name: str) -> tuple[str, ...]:
     fmt = str(format_name or "pt").strip().lower()
     if fmt == "pt":
-        return ultralytics_pt_rich_files_required(_read_training_task_type(root_dir))
+        task = _read_training_task_type(root_dir)
+        return ultralytics_pt_rich_files_required(task or "detect")
     return native_format_rich_files_required()

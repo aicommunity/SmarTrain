@@ -19,7 +19,7 @@ Work from the project root (current directory):
 ```bash
 smartrain deploy
 smartrain scan
-smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
+smartrain merge --dataset ds_a --dataset ds_b --classes "class_a,class_b"
 smartrain train --data 2026-01-01_12-00-00-merged --device 0 -y
 ```
 
@@ -27,8 +27,8 @@ smartrain train --data 2026-01-01_12-00-00-merged --device 0 -y
 
 - Single entry point: `smartrain` (module `smartrain.cli`).
 - Single-workspace model: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `inference/`, `tmp/`.
-- Pipeline support: `scan -> fusion -> train -> analyze`.
-- Additional tools: `queue`, `registry`, `report`, `model`, `normalize-data-yaml`, `migrate-models`, `clearml-upload`, `plot`, `cvat`, `sahi`, `heatmap`, `orient`.
+- Pipeline support: `scan -> merge -> train -> analyze`.
+- Additional tools: `queue`, `registry`, `dataset` (`report`, `rename`, `convert`), `model`, `normalize-data-yaml`, `migrate`, `migrate-models`, `clearml-upload`, `plot`, `sahi`, `heatmap`, `orient`, `rotate`, `vis`, `deps`.
 - Internal package layout is being cleaned up from a flat root into domain folders:
   - `smartrain/providers/*` for provider CLI/index/state internals
   - `smartrain/core/runtime/*` for runtime environment profiling helpers
@@ -56,7 +56,7 @@ Run artifact layout:
 |---|---|
 | `smartrain deploy` | Initialize the workspace structure |
 | `smartrain scan` | Synchronize sources and update the dataset catalog |
-| `smartrain fusion` | Build the final training dataset |
+| `smartrain merge` | Build the final training dataset |
 | `smartrain train` | Train and validate YOLO models |
 | `smartrain inference` | Run inference on folder or dataset split, save JSON report, dual performance profile, and environment artifact |
 | `smartrain queue` / `smartrain queue-run` | Manage and run the command queue |
@@ -84,8 +84,8 @@ pytest
 ## Important details
 
 - Interactive mode starts only when a command is launched with zero arguments (TTY required).
-- Interactive dataset commands: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `inference`; plus `train`.
-- Dataset cleanup command: `prune` (`prune empty` for empty pairs, `prune dedup` for duplicate images by content).
+- Interactive dataset commands: `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `inference`, `prune`; plus `train`.
+- Dataset cleanup command: `prune` (`prune empty` for empty pairs, `prune dedup` for duplicate images by content, `prune classes` for unused classes, `prune size` for labels smaller than `NxM` with default `20x20`; by default this mode removes images with no labels left unless `--no-drop-empty-images` is set).
 - If any arguments are provided but required ones are missing, commands return a clear "incomplete arguments" error instead of interactive prompts.
 - Command help now includes practical `Examples` / `Quick examples` blocks for common workflows.
 - `smartrain balance` presets:
@@ -117,6 +117,13 @@ pytest
   - `pip install -e ".[dev]"` for development and testing
   - `pip install -e ".[clearml]"` for ClearML
   - `pip install -e ".[sahi]"` for SAHI
+  - `pip install -e ".[export]"` for PDF/ODT export helpers (`pypandoc-binary`, `weasyprint`)
+
+Completion setup:
+  - automatic best-effort setup runs on first `smartrain` launch after install;
+  - manual fallback:
+    - `smartrain --install-completion`
+    - `smartrain --show-completion`
 
 ## Common workflows
 

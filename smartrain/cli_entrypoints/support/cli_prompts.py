@@ -52,6 +52,22 @@ def prompt_text(label: str, default: str | None = None, choices: Sequence[str] |
     return fallback
 
 
+def prompt_prefilled_text(label: str, default: str, choices: Sequence[str] | None = None) -> str:
+    """Prompt with the default value pre-filled in the input field for editing."""
+    prompt_label = f"{label}: "
+    completer = WordCompleter(list(choices), ignore_case=True) if choices else None
+    raw = prompt(
+        prompt_label,
+        default=str(default),
+        completer=completer,
+        complete_while_typing=True,
+    ).strip()
+    if raw:
+        return raw
+    _echo_default_if_used(str(default), prompt_label)
+    return str(default)
+
+
 def prompt_yes_no(label: str, default: bool = False) -> bool:
     suffix = "Y/n" if default else "y/N"
     prompt_label = f"{label} [{suffix}]: "

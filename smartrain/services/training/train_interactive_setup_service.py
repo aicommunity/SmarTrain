@@ -76,6 +76,10 @@ def run_interactive_train_setup(
     baseline_sm_opts: dict[str, Any] = {}
     available_runs = collect_available_base_runs_cb(layout, args.data)
     print_available_base_runs_cb(args.data, available_runs)
+    args.pretrained_run = getattr(args, "pretrained_run", None)
+    args.pretrained_model = getattr(args, "pretrained_model", None)
+    args.pretrained_weights = getattr(args, "pretrained_weights", None)
+
     baseline_args_yaml = prompt_base_run_args_yaml_cb(
         available_runs,
         default_path=str(getattr(args, "base_run_args_yaml", "") or "") or None,
@@ -158,8 +162,7 @@ def run_interactive_train_setup(
         selected_external_provider = None
         if ":" in model_choice:
             provider_part, model_part = model_choice.split(":", 1)
-            known_external = set(installed_external_provider_ids_cb())
-            if provider_part in known_external and model_part:
+            if provider_part and model_part:
                 selected_external_provider = provider_part
                 model_choice = model_part
         if selected_external_provider:
@@ -258,5 +261,66 @@ def run_interactive_train_setup(
         "Do not ask for confirmation if the folder exists (--yes)?",
         default=bool(getattr(args, "non_interactive", False)),
     )
+
+    if not any((args.pretrained_run, args.pretrained_model, args.pretrained_weights)):
+        use_pretrained = prompt_yes_no_cb(
+            "Use initialization from existing trained weights (--pretrained-*)?",
+            default=False,
+        )
+        if use_pretrained:
+            source_kind = prompt_input_cb(
+                "Pretrained source type (run/model/path): ",
+                default="run",
+            ).strip().lower() or "run"
+            if source_kind == "run":
+                if available_runs:
+                    for idx, row in enumerate(available_runs, start=1):
+                        print(f"  {idx:>3}. {row.get('run_rel', row.get('run_dir', '-'))}")
+                    selected_run = prompt_input_cb(
+                        "Pretrained run (number or path): ",
+                        default=str(available_runs[0].get("run_dir", "")),
+                    ).strip()
+                    if selected_run.isdigit():
+                        n = int(selected_run)
+                        if 1 <= n <= len(available_runs):
+                            selected_run = str(available_runs[n - 1].get("run_dir", "")).strip()
+                    args.pretrained_run = selected_run or str(available_runs[0].get("run_dir", "")).strip()
+                else:
+                    args.pretrained_run = prompt_input_cb(
+                        "Pretrained run path (--pretrained-run): ",
+                        default="",
+                    ).strip() or None
+            elif source_kind == "model":
+                models_dir = os.path.abspath(str(getattr(layout, "models", "")))
+                model_names = []
+                if os.path.isdir(models_dir):
+                    model_names = sorted([d for d in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, d))])
+                if model_names:
+                    for idx, name in enumerate(model_names, start=1):
+                        print(f"  {idx:>3}. {name}")
+                    selected_model = prompt_input_cb(
+                        "Pretrained model (number or name): ",
+                        default=model_names[0],
+                    ).strip()
+                    if selected_model.isdigit():
+                        n = int(selected_model)
+                        if 1 <= n <= len(model_names):
+                            selected_model = model_names[n - 1]
+                    args.pretrained_model = selected_model or model_names[0]
+                else:
+                    args.pretrained_model = prompt_input_cb(
+                        "Pretrained model name (--pretrained-model): ",
+                        default="",
+                    ).strip() or None
+            else:
+                args.pretrained_weights = (
+                    prompt_input_cb("Pretrained weights path (--pretrained-weights): ", default="").strip() or None
+                )
+            if args.pretrained_run:
+                print(f"[INFO] Pretrained run selected: {args.pretrained_run}")
+            if args.pretrained_model:
+                print(f"[INFO] Pretrained model selected: {args.pretrained_model}")
+            if args.pretrained_weights:
+                print(f"[INFO] Pretrained weights selected: {args.pretrained_weights}")
     return True
 

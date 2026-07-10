@@ -15,8 +15,12 @@ _ULTRALYTICS_YAML_IGNORED_KEYS = frozenset(
         "model_dir",
         "target_path",
         "workspace",
+        "save_dir",
+        "runs_dir",
+        "output_dir",
     }
 )
+_ULTRALYTICS_YAML_PATH_SAFETY_KEYS = frozenset({"save_dir", "runs_dir", "output_dir"})
 
 
 def merge_sources_with_priority(
@@ -31,6 +35,14 @@ def merge_sources_with_priority(
         ignored = sorted(k for k in ultralytics_profile.keys() if k in _ULTRALYTICS_YAML_IGNORED_KEYS)
         if ignored:
             print("[WARNING] --ultralytics_yaml: keys ignored: " + ", ".join(ignored))
+        ignored_for_path_safety = sorted(
+            k for k in ultralytics_profile.keys() if k in _ULTRALYTICS_YAML_PATH_SAFETY_KEYS
+        )
+        if ignored_for_path_safety:
+            print(
+                "[WARNING] --ultralytics_yaml: path-like keys ignored for safety: "
+                + ", ".join(ignored_for_path_safety)
+            )
         filtered = {k: v for k, v in ultralytics_profile.items() if k not in _ULTRALYTICS_YAML_IGNORED_KEYS}
         u_from_ultra, sm_from_ultra = extract_smartrain_options(filtered)
         cli_key_map = {

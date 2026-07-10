@@ -17,34 +17,41 @@ from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_wor
 
 HELP_MATRIX: list[list[str]] = [
     ["--help"],
+    ["quickstart"],
     ["deploy", "--help"],
     ["info", "--help"],
     ["scan", "--", "--help"],
     ["normalize-data-yaml", "--", "--help"],
+    ["sync", "--", "--help"],
+    ["merge", "--", "--help"],
     ["fusion", "--", "--help"],
+    ["split", "--", "--help"],
     ["train", "--", "--help"],
     ["augment", "--", "--help"],
     ["balance", "--", "--help"],
     ["prune", "--", "--help"],
     ["prune", "empty", "--", "--help"],
     ["prune", "dedup", "--", "--help"],
+    ["filter", "--", "--help"],
     ["hash", "--", "--help"],
     ["stats", "--", "--help"],
     ["stats", "compare", "--", "--help"],
     ["roi", "--", "--help"],
     ["test", "--", "--help"],
     ["inference", "--", "--help"],
+    ["vis", "--", "--help"],
     ["plot", "--", "--help"],
     ["migrate", "--", "--help"],
     ["migrate-models", "--", "--help"],
-    ["cvat", "--", "--help"],
+    ["dataset", "convert", "--", "--help"],
     ["clearml-upload", "--", "--help"],
     ["sahi", "--", "--help"],
     ["heatmap", "--", "--help"],
     ["orient", "--", "--help"],
     ["queue-run", "--", "--help"],
-    ["report", "--help"],
-    ["report", "dataset", "--", "--help"],
+    ["dataset", "--help"],
+    ["dataset", "report", "--", "--help"],
+    ["dataset", "rename", "--", "--help"],
     ["queue", "--help"],
     ["queue", "list", "--", "--help"],
     ["queue", "add", "--", "--help"],
@@ -79,13 +86,17 @@ HELP_MATRIX: list[list[str]] = [
     ["model", "--help"],
     ["model", "convert", "--", "--help"],
     ["model", "release", "--", "--help"],
+    ["model", "rename", "--", "--help"],
+    ["rotate", "--", "--help"],
 ]
 
 NO_ARGS_USAGE_CASES: list[str] = [
     "queue",
     "registry",
     "scan",
+    "merge",
     "fusion",
+    "split",
     "augment",
     "balance",
     "prune",
@@ -95,7 +106,6 @@ NO_ARGS_USAGE_CASES: list[str] = [
     "queue-run",
     "plot",
     "migrate-models",
-    "cvat",
     "clearml-upload",
     "sahi",
     "heatmap",
@@ -111,10 +121,12 @@ def _run(
     cwd: Path,
     env: dict[str, str],
 ) -> subprocess.CompletedProcess[str]:
+    cmd_env = dict(env)
+    cmd_env.setdefault("SMARTRAIN_DISABLE_AUTO_COMPLETION", "1")
     return subprocess.run(
         [sys.executable, "-m", "smartrain", *args],
         cwd=str(cwd),
-        env=env,
+        env=cmd_env,
         capture_output=True,
         text=True,
         timeout=120,
@@ -135,6 +147,8 @@ def test_smartrain_help_matrix(
     assert r.returncode in (0, 2), f"argv={argv}\nstderr:\n{r.stderr}\nstdout:\n{r.stdout}"
     if argv == ["deps", "--help"]:
         assert "Usage:" in out or "usage:" in out.lower()
+    elif argv == ["quickstart"]:
+        assert "Quick start" in out or "smartrain deploy" in out
     else:
         assert "usage:" in out.lower() or "examples:" in out.lower(), f"argv={argv}\n{out}"
     assert "traceback" not in out.lower(), f"argv={argv}\n{out}"
@@ -145,15 +159,75 @@ def test_smartrain_top_level_help(subprocess_env: dict[str, str], tmp_path: Path
     assert r.returncode in (0, 2)
     out = (r.stdout or "") + (r.stderr or "")
     assert "deploy" in out
+    assert "Workspace:" in out
+    assert "Dataset catalog and preparation:" in out
+    assert "Training:" in out
+    assert "quickstart" in out
 
 
-def test_smartrain_without_args_prints_quick_start(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+def test_smartrain_without_args_shows_grouped_help(subprocess_env: dict[str, str], tmp_path: Path) -> None:
     r = _run([], cwd=tmp_path, env=subprocess_env)
     out = (r.stdout or "") + (r.stderr or "")
     assert r.returncode == 0, out
-    assert "Quick start" in out
-    assert "smartrain report dataset" in out
-    assert "usage:" not in out.lower()
+    assert "Usage:" in out or "usage:" in out.lower()
+    assert "Workspace:" in out
+    assert "train" in out
+    assert "Quick start" not in out
+
+
+def test_smartrain_shell_completion_lists_commands(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    env = dict(subprocess_env)
+    env["_SMARTRAIN_COMPLETE"] = "complete_bash"
+    env["COMP_WORDS"] = "smartrain "
+    env["COMP_CWORD"] = "1"
+    r = subprocess.run(
+        [sys.executable, "-m", "smartrain"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "train" in out
+    assert "scan" in out
+    assert "Quick start" not in out
+
+
+def test_smartrain_show_completion_smoke(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    r = _run(["--show-completion"], cwd=tmp_path, env=subprocess_env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "smartrain" in out
+
+
+def test_smartrain_auto_completion_attempt_writes_state(
+    subprocess_env: dict[str, str], tmp_path: Path
+) -> None:
+    deploy_workspace(str(tmp_path))
+    state_root = tmp_path / "state"
+    env = dict(subprocess_env)
+    env["XDG_STATE_HOME"] = str(state_root)
+    env["SHELL"] = "/bin/unknown-shell"
+    env["CI"] = ""
+    env["SMARTRAIN_DISABLE_AUTO_COMPLETION"] = "0"
+    r = _run(["quickstart"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode in (0, 2), out
+    state_file = state_root / "smartrain" / "completion_autoinstall.json"
+    assert state_file.is_file()
+    payload = json.loads(state_file.read_text(encoding="utf-8"))
+    assert payload.get("attempted") is True
+
+
+def test_smartrain_quickstart_prints_guide(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    r = _run(["quickstart"], cwd=tmp_path, env=subprocess_env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "Quick start" in out or "smartrain deploy" in out
+    assert "smartrain dataset report" in out
+    assert "--install-completion" in out
 
 
 def test_smartrain_deploy_twice(subprocess_env: dict[str, str], tmp_path: Path) -> None:
@@ -258,7 +332,7 @@ def test_analyze_no_subcommand_requires_tty(subprocess_env: dict[str, str], tmp_
     assert "tty" in out.lower()
 
 
-@pytest.mark.parametrize("group_name", ["report", "model"])
+@pytest.mark.parametrize("group_name", ["dataset", "model"])
 def test_group_without_subcommand_prints_group_help(
     group_name: str,
     subprocess_env: dict[str, str],
@@ -278,7 +352,7 @@ def test_group_without_subcommand_prints_group_help(
     [
         (["analyze", "compare", "--help"], "usage:"),
         (["train", "--", "--help"], "Examples:"),
-        (["cvat", "--", "--help"], "Examples:"),
+        (["dataset", "convert", "--", "--help"], "Examples:"),
         (["sahi", "--", "--help"], "Examples:"),
         (["heatmap", "--", "--help"], "Examples:"),
     ],
@@ -347,7 +421,11 @@ def test_fusion_missing_workspace_metadata_shows_friendly_error(
 ) -> None:
     env = dict(subprocess_env)
     env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
-    r = _run(["fusion", "--", "--workspace", str(tmp_path), "--dataset", "ds_a"], cwd=tmp_path, env=env)
+    r = _run(
+        ["fusion", "--", "--no-auto-scan", "--workspace", str(tmp_path), "--dataset", "ds_a"],
+        cwd=tmp_path,
+        env=env,
+    )
     out = (r.stdout or "") + (r.stderr or "")
     low = out.lower()
     assert r.returncode == 0, out
@@ -356,6 +434,80 @@ def test_fusion_missing_workspace_metadata_shows_friendly_error(
     assert "datasets_info.json" in low
     assert "class_names.json" in low
     assert "traceback" not in low
+
+
+def test_merge_missing_workspace_metadata_shows_friendly_error(
+    subprocess_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(
+        ["merge", "--", "--no-auto-scan", "--workspace", str(tmp_path), "--dataset", "ds_a"],
+        cwd=tmp_path,
+        env=env,
+    )
+    out = (r.stdout or "") + (r.stderr or "")
+    low = out.lower()
+    assert r.returncode == 0, out
+    assert "fusion metadata files were not found" in low
+    assert "metadata directory" in low
+    assert "datasets_info.json" in low
+    assert "class_names.json" in low
+    assert "traceback" not in low
+
+
+def test_fusion_merge_classes_smoke(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = tmp_path / "datasets" / "ds_a"
+    (ds / "train" / "images").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "labels").mkdir(parents=True, exist_ok=True)
+    (ds / "train" / "images" / "a.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n1 0.4 0.4 0.1 0.1\n", encoding="utf-8")
+    (tmp_path / "datasets" / "datasets_info.json").write_text(
+        json.dumps({"ds_a": {"classes": {"class_a": 0, "class_b": 1}, "structure": "split"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (tmp_path / "datasets" / "class_names.json").write_text(
+        json.dumps({"class_a": "class_a", "class_b": "class_b"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(
+        [
+            "fusion",
+            "--",
+            "--workspace",
+            str(tmp_path),
+            "--output-name",
+            "merged_smoke",
+            "--dataset",
+            "ds_a",
+            "--classes",
+            "class_a",
+            "--merge-classes",
+            "class_b",
+            "class_a",
+            "--no-auto-scan",
+        ],
+        cwd=tmp_path,
+        env=env,
+    )
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "[OK]" in out
+    assert (tmp_path / "datasets" / "merged_smoke" / "data.yaml").is_file()
+
+
+def test_fusion_alias_prints_deprecation_warning(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    r = _run(["fusion", "--help"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode in (0, 2), out
+    assert "deprecated" in out.lower()
 
 
 def test_info_prints_supported_train_models(subprocess_env: dict[str, str], tmp_path: Path) -> None:
@@ -547,11 +699,13 @@ raise SystemExit(0)
 @pytest.mark.parametrize(
     "cmd,required_error,forbidden_phrase",
     [
-        (["fusion", "--", "--workspace", "."], "incomplete arguments", "interactive"),
-        (["augment", "--", "--workspace", "."], "incomplete arguments", "interactive augment mode"),
-        (["balance", "--", "--workspace", "."], "incomplete arguments", "interactive balance mode"),
-        (["orient", "--", "--workspace", "."], "incomplete arguments", "interactive"),
-        (["roi", "--", "--workspace", "."], "incomplete arguments", "interactive roi mode"),
+        (["merge", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive"),
+        (["fusion", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive"),
+        (["split", "--", "--no-auto-scan", "--workspace", "."], "datasets_info.json", "interactive"),
+        (["augment", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive augment mode"),
+        (["balance", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive balance mode"),
+        (["orient", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive"),
+        (["roi", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive roi mode"),
         (["inference", "--", "--workspace", ".", "--data-mode", "folder"], "incomplete arguments", "interactive inference mode"),
         (["stats", "compare", "--left", "foo"], "incomplete arguments", "interactive mode stats compare"),
     ],
@@ -579,6 +733,7 @@ def test_partial_args_do_not_trigger_interactive(
         ["test", "--", "--unknown-flag"],
         ["inference", "--", "--unknown-flag"],
         ["scan", "--", "--unknown-flag"],
+        ["merge", "--", "--unknown-flag"],
         ["fusion", "--", "--unknown-flag"],
         ["migrate", "--", "--unknown-flag"],
         ["migrate", "--", "canonical", "--", "--unknown-flag"],
@@ -751,7 +906,7 @@ def test_docs_cli_group_subcommand_parity_has_key_entries() -> None:
     ]
     combined = "\n".join(p.read_text(encoding="utf-8") for p in docs_files if p.is_file()).lower()
     expected_entries = [
-        "smartrain report dataset",
+        "smartrain dataset report",
         "smartrain queue list",
         "smartrain queue add",
         "smartrain queue run",
@@ -765,6 +920,7 @@ def test_docs_cli_group_subcommand_parity_has_key_entries() -> None:
         "smartrain analyze leaderboard",
         "smartrain model convert",
         "smartrain model release",
+        "smartrain model rename",
         "smartrain migrate unified",
     ]
     missing = [entry for entry in expected_entries if entry not in combined]

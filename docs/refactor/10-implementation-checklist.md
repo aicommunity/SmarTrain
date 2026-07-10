@@ -96,8 +96,8 @@ Notes:
 - [x] **7-E4** Schema v2 артефактов + миграция analyze на unified read; legacy reader контролируем и документирован (Волна 7). Notes: `format-compare` (analyze) переведён на `canonical_gateway.load_metrics` с поддержкой `split` (test/val), чтобы значения метрик шли через canonical/unified чтение; добавленные/обновленные regression-тесты покрывают `format_compare` блок.
 
 Notes:
-- 2026-05-05: Закрыт 5-E1: добавлены `tasks/context.py` (`TaskExecutionContext`) и `tasks/metrics.py` (task-aware metrics adapter framework), расширен `tasks/__init__.py`, и подключена task-aware metrics normalization в `canonical_gateway.load_metrics` (namespace + primary metrics через task adapter). Добавлены/обновлены тесты `tests/test_task_contracts.py` и `tests/orchestrators/test_canonical_gateway_extensions.py`.
-- 2026-05-05: Частичный прогресс по 5-E2: в `model_test_orchestrator` добавлен task-aware guard для internal `pt_uni` compare (только detection), cls/seg path теперь явно пропускает detection-only compare с информативным сообщением; добавлен regression тест в `tests/test_model_test_cli.py`.
+- 2026-05-05: Закрыт 5-E1: добавлены `tasks/context.py` (`TaskExecutionContext`) и `tasks/metrics.py` (task-aware metrics adapter framework), расширен `tasks/__init__.py`, и подключена task-aware metrics normalization в `run_model_contract.gateway.load_metrics` (namespace + primary metrics через task adapter). Добавлены/обновлены тесты `tests/test_task_contracts.py` и `tests/run_model_contract/test_gateway_extensions.py`.
+- 2026-05-05: Частичный прогресс по 5-E2: в `model_test_runner` добавлен task-aware guard для internal `pt_uni` compare (только detection), cls/seg path теперь явно пропускает detection-only compare с информативным сообщением; добавлен regression тест в `tests/test_model_test_cli.py`.
 - 2026-05-05: Дополнен consumer wiring по 5-E2 для inference runtime: в `inference_cli` добавлен `--task` (detect/classify/segment aliases), а в `services/inference_service` capability routing (`resolve_infer_backend`) теперь получает нормализованный `task_type` вместо жёсткого `"detection"`; добавлен regression `test_inference_passes_task_hint_to_capability_resolution`.
 - 2026-05-05: Дополнен adapter contract слой для 5-E2: `UltralyticsAdapter.infer` и `ExternalProviderAdapter.infer` теперь заполняют `BackendExecutionResult.task_type` из task hint (`task_to_metadata_task_type`) вместо детект-only default; добавлены тесты `test_ultralytics_adapter_infer_uses_task_hint` и `test_external_provider_adapter_propagates_task_hint`.
 - 2026-05-05: Дополнена task-aware целостность inference artifact path: `inference` report теперь несёт `task_type`, `wrap_inference_report_v2` формирует `task_type`/`v2.metrics.namespace` из payload, а `task_to_metadata_task_type` расширен для canonical значений (`detection`/`segmentation`) без регресса в alias-режиме.
@@ -161,3 +161,19 @@ Sync note:
 - [x] **G6** Утончение фасада: `cmd_scan` → `run_scan_command` в `analyze_table_service` (2026-05-10).
 - [x] **G7** Prediction bundle: `predictions_strict` в gateway + тесты контракта (2026-05-10).
 - [x] **G8** Таблица capability gaps в `docs/cli/inference.md` + `capability_gap_reason` в отчёте (2026-05-10).
+
+---
+
+## Instance Segmentation Rollout
+
+Register and burn-down: [`tech-debt-instance-segmentation.md`](./tech-debt-instance-segmentation.md).
+
+- [x] **SEG-0** Инфраструктура TD: register TD-SEG-001…010, checklist sync, capability matrix update.
+- [x] **SEG-1** Safety net: unit-тесты YoloSegment (yolo_labels, rotate, orient, ROI, dataset_report).
+- [x] **SEG-2** Docs + guards: EN/RU CLI limits; native ONNX/TRT test skip для segmentation.
+- [x] **SEG-3** Segmentation metrics adapter: CSV mapping, unit tests, Mask plots contract decision.
+- [x] **SEG-4** Polygon-aware augment: flip/rotate/photometric; reject bbox-copy для seg datasets.
+- [x] **SEG-5** Balance/stats/CVAT: polygon counts, enclosing-bbox balance, CVAT polygon import/export.
+- [x] **SEG-6** Analyze reports: task-aware `METRIC_AGG_COLUMNS`, format_compare, report_markdown.
+- [x] **SEG-7** Inference overlay: `--save-overlay` + viz service + tests.
+- [x] **SEG-8** Multi-framework: external `--task segment`, weighted sampling, E2E smoke, final TD burn-down.

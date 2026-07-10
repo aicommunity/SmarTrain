@@ -4,6 +4,15 @@
 
 Это руководство предполагает, что `smartrain` уже установлен, а команды запускаются из корня workspace.
 
+Команды `smartrain` или `smartrain --help` показывают сгруппированный справочник. Это руководство также доступно как `smartrain quickstart`.
+
+Автодополнение после установки:
+
+- авто: best-effort настройка выполняется при первом запуске `smartrain`;
+- ручной fallback:
+  - `smartrain --install-completion`
+  - `smartrain --show-completion`
+
 ## Основной путь: обучение на датасете и формирование отчетов
 
 1. **Создайте рабочую папку (если её ещё нет)**
@@ -67,11 +76,11 @@ smartrain train --data my_dataset --model yolo11n.pt -y
 
 Режимы запуска:
 
-- Interactive (без аргументов): `smartrain report dataset`
+- Interactive (без аргументов): `smartrain dataset report`
 - Non-interactive (минимальные аргументы):
 
 ```bash
-smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
+smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
 ```
 
 6. **Сформируйте аналитический отчет по запускам**
@@ -86,7 +95,7 @@ smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
 smartrain analyze all --report-languages en,ru
 ```
 
-`smartrain analyze scan` опционален как отдельная предварительная проверка, но не обязателен перед `smartrain analyze`/`smartrain analyze all`.
+`smartrain analyze scan` опционален как отдельная предварительная проверка, но не обязателен перед `smartrain analyze`/`smartrain analyze all`. Отдельный `smartrain test` и test/val split датасета для отчёта не обязательны; speed/PR при `profile=full` деградируют с предупреждениями при отсутствии split.
 
 ## Опциональные шаги
 
@@ -95,7 +104,7 @@ smartrain analyze all --report-languages en,ru
   ```bash
   smartrain analyze compare --baseline /path/to/run_a --others /path/to/run_b /path/to/run_c
   ```
-- **Работа с датасетами перед обучением** (при необходимости): `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`.
+- **Работа с датасетами перед обучением** (при необходимости): `merge` (legacy-алиас: `fusion`), `augment`, `balance`, `prune`, `orient`, `roi`.
 
 ## Куда сохраняются результаты
 

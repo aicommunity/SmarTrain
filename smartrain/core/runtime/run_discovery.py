@@ -39,6 +39,39 @@ def find_run_directories(models_root: str) -> list[str]:
     return sorted(runs)
 
 
+def discover_analysis_targets(
+    *,
+    workspace_cli: str | None = None,
+    models_root_cli: str | None = None,
+) -> list[str]:
+    """Return run and promoted-model directories available for ``smartrain analyze``.
+
+    Scans workspace ``runs/`` (or ``--models-root`` when set). Unless ``--models-root``
+    overrides the default, also scans workspace ``models/`` for released model bundles.
+    """
+    runs_root = resolve_models_scan_root(workspace_cli, models_root_cli)
+    seen: set[str] = set()
+    out: list[str] = []
+    for path in find_run_directories(runs_root):
+        ap = os.path.abspath(path)
+        if ap not in seen:
+            seen.add(ap)
+            out.append(ap)
+    if models_root_cli is None:
+        try:
+            ws = resolve_workspace_root(workspace_cli)
+            models_root = WorkspaceLayout(ws).models
+            if os.path.abspath(models_root) != os.path.abspath(runs_root):
+                for path in find_run_directories(models_root):
+                    ap = os.path.abspath(path)
+                    if ap not in seen:
+                        seen.add(ap)
+                        out.append(ap)
+        except ValueError:
+            pass
+    return sorted(out)
+
+
 def is_run_directory(path: str) -> bool:
     if not os.path.isdir(path):
         return False

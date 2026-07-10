@@ -16,16 +16,23 @@ from smartrain.core.runtime.workspace_paths import (
 )
 
 
-def _flat_dataset(root: Path, name: str) -> None:
+def _flat_dataset(root: Path, name: str, *, extra_classes: bool = False) -> None:
     ds = root / name
     (ds / "images").mkdir(parents=True, exist_ok=True)
     (ds / "labels").mkdir(parents=True, exist_ok=True)
     (ds / "images" / "a.jpg").write_bytes(b"\x00")
-    (ds / "labels" / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n", encoding="utf-8")
-    (ds / "data.yaml").write_text("nc: 1\nnames: ['bee']\n", encoding="utf-8")
+    if extra_classes:
+        (ds / "labels" / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n1 0.2 0.2 0.1 0.1\n", encoding="utf-8")
+        (ds / "data.yaml").write_text(
+            "train: images\nval: images\ntest: images\n\nnc: 3\nnames: ['bee', 'wasp', 'unused']\n",
+            encoding="utf-8",
+        )
+    else:
+        (ds / "labels" / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n", encoding="utf-8")
+        (ds / "data.yaml").write_text("nc: 1\nnames: ['bee']\n", encoding="utf-8")
 
 
-def _cvat11_dataset(root: Path, name: str, *, nested_image: bool = False) -> None:
+def _cvat11_dataset(root: Path, name: str, *, nested_image: bool = False, extra_label: bool = False) -> None:
     ds = root / name
     (ds / "images").mkdir(parents=True, exist_ok=True)
     if nested_image:
@@ -36,13 +43,18 @@ def _cvat11_dataset(root: Path, name: str, *, nested_image: bool = False) -> Non
     else:
         (ds / "images" / "img001.jpg").write_bytes(b"\x00")
         img_name = "img001.jpg"
+    labels_meta = "<label><name>bee</name></label>"
+    boxes = '<box label="bee" xtl="10" ytl="10" xbr="40" ybr="30"/>'
+    if extra_label:
+        labels_meta += "<label><name>wasp</name></label><label><name>unused</name></label>"
+        boxes += '<box label="wasp" xtl="50" ytl="10" xbr="70" ybr="30"/>'
     (ds / "annotations.xml").write_text(
         f"""<?xml version="1.0" encoding="utf-8"?>
 <annotations>
   <version>1.1</version>
-  <meta><task><labels><label><name>bee</name></label></labels></task></meta>
+  <meta><task><labels>{labels_meta}</labels></task></meta>
   <image id="0" name="{img_name}" width="100" height="80">
-    <box label="bee" xtl="10" ytl="10" xbr="40" ybr="30"/>
+    {boxes}
   </image>
 </annotations>
 """,
@@ -237,3 +249,61 @@ def test_scan_marks_provider_record_stale_when_paths_missing(tmp_path: Path, mon
     rec = next(r for r in recs if r.get("provider_id") == "dr-yolo")
     assert rec["install_state"] == "stale"
     assert "missing repo_path" in str(rec.get("last_error", ""))
+
+
+def test_scan_strip_unused_classes_yolo_flat(tmp_path: Path) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _flat_dataset(rd, "ds_strip", extra_classes=True)
+
+    datasets_json_main(["--workspace", str(tmp_path), "--strip-unused-classes"])
+    cfg = yaml.safe_load((tmp_path / "datasets" / "ds_strip" / "data.yaml").read_text(encoding="utf-8"))
+    assert cfg["names"] == ["bee", "wasp"]
+    info = json.loads((tmp_path / "datasets" / DATASETS_INFO_FILE).read_text(encoding="utf-8"))
+    assert info["ds_strip"]["classes"] == {"bee": 0, "wasp": 1}
+    assert info["ds_strip"]["modified"] is True
+
+
+def test_scan_strip_unused_classes_cvat11_after_conversion(tmp_path: Path) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _cvat11_dataset(rd, "cvat_strip", extra_label=True)
+
+    datasets_json_main(["--workspace", str(tmp_path), "--strip-unused-classes"])
+    cfg = yaml.safe_load((tmp_path / "datasets" / "cvat_strip" / "data.yaml").read_text(encoding="utf-8"))
+    assert cfg["names"] == ["bee", "wasp"]
+    info = json.loads((tmp_path / "datasets" / DATASETS_INFO_FILE).read_text(encoding="utf-8"))
+    assert set(info["cvat_strip"]["classes"].keys()) == {"bee", "wasp"}
+
+
+def test_scan_strip_unused_classes_skips_existing(tmp_path: Path) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _flat_dataset(rd, "ds_a", extra_classes=True)
+
+    datasets_json_main(["--workspace", str(tmp_path)])
+    before = (tmp_path / "datasets" / "ds_a" / "data.yaml").read_text(encoding="utf-8")
+
+    datasets_json_main(["--workspace", str(tmp_path), "--strip-unused-classes"])
+    after = (tmp_path / "datasets" / "ds_a" / "data.yaml").read_text(encoding="utf-8")
+    assert before == after
+
+
+def test_scan_strip_unused_classes_default_on(tmp_path: Path) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _flat_dataset(rd, "ds_on", extra_classes=True)
+
+    datasets_json_main(["--workspace", str(tmp_path)])
+    cfg = yaml.safe_load((tmp_path / "datasets" / "ds_on" / "data.yaml").read_text(encoding="utf-8"))
+    assert cfg["names"] == ["bee", "wasp"]
+
+
+def test_scan_strip_unused_classes_disabled_with_no_flag(tmp_path: Path) -> None:
+    deploy_workspace(tmp_path)
+    rd = tmp_path / "raw_data"
+    _flat_dataset(rd, "ds_off", extra_classes=True)
+
+    datasets_json_main(["--workspace", str(tmp_path), "--no-strip-unused-classes"])
+    cfg = yaml.safe_load((tmp_path / "datasets" / "ds_off" / "data.yaml").read_text(encoding="utf-8"))
+    assert cfg["names"] == ["bee", "wasp", "unused"]

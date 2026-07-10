@@ -22,6 +22,10 @@ from smartrain.workflows.analyze.results_analyzer import find_run_directories, l
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
 from smartrain.core.runtime.run_bundle_copy import copy_run_bundle
+from smartrain.services.models.release_model_naming import (
+    normalize_release_task,
+    sanitize_release_stem,
+)
 
 
 def build_model_release_arg_parser() -> argparse.ArgumentParser:
@@ -41,21 +45,6 @@ def build_model_release_arg_parser() -> argparse.ArgumentParser:
         help="Run directory path or run index from discovered runs list",
     )
     return p
-
-
-def _sanitize_stem(name: str) -> str:
-    s = re.sub(r"[^\w.\-+]+", "_", str(name), flags=re.UNICODE).strip("._")
-    return s[:180] if s else "unknown"
-
-
-def _normalize_task(task: str | None) -> str:
-    raw = (task or "").strip().lower()
-    mapping = {
-        "detection": "detect",
-        "det": "detect",
-        "classification": "classify",
-    }
-    return mapping.get(raw, raw or "detect")
 
 
 def _sha256_file(path: Path) -> str:
@@ -89,7 +78,7 @@ def _timestamp_for_name(md: dict[str, Any]) -> str:
     try:
         dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
     except ValueError:
-        return _sanitize_stem(str(ts))[:32]
+        return sanitize_release_stem(str(ts))[:32]
     return dt.strftime("%Y%m%d_%H%M%S")
 
 
@@ -299,9 +288,9 @@ def _build_release_json(
 
 def _target_paths(layout: WorkspaceLayout, run_dir: Path, md: dict[str, Any]) -> tuple[Path, Path]:
     ti = md.get("training_info") or {}
-    dataset_name = _sanitize_stem(str((ti.get("dataset") or {}).get("name") or "dataset"))
-    task = _normalize_task(str(ti.get("task_type") or "detect"))
-    model_name = _sanitize_stem(str(ti.get("model") or "model"))
+    dataset_name = sanitize_release_stem(str((ti.get("dataset") or {}).get("name") or "dataset"))
+    task = normalize_release_task(str(ti.get("task_type") or "detect"))
+    model_name = sanitize_release_stem(str(ti.get("model") or "model"))
     model_name = re.sub(r"\.(pt|onnx|engine)$", "", model_name, flags=re.IGNORECASE)
     dt = _timestamp_for_name(md)
     out_dir = Path(layout.models) / dataset_name

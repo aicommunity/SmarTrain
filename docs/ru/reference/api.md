@@ -9,45 +9,48 @@
 
 ## Основные модули
 
-- `smartrain/workflows/datasets/datasets_json_former.py` — `scan`.
-- `smartrain/workflows/datasets/dataset_former.py` — `fusion`.
-- `smartrain/workflows/training/train_entry.py` — `train`.
+- `smartrain/cli.py` — top-level Typer-роутер и группы команд.
+- `smartrain/cli_entrypoints/cli_forwarding.py` — мост Typer-обёрток к argparse-парсерам.
 - `smartrain/workflows/queue/training_queue_cli.py` и `smartrain/workflows/queue/training_queue.py` — очередь (`queue` и `queue-run`).
-- `smartrain/workflows/analyze/results_analyzer.py` — `analyze`.
 - `smartrain/workflows/registry/registry_cli.py` — `registry`.
-- `smartrain/workflows/datasets/dataset_hash.py` — `hash`.
-- `smartrain/workflows/inference/inference_cli.py` — `inference`.
-- `smartrain/workflows/datasets/dataset_report.py` — `report dataset`.
-- `smartrain/workflows/models/model_convert_cli.py` и `smartrain/workflows/models/model_release_cli.py` — `model`.
-- `smartrain/workflows/datasets/data_yaml_normalize.py` — `normalize-data-yaml`.
-- `smartrain/workflows/migration/migrate_models_to_smartrain.py` — `migrate-models`.
-- `smartrain/workflows/analyze/clearml_upload.py` — `clearml-upload`.
+- `smartrain/workflows/analyze/analyze_entry.py` и `smartrain/workflows/analyze/plot_creator.py` — `analyze` и legacy `plot`.
+- `smartrain/workflows/models/model_convert_cli.py`, `model_release_cli.py`, `model_rename_cli.py` — группа `model`.
+- `smartrain/providers/cli.py` — `providers`.
 
 ## Соответствие CLI -> модуль
 
 | CLI команда | Модуль |
 |---|---|
-| `smartrain scan` | `smartrain/workflows/datasets/datasets_json_former.py` |
-| `smartrain normalize-data-yaml` | `smartrain/workflows/datasets/data_yaml_normalize.py` |
-| `smartrain fusion` | `smartrain/workflows/datasets/dataset_former.py` |
+| `smartrain scan` | `smartrain/workflows/datasets/datasets_entry.py` |
+| `smartrain normalize-data-yaml` | `smartrain/services/datasets/data_yaml_normalize.py` |
+| `smartrain merge` / `smartrain fusion` | `smartrain/workflows/datasets/dataset_former.py` |
 | `smartrain augment` | `smartrain/workflows/datasets/dataset_augment.py` |
 | `smartrain balance` | `smartrain/workflows/datasets/dataset_balance.py` |
 | `smartrain prune` | `smartrain/workflows/datasets/dataset_prune.py` |
+| `smartrain filter` | `smartrain/workflows/datasets/dataset_filter.py` |
 | `smartrain roi` | `smartrain/workflows/datasets/dataset_roi_yolo.py` |
 | `smartrain orient` | `smartrain/workflows/datasets/dataset_orient.py` |
-| `smartrain stats` | `smartrain/workflows/datasets/dataset_stats.py` |
-| `smartrain hash` | `smartrain/workflows/datasets/dataset_hash.py` |
-| `smartrain train` | `smartrain/workflows/training/train_entry.py` (`train_wiring.py`; CLI в `services/training/train_cli_main.py`) |
-| `smartrain inference` | `smartrain/workflows/inference/inference_cli.py` |
-| `smartrain report dataset` | `smartrain/workflows/datasets/dataset_report.py` |
-| `smartrain analyze` | `smartrain/workflows/analyze/results_analyzer.py` |
+| `smartrain rotate` | `smartrain/workflows/datasets/dataset_rotate.py` |
+| `smartrain stats` | `smartrain/services/datasets/dataset_stats.py` |
+| `smartrain hash` | `smartrain/services/datasets/dataset_hash.py` |
+| `smartrain train` | `smartrain/cli_entrypoints/train_app.py` |
+| `smartrain test` | `smartrain/cli_entrypoints/test_app.py` |
+| `smartrain inference` | `smartrain/cli_entrypoints/inference_app.py` |
+| `smartrain vis` | `smartrain/workflows/visualization/vis_cli.py` |
+| `smartrain dataset report` | `smartrain/services/datasets/dataset_report.py` |
+| `smartrain dataset rename` | `smartrain/workflows/datasets/dataset_rename_cli.py` |
+| `smartrain dataset convert` | `smartrain/workflows/datasets/dataset_convert_cli.py` |
+| `smartrain analyze` | `smartrain/workflows/analyze/analyze_entry.py` |
 | `smartrain plot` | `smartrain/workflows/analyze/plot_creator.py` |
 | `smartrain queue` / `queue-run` | `smartrain/workflows/queue/training_queue_cli.py` / `smartrain/workflows/queue/training_queue.py` |
 | `smartrain registry` | `smartrain/workflows/registry/registry_cli.py` |
-| `smartrain model convert` / `model release` | `smartrain/workflows/models/model_convert_cli.py` / `smartrain/workflows/models/model_release_cli.py` |
+| `smartrain model convert` / `model release` / `model rename` | `smartrain/workflows/models/model_convert_cli.py` / `model_release_cli.py` / `model_rename_cli.py` |
+| `smartrain providers` | `smartrain/providers/cli.py` |
+| `smartrain deps sync-torch` | `smartrain/external_providers/installer.py` |
+| `smartrain deploy` / `quickstart` / `info` / `sync` | `smartrain/cli.py` (+ `smartrain/services/workspace/workspace_sync_service.py` для `sync`) |
+| `smartrain migrate` | `smartrain/workflows/migration/cli_migration.py` |
 | `smartrain migrate-models` | `smartrain/workflows/migration/migrate_models_to_smartrain.py` |
 | `smartrain clearml-upload` | `smartrain/workflows/analyze/clearml_upload.py` |
-| `smartrain cvat` | `smartrain/workflows/datasets/cvat_cli.py` |
 | `smartrain sahi` | `smartrain/workflows/inference/sahi_cli.py` |
 | `smartrain heatmap` | `smartrain/workflows/inference/heatmap_cli.py` |
 
@@ -67,8 +70,8 @@ flowchart LR
     cliRouter --> analyzeBlock["results_analyzer.py"]
     cliRouter --> queueBlock["workflows/queue/training_queue_cli.py + training_queue.py"]
     cliRouter --> registryBlock["workflows/registry/registry_cli.py"]
-    cliRouter --> modelBlock["workflows/models/model_convert_cli.py + workflows/models/model_release_cli.py"]
-    cliRouter --> ioBlock["workflows/datasets/cvat_cli.py + workflows/inference/sahi_cli.py + heatmap_cli.py"]
+    cliRouter --> modelBlock["workflows/models/model_convert_cli.py + model_release_cli.py + model_rename_cli.py"]
+    cliRouter --> ioBlock["workflows/datasets/dataset_convert_cli.py + workflows/inference/sahi_cli.py + heatmap_cli.py"]
     cliRouter --> reportBlock["workflows/datasets/dataset_report.py"]
 ```
 

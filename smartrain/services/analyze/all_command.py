@@ -90,6 +90,8 @@ def run_all_command(
         )
 
     selected_labels = [os.path.basename(x.rstrip(os.sep)) for x in selected_run_dirs]
+    if not others:
+        print("[INFO] Single-run report mode: cross-run compare artifacts will be skipped.")
     print("[INFO] Selected compare runs:")
     for idx, (run_dir, label) in enumerate(zip(selected_run_dirs, selected_labels), start=1):
         role = "baseline" if idx == 1 else "other"
@@ -125,6 +127,7 @@ def run_all_command(
         run_data_yaml_map=run_data_yaml_map,
         collect_missing_metrics_recompute_plan_cb=collect_missing_metrics_recompute_plan_cb,
         cmd_test_metrics_plot_cb=cmd_test_metrics_plot_cb,
+        refresh_runs_summary_cb=cmd_export_table_cb,
     )
     artifacts.extend(quality_artifacts)
 
@@ -143,6 +146,7 @@ def run_all_command(
         cmd_inference_benchmark_cb=cmd_inference_benchmark_cb,
         cmd_inference_plot_cb=cmd_inference_plot_cb,
         write_speed_quality_artifacts_cb=write_speed_quality_artifacts_cb,
+        build_run_display_labels_cb=build_abbreviations_for_report_cb,
     )
     artifacts.extend(speed_artifacts)
     cache_events.extend(speed_cache_events)

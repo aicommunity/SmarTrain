@@ -1,6 +1,6 @@
 # Актуальное состояние архитектуры SmarTrain (срез)
 
-**Дата среза:** 2026-05-16  
+**Дата среза:** 2026-05-25  
 **Назначение:** краткий narrative-snapshot структуры пакета, закрытых волн рефакторинга, границ слоёв и известных ограничений. Не заменяет детальные спецификации в `00`–`08`.
 
 **Источник истины по статусу волн и PR:** [`10-implementation-checklist.md`](./10-implementation-checklist.md) (чекбоксы Phase A–F и заметки). Журнал компромиссов и история шагов: [`09-tech-debt.md`](./09-tech-debt.md). Базовый аудит соответствия целевой архитектуре: [`11-plan-conformance-audit.md`](./11-plan-conformance-audit.md). Волна закрытия P0/P1 разрывов: [`12-gap-closure-wave-p0-p1.md`](./12-gap-closure-wave-p0-p1.md).
@@ -83,7 +83,7 @@
 
 ## Analyze, datasets и отчёты
 
-- **Analyze:** логика в [`services/analyze/`](../../smartrain/services/analyze/); CLI-фасад [`workflows/analyze/results_analyzer.py`](../../smartrain/workflows/analyze/results_analyzer.py); отчёты — `report_{markdown,odt,writer}.py`, экспорт — [`services/reporting/document_export.py`](../../smartrain/services/reporting/document_export.py).
+- **Analyze:** логика в [`services/analyze/`](../../smartrain/services/analyze/); CLI-фасад [`workflows/analyze/results_analyzer.py`](../../smartrain/workflows/analyze/results_analyzer.py); отчёты — `report_{markdown,odt,writer}.py`, экспорт — [`services/reporting/document_export.py`](../../smartrain/services/reporting/document_export.py). Split/data.yaml для speed/PR: [`data_yaml_splits.py`](../../smartrain/services/analyze/data_yaml_splits.py) (path-aware пути, fallback test→val→train в `analyze all`, graceful degradation без test/val).
 - **Datasets:** логика в [`services/datasets/`](../../smartrain/services/datasets/); CLI-фасады [`workflows/datasets/*.py`](../../smartrain/workflows/datasets/).
 - **Schema governance:** [`services/analyze/schema_contracts.py`](../../smartrain/services/analyze/schema_contracts.py) (session manifest, format-compare index).
 
@@ -107,10 +107,25 @@
 
 ---
 
+## Instance segmentation rollout (closed 2026-06-27)
+
+**Статус:** волна SEG-0…SEG-8 закрыта. Регистр: [`tech-debt-instance-segmentation.md`](./tech-debt-instance-segmentation.md).
+
+- [x] **SEG-0** Инфраструктура TD: register TD-SEG-001…010, checklist sync, capability matrix update.
+- [x] **SEG-1** Safety net: unit-тесты YoloSegment (yolo_labels, rotate, orient, ROI, dataset_report).
+- [x] **SEG-2** Docs + guards: EN/RU CLI limits; native ONNX/TRT test skip для segmentation.
+- [x] **SEG-3** Segmentation metrics adapter: CSV mapping, unit tests, Mask plots contract decision.
+- [x] **SEG-4** Polygon-aware augment: flip/rotate/photometric; reject bbox-copy для seg datasets.
+- [x] **SEG-5** Balance/stats/CVAT: polygon counts, enclosing-bbox balance, CVAT polygon import/export.
+- [x] **SEG-6** Analyze reports: task-aware `METRIC_AGG_COLUMNS`, format_compare, report_markdown.
+- [x] **SEG-7** Inference overlay: `--save-overlay` + viz service + tests.
+- [x] **SEG-8** Multi-framework: external `--task segment`, weighted sampling, E2E smoke, final TD burn-down.
+
+---
+
 ## Следующий горизонт (backlog, без обязательства срока)
 
-1. **Train CLI (опционально):** дальнейшее утоньшение [`inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py) (LB-D4 LOC) и косметика wiring — основной train path уже в [`train_cli_main`](../../smartrain/services/training/train_cli_main.py) + [`train_wiring`](../../smartrain/workflows/training/train_wiring.py); MTM удалён (LB-D8).
-2. **Документация RU:** синхронизация [`../ru/development/architecture.md`](../ru/development/architecture.md) с EN-срезом datasets/services.
+1. **Inference CLI (опционально):** [`inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py) ~235 LOC (цель LB-D4: under 200) — косметическое сжатие фасада; runtime в `services/inference_service.py`.
 
 ---
 

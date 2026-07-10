@@ -10,6 +10,10 @@ import pandas as pd
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 
 
+from smartrain.services.analyze.ultralytics_test_ensure import ensure_ultralytics_test_for_runs
+from smartrain.services.analyze.eval_dataset_test_artifacts import collect_eval_dataset_test_artifacts
+
+
 def finalize_all_session(
     *,
     args: Any,
@@ -36,12 +40,26 @@ def finalize_all_session(
     replay_parser: argparse.ArgumentParser | None = None,
 ) -> None:
     abbreviations = build_abbreviations_for_report_cb([baseline] + others)
+    ensure_ultralytics_test_for_runs(
+        [baseline] + others,
+        args=args,
+        profile=profile,
+        workspace_cli=getattr(args, "workspace", None),
+        run_data_yaml_map=run_data_yaml_map,
+        record_failure_cb=record_failure_cb,
+    )
     ultralytics_test_rows, ultralytics_test_artifacts = collect_ultralytics_test_artifacts_cb(
         session_root,
         [baseline] + others,
         abbreviations,
     )
     artifacts.extend(ultralytics_test_artifacts)
+    eval_dataset_rows, eval_dataset_artifacts = collect_eval_dataset_test_artifacts(
+        session_root,
+        [baseline] + others,
+        abbreviations,
+    )
+    artifacts.extend(eval_dataset_artifacts)
 
     format_compare = write_format_compare_artifacts_cb(session_root, [baseline] + others)
     if format_compare and format_compare.get("csv"):
@@ -87,11 +105,13 @@ def finalize_all_session(
                 }
             )
 
+    single_run_mode = not others
     manifest = {
         "session_name": os.path.basename(session_root),
         "profile": profile,
         "baseline": baseline,
         "others": others,
+        "single_run_mode": single_run_mode,
         "artifacts": artifacts,
         "images": [a["path"] for a in artifacts if a["path"].endswith(".png")],
         "tables": [a["path"] for a in artifacts if a["path"].endswith(".csv")],
@@ -114,6 +134,8 @@ def finalize_all_session(
     }
     if ultralytics_test_rows:
         manifest["ultralytics_test"] = ultralytics_test_rows
+    if eval_dataset_rows:
+        manifest["eval_dataset_tests"] = eval_dataset_rows
     if conf_tables:
         manifest["confidence_recommendations"] = {
             key: os.path.relpath(path, session_root) for key, path in conf_tables.items()

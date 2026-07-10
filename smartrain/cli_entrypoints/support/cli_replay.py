@@ -53,6 +53,12 @@ def build_non_interactive_command(
             if not value:
                 continue
             for item in value:
+                if isinstance(item, (list, tuple)):
+                    if opt:
+                        parts.extend([opt] + [str(x) for x in item])
+                    else:
+                        parts.extend([str(x) for x in item])
+                    continue
                 if opt:
                     parts.extend([opt, str(item)])
                 else:

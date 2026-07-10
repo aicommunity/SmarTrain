@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-ANALYZE_SESSION_SCHEMA_VERSION = "1.0.0"
+ANALYZE_SESSION_SCHEMA_VERSION = "1.1.0"
 FORMAT_COMPARE_SCHEMA_VERSION = "1.0.0"
 
 

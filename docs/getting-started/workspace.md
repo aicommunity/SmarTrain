@@ -4,6 +4,8 @@
 
 `smartrain` uses a single workspace root. The default mode is to work from the current directory.
 
+Run `smartrain` or `smartrain --help` for a grouped command reference. Run `smartrain quickstart` for the step-by-step workflow guide.
+
 You can optionally override the workspace root with a global flag:
 
 - `smartrain --workspace /path/to/ws ...`.

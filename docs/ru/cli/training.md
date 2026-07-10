@@ -8,17 +8,39 @@
 
 ```bash
 smartrain train --data my_dataset -y
+smartrain train --data my_seg_dataset --task segment --model yolo11s-seg.pt -y
 smartrain train --test-only --model-dir /path/to/run --data /path/to/dataset
 ```
+
+### Instance segmentation
+
+- `--task segment` и модель `*-seg.pt` (например `yolo11s-seg.pt`).
+- Разметка — YOLO-полигоны. См. [форматы данных](../reference/data-formats.md).
+- В интерактиве при task=segment предлагаются модели с `-seg`.
+- Полный набор графиков после обучения: `smartrain test --formats pt --task segment`.
+- Native ONNX/engine/TRT test для segmentation по умолчанию пропускается.
+- Экспериментально: `smartrain test --formats onnx --task segment --force-native-seg-test` (bbox-native eval; mask-метрики ненадёжны).
 
 Источники параметров и приоритет:
 
 `CLI > --ultralytics_yaml > --config > defaults`
 
 Поле `data` из `--ultralytics_yaml` игнорируется, используется выбранный `--data`.
-Также из `--ultralytics_yaml` игнорируются: `project`, `name`, `exist_ok`, `cfg`, `device`, `model_dir`, `target_path`, `workspace`.
+Также из `--ultralytics_yaml` игнорируются: `project`, `name`, `exist_ok`, `cfg`, `device`, `model_dir`, `target_path`, `workspace`, `save_dir`, `runs_dir`, `output_dir`.
 
 То есть параметры командной строки всегда имеют наивысший приоритет.
+
+Двухэтапная защита для внешнего YAML:
+
+1. На этапе merge из `--ultralytics_yaml` отбрасываются сервисные и path-like ключи.
+2. На этапе finalize перед `YOLO.train(...)` принудительно задаются `data`, `project`, `name`, `exist_ok`.
+
+Это не позволяет стороннему `args.yaml` перенаправить запуск в чужие директории.
+
+Примечание по переносимости путей:
+
+- Избегайте абсолютных машинно-зависимых путей (например `/mnt/*`) во внешнем `args.yaml`.
+- Для выбора устройства используйте `--device` из CLI; `device` в `--ultralytics_yaml` игнорируется.
 
 Выбор модели:
 

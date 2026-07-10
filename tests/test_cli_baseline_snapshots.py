@@ -26,7 +26,7 @@ def test_baseline_help_snapshots(subprocess_env: dict[str, str], tmp_path: Path)
     env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
 
     cases: list[tuple[list[str], list[str]]] = [
-        (["--help"], ["deploy", "train", "analyze", "inference"]),
+        (["--help"], ["deploy", "train", "analyze", "inference", "Workspace:", "Dataset catalog"]),
         (["train", "--", "--help"], ["Examples:", "--data", "--model"]),
         (["test", "--", "--help"], ["--formats", "--weights", "--non-interactive", "--nit"]),
         (["inference", "--", "--help"], ["--data-mode", "--source-dir", "--model-name"]),

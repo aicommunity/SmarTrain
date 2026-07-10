@@ -658,7 +658,7 @@ def _gather_instances(pairs: list[tuple[str, str]], classes_by_id: dict[int, str
 
 
 def _run_interactive(args: argparse.Namespace, dataset_names: list[str]) -> None:
-    print("[INFO] Interactive report dataset (Enter = defaults).")
+    print("[INFO] Interactive dataset report (Enter = defaults).")
     args.dataset = prompt_choice("Dataset", dataset_names, default=args.dataset or dataset_names[0])
     layout = WorkspaceLayout(resolve_workspace_root(args.workspace))
     default_out = _default_output_dir(layout, args.dataset)
@@ -737,7 +737,7 @@ def main(argv: list[str] | None = None) -> None:
 
     replay_cmd = None
     if interactive_used:
-        replay_cmd = build_non_interactive_command("report dataset", parser, args)
+        replay_cmd = build_non_interactive_command("dataset report", parser, args)
         print_replay_command("before launch", replay_cmd)
 
     _log("[INFO] --- Generating report (this may take a while) ---")

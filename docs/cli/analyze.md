@@ -35,9 +35,34 @@ smartrain analyze leaderboard --quality-metric mAP50-95 --speed-metric avg_infer
 smartrain analyze pr-curves --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml
 smartrain analyze pr-curves --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml --pr-per-class
 smartrain analyze inference-benchmark --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml --split test --frames 200
+# Standalone benchmark defaults to --split test (strict fail if missing).
+# analyze all (profile=full) picks split automatically: test → val → train.
 smartrain analyze inference-plot --csv benchmark.csv --out-png benchmark.png
 smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 mAP50-95 Box-F1
 ```
+
+### Baseline-only report (`analyze all`)
+
+`analyze all` can build a full report from a **single baseline run** without `--others`:
+
+```bash
+# Non-interactive: baseline + profile required; --others is optional
+smartrain analyze all \
+  --baseline runs/ds_a/my_run \
+  --profile full \
+  --data-yaml datasets/ds_a/data.yaml
+
+# Interactive (TTY): with one run in workspace, it is auto-selected as baseline;
+# leave "Other run numbers" empty for baseline-only mode
+smartrain analyze all
+```
+
+In baseline-only mode (`single_run_mode` in `session.json`):
+
+- **Included:** metrics recompute, format comparison (pt/onnx/engine within the run), PR curves, inference benchmark, Ultralytics test artifacts, markdown/PDF/ODT report.
+- **Skipped (needs 2+ runs):** cross-run `compare` delta/curves, speed-vs-quality scatter, multi-run test-metrics bar charts.
+
+`analyze compare` still requires at least one candidate run in `--others`.
 
 ## Artifacts
 
@@ -59,12 +84,13 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
 - Analyze reports are narrative-first (by comparison meaning), including:
   - executive summary, context, quality, speed, per-class analysis, conclusion
   - captions for tables/figures and optional abbreviations glossary for wide tables
-- `session.json` now contains sections: `metric_sources`, `pr_per_class`, `speed_quality`, `tables`, `images`, `cache`, `artifact_scope`.
+- `session.json` now contains sections: `metric_sources`, `pr_per_class`, `speed_quality`, `tables`, `images`, `cache`, `artifact_scope`, `artifact_failures` (and optional `artifact_failures_summary` when speed/PR or other stages degrade).
 - Format comparison reads per-format artifacts from test manifests and supports entries with multiple artifacts per format (`formats.<fmt>.artifacts`), selecting available metrics sources with legacy fallback.
 - For runs produced by external inference in cls/seg modes, degraded-contract payloads are expected when provider runtime lacks `probs/masks`:
   - classification rows may contain `task_outputs.classification = {}`
   - segmentation rows may contain `task_outputs.segments = []`
   - aggregate visibility comes from `summary.task_outputs_total` and `summary.capability_gap_images`
+- **Segmentation metrics in analyze:** runs with `training_metadata.json` → `task_type=segmentation` expose mask columns (`mask_mAP50-95`, `Mask-F1`, …) in `format_metrics_compare_*.csv`, `compare_delta.csv`, and `runs_summary.csv` (`test_mask_*` prefixes). When mask columns are absent in a CSV, analyze falls back to box metrics (`mAP50-95`, `Box-F1`, …). `test-metrics-plot` picks defaults from the first run's task and CSV headers.
 - `analyze all` supports:
   - `--report-languages` (default `ru,en`)
   - `--scatter-x` / `--scatter-y` for speed-quality scatter axes
@@ -86,12 +112,39 @@ smartrain analyze test-metrics-plot --runs-group-dir runs/ds_a --metrics mAP50 m
 - `compare` also creates plain text auto-insights (`--out-insights`).
 - `compare` without `--baseline/--others` starts interactive selection in terminal (TTY).
 - `pr-curves` builds per-run `test/pr.csv`, optional per-class CSV, and a combined PR plot.
-- `inference-benchmark` generates a CSV with inference measurements.
+- `inference-benchmark` generates a CSV with inference measurements (`benchmark_split_used` column records the split actually used).
 - `inference-plot` builds a visualization based on the CSV from `inference-benchmark`.
 - `test-metrics-plot` builds bar charts from `test_metrics*.csv` across a runs group.
 - `leaderboard` generates ranked CSV using weighted quality/speed/stability score.
 
 `smartrain plot` remains a legacy wrapper and delegates to `analyze`.
+
+## Data.yaml resolution and split policy
+
+Dataset paths for speed/PR stages are resolved via [`data_yaml_splits.py`](../../smartrain/services/analyze/data_yaml_splits.py):
+
+- **Dataset root:** if `data.yaml` has a non-empty `path:` field, split directories (`train`, `val`, `test`) are resolved relative to that path; otherwise relative to the yaml file directory. This matters for runtime yaml under `run/tmp/_runtime_data_*.yaml` where `path:` points at `datasets/<name>/`.
+- **Per-run data.yaml selection:** when `analyze all` maps a data.yaml per run, workspace `datasets/*/data.yaml` is preferred over runtime yaml from `train/args.yaml:data` when both exist.
+
+### `analyze all` (orchestration, `profile=full`)
+
+| Stage | Split / failure behavior |
+|-------|--------------------------|
+| Quality (compare, test-metrics) | Uses training-time metrics; separate `smartrain test` is not required |
+| Speed (`inference-benchmark`) | Internally uses auto split preference **test → val → train**; on missing images prints `[WARN]`, records `artifact_failures` with `reason_code=benchmark_missing_or_failed`, session report still completes |
+| PR (`pr-curves`) | Uses test split; on empty curves prints `[WARN]` and skips (no `sys.exit`) |
+| `inference-plot` | Skipped when `benchmark.csv` has no numeric speed metrics |
+| Finalize | Always writes manifest + report unless `--strict-diagnostics` is set |
+
+`benchmark.csv` includes `benchmark_split_used`. When benchmark runs on `train` because test/val are absent, treat speed numbers as indicative only (not a production test-set profile).
+
+### Standalone `inference-benchmark`
+
+- `--split` choices: `train`, `val`, `test` (default `test`).
+- Path resolution via `path:` applies, but **no split fallback**: if the requested split directory is missing, the command fails with exit code 1.
+- `--split auto` is not exposed in the public CLI; it is used internally by `analyze all`.
+
+Use `--strict-diagnostics` on `analyze all` only when missing PR/metric_sources artifacts must fail the session (opt-in).
 
 ## Contracts
 

@@ -22,6 +22,9 @@ class MFELConvModuleShim:  # picklable top-level shim for broken forks
         return self.act(self.bn(self.conv(x)))
 
 
+from smartrain.external_providers.task_alias import ultralytics_task_alias
+
+
 def _resolve_mfel_model_spec(repo: Path, model_arg: str) -> str:
     model_raw = str(model_arg or "").strip()
     cfg_root = repo / "ultralytics" / "cfg" / "MFEL-YOLO"
@@ -65,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--device", default=None)
     p.add_argument("--project", default=None)
     p.add_argument("--name", default=None)
+    p.add_argument("--task", default="detection")
     args = p.parse_args(argv)
 
     repo = Path(args.repo).expanduser().resolve()
@@ -94,8 +98,8 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    model = YOLO(model_spec, task="detect")
-    kwargs = {"data": args.data, "batch": int(args.batch), "epochs": int(args.epochs), "imgsz": int(args.imgsz)}
+    model = YOLO(model_spec, task=ultralytics_task_alias(args.task))
+    kwargs = {"data": args.data, "batch": int(args.batch), "epochs": int(args.epochs), "imgsz": int(args.imgsz), "task": ultralytics_task_alias(args.task)}
     # MFEL custom ops are unstable under AMP on some GPUs/drivers (nan losses on epoch 1).
     kwargs["amp"] = False
     # Stabilize optimization for MFEL custom architecture.

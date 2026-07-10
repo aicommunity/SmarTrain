@@ -30,7 +30,7 @@
 pytest tests/regression/test_layer_import_guardrails.py -q
 pytest tests/test_train_*.py tests/test_training_metadata*.py -q  # after D2/D3
 pytest tests/ -k inference -q  # after D4
-pytest tests/unified/io/read/ -q  # after D5.1 / unified rename
+pytest tests/run_model_contract/io/read/ -q  # after D5.1 / run_model_contract rename
 pytest tests/ -k "model_test or test_backend" -q  # after D6
 pytest tests/ -q  # final
 ```

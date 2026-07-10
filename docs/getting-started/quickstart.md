@@ -4,6 +4,15 @@
 
 This guide assumes `smartrain` is already installed and you run commands from the workspace root.
 
+Run `smartrain` or `smartrain --help` for a grouped command reference. This guide is also available as `smartrain quickstart`.
+
+Completion after install:
+
+- auto: best-effort setup runs on first `smartrain` launch;
+- manual fallback:
+  - `smartrain --install-completion`
+  - `smartrain --show-completion`
+
 ## Main path: train on your dataset and build reports
 
 1. **Create a workspace directory (if it does not exist yet)**
@@ -62,16 +71,24 @@ Launch modes:
 smartrain train --data my_dataset --model yolo11n.pt -y
 ```
 
+**Instance segmentation (optional):**
+
+```bash
+smartrain train --data my_seg_dataset --task segment --model yolo11s-seg.pt -y
+smartrain test --run <run> --formats pt --task segment
+smartrain inference --model <best.pt> --source images/ --task segment
+```
+
 5. **Build dataset report**
    Generates visual/text report for dataset quality and class coverage.
 
 Launch modes:
 
-- Interactive (no args): `smartrain report dataset`
+- Interactive (no args): `smartrain dataset report`
 - Non-interactive (minimal args):
 
 ```bash
-smartrain report dataset --dataset my_dataset -n 6 --languages en,ru
+smartrain dataset report --dataset my_dataset -n 6 --languages en,ru
 ```
 
 6. **Build run analysis report**
@@ -86,7 +103,7 @@ Launch modes:
 smartrain analyze all --report-languages en,ru
 ```
 
-`smartrain analyze scan` is optional and can be used as a separate pre-check, but it is not required before `smartrain analyze`/`smartrain analyze all`.
+`smartrain analyze scan` is optional and can be used as a separate pre-check, but it is not required before `smartrain analyze`/`smartrain analyze all`. A separate `smartrain test` run and test/val dataset splits are not required for the report; speed/PR stages degrade with warnings when splits are missing (`profile=full`).
 
 ## Optional steps
 
@@ -95,7 +112,7 @@ smartrain analyze all --report-languages en,ru
   ```bash
   smartrain analyze compare --baseline /path/to/run_a --others /path/to/run_b /path/to/run_c
   ```
-- **Dataset operations before training** (when needed): `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`.
+- **Dataset operations before training** (when needed): `merge` (legacy alias: `fusion`), `augment`, `balance`, `prune`, `orient`, `roi`.
 
 ## Where outputs are saved
 

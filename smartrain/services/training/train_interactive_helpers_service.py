@@ -163,6 +163,11 @@ def pick_model_interactive(options: list[str], default_alias: str, *, format_col
             return default_alias
         if raw in options:
             return raw
+        # Allow explicit provider-prefixed aliases and direct model paths.
+        # This keeps interactive flow compatible with external providers even
+        # when prefixed aliases are not listed in local options.
+        if ":" in raw or "/" in raw or raw.endswith(".pt"):
+            return raw
         if raw.isdigit():
             idx = int(raw)
             if 1 <= idx <= len(options):

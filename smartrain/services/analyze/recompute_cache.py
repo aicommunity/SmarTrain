@@ -7,6 +7,11 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from smartrain.core.analyze.run_metrics_discovery import (
+    recomputed_metrics_write_path,
+    resolve_recomputed_metrics_csv,
+)
+
 
 def recompute_status_path(
     run_dir: str,
@@ -114,8 +119,8 @@ def collect_missing_metrics_recompute_plan(
     skipped: list[dict[str, Any]] = []
     for run_dir in run_dirs:
         row = read_test_metrics_for_run_cb(run_dir)
-        recomputed_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
-        if os.path.isfile(recomputed_csv):
+        recomputed_csv = resolve_recomputed_metrics_csv(run_dir)
+        if recomputed_csv:
             try:
                 rdf = pd.read_csv(recomputed_csv)
                 if len(rdf) > 0:
@@ -261,6 +266,7 @@ def recompute_run_test_metrics(
     if len(rdf) == 0:
         return {}
     row = rdf.iloc[0].to_dict()
-    out_csv = os.path.join(run_dir, "test_metrics_recomputed.csv")
+    out_csv = recomputed_metrics_write_path(run_dir)
+    os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
     rdf.to_csv(out_csv, index=False, encoding="utf-8")
     return row

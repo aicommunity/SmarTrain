@@ -4,6 +4,8 @@ Operational execution status and PR-level checkboxes: [`10-implementation-checkl
 
 Purpose: keep a running list of refactor leftovers and intentional short-term compromises.
 
+- 2026-05-25: **analyze без test/val split:** `services/analyze/data_yaml_splits.py` — path-aware разрешение split из `path:` в data.yaml, fallback test→val→train в `analyze all`, ранжирование per-run data.yaml кандидатов; speed/PR stages с `soft_fail` (WARN + `artifact_failures`, отчёт без `sys.exit`). Standalone `inference-benchmark` по-прежнему strict при отсутствии запрошенного split.
+- 2026-05-25: **model convert TRT prep:** при пропуске экспорта ONNX (уже есть публичный `*.onnx`) интерактивный пайплайн ONNX+TRT и режим `--format onnx` синхронизируют dedicated `*_trtprep.onnx` перед `trtexec`, если подпись ONNX совпадает с ожидаемой. Исправляет сбой «Input file cannot be found» для `trtexec` при наличии только короткого имени `.onnx`.
 - 2026-05-17: **CLI package layout:** `cli_apps/` → `cli_entrypoints/`; `cli_support/` → `cli_entrypoints/support/`. Entry point `smartrain.cli:main` unchanged.
 - 2026-05-17: **Package rename (imports/docs):** all code imports `smartrain.run_model_contract`; docs/release-notes updated. Legacy on-disk `/.smartrain/unified/` and env `SMARTTRAIN_UNIFIED_*` intentionally unchanged.
 - 2026-05-17: **Package rename (tree):** `smartrain/unified/` → `smartrain/run_model_contract/`; tests → `tests/run_model_contract/`. Disk `.smartrain/unified/` and `SMARTTRAIN_UNIFIED_*` unchanged; public types still `Unified*`.
@@ -413,6 +415,10 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 - External providers могут легитимно возвращать неполные task-specific payloads для `classification/segmentation` (отсутствие `probs/masks` в runtime fork). Контракт деградации (`classification: {}`, `segments: []`) считается валидным до rollout расширенной provider-поддержки. Диагностика в отчётах и пользовательский контекст: `README.md`, [`docs/cli/inference.md`](../cli/inference.md), [`services/inference_service.py`](../../smartrain/services/inference_service.py) (`capability_gap` / счётчики при необходимости).
 
 - **Model test / internal `pt_uni` compare:** для **`detection`**, **`classification`** и **`segmentation`** запускается внутренний проход `pt_uni` с пробросом `task_type` в Ultralytics `val` (см. [`14-pt-uni-compare-contract.md`](./14-pt-uni-compare-contract.md)). Иные задачи по-прежнему пропускаются с информационным сообщением.
+
+- **Model test / native ONNX/engine/TRT для segmentation:** native eval использует detection-shaped bbox pipeline; для `task_type=segmentation` форматы `onnx`/`engine`/`trt` **пропускаются** по умолчанию (`status=skipped`, `capability_gap` в manifest). Используйте PT test или `--force-native-seg-test` (экспериментально). Регистр: [`tech-debt-instance-segmentation.md`](./tech-debt-instance-segmentation.md) TD-SEG-002.
+
+- 2026-06-27: **Instance segmentation rollout (SEG-0…SEG-8) closed.** Register: [`tech-debt-instance-segmentation.md`](./tech-debt-instance-segmentation.md). Polygon augment, native test guard, metrics adapter, analyze mask columns, inference overlay, CVAT polygon, external `--task` propagation.
 
 - **Canonical model read (`ModelAdapter`):** порядок вывода `task_type` — поля `manifest` / `training_metadata.training_info.task_type` / `training_info.ultralytics_train.task` (если заданы) → эвристика по имени файла весов (`-cls`/`-seg` и т.д.) → **последний резерв `detection`**. Порядок `backend_type` — metadata/provider → эвристика по расширению веса (`onnx` → onnxruntime, `engine`/`trt` → tensorrt, иначе ultralytics). При «немых» артефактах без метаданных и без подсказок в имени возможна неверная интерпретация задачи до явного исправления provenance.
 

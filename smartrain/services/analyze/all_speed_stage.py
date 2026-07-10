@@ -8,6 +8,40 @@ from typing import Any, Callable
 import pandas as pd
 
 
+from smartrain.services.analyze.report_labels import build_run_display_labels
+
+
+def _apply_display_labels_to_benchmark_df(df: pd.DataFrame, label_map: dict[str, str]) -> pd.DataFrame:
+    if df is None or len(df) == 0 or not label_map:
+        return df
+    out = df.copy()
+
+    def _label_for_row(run_dir: Any, model: Any, run_name: Any) -> str:
+        rd = str(run_dir or "").strip()
+        if rd:
+            abs_rd = os.path.abspath(rd.rstrip(os.sep))
+            if abs_rd in label_map:
+                return label_map[abs_rd]
+        rn = str(run_name or "").strip() or (os.path.basename(rd.rstrip(os.sep)) if rd else "")
+        if rn and rn in label_map:
+            return label_map[rn]
+        m = str(model or "").strip()
+        if m and m in label_map:
+            return label_map[m]
+        return rn or m or "?"
+
+    if "run_dir" in out.columns or "model" in out.columns:
+        out["display_label"] = [
+            _label_for_row(
+                row.get("run_dir") if hasattr(row, "get") else None,
+                row.get("model") if hasattr(row, "get") else None,
+                row.get("run_name") if hasattr(row, "get") else None,
+            )
+            for _, row in out.iterrows()
+        ]
+    return out
+
+
 def run_all_speed_stage(
     *,
     args: Any,
@@ -24,12 +58,18 @@ def run_all_speed_stage(
     cmd_inference_benchmark_cb: Callable[[argparse.Namespace], None],
     cmd_inference_plot_cb: Callable[[argparse.Namespace], None],
     write_speed_quality_artifacts_cb: Callable[..., dict[str, str] | None],
+    build_run_display_labels_cb: Callable[[list[str]], dict[str, str]] | None = None,
 ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
     if profile not in ("speed", "full"):
         return [], []
 
     artifacts: list[dict[str, str]] = []
     cache_events: list[dict[str, Any]] = []
+    compare_runs = [baseline] + others
+    if build_run_display_labels_cb is not None:
+        label_map = build_run_display_labels_cb(compare_runs)
+    else:
+        label_map = build_run_display_labels(compare_runs, build_run_record_cb=None)
 
     run_groups, unresolved_for_speed = group_runs_by_data_yaml_cb(selected_run_dirs, run_data_yaml_map)
     if unresolved_for_speed:
@@ -58,10 +98,11 @@ def run_all_speed_stage(
             runs_group_dir=runs_group_dir,
             selected_run_dirs=group_runs,
             data_yaml=group_yaml,
-            split="test",
+            split="auto",
             frames=100,
             device="cpu",
             half=False,
+            soft_fail=True,
             out_csv=inf_part_csv,
             workspace=args.workspace,
             models_root=args.models_root,
@@ -146,6 +187,7 @@ def run_all_speed_stage(
                 run_dir=run_dir,
                 split="test",
             )
+        inf_df = _apply_display_labels_to_benchmark_df(inf_df, label_map)
         inf_df.to_csv(inf_csv, index=False, encoding="utf-8")
     else:
         inf_df = pd.DataFrame(
@@ -160,6 +202,7 @@ def run_all_speed_stage(
                 for run_dir in selected_run_dirs
             ]
         )
+        inf_df = _apply_display_labels_to_benchmark_df(inf_df, label_map)
         inf_df.to_csv(inf_csv, index=False, encoding="utf-8")
 
     lb_csv = os.path.join(session_root, "artifacts", "leaderboard", "leaderboard.csv")
@@ -221,13 +264,31 @@ def run_all_speed_stage(
         models_root=args.models_root,
         analytics_session=args.analytics_session,
     )
-    cmd_inference_plot_cb(ip_ns)
-    artifacts.extend(
-        [
-            {"role": "inference_csv", "path": os.path.relpath(inf_csv, session_root)},
-            {"role": "inference_png", "path": os.path.relpath(inf_png, session_root)},
-        ]
-    )
+    plot_ready = False
+    if os.path.isfile(inf_csv) and os.path.getsize(inf_csv) > 0:
+        try:
+            plot_df = pd.read_csv(inf_csv)
+            speed_col = "avg_inference_ms_per_frame"
+            if speed_col in plot_df.columns:
+                plot_ready = pd.to_numeric(plot_df[speed_col], errors="coerce").notna().any()
+            if not plot_ready and "avg_inference_fps" in plot_df.columns:
+                speed_col = "avg_inference_fps"
+                plot_ready = pd.to_numeric(plot_df[speed_col], errors="coerce").notna().any()
+                ip_ns.metric = speed_col
+        except Exception:
+            plot_ready = False
+    if plot_ready:
+        cmd_inference_plot_cb(ip_ns)
+        artifacts.extend(
+            [
+                {"role": "inference_csv", "path": os.path.relpath(inf_csv, session_root)},
+                {"role": "inference_png", "path": os.path.relpath(inf_png, session_root)},
+            ]
+        )
+    else:
+        print("[WARN] Speed stage: skipping inference plot (no benchmark timing metrics).")
+        if os.path.isfile(inf_csv):
+            artifacts.append({"role": "inference_csv", "path": os.path.relpath(inf_csv, session_root)})
 
     for g_idx in range(1, len(run_groups) + 1):
         cache_stats_path = os.path.join(session_root, "artifacts", "inference", f"cache_stats_group_{g_idx}.json")
@@ -250,11 +311,12 @@ def run_all_speed_stage(
                 sq = write_speed_quality_artifacts_cb(
                     session_root,
                     inf_csv,
-                    [baseline] + others,
+                    compare_runs,
                     metric_sources_payload,
                     scatter_x=str(getattr(args, "scatter_x", "avg_inference_ms_per_frame")),
                     scatter_y=str(getattr(args, "scatter_y", "mAP50-95")),
                     run_data_yaml_map=run_data_yaml_map,
+                    display_labels=label_map,
                 )
                 if sq:
                     artifacts.extend(
@@ -270,7 +332,10 @@ def run_all_speed_stage(
                             os.path.basename(str(r).rstrip(os.sep))
                             for r in selected_run_dirs
                         }
-                        actual = set(sq_df.get("model", pd.Series(dtype=str)).astype(str).tolist())
+                        if "run_name" in sq_df.columns:
+                            actual = set(sq_df["run_name"].astype(str).tolist())
+                        else:
+                            actual = set(sq_df.get("model", pd.Series(dtype=str)).astype(str).tolist())
                         if len(actual) < len(expected):
                             record_failure_cb(
                                 stage="speed_quality",

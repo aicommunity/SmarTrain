@@ -6,6 +6,8 @@
 - как их использует корневая команда `smartrain analyze`,
 - практическую шпаргалку по запуску.
 
+Подробный контракт split/data.yaml и деградация speed/PR: [analyze.md](analyze.md).
+
 ## Поведение корневой команды
 
 - `smartrain analyze` (без подкоманды, в TTY) запускает интерактивный orchestrator, эквивалентный `smartrain analyze all`.
@@ -57,9 +59,11 @@
 
 - Назначение: замер скорости инференса.
 - Артефакты:
-  - `benchmark.csv`.
+  - `benchmark.csv` (колонка `benchmark_split_used` — фактически использованный split).
 - Run-level cache:
   - `.smartrain_cache/analyze/inference/bench_<fingerprint>.csv`.
+- **Standalone:** `--split` default `test`, strict fail при отсутствии каталога split (пути разрешаются через `path:` в data.yaml).
+- **Внутри `analyze all`:** split выбирается автоматически test → val → train; при отсутствии изображений — WARN и skip (запись в `session.json` → `artifact_failures`).
 
 ### `smartrain analyze inference-plot`
 
@@ -68,6 +72,7 @@
   - требует CSV (`--csv`), обычно созданный `inference-benchmark`.
 - Артефакты:
   - `benchmark_bars.png` (или путь из `--out-png`).
+- В `analyze all`: пропускается, если в `benchmark.csv` нет числовых `avg_inference_ms_per_frame` / `avg_inference_fps`.
 
 ### `smartrain analyze test-metrics-plot`
 
@@ -95,6 +100,7 @@
   - `artifacts/pr/...`,
   - `artifacts/speed_quality/speed_quality.csv`,
   - `artifacts/speed_quality/speed_vs_map.png`.
+- **Деградация (profile=full):** quality работает без отдельного `smartrain test`; speed/PR при отсутствии split или данных — WARN + `artifact_failures`, отчёт всё равно финализируется (кроме `--strict-diagnostics`).
 
 ## Зависимости подкоманд и flow
 
@@ -103,8 +109,8 @@
   - `export-table`
   - `leaderboard`
   - `test-metrics-plot` (quality/full)
-  - `inference-benchmark` -> `inference-plot` (speed/full)
-  - `pr-curves` (full)
+  - `inference-benchmark` -> `inference-plot` (speed/full; plot skip при пустом benchmark)
+  - `pr-curves` (full; soft skip при пустых curves)
   - затем: `session.json` + RU/EN отчёты
 
 - `speed-vs-mAP` scatter строится из:
@@ -153,8 +159,9 @@
 - PR curves (включая per-class):
   - `smartrain analyze pr-curves --runs-group-dir runs/<dataset> --data-yaml datasets/<dataset>/data.yaml --pr-per-class`
 
-- Benchmark скорости:
+- Benchmark скорости (standalone):
   - `smartrain analyze inference-benchmark --runs-group-dir runs/<dataset> --data-yaml datasets/<dataset>/data.yaml --split test --frames 200`
+- Benchmark в `analyze all`: split test → val → train автоматически (см. [analyze.md](analyze.md)).
 
 - График скорости из benchmark CSV:
   - `smartrain analyze inference-plot --csv /path/to/benchmark.csv --out-png /path/to/benchmark_bars.png`

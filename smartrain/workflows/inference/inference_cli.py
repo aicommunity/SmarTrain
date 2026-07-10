@@ -20,6 +20,8 @@ from smartrain.core.runtime.device_selector import (
     resolve_device_request,
     validate_device_available,
 )
+from smartrain.services.inference_arg_parser import build_inference_arg_parser
+from smartrain.services.inference_dataset_export import resolve_export_options, validate_export_options
 from smartrain.services.inference_service import run_inference_job
 from smartrain.services.inference_runtime_helpers import (
     DATA_MODES,
@@ -40,48 +42,6 @@ __all__ = [
     "_resolve_model",
     "print_replay_command",
 ]
-
-
-def build_inference_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(
-        description="Run object detection inference and save JSON report (empty call starts interactive mode)."
-    )
-    p.add_argument("--workspace", type=str, default=None, help=f"Workspace root (otherwise {WORKSPACE_ENV_VAR}).")
-    p.add_argument("--model-name", type=str, default=None, help="Promoted model directory name from workspace/models.")
-    p.add_argument("--run", type=str, default=None, help="Run path or run index from workspace/runs list.")
-    p.add_argument("--weights", type=str, default=None, help="Explicit model weights path (.pt/.onnx/.engine/.trt).")
-    p.add_argument("--data-mode", choices=DATA_MODES, default="folder", help="Data source mode.")
-    p.add_argument("--source-dir", type=str, default=None, help="Folder with images (recursive).")
-    p.add_argument("--dataset", type=str, default=None, help="Dataset key from datasets/datasets_info.json.")
-    p.add_argument("--split", choices=("train", "val", "test"), default="test", help="Dataset split for dataset-split mode.")
-    p.add_argument("--limit", type=int, default=0, help="Max images to process (0 = all).")
-    p.add_argument("--conf", type=float, default=0.25, help="Confidence threshold for inference model.")
-    p.add_argument("--img-size", type=int, default=None, help="Inference input resolution (imgsz).")
-    p.add_argument(
-        "--device",
-        type=str,
-        default=None,
-        help="Ultralytics device (cpu, 0, etc). Default: GPU 0 if available, otherwise cpu.",
-    )
-    p.add_argument("--half", action="store_true", help="Enable FP16 where supported.")
-    p.add_argument("--perf-warmup-images", type=int, default=5, help="Warmup images excluded from steady perf statistics.")
-    p.add_argument("--roi-pre-detect", action="store_true", help="Pre-detect ROI before inference (folder mode only).")
-    p.add_argument("--roi-weights", type=str, default=None, help="ROI detector weights path (.pt/.onnx).")
-    p.add_argument("--roi-conf", type=float, default=0.25, help="Confidence threshold for ROI detector.")
-    p.add_argument("--roi-policy", choices=ROI_POLICIES, default="largest", help="ROI selection policy.")
-    p.add_argument("--roi-pad-px", type=int, default=0, help="Padding in pixels around selected ROI.")
-    p.add_argument("--roi-on-empty", choices=ON_EMPTY_MODES, default="full_image", help="Behavior when ROI detector has no detections.")
-    p.add_argument("--roi-class-ids", type=str, default=None, help="CSV class ids for ROI detector (empty=all).")
-    p.add_argument("--external-provider", type=str, default=None, help="External provider id for inference.")
-    p.add_argument("--external-repo", type=str, default=None, help="Override external provider repository path.")
-    p.add_argument(
-        "--task",
-        type=str,
-        default=None,
-        choices=["detect", "segment", "classify", "detection", "segmentation", "classification"],
-        help="Task type hint for task-aware backend routing (default: detection).",
-    )
-    return p
 
 
 def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool:
@@ -167,6 +127,20 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         default_device=str(args.device or default_device_value()),
     )
     args.half = prompt_yes_no("Use FP16 (--half)", default=bool(args.half))
+    args.export_dataset = prompt_yes_no("Export YOLO autolabel dataset", default=bool(getattr(args, "export_dataset", True)))
+    if args.export_dataset:
+        args.export_label_conf_min = float(
+            prompt_text("Export label conf min", default=str(getattr(args, "export_label_conf_min", 0.25))).strip()
+            or str(getattr(args, "export_label_conf_min", 0.25))
+        )
+        args.export_label_conf_max = float(
+            prompt_text("Export label conf max", default=str(getattr(args, "export_label_conf_max", 1.0))).strip()
+            or str(getattr(args, "export_label_conf_max", 1.0))
+        )
+    args.export_visualize = prompt_yes_no(
+        "Save prediction overlays",
+        default=bool(args.export_dataset),
+    )
     return True
 
 
@@ -219,6 +193,7 @@ def main(argv: list[str] | None = None) -> None:
         emit_replay(command_name="inference", parser=parser, args=args, stage="before launch")
     else:
         _validate_non_interactive_args(parser, args)
+    validate_export_options(resolve_export_options(args), parser=parser)
     _ensure_device_available_or_exit(args.device)
     print(f"[INFO] Inference device: {device_display_name(args.device)}")
 

@@ -63,6 +63,32 @@ def pick_split_relative_dir(dataset_path: str, split_aliases: tuple[str, ...]) -
     return None
 
 
+def resolve_runtime_split_dirs(dataset_path: str, raw: dict) -> tuple[str, str, str | None]:
+    """Resolve train/val/test image dirs; val falls back to train when val is absent."""
+    train_rel = pick_split_relative_dir(dataset_path, ("train",)) or split_dir_from_dataset_yaml(
+        dataset_path, raw, "train"
+    )
+    if train_rel is None:
+        raise FileNotFoundError(
+            f"Required train split folder not found inside {dataset_path}."
+        )
+    val_rel = pick_split_relative_dir(dataset_path, ("val", "valid")) or split_dir_from_dataset_yaml(
+        dataset_path, raw, "val"
+    )
+    if val_rel is None:
+        val_rel = train_rel
+        print(
+            f"[WARN] val split folder not found in {dataset_path}; "
+            f"using train images for validation ({train_rel})."
+        )
+    test_rel = pick_split_relative_dir(dataset_path, ("test",)) or split_dir_from_dataset_yaml(
+        dataset_path, raw, "test"
+    )
+    if test_rel is None:
+        test_rel = val_rel
+    return train_rel, val_rel, test_rel
+
+
 def build_runtime_data_yaml(
     dataset_path: str,
     run_dir: str,
@@ -77,26 +103,13 @@ def build_runtime_data_yaml(
     if not isinstance(raw, dict):
         raise ValueError(f"Incorrect YAML format data.yaml: {src_yaml}")
 
-    train_rel = pick_split_relative_dir(dataset_path, ("train",)) or split_dir_from_dataset_yaml(
-        dataset_path, raw, "train"
-    )
-    val_rel = pick_split_relative_dir(dataset_path, ("val", "valid")) or split_dir_from_dataset_yaml(
-        dataset_path, raw, "val"
-    )
-    test_rel = pick_split_relative_dir(dataset_path, ("test",)) or split_dir_from_dataset_yaml(
-        dataset_path, raw, "test"
-    )
-    if train_rel is None or val_rel is None:
-        raise FileNotFoundError(
-            f"Required train/val split folders not found inside {dataset_path}."
-        )
+    train_rel, val_rel, test_rel = resolve_runtime_split_dirs(dataset_path, raw)
 
     runtime_cfg: dict[str, Any] = dict(raw)
     runtime_cfg["path"] = dataset_path
     runtime_cfg["train"] = train_rel
     runtime_cfg["val"] = val_rel
-    if test_rel is not None:
-        runtime_cfg["test"] = test_rel
+    runtime_cfg["test"] = test_rel
 
     ensure_run_layout_cb(run_dir)
     out_yaml = os.path.join(str(run_tmp_dir_cb(run_dir)), f"_runtime_data_{stage}.yaml")

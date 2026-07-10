@@ -33,6 +33,27 @@ def test_prompt_choice_show_options_false_skips_list(monkeypatch, capsys) -> Non
     assert "Options for Pick" not in out
 
 
+def test_prompt_prefilled_text_uses_default_in_prompt(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_prompt(prompt_label: str, *, default: str = "", **kwargs: object) -> str:
+        seen["label"] = prompt_label
+        seen["default"] = default
+        return default
+
+    monkeypatch.setattr(cli_prompts, "prompt", fake_prompt)
+    assert cli_prompts.prompt_prefilled_text("New release name", "detect_yolo_20260115_120000") == (
+        "detect_yolo_20260115_120000"
+    )
+    assert seen["default"] == "detect_yolo_20260115_120000"
+    assert seen["label"] == "New release name: "
+
+
+def test_prompt_prefilled_text_returns_edited_value(monkeypatch) -> None:
+    monkeypatch.setattr(cli_prompts, "prompt", lambda *args, **kwargs: "my_new_name")
+    assert cli_prompts.prompt_prefilled_text("New release name", "old_name") == "my_new_name"
+
+
 def test_prompt_multichoice_csv_accepts_numeric_named_values(monkeypatch) -> None:
     monkeypatch.setattr(
         cli_prompts,

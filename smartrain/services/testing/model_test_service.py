@@ -27,6 +27,7 @@ from smartrain.core.testing.artifact_paths import (
     SUPPORTED_TEST_FORMATS,
     TEST_ARTIFACTS_MANIFEST,
     artifacts_manifest_path_for_write,
+    current_eval_slot_key,
     format_metrics_path,
     format_metrics_path_for_split,
     format_metrics_path_for_split_write,
@@ -213,10 +214,29 @@ def update_test_artifacts_manifest(
         updated_at=datetime.now().isoformat(timespec="seconds"),
     )
     payload = load_test_artifacts_manifest(root_dir)
-    formats = payload.get("formats")
-    if not isinstance(formats, dict):
-        formats = {}
-        payload["formats"] = formats
+    eval_slot = current_eval_slot_key()
+    if eval_slot:
+        eval_datasets = payload.get("eval_datasets")
+        if not isinstance(eval_datasets, dict):
+            eval_datasets = {}
+            payload["eval_datasets"] = eval_datasets
+        slot_payload = eval_datasets.get(eval_slot)
+        if not isinstance(slot_payload, dict):
+            slot_payload = {"slot_key": eval_slot, "formats": {}}
+            eval_datasets[eval_slot] = slot_payload
+        if dataset_yaml and not slot_payload.get("dataset_yaml"):
+            slot_payload["dataset_yaml"] = (
+                os.path.relpath(dataset_yaml, root_dir) if os.path.isabs(dataset_yaml) else dataset_yaml
+            )
+        formats = slot_payload.get("formats")
+        if not isinstance(formats, dict):
+            formats = {}
+            slot_payload["formats"] = formats
+    else:
+        formats = payload.get("formats")
+        if not isinstance(formats, dict):
+            formats = {}
+            payload["formats"] = formats
     existing = formats.get(fmt)
     if isinstance(existing, dict):
         artifacts = existing.get("artifacts")
@@ -506,9 +526,21 @@ def has_matching_test_artifacts(
     if not has_complete_test_artifacts(root_dir, fmt):
         return False
     payload = load_test_artifacts_manifest(root_dir)
-    formats = payload.get("formats")
-    if not isinstance(formats, dict):
-        return False
+    eval_slot = current_eval_slot_key()
+    if eval_slot:
+        eval_datasets = payload.get("eval_datasets")
+        if not isinstance(eval_datasets, dict):
+            return False
+        slot_payload = eval_datasets.get(eval_slot)
+        if not isinstance(slot_payload, dict):
+            return False
+        formats = slot_payload.get("formats")
+        if not isinstance(formats, dict):
+            return False
+    else:
+        formats = payload.get("formats")
+        if not isinstance(formats, dict):
+            return False
     entry = formats.get(fmt)
     if not isinstance(entry, dict):
         return False
