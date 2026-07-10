@@ -150,6 +150,7 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
     "smartrain inference": (
         "Examples:\n"
         "  smartrain inference --model-name my_promoted_model --data-mode folder --source-dir raw_images\n"
+        "  smartrain inference --model-name my_promoted_model --data-mode folder --source-dir raw_images --no-export-dataset\n"
         "  smartrain inference --model-name my_promoted_model --data-mode dataset-split --dataset my_dataset --split test --limit 200\n"
         "  smartrain inference --run 1 --data-mode folder --source-dir samples --roi-pre-detect --roi-weights yolo11n.pt\n"
     ),

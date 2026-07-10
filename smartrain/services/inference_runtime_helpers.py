@@ -365,6 +365,14 @@ def build_report(
             "roi_pad_px": args.roi_pad_px,
             "roi_on_empty": args.roi_on_empty,
             "roi_class_ids": _parse_roi_class_ids(args.roi_class_ids),
+            "export_dataset": bool(getattr(args, "export_dataset", True)),
+            "export_label_conf_min": float(getattr(args, "export_label_conf_min", 0.25)),
+            "export_label_conf_max": float(getattr(args, "export_label_conf_max", 1.0)),
+            "export_visualize": (
+                bool(getattr(args, "export_visualize"))
+                if getattr(args, "export_visualize", None) is not None
+                else bool(getattr(args, "export_dataset", True))
+            ),
         },
         "source": source_descriptor(args, source_abs, source_short, layout),
         "output": {

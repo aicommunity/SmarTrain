@@ -50,6 +50,11 @@ from smartrain.services.inference_runtime_helpers import (
     source_descriptor,
     write_report,
 )
+from smartrain.services.inference_dataset_export import (
+    resolve_export_options,
+    run_inference_exports,
+    validate_export_options,
+)
 
 
 def _backend_name_matches_capability(runtime_name: str | None, capability_backend: str) -> bool:
@@ -341,6 +346,29 @@ def _validate_external_inference_model_or_fail(
     return 2, True
 
 
+def _run_inference_postprocess(
+    *,
+    report_path: str,
+    out_root: str,
+    source_short: str,
+    args: argparse.Namespace,
+    layout: WorkspaceLayout,
+) -> None:
+    if bool(getattr(args, "save_overlay", False)):
+        from smartrain.services.inference_segmentation_viz import save_inference_segment_overlays
+
+        overlays = save_inference_segment_overlays(report_path)
+        if overlays:
+            print(f"[OK] Saved {len(overlays)} segmentation overlay image(s)")
+    run_inference_exports(
+        report_path=report_path,
+        out_root=out_root,
+        source_short=source_short,
+        args=args,
+        layout=layout,
+    )
+
+
 def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[int, bool]:
     """
     Run inference after CLI validated workspace, device, and interactive/non-interactive args.
@@ -350,6 +378,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
     those. Local Ultralytics/backend runs use ``(code, False)`` so the CLI can return normally
     on success (code 0) and only raise on error.
     """
+    validate_export_options(resolve_export_options(args))
     known_provider_ids = {spec.id for spec in list_provider_specs()}
     external_ref_outcome = _apply_external_provider_inference_from_refs(
         args, known_provider_ids=known_provider_ids
@@ -501,6 +530,14 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         }
         write_report(report_path, external_report)
         print(f"[OK] External inference report: {report_path}")
+        if int(rc) == 0:
+            _run_inference_postprocess(
+                report_path=report_path,
+                out_root=out_root,
+                source_short=source_short,
+                args=args,
+                layout=layout,
+            )
         maybe_dual_write_unified_snapshot(out_root, status_ok=True)
         return int(rc), True
 
@@ -682,11 +719,12 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
 
     print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")
     print(f"[OK] Report: {report_path}")
-    if bool(getattr(args, "save_overlay", False)):
-        from smartrain.services.inference_segmentation_viz import save_inference_segment_overlays
-
-        overlays = save_inference_segment_overlays(report_path)
-        if overlays:
-            print(f"[OK] Saved {len(overlays)} segmentation overlay image(s)")
+    _run_inference_postprocess(
+        report_path=report_path,
+        out_root=out_root,
+        source_short=source_short,
+        args=args,
+        layout=layout,
+    )
     maybe_dual_write_unified_snapshot(out_root, status_ok=True)
     return 0, False

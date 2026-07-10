@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Any, Iterable, List, Tuple
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,100 @@ class YoloSegment:
 
 
 YoloLabel = YoloBBox | YoloSegment
+
+
+def _clip01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def xyxy_pixels_to_yolo_bbox(cls_id: int, x1: float, y1: float, x2: float, y2: float, img_w: int, img_h: int) -> YoloBBox | None:
+    if img_w <= 0 or img_h <= 0:
+        return None
+    bw = max(0.0, float(x2) - float(x1))
+    bh = max(0.0, float(y2) - float(y1))
+    if bw <= 0.0 or bh <= 0.0:
+        return None
+    cx = float(x1) + bw / 2.0
+    cy = float(y1) + bh / 2.0
+    return YoloBBox(
+        cls_id=int(cls_id),
+        cx=_clip01(cx / float(img_w)),
+        cy=_clip01(cy / float(img_h)),
+        w=_clip01(bw / float(img_w)),
+        h=_clip01(bh / float(img_h)),
+    )
+
+
+def polygon_pixels_to_yolo_segment(cls_id: int, polygon_xy: list[Any], img_w: int, img_h: int) -> YoloSegment | None:
+    if img_w <= 0 or img_h <= 0:
+        return None
+    pts: list[tuple[float, float]] = []
+    for point in polygon_xy:
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            continue
+        try:
+            x = float(point[0])
+            y = float(point[1])
+        except Exception:
+            continue
+        if max(abs(x), abs(y)) <= 1.0 + 1e-6:
+            pts.append((_clip01(x), _clip01(y)))
+        else:
+            pts.append((_clip01(x / float(img_w)), _clip01(y / float(img_h))))
+    if len(pts) < 3:
+        return None
+    return YoloSegment(cls_id=int(cls_id), points=tuple(pts))
+
+
+def _det_class_id(det: dict[str, Any]) -> int:
+    for key in ("class_index", "class_id"):
+        if key in det:
+            try:
+                return int(det[key])
+            except Exception:
+                continue
+    return 0
+
+
+def _extract_bbox_original_xyxy(det: dict[str, Any]) -> list[float] | None:
+    for key in ("bbox_original_xyxy", "bbox_roi_xyxy", "bbox_xyxy"):
+        raw = det.get(key)
+        if isinstance(raw, list) and len(raw) >= 4:
+            try:
+                return [float(raw[0]), float(raw[1]), float(raw[2]), float(raw[3])]
+            except Exception:
+                return None
+    return None
+
+
+def _extract_polygon_original_xy(det: dict[str, Any]) -> list[Any] | None:
+    for key in ("polygon_original_xy", "polygon_roi_xy", "polygon_xy"):
+        raw = det.get(key)
+        if isinstance(raw, list) and raw:
+            return raw
+    return None
+
+
+def task_output_dict_to_yolo_label(det: dict[str, Any], img_w: int, img_h: int) -> YoloLabel | None:
+    cls_id = _det_class_id(det)
+    bbox = _extract_bbox_original_xyxy(det)
+    if bbox is not None:
+        return xyxy_pixels_to_yolo_bbox(cls_id, bbox[0], bbox[1], bbox[2], bbox[3], img_w, img_h)
+    poly = _extract_polygon_original_xy(det)
+    if poly is not None:
+        return polygon_pixels_to_yolo_segment(cls_id, poly, img_w, img_h)
+    return None
+
+
+def task_outputs_to_yolo_labels(task_type: str, outputs: list[dict[str, Any]], img_w: int, img_h: int) -> list[YoloLabel]:
+    labels: list[YoloLabel] = []
+    for item in outputs:
+        if not isinstance(item, dict):
+            continue
+        lb = task_output_dict_to_yolo_label(item, img_w, img_h)
+        if lb is not None:
+            labels.append(lb)
+    return labels
 
 
 def read_yolo_labels(path: str) -> list[YoloLabel]:

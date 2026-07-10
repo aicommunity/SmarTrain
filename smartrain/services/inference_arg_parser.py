@@ -42,5 +42,29 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
         help="Task type hint for task-aware backend routing (default: detection).",
     )
     p.add_argument("--save-overlay", action="store_true", help="For segmentation runs, save polygon overlay images next to inference_results.json.")
+    p.add_argument(
+        "--export-dataset",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Export YOLO autolabel dataset under <basename>_autolabeled/ (default: on).",
+    )
+    p.add_argument(
+        "--export-label-conf-min",
+        type=float,
+        default=0.25,
+        help="Minimum confidence for writing labels to autolabel dataset (default: 0.25).",
+    )
+    p.add_argument(
+        "--export-label-conf-max",
+        type=float,
+        default=1.0,
+        help="Maximum confidence for writing labels to autolabel dataset (default: 1.0).",
+    )
+    p.add_argument(
+        "--export-visualize",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Save prediction overlay images to pred_overlays/ (default: on when --export-dataset, else off).",
+    )
     return p
 

@@ -116,6 +116,21 @@ def test_rotate_polygon_270(tmp_path: Path) -> None:
     assert len(rotated) == 1
 
 
+def test_task_output_dict_to_yolo_label_bbox() -> None:
+    from smartrain.services.datasets.yolo_labels import task_output_dict_to_yolo_label
+
+    det = {
+        "bbox_original_xyxy": [10.0, 20.0, 30.0, 40.0],
+        "class_index": 1,
+        "confidence": 0.9,
+    }
+    lb = task_output_dict_to_yolo_label(det, 100, 100)
+    assert lb is not None
+    assert lb.cls_id == 1
+    assert lb.cx == pytest.approx(0.2)
+    assert lb.cy == pytest.approx(0.3)
+
+
 def test_rotate_polygon_k0_identity() -> None:
     seg = YoloSegment(cls_id=0, points=((0.1, 0.2), (0.3, 0.2), (0.3, 0.4), (0.1, 0.4)))
     rotated, nw, nh = rotate_yolo_labels_90cw_k([seg], w=100, h=80, k=0)

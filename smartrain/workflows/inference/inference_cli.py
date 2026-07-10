@@ -21,6 +21,7 @@ from smartrain.core.runtime.device_selector import (
     validate_device_available,
 )
 from smartrain.services.inference_arg_parser import build_inference_arg_parser
+from smartrain.services.inference_dataset_export import resolve_export_options, validate_export_options
 from smartrain.services.inference_service import run_inference_job
 from smartrain.services.inference_runtime_helpers import (
     DATA_MODES,
@@ -126,6 +127,20 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         default_device=str(args.device or default_device_value()),
     )
     args.half = prompt_yes_no("Use FP16 (--half)", default=bool(args.half))
+    args.export_dataset = prompt_yes_no("Export YOLO autolabel dataset", default=bool(getattr(args, "export_dataset", True)))
+    if args.export_dataset:
+        args.export_label_conf_min = float(
+            prompt_text("Export label conf min", default=str(getattr(args, "export_label_conf_min", 0.25))).strip()
+            or str(getattr(args, "export_label_conf_min", 0.25))
+        )
+        args.export_label_conf_max = float(
+            prompt_text("Export label conf max", default=str(getattr(args, "export_label_conf_max", 1.0))).strip()
+            or str(getattr(args, "export_label_conf_max", 1.0))
+        )
+    args.export_visualize = prompt_yes_no(
+        "Save prediction overlays",
+        default=bool(args.export_dataset),
+    )
     return True
 
 
@@ -178,6 +193,7 @@ def main(argv: list[str] | None = None) -> None:
         emit_replay(command_name="inference", parser=parser, args=args, stage="before launch")
     else:
         _validate_non_interactive_args(parser, args)
+    validate_export_options(resolve_export_options(args), parser=parser)
     _ensure_device_available_or_exit(args.device)
     print(f"[INFO] Inference device: {device_display_name(args.device)}")
 
