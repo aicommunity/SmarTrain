@@ -92,7 +92,7 @@ Analyze highlights:
 
 Dataset report highlights:
 
-- `smartrain dataset report` writes a multilingual per-class sample report (Markdown + PNG; default folder `analytics/datasets-reports/<dataset>_<timestamp>/`). Default dependencies include bundled pandoc (`pypandoc-binary`), WeasyPrint, `fpdf2`, and `odfpy` for PDF/ODT. WeasyPrint may need OS libraries (Cairo, Pango) if wheels are unavailable.
+- `smartrain dataset report` writes a multilingual per-class sample report (Markdown + PNG; default folder `analytics/datasets-reports/<dataset>_<timestamp>/`). PDF/ODT export helpers (`pypandoc-binary`, `weasyprint`) are installed via optional extra `pip install -e ".[export]"`; `fpdf2` and `odfpy` remain base dependencies. WeasyPrint may need OS libraries (Cairo, Pango) if wheels are unavailable.
 
 Dataset rename highlights:
 

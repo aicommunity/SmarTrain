@@ -10,6 +10,7 @@ import shutil
 
 import smartrain.workflows.queue.training_queue as tq
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.core.runtime.file_lock import locked_file
 
 
 def _queue_and_status(args):
@@ -25,24 +26,13 @@ def _queue_path(args):
     return q
 
 
-def _lock_path(queue_path):
-    return queue_path + ".lock"
-
-
 def _with_file_lock(queue_path, fn):
     try:
-        fd = os.open(_lock_path(queue_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.close(fd)
-    except FileExistsError:
-        print("[ERROR] The queue is locked (.lock). Please try again later.", file=sys.stderr)
+        with locked_file(queue_path):
+            return fn()
+    except OSError as exc:
+        print(f"[ERROR] Failed to lock queue file: {exc}", file=sys.stderr)
         sys.exit(1)
-    try:
-        return fn()
-    finally:
-        try:
-            os.remove(_lock_path(queue_path))
-        except OSError:
-            pass
 
 
 def _rebuild_queue_file(queue_path, new_tasks):

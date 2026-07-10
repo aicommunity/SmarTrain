@@ -117,6 +117,7 @@ pytest
   - `pip install -e ".[dev]"` for development and testing
   - `pip install -e ".[clearml]"` for ClearML
   - `pip install -e ".[sahi]"` for SAHI
+  - `pip install -e ".[export]"` for PDF/ODT export helpers (`pypandoc-binary`, `weasyprint`)
 
 ## Common workflows
 

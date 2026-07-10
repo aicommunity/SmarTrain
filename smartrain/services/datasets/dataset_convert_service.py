@@ -186,7 +186,8 @@ def resolve_source(
             dataset_key=dataset_key,
         )
 
-    assert source_dir is not None
+    if source_dir is None:
+        raise ValueError("source_dir is required for direct conversion")
     root = Path(source_dir).expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(f"Source directory not found: {root}")
@@ -416,7 +417,10 @@ def apply_zip_postprocess(
     else:
         pack_directory_zip(output_dir, zip_path, force=opts.force or True)
     if opts.delete_after_zip and output_dir.is_dir():
-        shutil.rmtree(output_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(output_dir)
+        except OSError as exc:
+            raise RuntimeError(f"Failed to delete temporary output directory: {output_dir}") from exc
     return zip_path
 
 
@@ -444,7 +448,8 @@ def run_conversion(
 
     if target == TARGET_YOLO:
         if source.structure == STRUCTURE_CVAT11_ZIP:
-            assert source.source_zip is not None
+            if source.source_zip is None:
+                raise ValueError("source_zip is required for cvat11_zip conversion")
             info = import_cvat11_zip_to_yolo(
                 cvat_zip_path=source.source_zip,
                 output_dir=output_path,
@@ -578,7 +583,10 @@ def run_conversion(
             )
         finally:
             if tmp_cleanup is not None:
-                shutil.rmtree(tmp_cleanup, ignore_errors=True)
+                try:
+                    shutil.rmtree(tmp_cleanup)
+                except OSError:
+                    pass
 
     if target == TARGET_CVAT11_ZIP:
         zip_path = output_path
@@ -597,7 +605,10 @@ def run_conversion(
                 zip_path=zip_path,
             )
             if out_dir.is_dir() and opts.delete_after_zip:
-                shutil.rmtree(out_dir, ignore_errors=True)
+                try:
+                    shutil.rmtree(out_dir)
+                except OSError as exc:
+                    raise RuntimeError(f"Failed to delete temporary output directory: {out_dir}") from exc
             return ConvertResult(
                 target=target,
                 output_dir=None,
@@ -649,6 +660,9 @@ def run_conversion(
             )
         finally:
             if tmp_cleanup is not None:
-                shutil.rmtree(tmp_cleanup, ignore_errors=True)
+                try:
+                    shutil.rmtree(tmp_cleanup)
+                except OSError:
+                    pass
 
     raise ValueError(f"Unhandled conversion: {source.structure} -> {target}")

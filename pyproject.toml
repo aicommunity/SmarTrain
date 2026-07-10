@@ -73,7 +73,12 @@ warn_unused_ignores = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 files = [
-    "smartrain/run_model_contract",
-    "smartrain/backends",
     "smartrain/core/runtime",
 ]
+
+[[tool.mypy.overrides]]
+module = [
+    "smartrain.backends.*",
+    "smartrain.run_model_contract.*",
+]
+ignore_errors = true

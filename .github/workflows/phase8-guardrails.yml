@@ -30,6 +30,9 @@ jobs:
       - name: Full test suite
         run: python -m pytest -q
 
+      - name: Lint baseline guard
+        run: python scripts/ci/check_lint_baseline.py
+
       - name: Ruff
         run: >-
           python -m ruff check
