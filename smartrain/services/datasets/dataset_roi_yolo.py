@@ -760,7 +760,8 @@ def main(argv=None) -> None:
             }
         }
     else:
-        assert info_path is not None
+        if info_path is None:
+            sys.exit("[ERROR] datasets_info_path is required when source is not provided")
         if not os.path.isfile(info_path):
             sys.exit(f"[ERROR] {info_path} not found")
         with open(info_path, "r", encoding="utf-8") as f:
@@ -790,7 +791,8 @@ def main(argv=None) -> None:
                 )
             output_root = os.path.abspath(os.path.expanduser(str(args.output_path).strip()))
         else:
-            assert workspace_root is not None and layout is not None
+            if workspace_root is None or layout is None:
+                sys.exit("[ERROR] workspace root could not be resolved")
             dataset_root = resolve_dataset_root_for_entry(
                 dataset_key,
                 entry,

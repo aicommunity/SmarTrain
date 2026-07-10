@@ -4,6 +4,7 @@ import json
 import os
 from typing import Any
 
+from smartrain.core.runtime.file_lock import locked_file
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
 
@@ -73,8 +74,9 @@ def update_datasets_sidecar(
         if isinstance(loaded, dict):
             previous = loaded
     previous[output_key] = entry
-    with open(info_path, "w", encoding="utf-8") as f:
-        json.dump(previous, f, ensure_ascii=False, indent=4)
+    with locked_file(info_path):
+        with open(info_path, "w", encoding="utf-8") as f:
+            json.dump(previous, f, ensure_ascii=False, indent=4)
 
     cn_path = layout.work_class_names_path()
     class_names_out: dict[str, str] = {}
@@ -85,6 +87,7 @@ def update_datasets_sidecar(
             class_names_out = {str(k): str(v) for k, v in loaded.items()}
     for c in class_map.keys():
         class_names_out[str(c)] = str(c)
-    with open(cn_path, "w", encoding="utf-8") as f:
-        json.dump(class_names_out, f, ensure_ascii=False, indent=4)
+    with locked_file(cn_path):
+        with open(cn_path, "w", encoding="utf-8") as f:
+            json.dump(class_names_out, f, ensure_ascii=False, indent=4)
 

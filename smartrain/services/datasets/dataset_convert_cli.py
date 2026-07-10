@@ -422,7 +422,8 @@ def main(argv: list[str] | None = None) -> None:
         if create_zip is None:
             create_zip = False
 
-    assert source is not None and target is not None and output_path is not None
+    if source is None or target is None or output_path is None:
+        raise SystemExit("internal error: source/target/output_path must be resolved before conversion")
 
     if args.rename_classes:
         try:

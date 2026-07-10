@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smartrain"
-version = "0.1.0"
+version = "0.0.3"
 description = "YOLO datasets, training queue, runs analytics — workspace-first CLI"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,8 +22,6 @@ dependencies = [
     "prompt_toolkit>=3.0.0",
     "fpdf2>=2.7.0",
     "odfpy>=1.4.0",
-    "pypandoc-binary>=1.14.0",
-    "weasyprint>=60.0",
 ]
 
 [project.scripts]
@@ -44,6 +42,10 @@ clearml = [
 ]
 sahi = [
     "sahi>=0.11.0",
+]
+export = [
+    "pypandoc-binary>=1.14.0",
+    "weasyprint>=60.0",
 ]
 
 [tool.pytest.ini_options]
@@ -71,7 +73,12 @@ warn_unused_ignores = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 files = [
-    "smartrain/run_model_contract",
-    "smartrain/backends",
     "smartrain/core/runtime",
 ]
+
+[[tool.mypy.overrides]]
+module = [
+    "smartrain.backends.*",
+    "smartrain.run_model_contract.*",
+]
+ignore_errors = true

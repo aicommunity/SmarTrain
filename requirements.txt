@@ -1,2 +1,3 @@
-# Установка пакета: pip install -e .
-# Зависимости перечислены в pyproject.toml.
+# Use editable install with extras:
+# pip install -e ".[dev,export]"
+# Runtime dependencies are defined in pyproject.toml.

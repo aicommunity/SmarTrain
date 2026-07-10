@@ -6,6 +6,13 @@
 
 Команды `smartrain` или `smartrain --help` показывают сгруппированный справочник. Это руководство также доступно как `smartrain quickstart`.
 
+Автодополнение после установки:
+
+- авто: best-effort настройка выполняется при первом запуске `smartrain`;
+- ручной fallback:
+  - `smartrain --install-completion`
+  - `smartrain --show-completion`
+
 ## Основной путь: обучение на датасете и формирование отчетов
 
 1. **Создайте рабочую папку (если её ещё нет)**
@@ -97,7 +104,7 @@ smartrain analyze all --report-languages en,ru
   ```bash
   smartrain analyze compare --baseline /path/to/run_a --others /path/to/run_b /path/to/run_c
   ```
-- **Работа с датасетами перед обучением** (при необходимости): `fusion`, `augment`, `balance`, `prune`, `orient`, `roi`.
+- **Работа с датасетами перед обучением** (при необходимости): `merge` (legacy-алиас: `fusion`), `augment`, `balance`, `prune`, `orient`, `roi`.
 
 ## Куда сохраняются результаты
 

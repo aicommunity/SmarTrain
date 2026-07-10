@@ -19,7 +19,7 @@ pip install -e .
 ```bash
 smartrain deploy
 smartrain scan
-smartrain fusion --dataset ds_a --dataset ds_b --classes "class_a,class_b"
+smartrain merge --dataset ds_a --dataset ds_b --classes "class_a,class_b"
 smartrain train --data 2026-01-01_12-00-00-merged -y
 ```
 
@@ -27,8 +27,8 @@ smartrain train --data 2026-01-01_12-00-00-merged -y
 
 - Единая точка входа: `smartrain` (модуль `smartrain.cli`).
 - Модель единого рабочего каталога: `raw_data/`, `datasets/`, `runs/`, `analytics/`, `models/`, `inference/`, `tmp/`.
-- Поддержка конвейера: `scan -> fusion -> train -> analyze`.
-- Отдельные инструменты: `queue`, `registry`, `report`, `model`, `normalize-data-yaml`, `migrate-models`, `clearml-upload`, `plot`, `cvat`, `sahi`, `heatmap`, `orient`.
+- Поддержка конвейера: `scan -> merge -> train -> analyze`.
+- Отдельные инструменты: `queue`, `registry`, `dataset` (`report`, `rename`, `convert`), `model`, `normalize-data-yaml`, `migrate`, `migrate-models`, `clearml-upload`, `plot`, `sahi`, `heatmap`, `orient`, `rotate`, `vis`, `deps`.
 
 ## Принцип работы
 
@@ -45,7 +45,7 @@ smartrain train --data 2026-01-01_12-00-00-merged -y
 |---|---|
 | `smartrain deploy` | Инициализация структуры workspace |
 | `smartrain scan` | Синхронизация источников и обновление каталога датасетов |
-| `smartrain fusion` | Сборка итогового датасета для обучения |
+| `smartrain merge` | Сборка итогового датасета для обучения |
 | `smartrain train` | Обучение/валидация модели YOLO |
 | `smartrain inference` | Инференс по папке или сплиту датасета с сохранением JSON-отчёта |
 | `smartrain queue` / `smartrain queue-run` | Управление и запуск очереди команд |
@@ -88,6 +88,13 @@ pytest
   - `pip install -e ".[dev]"` для разработки и тестов
   - `pip install -e ".[clearml]"` для ClearML
   - `pip install -e ".[sahi]"` для SAHI
+  - `pip install -e ".[export]"` для PDF/ODT отчётов (`pypandoc-binary`, `weasyprint`)
+
+Автодополнение:
+  - best-effort автонастройка выполняется при первом запуске `smartrain` после установки;
+  - ручной fallback:
+    - `smartrain --install-completion`
+    - `smartrain --show-completion`
 
 ## Частые сценарии
 

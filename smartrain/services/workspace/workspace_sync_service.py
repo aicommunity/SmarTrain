@@ -10,6 +10,7 @@ from typing import Any
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text, prompt_yes_no
+from smartrain.core.runtime.file_lock import locked_file
 from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.runtime.workspace_path_repair import repair_workspace_paths
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
@@ -50,7 +51,8 @@ def _write_json(path: str, payload: dict[str, Any], *, dry_run: bool) -> None:
     if dry_run:
         return
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    with locked_file(path):
+        Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _copy_tree_or_file(src: str, dst: str, *, dry_run: bool) -> None:

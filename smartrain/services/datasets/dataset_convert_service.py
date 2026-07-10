@@ -6,7 +6,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.services.datasets.cvat11_converter import (
@@ -14,13 +14,12 @@ from smartrain.services.datasets.cvat11_converter import (
     export_yolo_to_cvat11_zip,
     generate_temp_yolo_labels_from_cvat11_extracted,
     import_cvat11_zip_to_yolo,
-    load_cvat11_label_names_from_xml,
 )
 from smartrain.services.datasets.cvsdcldet_converter import (
     _pack_cvat11_zip,
     convert_cvsdcldet_to_cvat11,
-    is_cvsdcldet_dir,
 )
+from smartrain.services.datasets.data_yaml_writer import write_flat_yolo_data_yaml
 from smartrain.services.datasets.dataset_access import find_dataset_paths, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_cli_common import load_dataset_catalog
 from smartrain.services.datasets.dataset_scan import find_obj_names_file, find_yaml_file
@@ -187,7 +186,8 @@ def resolve_source(
             dataset_key=dataset_key,
         )
 
-    assert source_dir is not None
+    if source_dir is None:
+        raise ValueError("source_dir is required for direct conversion")
     root = Path(source_dir).expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(f"Source directory not found: {root}")
@@ -320,14 +320,7 @@ def stage_flat_yolo_snapshot(
     if not names:
         raise ValueError(f"Could not determine class names for {source_root}")
 
-    (output_dir / "data.yaml").write_text(
-        "train: images\n"
-        "val: images\n"
-        "test: images\n\n"
-        f"nc: {len(names)}\n"
-        f"names: {list(names)}\n",
-        encoding="utf-8",
-    )
+    write_flat_yolo_data_yaml(str(output_dir), list(names))
     return names
 
 
@@ -424,7 +417,10 @@ def apply_zip_postprocess(
     else:
         pack_directory_zip(output_dir, zip_path, force=opts.force or True)
     if opts.delete_after_zip and output_dir.is_dir():
-        shutil.rmtree(output_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(output_dir)
+        except OSError as exc:
+            raise RuntimeError(f"Failed to delete temporary output directory: {output_dir}") from exc
     return zip_path
 
 
@@ -452,7 +448,8 @@ def run_conversion(
 
     if target == TARGET_YOLO:
         if source.structure == STRUCTURE_CVAT11_ZIP:
-            assert source.source_zip is not None
+            if source.source_zip is None:
+                raise ValueError("source_zip is required for cvat11_zip conversion")
             info = import_cvat11_zip_to_yolo(
                 cvat_zip_path=source.source_zip,
                 output_dir=output_path,
@@ -586,7 +583,10 @@ def run_conversion(
             )
         finally:
             if tmp_cleanup is not None:
-                shutil.rmtree(tmp_cleanup, ignore_errors=True)
+                try:
+                    shutil.rmtree(tmp_cleanup)
+                except OSError:
+                    pass
 
     if target == TARGET_CVAT11_ZIP:
         zip_path = output_path
@@ -605,7 +605,10 @@ def run_conversion(
                 zip_path=zip_path,
             )
             if out_dir.is_dir() and opts.delete_after_zip:
-                shutil.rmtree(out_dir, ignore_errors=True)
+                try:
+                    shutil.rmtree(out_dir)
+                except OSError as exc:
+                    raise RuntimeError(f"Failed to delete temporary output directory: {out_dir}") from exc
             return ConvertResult(
                 target=target,
                 output_dir=None,
@@ -657,6 +660,9 @@ def run_conversion(
             )
         finally:
             if tmp_cleanup is not None:
-                shutil.rmtree(tmp_cleanup, ignore_errors=True)
+                try:
+                    shutil.rmtree(tmp_cleanup)
+                except OSError:
+                    pass
 
     raise ValueError(f"Unhandled conversion: {source.structure} -> {target}")

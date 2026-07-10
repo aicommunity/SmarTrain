@@ -1,11 +1,13 @@
 import argparse
 import os
 import shlex
+import shutil
 import subprocess
 import time
 from pathlib import Path
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.core.runtime.file_lock import locked_file
 from smartrain.core.runtime.workspace_paths import (
     resolve_workspace_root,
     workspace_queue_path,
@@ -63,11 +65,16 @@ def get_queue_tasks(queue_path=None):
 
 
 def main_window(status_file: str) -> None:
-    subprocess.Popen([
-        "gnome-terminal", "--",
-        "bash", "-c",
-        f"watch -n 1 cat {status_file}; exec bash"
-    ])
+    if shutil.which("gnome-terminal"):
+        subprocess.Popen([
+            "gnome-terminal", "--",
+            "bash", "-c",
+            f"watch -n 1 cat {status_file}; exec bash"
+        ])
+        return
+    print(f"[INFO] Queue status file: {status_file}")
+    print("[INFO] gnome-terminal not found; monitor with: watch -n 1 cat", status_file)
+    print("[INFO] Or rerun with --no-gui to skip the status window.")
 
 
 def update_status(index, status, tasks):
@@ -139,12 +146,13 @@ def load_statuses():
 def save_statuses(tasks, statuses, status_file=None):
     """Writes status.txt in queue line order."""
     path = status_file or STATUS_FILE
-    with open(path, "w", encoding="utf-8") as f:
-        for t in tasks:
-            st = statuses.get(t, "Waiting to be completed")
-            if isinstance(st, str):
-                st = st.strip()
-            f.write(f"{t} | {st}\n")
+    with locked_file(path):
+        with open(path, "w", encoding="utf-8") as f:
+            for t in tasks:
+                st = statuses.get(t, "Waiting to be completed")
+                if isinstance(st, str):
+                    st = st.strip()
+                f.write(f"{t} | {st}\n")
 
 
 def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):

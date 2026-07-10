@@ -121,10 +121,12 @@ def _run(
     cwd: Path,
     env: dict[str, str],
 ) -> subprocess.CompletedProcess[str]:
+    cmd_env = dict(env)
+    cmd_env.setdefault("SMARTRAIN_DISABLE_AUTO_COMPLETION", "1")
     return subprocess.run(
         [sys.executable, "-m", "smartrain", *args],
         cwd=str(cwd),
-        env=env,
+        env=cmd_env,
         capture_output=True,
         text=True,
         timeout=120,
@@ -193,12 +195,39 @@ def test_smartrain_shell_completion_lists_commands(subprocess_env: dict[str, str
     assert "Quick start" not in out
 
 
+def test_smartrain_show_completion_smoke(subprocess_env: dict[str, str], tmp_path: Path) -> None:
+    r = _run(["--show-completion"], cwd=tmp_path, env=subprocess_env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, out
+    assert "smartrain" in out
+
+
+def test_smartrain_auto_completion_attempt_writes_state(
+    subprocess_env: dict[str, str], tmp_path: Path
+) -> None:
+    deploy_workspace(str(tmp_path))
+    state_root = tmp_path / "state"
+    env = dict(subprocess_env)
+    env["XDG_STATE_HOME"] = str(state_root)
+    env["SHELL"] = "/bin/unknown-shell"
+    env["CI"] = ""
+    env["SMARTRAIN_DISABLE_AUTO_COMPLETION"] = "0"
+    r = _run(["quickstart"], cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode in (0, 2), out
+    state_file = state_root / "smartrain" / "completion_autoinstall.json"
+    assert state_file.is_file()
+    payload = json.loads(state_file.read_text(encoding="utf-8"))
+    assert payload.get("attempted") is True
+
+
 def test_smartrain_quickstart_prints_guide(subprocess_env: dict[str, str], tmp_path: Path) -> None:
     r = _run(["quickstart"], cwd=tmp_path, env=subprocess_env)
     out = (r.stdout or "") + (r.stderr or "")
     assert r.returncode == 0, out
     assert "Quick start" in out or "smartrain deploy" in out
     assert "smartrain dataset report" in out
+    assert "--install-completion" in out
 
 
 def test_smartrain_deploy_twice(subprocess_env: dict[str, str], tmp_path: Path) -> None:
