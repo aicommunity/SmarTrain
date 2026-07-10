@@ -32,6 +32,7 @@ from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceL
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 SPLIT_PRIORITY = {"train": 0, "val": 1, "valid": 1, "test": 2}
+SIZE_MODE_CHOICES = ("or", "and")
 
 
 @dataclass
@@ -76,6 +77,13 @@ def build_prune_size_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dataset", type=str, default=None, help="Source dataset key from datasets_info.json")
     p.add_argument("--output-name", type=str, default=None, help="Output dataset name (default <dataset>_size_pruned)")
     p.add_argument("--min-size", type=str, default="20x20", help="Minimum bbox size in pixels as NxM (default 20x20)")
+    p.add_argument(
+        "--size-mode",
+        type=str,
+        default="or",
+        choices=SIZE_MODE_CHOICES,
+        help="Drop when any side is below threshold (or) or only when both are (and); default or",
+    )
     p.add_argument("--drop-empty-images", dest="drop_empty_images", action="store_true", default=True)
     p.add_argument("--no-drop-empty-images", dest="drop_empty_images", action="store_false")
     p.add_argument("--dry-run", action="store_true")
@@ -309,7 +317,22 @@ def _parse_min_size(raw: str) -> tuple[float, float]:
     return min_w, min_h
 
 
-def _prune_small_labels(out_dir: str, *, min_w_px: float, min_h_px: float, drop_empty_images: bool) -> dict[str, int]:
+def _should_drop_small_bbox(*, w_px: float, h_px: float, min_w_px: float, min_h_px: float, size_mode: str) -> bool:
+    too_narrow = w_px < min_w_px
+    too_short = h_px < min_h_px
+    if str(size_mode).strip().lower() == "and":
+        return too_narrow and too_short
+    return too_narrow or too_short
+
+
+def _prune_small_labels(
+    out_dir: str,
+    *,
+    min_w_px: float,
+    min_h_px: float,
+    size_mode: str,
+    drop_empty_images: bool,
+) -> dict[str, int]:
     scanned = 0
     labels_before = 0
     removed_labels = 0
@@ -350,7 +373,13 @@ def _prune_small_labels(out_dir: str, *, min_w_px: float, min_h_px: float, drop_
             if geom is None:
                 kept.append(lb)
                 continue
-            if geom.w_px < min_w_px or geom.h_px < min_h_px:
+            if _should_drop_small_bbox(
+                w_px=geom.w_px,
+                h_px=geom.h_px,
+                min_w_px=min_w_px,
+                min_h_px=min_h_px,
+                size_mode=size_mode,
+            ):
                 removed_labels += 1
                 continue
             kept.append(lb)
@@ -398,6 +427,11 @@ def _interactive_fill(args: argparse.Namespace, mode: str, dataset_names: list[s
             prompt_text("Minimum bbox size in px NxM (--min-size)", default=str(getattr(args, "min_size", "20x20")))
             .strip()
             or "20x20"
+        )
+        args.size_mode = prompt_choice(
+            "Size drop condition (--size-mode)",
+            list(SIZE_MODE_CHOICES),
+            default=str(getattr(args, "size_mode", "or")),
         )
         drop_empty_images = prompt_choice(
             "Drop images with no labels after size prune?",
@@ -567,6 +601,7 @@ def main(argv=None) -> None:
                 out_dir,
                 min_w_px=min_w_px,
                 min_h_px=min_h_px,
+                size_mode=str(getattr(args, "size_mode", "or")),
                 drop_empty_images=bool(getattr(args, "drop_empty_images", True)),
             )
         else:

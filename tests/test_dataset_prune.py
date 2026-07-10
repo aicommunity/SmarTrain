@@ -11,9 +11,9 @@ from smartrain.workflows.datasets.dataset_prune import main as prune_main
 from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, WORKSPACE_ENV_VAR, deploy_workspace
 
 
-def _write_jpg(path: Path, color: tuple[int, int, int]) -> None:
+def _write_jpg(path: Path, color: tuple[int, int, int], *, size: tuple[int, int] = (32, 24)) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (32, 24), color=color).save(path, format="JPEG", quality=85)
+    Image.new("RGB", size, color=color).save(path, format="JPEG", quality=85)
 
 
 def _setup_split_dataset(tmp_path: Path, name: str = "src_ds") -> Path:
@@ -176,6 +176,33 @@ def test_prune_size_keeps_empty_images_with_no_drop_empty_images(tmp_path: Path)
     assert (out / "train" / "labels" / "tiny.txt").read_text(encoding="utf-8") == ""
 
 
+def test_prune_size_or_mode_drops_when_one_side_below_threshold(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "a.jpg", (100, 100, 100), size=(100, 100))
+    # 100x100 image: 0.19x1.0 -> 19x100 px; dropped in or mode for 20x20
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.19 1.0\n", encoding="utf-8")
+
+    prune_main(["size", "--workspace", str(tmp_path), "--dataset", "src_ds", "--size-mode", "or"])
+
+    out = tmp_path / "datasets" / "src_ds_size_pruned"
+    assert not (out / "train" / "images" / "a.jpg").exists()
+
+
+def test_prune_size_and_mode_keeps_when_only_one_side_below_threshold(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    ds = _setup_split_dataset(tmp_path)
+    _write_jpg(ds / "train" / "images" / "a.jpg", (101, 101, 101), size=(100, 100))
+    # 100x100 image: 0.19x1.0 -> 19x100 px; kept in and mode for 20x20
+    (ds / "train" / "labels" / "a.txt").write_text("0 0.5 0.5 0.19 1.0\n", encoding="utf-8")
+
+    prune_main(["size", "--workspace", str(tmp_path), "--dataset", "src_ds", "--size-mode", "and"])
+
+    out = tmp_path / "datasets" / "src_ds_size_pruned"
+    labels = (out / "train" / "labels" / "a.txt").read_text(encoding="utf-8").strip().splitlines()
+    assert len(labels) == 1
+
+
 def test_prune_size_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     deploy_workspace(str(tmp_path))
     ds = _setup_split_dataset(tmp_path)
@@ -184,7 +211,7 @@ def test_prune_size_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    answers = iter(["size", "src_ds", "", "yes"])
+    answers = iter(["size", "src_ds", "or", "yes"])
     monkeypatch.setattr("smartrain.services.datasets.dataset_prune.prompt_choice", lambda *a, **k: next(answers))
     monkeypatch.setattr(
         "smartrain.services.datasets.dataset_prune.prompt_text",

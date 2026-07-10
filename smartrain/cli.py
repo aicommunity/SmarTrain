@@ -650,7 +650,7 @@ def cmd_prune(ctx: typer.Context) -> None:
       smartrain prune dedup --dataset my_dataset
       smartrain prune classes --dataset my_dataset
       smartrain prune size --dataset my_dataset
-      smartrain prune size --dataset my_dataset --min-size 12x18 --no-drop-empty-images
+      smartrain prune size --dataset my_dataset --min-size 12x18 --size-mode and --no-drop-empty-images
       smartrain prune dedup --dataset my_dataset --allow-balanced-dedup
     """
     from smartrain.workflows.datasets.dataset_prune import (
