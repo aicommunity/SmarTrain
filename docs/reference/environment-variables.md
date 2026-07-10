@@ -30,6 +30,17 @@ Smart Train reads configuration from CLI flags and environment variables. CLI fl
 | `SMARTTRAIN_ONNX_IMGSZ_STRICT` | `0` | When truthy, enforces strict image-size matching for ONNX evaluation. |
 | `SMARTTRAIN_ONNX_USE_SUBPROCESS` | `1` | When falsy, runs ONNX evaluation in-process instead of a subprocess worker. |
 
+## Optional install extras
+
+| Extra | Packages | Purpose |
+|-------|----------|---------|
+| `export` | `pypandoc-binary`, `weasyprint` | PDF/ODT export for dataset and analyze reports |
+| `dev` | `pytest`, `ruff`, `mypy` | Development and CI tooling |
+| `clearml` | `clearml` | ClearML experiment tracking |
+| `sahi` | `sahi` | SAHI tiled inference CLI |
+
+Install example: `pip install -e ".[dev,export]"`.
+
 ## Notes
 
 - Two prefixes are used intentionally: `SMART_TRAIN_*` for workspace/CLI runtime and `SMARTTRAIN_*` for artifact contract and backend policy.

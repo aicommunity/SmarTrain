@@ -889,7 +889,8 @@ def main(argv: list[str] | None = None) -> None:
                 layout=layout,
                 data_cli=None,
             )
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to resolve default train data.yaml for %s: %s", root_dir, exc)
             default_train_yaml = None
         if default_train_yaml and _normalize_abs(default_train_yaml) != _normalize_abs(data_yaml):
             eval_slot_key, eval_source = _eval_slot_from_dataset_yaml(layout, data_yaml)
@@ -922,15 +923,6 @@ def main(argv: list[str] | None = None) -> None:
         )
     finally:
         os.environ.pop(TEST_EVAL_SLOT_ENV, None)
-
-
-surf._check_onnx_format_preflight = _check_onnx_format_preflight
-surf._check_native_format_preflight = _check_native_format_preflight
-surf._pick_interactive_target = _pick_interactive_target
-surf._prompt_export_backends_interactive = _prompt_export_backends_interactive
-surf._prompt_artifact_selection_interactive = _prompt_artifact_selection_interactive
-surf._resolve_existing_artifact = _resolve_existing_artifact
-surf._run_native_backend_isolated = _run_native_backend_isolated
 
 
 if __name__ == "__main__":

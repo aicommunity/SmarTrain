@@ -102,8 +102,8 @@ def _figure_takeaway_lines(
                 try:
                     df = pd.read_csv(p)
                     lines.extend(_speed_quality_takeaways(df, is_ru))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Figure takeaway skipped for %s: %s", rel, exc)
     if "benchmark" in low and rr:
         fmt = manifest.get("format_comparison") if isinstance(manifest.get("format_comparison"), dict) else {}
         perf_rel = str((fmt or {}).get("perf_test_csv") or "")
@@ -123,8 +123,8 @@ def _figure_takeaway_lines(
                                 else:
                                     lines.append(f"- Max **{_column_display_name(col, is_ru)}**: **{lab}** ({float(s.max()):.4g}).")
                                 break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Figure takeaway skipped for %s: %s", rel, exc)
     if "compare_curves" in low:
         fmt = manifest.get("format_comparison") if isinstance(manifest.get("format_comparison"), dict) else {}
         if str((fmt or {}).get("test_csv") or "").strip():
@@ -144,8 +144,8 @@ def _figure_takeaway_lines(
                 try:
                     pdf = pd.read_csv(p)
                     lines.extend(_pr_summary_takeaways(pdf, is_ru))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Figure takeaway skipped for %s: %s", rel, exc)
     if not lines:
         t = str(tpl.get("NARR_TAKEAWAY_NO_DATA") or "").strip()
         if t:
@@ -180,7 +180,8 @@ def _load_filtered_table_df(rel: str, abs_path: str, manifest: dict[str, Any]) -
                     df = df.drop(columns=[col])
             return df
         return df
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to load filtered table %s: %s", rel, exc)
         return None
 
 
@@ -258,7 +259,8 @@ def _ultralytics_per_class_ap_table_lines(
         return [], table_no
     try:
         df = pd.read_csv(abs_path)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to append speed/quality table %s: %s", rel, exc)
         return [], table_no
     if len(df) == 0:
         return [], table_no
@@ -425,7 +427,8 @@ def _path_for_report(path: str, workspace_root: str) -> str:
             if os.path.abspath(p) == os.path.abspath(root):
                 return "."
             return os.path.relpath(p, root)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to resolve report path %s: %s", p, exc)
             return p
     return p
 
@@ -620,7 +623,8 @@ def _missing_reasons_from_manifest(manifest: dict[str, Any], lang: str) -> list[
                 conf_reasons.dropna().value_counts().items()
             ):
                 reason_counts[str(reason)] = reason_counts.get(str(reason), 0) + int(cnt)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Skipping confidence recommendation row: %s", exc)
             continue
     if reason_counts:
         top = ", ".join(f"{k}={v}" for k, v in sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:5])
@@ -697,7 +701,8 @@ def _append_speed_quality_table(
         df = _filter_generic_table_for_selection(df, manifest)
         df = _select_table_columns(rel, df)
         df = _abbrev_df(df, abbreviations)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to render table section: %s", exc)
         return table_no
     if emit_before_table is not None:
         emit_before_table()
@@ -1373,7 +1378,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             try:
                 with open(issues_abs, "r", encoding="utf-8") as f:
                     issues_payload = json.load(f)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to read issues payload: %s", exc)
                 issues_payload = []
             if isinstance(issues_payload, list) and issues_payload:
                 lines.append("### " + ("Проблемы вычисления форматов" if is_ru else "Format evaluation issues"))
@@ -1598,7 +1604,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         if pd.isna(out):
                             return None
                         return out
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug("Failed to resolve leaderboard row: %s", exc)
                         return None
 
                 # Explicitly separate pure inference timing from full pipeline timing.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 import albumentations as A
 
@@ -64,7 +64,7 @@ def iter_orthogonal_variants(args, rng: random.Random, *, orth_prob: float | Non
         return [OrthogonalSpec("cw", "c")]
     if d == "ccw":
         return [OrthogonalSpec("ccw", "a")]
-    direction = rng.choice(["cw", "ccw"])
+    direction = cast(Literal["cw", "ccw"], rng.choice(["cw", "ccw"]))
     return [OrthogonalSpec(direction, "c" if direction == "cw" else "a")]
 
 

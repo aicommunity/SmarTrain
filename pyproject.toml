@@ -22,8 +22,6 @@ dependencies = [
     "prompt_toolkit>=3.0.0",
     "fpdf2>=2.7.0",
     "odfpy>=1.4.0",
-    "pypandoc-binary>=1.14.0",
-    "weasyprint>=60.0",
 ]
 
 [project.scripts]
@@ -44,6 +42,10 @@ clearml = [
 ]
 sahi = [
     "sahi>=0.11.0",
+]
+export = [
+    "pypandoc-binary>=1.14.0",
+    "weasyprint>=60.0",
 ]
 
 [tool.pytest.ini_options]

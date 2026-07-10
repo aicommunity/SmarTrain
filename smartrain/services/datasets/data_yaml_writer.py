@@ -44,3 +44,7 @@ def write_data_yaml_from_names(
         f"names: {names}\n",
         encoding="utf-8",
     )
+
+
+def write_flat_yolo_data_yaml(out_dir: str, names: list[str]) -> None:
+    write_data_yaml_from_names(out_dir, list(names), train_rel="images", val_rel="images", test_rel="images")

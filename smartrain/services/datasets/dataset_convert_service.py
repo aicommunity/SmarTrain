@@ -6,7 +6,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.services.datasets.cvat11_converter import (
@@ -14,13 +14,12 @@ from smartrain.services.datasets.cvat11_converter import (
     export_yolo_to_cvat11_zip,
     generate_temp_yolo_labels_from_cvat11_extracted,
     import_cvat11_zip_to_yolo,
-    load_cvat11_label_names_from_xml,
 )
 from smartrain.services.datasets.cvsdcldet_converter import (
     _pack_cvat11_zip,
     convert_cvsdcldet_to_cvat11,
-    is_cvsdcldet_dir,
 )
+from smartrain.services.datasets.data_yaml_writer import write_flat_yolo_data_yaml
 from smartrain.services.datasets.dataset_access import find_dataset_paths, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_cli_common import load_dataset_catalog
 from smartrain.services.datasets.dataset_scan import find_obj_names_file, find_yaml_file
@@ -320,14 +319,7 @@ def stage_flat_yolo_snapshot(
     if not names:
         raise ValueError(f"Could not determine class names for {source_root}")
 
-    (output_dir / "data.yaml").write_text(
-        "train: images\n"
-        "val: images\n"
-        "test: images\n\n"
-        f"nc: {len(names)}\n"
-        f"names: {list(names)}\n",
-        encoding="utf-8",
-    )
+    write_flat_yolo_data_yaml(str(output_dir), list(names))
     return names
 
 
