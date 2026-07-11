@@ -73,11 +73,13 @@ def format_enriched_display_label(
     epochs: Any = None,
     batch: Any = None,
     collision: bool = False,
+    run_name: str = "",
 ) -> str:
     short = format_run_display_label(index, short_model)
     if not collision:
         return short
-    parts = [f"M{int(index)}", str(short_model or "model").strip() or "model"]
+    model = str(short_model or "model").strip() or "model"
+    parts = [f"M{int(index)}", model]
     ds = str(dataset_label or "").strip()
     if ds:
         parts.append(ds)
@@ -91,6 +93,10 @@ def format_enriched_display_label(
             parts.append(f"b{int(float(batch))}")
         except (TypeError, ValueError):
             parts.append(f"b{batch}")
+    if len(parts) <= 2 and run_name:
+        tail = run_dir_display_suffix(run_name)
+        if tail:
+            parts.append(tail)
     return " · ".join(parts)
 
 
@@ -167,6 +173,7 @@ def build_run_legend_rows(
             epochs=meta.get("epochs"),
             batch=meta.get("batch_size"),
             collision=collision,
+            run_name=str(meta["run_name"]),
         )
         short_label = enriched if collision else format_run_display_label(meta["index"], meta["short_model"])
         epochs_txt = ""

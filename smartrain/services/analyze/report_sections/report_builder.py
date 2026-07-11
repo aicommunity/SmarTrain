@@ -44,7 +44,7 @@ logger = get_logger(__name__)
 from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
 from smartrain.services.analyze.report_sections.report_figures import (
     _discover_missing_pr_images,
-    _figure_caption,
+    append_figure_caption_lines,
     _figure_preamble_lines,
     _figure_takeaway_lines,
     is_ultralytics_compact_main_image,
@@ -238,7 +238,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         lines.extend(_figure_preamble_lines(rel_e, is_ru, tpl))
         lines.extend(_center_open())
         lines.append(f"![]({os.path.join('..', rel_e)}){{ width=95% }}")
-        lines.append(f"*{_figure_caption(rel_e, figure_no, abbreviations, manifest, is_ru)}*")
+        append_figure_caption_lines(lines, rel_e, figure_no, abbreviations, manifest, is_ru)
         figure_no += 1
         lines.append("")
         lines.extend(_center_close())
@@ -888,7 +888,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.extend(_center_open())
             lines.append("")
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
-            lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
+            append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
             figure_no += 1
             lines.append("")
             lines.extend(_center_close())
@@ -1432,7 +1432,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.extend(_center_open())
             lines.append("")
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
-            lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
+            append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
             figure_no += 1
             lines.append("")
             lines.extend(_center_close())
@@ -1453,7 +1453,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.extend(_center_open())
             lines.append("")
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
-            lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
+            append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
             figure_no += 1
             lines.append("")
             lines.extend(_center_close())
@@ -1463,6 +1463,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             )
     lines.append(_sec("ultra"))
     lines.append("")
+    lines.extend(_subsection_intro_lines(tpl, "SUB_ULTRA_SECTION"))
     ultra_rows = manifest.get("ultralytics_test") or []
     if isinstance(ultra_rows, list) and ultra_rows:
         table_rows: list[dict[str, Any]] = []
@@ -1577,7 +1578,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.extend(_center_open())
                 lines.append("")
                 lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
-                lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
+                append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
                 figure_no += 1
                 lines.append("")
                 lines.extend(_center_close())
@@ -1659,7 +1660,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.extend(_center_open())
             lines.append("")
             lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
-            lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
+            append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
             figure_no += 1
             lines.append("")
             lines.extend(_center_close())

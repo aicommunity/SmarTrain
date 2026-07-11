@@ -401,6 +401,58 @@ def _render_executive_summary_section(
         )
         lines.extend(_center_close())
         table_no += 1
+    sq_meta = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
+    sq_rel = _find_table_rel(manifest, "speed_quality")
+    if not sq_rel:
+        sq_rel = str(sq_meta.get("csv") or "")
+    sq_df = _load_artifact_csv(report_root, sq_rel)
+    if sq_df is not None and len(sq_df) > 0:
+        sq_df = _filter_generic_table_for_selection(sq_df, manifest)
+        keep = [
+            c
+            for c in (
+                "model",
+                "scatter_x_metric",
+                "scatter_x_value",
+                "scatter_y_metric",
+                "scatter_y_value",
+                "quality_source",
+            )
+            if c in sq_df.columns
+        ]
+        if keep:
+            sq_df = _abbrev_df(sq_df[keep], abbreviations)
+        lines.extend(_table_preamble_lines(sq_rel, sq_df, "speed_quality", is_ru, tpl))
+        lines.extend(_center_open())
+        lines.append("")
+        lines.append(
+            f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+            + ("Компромисс скорость–качество (сводка)" if is_ru else "Speed–quality trade-off (summary)")
+            + "**"
+        )
+        lines.append("")
+        lines.extend(_md_table_from_df(sq_df, abbreviations, limit=5, is_ru=is_ru))
+        lines.append("")
+        if sq_rel:
+            lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{sq_rel}`"))
+        lines.append("")
+        from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
+
+        _append_takeaway_bullets(
+            lines,
+            _table_takeaway_lines(
+                sq_rel,
+                sq_df,
+                "speed_quality",
+                is_ru,
+                manifest=manifest,
+                report_root=report_root,
+                tpl=tpl,
+                abbreviations=abbreviations,
+            ),
+        )
+        lines.extend(_center_close())
+        table_no += 1
     exec_insights = _executive_insights_from_manifest(manifest, lang, abbreviations)
     if exec_insights:
         lines.append("### " + ("Ключевые выводы" if is_ru else "Key findings"))

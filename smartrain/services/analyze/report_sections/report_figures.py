@@ -42,6 +42,8 @@ _ULTRALYTICS_COMPACT_BASENAMES = frozenset(
     }
 )
 
+_COMPARE_CURVE_METRICS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
+
 
 def ultralytics_report_mode(manifest: dict[str, Any]) -> str:
     explicit = str(manifest.get("ultralytics_report_mode") or "").strip().lower()
@@ -89,134 +91,185 @@ def _ultra_item_for_rel(manifest: dict[str, Any], rel: str) -> dict[str, Any] | 
     m = re.search(r"ultralytics-test/([^/]+)/", norm)
     if not m:
         return None
-    run_code = m.group(1)
+    run_code = m.group(1).lower()
     rows = manifest.get("ultralytics_test") or []
     if not isinstance(rows, list):
         return None
     for item in rows:
         if not isinstance(item, dict):
             continue
-        code = str(item.get("run_code") or item.get("run_name") or "")
+        code = str(item.get("run_code") or item.get("run_name") or "").lower()
         if code == run_code or run_code.startswith(code) or code.startswith(run_code):
             return item
     return None
 
 
-def _figure_context_suffix(
+def _ultralytics_split_hint(item: dict[str, Any]) -> str:
+    comp_raw = item.get("completeness")
+    if isinstance(comp_raw, dict):
+        split_hint = str(comp_raw.get("primary_split") or comp_raw.get("split") or "").strip()
+        if split_hint:
+            return split_hint.lower()
+    comp = str(comp_raw or "").strip().lower()
+    if comp == "complete":
+        return "test"
+    if comp == "train_val_fallback":
+        return "val"
+    sources = item.get("artifact_sources") or {}
+    if isinstance(sources, dict) and sources:
+        provs = {str(v).strip().lower() for v in sources.values()}
+        if provs & {"test", "legacy"} and "train_val_fallback" not in provs:
+            return "test"
+        if "train_val_fallback" in provs:
+            return "val"
+    note = str(item.get("completeness_note") or "").lower()
+    if "not test-split" in note or "train-ultralytics" in note or "train-val" in note or "validation during training" in note:
+        return "val"
+    if "test-split" in note:
+        return "test"
+    return ""
+
+
+def _run_legend_rows_from_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = manifest.get("run_legend") or []
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def _legend_line_for_row(row: dict[str, Any], *, is_ru: bool, split: str = "") -> str:
+    label = str(row.get("short_label") or row.get("enriched_label") or "").strip()
+    if not label:
+        idx = row.get("index")
+        label = f"M{idx}" if idx is not None else "?"
+    extras: list[str] = []
+    if split:
+        extras.append(f"split: {split}")
+    role = str(row.get("role") or "").strip()
+    if role == "baseline":
+        extras.append("базовый" if is_ru else "baseline")
+    if extras:
+        return f"{label} — {', '.join(extras)}"
+    return label
+
+
+def _match_legend_row(manifest: dict[str, Any], *, run_name: str = "", run_code: str = "") -> dict[str, Any] | None:
+    for row in _run_legend_rows_from_manifest(manifest):
+        rn = str(row.get("run_name") or "")
+        rd = os.path.basename(str(row.get("run_dir") or "").rstrip("/"))
+        sl = str(row.get("short_label") or "")
+        if run_name and run_name in {rn, rd}:
+            return row
+        if run_code and run_code in {sl, rn, rd}:
+            return row
+        if run_code and run_code.replace("_", " ") in sl:
+            return row
+    return None
+
+
+def _build_ultra_legend_line(item: dict[str, Any], manifest: dict[str, Any], abbreviations: dict[str, str], is_ru: bool) -> str:
+    run_name = str(item.get("run_name") or "")
+    run_code = str(item.get("run_code") or "")
+    row = _match_legend_row(manifest, run_name=run_name, run_code=run_code)
+    split = _ultralytics_split_hint(item)
+    if row:
+        return _legend_line_for_row(row, is_ru=is_ru, split=split)
+    run_info = item.get("run_info") if isinstance(item.get("run_info"), dict) else {}
+    label = _abbrev_value(run_code, abbreviations) if run_code else run_name
+    parts = [label or "?"]
+    model = str(run_info.get("model") or "").strip()
+    dataset = str(run_info.get("dataset_name") or "").strip()
+    if model and model.lower() not in label.lower():
+        parts.append(model)
+    if dataset:
+        parts.append(_abbrev_value(dataset, abbreviations))
+    epochs = run_info.get("epochs")
+    batch = run_info.get("batch_size")
+    val_img = run_info.get("val_imgsz") or run_info.get("train_image_size")
+    cfg: list[str] = []
+    if epochs is not None:
+        cfg.append(f"epochs={epochs}")
+    if batch is not None:
+        cfg.append(f"batch={batch}")
+    if val_img is not None:
+        cfg.append(f"imgsz={val_img}")
+    line = " · ".join(parts)
+    if cfg:
+        line = f"{line} — {', '.join(cfg)}"
+    if split:
+        line = f"{line} — split: {split}"
+    return line
+
+
+def _figure_legend_lines(
     rel: str,
     manifest: dict[str, Any],
     abbreviations: dict[str, str],
     is_ru: bool,
-) -> str:
+) -> list[str]:
     norm = rel.replace("\\", "/")
     low = norm.lower()
+    lines: list[str] = []
+
+    if "ultralytics-test/" in low:
+        item = _ultra_item_for_rel(manifest, rel)
+        if item:
+            lines.append(_build_ultra_legend_line(item, manifest, abbreviations, is_ru))
+        return lines
+
+    legend_rows = _run_legend_rows_from_manifest(manifest)
+    if not legend_rows:
+        return lines
+
+    if "compare_curves" in low or "benchmark" in low or "speed_vs_map" in low or "pr_all_classes" in low or (
+        "pr/" in low and "per_class" in low
+    ) or "pr_class_" in low:
+        baseline_name = os.path.basename(str(manifest.get("baseline", "")).rstrip("/"))
+        ordered: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in legend_rows:
+            rn = str(row.get("run_name") or "")
+            if rn == baseline_name or os.path.basename(str(row.get("run_dir") or "").rstrip("/")) == baseline_name:
+                ordered.append(row)
+                seen.add(rn)
+                break
+        for row in legend_rows:
+            rn = str(row.get("run_name") or "")
+            if rn not in seen:
+                ordered.append(row)
+                seen.add(rn)
+        for row in ordered or legend_rows:
+            lines.append(_legend_line_for_row(row, is_ru=is_ru))
+        return lines
+
+    return lines
+
+
+def _figure_description_extra(rel: str, manifest: dict[str, Any], abbreviations: dict[str, str], is_ru: bool) -> str:
+    low = rel.replace("\\", "/").lower()
     parts: list[str] = []
 
     if "compare_curves" in low:
-        baseline = os.path.basename(str(manifest.get("baseline", "")).rstrip("/"))
-        others = [os.path.basename(str(x).rstrip("/")) for x in (manifest.get("others") or [])]
-        b = abbreviations.get(baseline, baseline)
-        o = ",".join(abbreviations.get(x, x) for x in others)
-        if o:
-            parts.append(f"{'базовый' if is_ru else 'baseline'}: {b}; {'сравнение' if is_ru else 'others'}: {o}")
-        return f" ({'; '.join(parts)})" if parts else ""
-
-    if "benchmark" in low and low.endswith(".png"):
-        runs = []
-        for row in manifest.get("run_legend") or []:
-            if isinstance(row, dict):
-                runs.append(str(row.get("short_label") or ""))
-        if runs:
-            parts.append(f"PT CPU benchmark; runs: {', '.join(r for r in runs if r)}")
-        else:
-            parts.append("PT CPU benchmark")
-        return f" ({'; '.join(parts)})" if parts else ""
+        parts.append(", ".join(_COMPARE_CURVE_METRICS))
 
     if "speed_vs_map" in low:
         sq = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
         x_name = _column_display_name(str(sq.get("scatter_x") or "avg_inference_ms_per_frame"), is_ru)
         y_name = _column_display_name(str(sq.get("scatter_y") or "mAP50-95"), is_ru)
         parts.append(f"{x_name} vs {y_name}")
-        report_root = str(manifest.get("_report_root") or "")
-        sq_rel = str((sq or {}).get("csv") or "")
-        if report_root and sq_rel:
-            p = os.path.join(report_root, sq_rel)
-            if os.path.isfile(p):
-                try:
-                    pdf = pd.read_csv(p)
-                    if "model" in pdf.columns:
-                        labels = [
-                            abbreviations.get(str(v), str(v))
-                            for v in pdf["model"].astype(str).tolist()
-                        ]
-                        if labels:
-                            parts.append(", ".join(labels))
-                except Exception as exc:
-                    logger.debug("Figure context skipped for %s: %s", rel, exc)
-        return f" ({'; '.join(parts)})" if parts else ""
 
-    if "pr_all_classes" in low or ("pr/" in low and "per_class" in low):
-        runs = []
-        for row in manifest.get("run_legend") or []:
-            if isinstance(row, dict):
-                runs.append(str(row.get("short_label") or ""))
-        if runs:
-            parts.append(f"{'все запуски' if is_ru else 'all runs'}: {', '.join(r for r in runs if r)}")
-        return f" ({'; '.join(parts)})" if parts else ""
+    if "benchmark" in low and low.endswith(".png"):
+        parts.append("PT CPU benchmark")
 
     if "pr_class_" in low:
         m = re.search(r"pr_class_\d+_(.+)\.png$", os.path.basename(rel), flags=re.IGNORECASE)
         if m:
             cls = m.group(1).replace("_", " ")
             parts.append(f"{'класс' if is_ru else 'class'}: {cls}")
-        runs = []
-        for row in manifest.get("run_legend") or []:
-            if isinstance(row, dict):
-                runs.append(str(row.get("short_label") or ""))
-        if runs:
-            parts.append(f"{'все запуски' if is_ru else 'all runs'}: {', '.join(r for r in runs if r)}")
-        return f" ({'; '.join(parts)})" if parts else ""
 
-    if "ultralytics-test/" in low:
-        m = re.search(r"ultralytics-test/([^/]+)/", norm, flags=re.IGNORECASE)
-        run_code = m.group(1) if m else ""
-        run_label = _abbrev_value(run_code, abbreviations) if run_code else ""
-        if run_label:
-            parts.append(f"{'запуск' if is_ru else 'run'}: {run_label}")
-        item = _ultra_item_for_rel(manifest, rel)
-        if item:
-            run_info = item.get("run_info") if isinstance(item.get("run_info"), dict) else {}
-            model = str(run_info.get("model") or "").strip()
-            dataset = str(run_info.get("dataset_name") or "").strip()
-            if model:
-                parts.append(f"{'модель' if is_ru else 'model'}: {model}")
-            if dataset:
-                parts.append(f"{'датасет' if is_ru else 'dataset'}: {_abbrev_value(dataset, abbreviations)}")
-            epochs = run_info.get("epochs")
-            batch = run_info.get("batch_size")
-            val_img = run_info.get("val_imgsz") or run_info.get("train_image_size")
-            cfg_bits: list[str] = []
-            if epochs is not None:
-                cfg_bits.append(f"epochs={epochs}")
-            if batch is not None:
-                cfg_bits.append(f"batch={batch}")
-            if val_img is not None:
-                cfg_bits.append(f"imgsz={val_img}")
-            if cfg_bits:
-                parts.append(", ".join(cfg_bits))
-            comp = item.get("completeness") if isinstance(item.get("completeness"), dict) else {}
-            split_hint = str(comp.get("primary_split") or comp.get("split") or "").strip()
-            if not split_hint:
-                sources = str(comp.get("sources_summary") or item.get("sources_summary") or "")
-                if "test-split" in sources.lower():
-                    split_hint = "test"
-                elif "train-val" in sources.lower() or "train-ultralytics" in sources.lower():
-                    split_hint = "val"
-            if split_hint:
-                parts.append(f"split: {split_hint}")
-        return f" ({'; '.join(parts)})" if parts else ""
-
-    return ""
+    if not parts:
+        return ""
+    return f" ({'; '.join(parts)})"
 
 
 def _figure_takeaway_lines(
@@ -350,11 +403,36 @@ def _figure_title(rel: str, is_ru: bool) -> str:
     return "Иллюстрация результатов" if is_ru else "Result illustration"
 
 
-def _figure_caption(rel: str, figure_no: int, abbreviations: dict[str, str], manifest: dict[str, Any], is_ru: bool) -> str:
+def _figure_caption_lines(
+    rel: str,
+    figure_no: int,
+    abbreviations: dict[str, str],
+    manifest: dict[str, Any],
+    is_ru: bool,
+) -> list[str]:
+    """Legend lines (one run per line), then italic figure number + description."""
+    legend = _figure_legend_lines(rel, manifest, abbreviations, is_ru)
     base = _figure_title(rel, is_ru)
-    suffix = _figure_context_suffix(rel, manifest, abbreviations, is_ru)
+    extra = _figure_description_extra(rel, manifest, abbreviations, is_ru)
     title = "Рисунок" if is_ru else "Figure"
-    return f"{title} {figure_no}. {base}{suffix}"
+    caption = f"*{title} {figure_no}. {base}{extra}*"
+    return [*legend, caption]
+
+
+def _figure_caption(rel: str, figure_no: int, abbreviations: dict[str, str], manifest: dict[str, Any], is_ru: bool) -> str:
+    return "\n".join(_figure_caption_lines(rel, figure_no, abbreviations, manifest, is_ru))
+
+
+def append_figure_caption_lines(
+    lines: list[str],
+    rel: str,
+    figure_no: int,
+    abbreviations: dict[str, str],
+    manifest: dict[str, Any],
+    is_ru: bool,
+) -> None:
+    for cap_line in _figure_caption_lines(rel, figure_no, abbreviations, manifest, is_ru):
+        lines.append(cap_line)
 
 
 def _discover_missing_pr_images(report_root: str, manifest_images: list[str]) -> list[str]:

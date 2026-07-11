@@ -13,6 +13,15 @@ Shows metric deltas for each candidate relative to the baseline run.
 <!-- BLOCK: NARR_PREAMBLE_RUNS_SUMMARY -->
 Run parameters and aggregated test metrics for selected training runs.
 
+<!-- BLOCK: NARR_PREAMBLE_FORMAT_METRICS -->
+Compares quality metrics across export formats (pt/onnx/engine) on aligned splits.
+
+<!-- BLOCK: NARR_PREAMBLE_SPEED_QUALITY -->
+Summary of run positions on the speed–quality axes; use together with the scatter figure.
+
+<!-- BLOCK: SUB_ULTRA_SECTION -->
+Figure captions below list runs (one model per line) with split and eval parameters. In compact mode the main body is shortened; see the appendix for the full illustration set.
+
 <!-- BLOCK: NARR_FIG_ULTRA -->
 Ultralytics test illustration for the run named in the caption (split and params included).
 
