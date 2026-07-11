@@ -24,6 +24,7 @@ from smartrain.services.datasets.dataset_cli_catalog import (
     try_prompt_dataset_interactive,
 )
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
+from smartrain.services.datasets.dataset_cli_common import update_datasets_sidecar_from_entry
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
@@ -555,31 +556,6 @@ def _copy_tree_structure_if_exists(src_root: str, dst_root: str) -> None:
             shutil.copy2(sp, os.path.join(dst_root, name))
 
 
-def _update_datasets_sidecar(
-    layout: WorkspaceLayout,
-    output_key: str,
-    entry: dict,
-    target_dir: str,
-    output_hash: str,
-) -> None:
-    os.makedirs(layout.datasets, exist_ok=True)
-    rel = os.path.relpath(os.path.abspath(target_dir), layout.root)
-    prev: dict = {}
-    info_path = layout.work_datasets_info_path()
-    if os.path.isfile(info_path):
-        with open(info_path, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
-        if isinstance(loaded, dict):
-            prev = loaded
-    new_entry = dict(entry) if isinstance(entry, dict) else {}
-    new_entry["data_path"] = rel
-    new_entry["dataset_hash"] = output_hash
-    new_entry["modified"] = False
-    prev[output_key] = new_entry
-    with open(info_path, "w", encoding="utf-8") as f:
-        json.dump(prev, f, ensure_ascii=False, indent=4)
-
-
 def _write_orient_stats_csv(out_dir: str, rows: list[dict]) -> str:
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "orient_stats.csv")
@@ -865,7 +841,13 @@ def main(argv=None) -> None:
     _copy_tree_structure_if_exists(src_root, out_dir)
     stats_path = _write_orient_stats_csv(out_dir, decision_rows)
     out_hash = calculate_dataset_hash(out_dir)
-    _update_datasets_sidecar(layout, out_name, entry if isinstance(entry, dict) else {}, out_dir, out_hash)
+    update_datasets_sidecar_from_entry(
+        layout=layout,
+        output_key=out_name,
+        entry=entry if isinstance(entry, dict) else {},
+        target_dir=out_dir,
+        output_hash=out_hash,
+    )
     write_dataset_passport(
         output_dataset_dir=out_dir,
         command="orient",

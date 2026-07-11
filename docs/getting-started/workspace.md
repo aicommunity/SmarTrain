@@ -21,6 +21,8 @@ You can optionally override the workspace root with a global flag:
 
 The default queue file is `queue.txt` in the workspace root.
 
+For multi-machine SMB shares, see [Shared workspace](shared-workspace.md).
+
 ## Workspace layout diagram
 
 ```mermaid

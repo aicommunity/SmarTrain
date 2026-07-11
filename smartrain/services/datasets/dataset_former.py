@@ -19,6 +19,8 @@ from smartrain.services.datasets.dataset_access import (
     resolve_dataset_root_for_entry,
 )
 from smartrain.services.datasets.dataset_passport import write_dataset_passport
+from smartrain.services.datasets.dataset_cli_common import update_datasets_sidecar
+from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
 from smartrain.services.datasets.image_label_pairs import collect_label_image_pairs as _collect_label_image_pairs
 from smartrain.core.runtime.logging_config import get_logger
@@ -921,44 +923,6 @@ def _write_label_objects(path: str, objs: list[tuple[int, tuple[float, ...]]]) -
     return True
 
 
-def _update_datasets_sidecar(
-    layout: WorkspaceLayout,
-    output_key: str,
-    selected_classes: list,
-    target_dir: str,
-) -> None:
-    os.makedirs(layout.datasets, exist_ok=True)
-    rel = os.path.relpath(os.path.abspath(target_dir), layout.root)
-    entry = {
-        "classes": {name: idx for idx, name in enumerate(selected_classes)},
-        "structure": "split",
-        "elements_count": None,
-        "data_path": rel,
-    }
-    info_path = layout.work_datasets_info_path()
-    previous: dict = {}
-    if os.path.isfile(info_path):
-        with open(info_path, "r", encoding="utf-8") as f:
-            previous = json.load(f)
-        if not isinstance(previous, dict):
-            previous = {}
-    previous[output_key] = entry
-    with open(info_path, "w", encoding="utf-8") as f:
-        json.dump(previous, f, ensure_ascii=False, indent=4)
-
-    cn_path = layout.work_class_names_path()
-    class_names_out: dict = {}
-    if os.path.isfile(cn_path):
-        with open(cn_path, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
-        if isinstance(loaded, dict):
-            class_names_out = dict(loaded)
-    for c in selected_classes:
-        class_names_out[c] = c
-    with open(cn_path, "w", encoding="utf-8") as f:
-        json.dump(class_names_out, f, ensure_ascii=False, indent=4)
-
-
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -1450,7 +1414,15 @@ def main(argv=None):
 
     if layout is not None:
         out_key = os.path.basename(os.path.normpath(target_dir))
-        _update_datasets_sidecar(layout, out_key, selected_classes, target_dir)
+        class_map = {name: idx for idx, name in enumerate(selected_classes)}
+        out_hash = calculate_dataset_hash(target_dir)
+        update_datasets_sidecar(
+            layout=layout,
+            output_key=out_key,
+            class_map=class_map,
+            target_dir=target_dir,
+            output_hash=out_hash,
+        )
         print(f"[OK] Updated {layout.work_datasets_info_path()} and class_names.json in datasets/")
         try:
             source_datasets = []

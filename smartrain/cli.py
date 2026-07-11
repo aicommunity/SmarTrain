@@ -97,6 +97,34 @@ def cmd_deploy(
     typer.echo("Done.")
 
 
+workspace_app = plain_sub_typer(help="Workspace coordination and status.")
+
+
+@workspace_app.command(
+    "peers",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_workspace_peers(ctx: typer.Context) -> None:
+    """List active workspace sessions and lock files."""
+    from smartrain.workflows.workspace.workspace_peers_cli import build_workspace_peers_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.workspace.workspace_peers_cli",
+        build_parser=build_workspace_peers_arg_parser,
+        prog="smartrain workspace peers",
+        empty_args_mode="invoke",
+    )
+
+
+app.add_typer(
+    workspace_app,
+    name="workspace",
+    help="Workspace coordination: active peers, locks, shared-folder safety.",
+)
+
+
 @app.command("quickstart")
 def cmd_quickstart() -> None:
     """Print step-by-step getting-started workflow guide."""

@@ -17,6 +17,13 @@ from smartrain.cli_entrypoints.support.typer_non_interactive import (
     strip_typer_meta_non_interactive_flags,
 )
 from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
+from smartrain.core.runtime.workspace_coordination import (
+    WorkspaceLockBusy,
+    WorkspaceSession,
+    classify_command,
+    get_active_session,
+    try_resolve_layout_from_argv,
+)
 
 
 def _format_columns(items: tuple[str, ...], *, max_columns: int = 4) -> list[str]:
@@ -58,6 +65,33 @@ def _invoke_module_main(module: str, args: list[str]) -> None:
     fn(args)
 
 
+def _strip_coordination_flags(argv: list[str]) -> list[str]:
+    out: list[str] = []
+    skip_next = False
+    for tok in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in ("--no-peer-warn", "--force-resource-lock"):
+            continue
+        if tok in ("--wait-for-scan", "--catalog-lock-timeout"):
+            skip_next = True
+            continue
+        if tok.startswith("--wait-for-scan=") or tok.startswith("--catalog-lock-timeout="):
+            continue
+        out.append(tok)
+    return out
+
+
+def _command_label(prog: str | None, filtered: list[str]) -> list[str]:
+    if prog:
+        parts = prog.split()
+        if parts and parts[0] == "smartrain" and len(parts) > 1:
+            return parts[1:] + filtered
+        return parts + filtered
+    return filtered
+
+
 @contextmanager
 def _interactive_flag_env(allowed: bool):
     prev = os.environ.get(INTERACTIVE_ALLOWED_ENV)
@@ -69,6 +103,41 @@ def _interactive_flag_env(allowed: bool):
             os.environ.pop(INTERACTIVE_ALLOWED_ENV, None)
         else:
             os.environ[INTERACTIVE_ALLOWED_ENV] = prev
+
+
+def _run_with_coordination(
+    module: str,
+    filtered: list[str],
+    *,
+    prog: str | None,
+    ensure_scan: bool,
+    auto_scan_disabled: bool,
+    interactive_allowed: bool,
+) -> None:
+    from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
+
+    layout = try_resolve_layout_from_argv(filtered)
+    clean = _strip_coordination_flags(filtered)
+    if layout is None:
+        maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
+        with _interactive_flag_env(interactive_allowed):
+            _invoke_module_main(module, clean)
+        return
+
+    cmd_argv = _command_label(prog, filtered)
+    with WorkspaceSession(layout, cmd_argv):
+        maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
+        policy = classify_command(filtered, prog=(prog or "").split()[-1] if prog else None)
+        session = get_active_session()
+        if session is None:
+            raise RuntimeError("WorkspaceSession active but get_active_session() returned None")
+        try:
+            with policy.locks(session):
+                with _interactive_flag_env(interactive_allowed):
+                    _invoke_module_main(module, clean)
+        except WorkspaceLockBusy as exc:
+            print(f"[ERROR] {exc}", file=sys.stderr)
+            raise typer.Exit(1) from exc
 
 
 def _forward_argparse_command(
@@ -106,19 +175,25 @@ def _forward_argparse_command(
 
     if not filtered:
         if empty_args_mode == "invoke":
-            from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
-
-            maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
-            with _interactive_flag_env(interactive_allowed):
-                _invoke_module_main(module, filtered)
+            _run_with_coordination(
+                module,
+                filtered,
+                prog=prog,
+                ensure_scan=ensure_scan,
+                auto_scan_disabled=auto_scan_disabled,
+                interactive_allowed=interactive_allowed,
+            )
             return
         if empty_args_mode == "invoke_if_tty_else_help":
             if sys.stdin.isatty():
-                from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
-
-                maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
-                with _interactive_flag_env(interactive_allowed):
-                    _invoke_module_main(module, filtered)
+                _run_with_coordination(
+                    module,
+                    filtered,
+                    prog=prog,
+                    ensure_scan=ensure_scan,
+                    auto_scan_disabled=auto_scan_disabled,
+                    interactive_allowed=interactive_allowed,
+                )
                 return
         if build_parser:
             parser = build_parser()
@@ -141,8 +216,12 @@ def _forward_argparse_command(
             if code is None:
                 code = 0
             raise typer.Exit(code if isinstance(code, int) else 1)
-    from smartrain.services.datasets.dataset_scan_preflight import maybe_run_auto_scan
 
-    maybe_run_auto_scan(filtered, ensure_scan=ensure_scan, auto_scan_disabled=auto_scan_disabled)
-    with _interactive_flag_env(interactive_allowed):
-        _invoke_module_main(module, filtered)
+    _run_with_coordination(
+        module,
+        filtered,
+        prog=prog,
+        ensure_scan=ensure_scan,
+        auto_scan_disabled=auto_scan_disabled,
+        interactive_allowed=interactive_allowed,
+    )
