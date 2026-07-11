@@ -42,6 +42,59 @@ def build_run_name(
     return folder_name
 
 
+def run_dir_has_train_artifacts(run_dir: str) -> bool:
+    if resolve_run_model(run_dir) is not None:
+        return True
+    train_backend = run_train_backend_dir(run_dir, "ultralytics")
+    for rel in ("weights/best.pt", "weights/last.pt", "results.csv", "args.yaml"):
+        if (train_backend / rel).is_file():
+            return True
+    legacy_train = Path(run_dir) / "train"
+    for rel in ("weights/best.pt", "weights/last.pt", "results.csv", "args.yaml"):
+        if (legacy_train / rel).is_file():
+            return True
+    return False
+
+
+def recover_builtin_run_dir_after_train_error(
+    *,
+    target_dir: str,
+    dataset_path: str,
+    model_version: str,
+    epochs: int,
+    batch: int,
+    dataset_hash: str | None,
+    training_start_time: datetime | None,
+) -> str | None:
+    """Find an existing run directory when train_yolo failed after creating one."""
+    dataset_name = os.path.basename(os.path.normpath(dataset_path))
+    runs_root = os.path.join(target_dir, dataset_name)
+    if not os.path.isdir(runs_root):
+        return None
+
+    if training_start_time is not None:
+        folder_name = build_run_name(
+            "ultralytics",
+            model_version,
+            epochs,
+            batch,
+            dataset_hash,
+            timestamp=training_start_time,
+        )
+        candidate = os.path.join(runs_root, folder_name)
+        if run_dir_has_train_artifacts(candidate):
+            return candidate
+
+    candidates: list[str] = []
+    for name in os.listdir(runs_root):
+        run_dir = os.path.join(runs_root, name)
+        if os.path.isdir(run_dir) and run_dir_has_train_artifacts(run_dir):
+            candidates.append(run_dir)
+    if not candidates:
+        return None
+    return max(candidates, key=os.path.getmtime)
+
+
 def resolve_external_eval_source(dataset_path: str) -> str:
     root = Path(dataset_path).expanduser().resolve()
     candidates = [

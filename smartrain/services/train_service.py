@@ -26,6 +26,8 @@ from smartrain.services.train_runtime_helpers import (
     load_batch_from_training_metadata,
     maybe_free_cuda_memory,
     normalize_external_run_layout,
+    recover_builtin_run_dir_after_train_error,
+    run_dir_has_train_artifacts,
     run_mfel_external_eval_substitute,
     resolve_external_eval_source,
     write_external_fallback_metrics,
@@ -381,6 +383,16 @@ def _run_builtin_train_and_eval_flow(
         except Exception:
             dataset_hash = None
         if not model_dir:
+            model_dir = recover_builtin_run_dir_after_train_error(
+                target_dir=target_dir,
+                dataset_path=data,
+                model_version=model_version,
+                epochs=epochs,
+                batch=batch,
+                dataset_hash=dataset_hash,
+                training_start_time=training_start_time,
+            )
+        if not model_dir:
             dataset_name = os.path.basename(os.path.normpath(data))
             folder_name = runtime_ops.build_run_name(
                 "ultralytics",
@@ -392,14 +404,18 @@ def _run_builtin_train_and_eval_flow(
             )
             model_dir = os.path.join(target_dir, dataset_name, folder_name)
             os.makedirs(model_dir, exist_ok=True)
+        training_ok = run_dir_has_train_artifacts(model_dir) if model_dir else False
         meta_extras = {
             "task_type": task_to_metadata_task_type(u_cfg.get("task")),
             "train_kw": {k: v for k, v in u_cfg.items() if k != "data"},
-            "training_ok": False,
+            "training_ok": training_ok,
             "mpl_runtime": ensure_matplotlib_training_runtime(
                 non_interactive=args.non_interactive
             ).as_dict(),
         }
+        if training_ok:
+            training_success = True
+            training_error = None
 
     if training_success and model_dir:
         try:
