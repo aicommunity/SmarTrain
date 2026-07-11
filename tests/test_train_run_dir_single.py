@@ -86,7 +86,9 @@ def test_recover_builtin_run_dir_finds_existing_train_artifacts(tmp_path: Path) 
     ds = _make_dataset(tmp_path)
     target_dir = tmp_path / "runs"
     fixed_start = datetime(2026, 7, 11, 14, 30)
-    run_name = build_run_name("ultralytics", "yolo11n.pt", 1, 2, "abc12345", timestamp=fixed_start)
+    run_name = build_run_name(
+        "ultralytics", "yolo11n.pt", 1, 2, "abc12345", img_size=640, timestamp=fixed_start
+    )
     run_dir = target_dir / ds.name / run_name
     _seed_train_artifacts(run_dir)
 
@@ -96,6 +98,7 @@ def test_recover_builtin_run_dir_finds_existing_train_artifacts(tmp_path: Path) 
         model_version="yolo11n.pt",
         epochs=1,
         batch=2,
+        img_size=640,
         dataset_hash="abc12345",
         training_start_time=None,
     )
@@ -108,7 +111,9 @@ def test_builtin_train_and_eval_uses_single_run_dir(
     ds = _make_dataset(tmp_path)
     target_dir = tmp_path / "runs"
     fixed_start = datetime(2026, 7, 11, 14, 30)
-    run_name = build_run_name("ultralytics", "yolo11n.pt", 1, 2, "abc12345", timestamp=fixed_start)
+    run_name = build_run_name(
+        "ultralytics", "yolo11n.pt", 1, 2, "abc12345", img_size=640, timestamp=fixed_start
+    )
     run_dir = target_dir / ds.name / run_name
     _seed_train_artifacts(run_dir)
 
@@ -183,7 +188,9 @@ def test_builtin_train_error_recovery_does_not_create_duplicate_run_dir(
     ds = _make_dataset(tmp_path)
     target_dir = tmp_path / "runs"
     fixed_start = datetime(2026, 7, 11, 14, 30)
-    run_name = build_run_name("ultralytics", "yolo11n.pt", 1, 2, "abc12345", timestamp=fixed_start)
+    run_name = build_run_name(
+        "ultralytics", "yolo11n.pt", 1, 2, "abc12345", img_size=640, timestamp=fixed_start
+    )
     run_dir = target_dir / ds.name / run_name
     _seed_train_artifacts(run_dir)
 

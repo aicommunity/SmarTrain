@@ -243,6 +243,7 @@ def train_yolo(
         epochs,
         batch,
         dataset_hash,
+        img_size=img_size,
         timestamp=training_start_time,
     )
 

@@ -70,7 +70,7 @@ This logic is in `services/training/train_interactive_helpers_service.py` (`appl
 
 Run name must be path-safe and stable:
 
-- `YYYY-MM-DD_HH-MM_<provider>_<model>_<epochs>epochs_b<batch>-<dataset_hash>`
+- `YYYY-MM-DD_HH-MM_<provider>_<model>_<imgsz>px_<epochs>epochs_b<batch>[-<dataset_hash>]`
 
 Model token must be sanitized from filenames/paths to avoid nested invalid directories.
 

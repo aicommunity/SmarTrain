@@ -14,7 +14,7 @@ def test_mfel_train_adapter_uses_launcher() -> None:
         imgsz=640,
         device="0",
         target_dir="/tmp/runs",
-        run_name="2026-04-23_12-00_yolov8n_1epochs_b2-abc123",
+        run_name="2026-04-23_12-00_yolov8n_640px_1epochs_b2-abc123",
     )
     assert "mfel_train_launcher.py" in spec.script_path
     assert "--repo" in spec.args
