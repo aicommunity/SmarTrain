@@ -922,28 +922,50 @@ def _save_recompute_status(
     )
 
 
-def _build_run_display_labels(run_dirs: list[str]) -> dict[str, str]:
+def _build_run_display_labels(run_dirs: list[str], *, baseline: str = "") -> dict[str, str]:
     from smartrain.services.analyze.report_labels import build_run_display_labels
 
-    return build_run_display_labels(run_dirs, build_run_record_cb=_build_run_record_unified)
+    return build_run_display_labels(
+        run_dirs,
+        build_run_record_cb=_build_run_record_unified,
+        baseline=baseline,
+    )
+
+
+def _build_report_manifest_labels(baseline: str, others: list[str]) -> dict[str, Any]:
+    from smartrain.services.analyze.report_labels import build_report_labels_context
+
+    run_dirs = [baseline] + list(others or [])
+    abbreviations, legend_rows, _dataset_labels = build_report_labels_context(
+        run_dirs,
+        baseline=baseline,
+        build_run_record_cb=_build_run_record_unified,
+    )
+    return {
+        "abbreviations": abbreviations,
+        "run_legend": [
+            {
+                "index": row.index,
+                "short_label": row.short_label,
+                "enriched_label": row.enriched_label,
+                "architecture": row.architecture,
+                "dataset_label": row.dataset_label,
+                "dataset_name": row.dataset_name,
+                "epochs": row.epochs,
+                "batch": row.batch,
+                "run_name": row.run_name,
+                "run_dir": row.run_dir,
+                "role": row.role,
+            }
+            for row in legend_rows
+        ],
+    }
 
 
 def _build_abbreviations_for_report(run_dirs: list[str]) -> dict[str, str]:
-    out = _build_run_display_labels(run_dirs)
-    dataset_to_idx: dict[str, int] = {}
-    dataset_counter = 1
-    for rd in run_dirs:
-        try:
-            rec = _build_run_record_unified(rd)
-            dataset_name = str((rec.dataset_name or "")).strip()
-        except Exception:
-            dataset_name = ""
-        if dataset_name:
-            if dataset_name not in dataset_to_idx:
-                dataset_to_idx[dataset_name] = dataset_counter
-                dataset_counter += 1
-            out.setdefault(dataset_name, f"D{dataset_to_idx[dataset_name]}")
-    return out
+    baseline = run_dirs[0] if run_dirs else ""
+    others = run_dirs[1:] if len(run_dirs) > 1 else []
+    return _build_report_manifest_labels(baseline, others)["abbreviations"]
 
 
 def _collect_ultralytics_test_artifacts(
@@ -1152,6 +1174,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         cmd_pr_curves_cb=_workflow_analyze_cmd("cmd_pr_curves"),
         safe_name_cb=_safe_name,
         build_abbreviations_for_report_cb=_build_abbreviations_for_report,
+        build_report_manifest_labels_cb=_build_report_manifest_labels,
         collect_ultralytics_test_artifacts_cb=_workflow_callback("_collect_ultralytics_test_artifacts"),
         write_format_compare_artifacts_cb=_write_format_compare_artifacts,
         collect_confidence_recommendation_tables_cb=_collect_confidence_recommendation_tables,

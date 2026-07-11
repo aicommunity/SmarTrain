@@ -22,10 +22,13 @@ from smartrain.core.runtime.run_artifacts import run_test_backend_dir, run_tests
 from smartrain.services.train_runtime_helpers import (
     build_run_name,
     ensure_external_best_checkpoint_layout,
+    finalize_run_dir_naming,
     json_safe_train_summary,
     load_batch_from_training_metadata,
     maybe_free_cuda_memory,
     normalize_external_run_layout,
+    recover_builtin_run_dir_after_train_error,
+    run_dir_has_train_artifacts,
     run_mfel_external_eval_substitute,
     resolve_external_eval_source,
     write_external_fallback_metrics,
@@ -136,7 +139,9 @@ def _run_external_provider_flow(
         dataset_hash = calculate_dataset_hash(data)
     except Exception:
         dataset_hash = None
-    run_name = runtime_ops.build_run_name(external_provider, model_version, epochs, batch, dataset_hash)
+    run_name = runtime_ops.build_run_name(
+        external_provider, model_version, epochs, batch, dataset_hash, img_size=img_size
+    )
     print(f"[INFO] External run name: {run_name}")
     rc = external_adapter.run_train(
         dataset_path=data,
@@ -270,6 +275,20 @@ def _run_external_provider_flow(
         _ext_mpl = _c if isinstance(_c, dict) else None
     if _ext_mpl is None:
         _ext_mpl = ensure_matplotlib_training_runtime(non_interactive=args.non_interactive).as_dict()
+    external_run_dir, effective = finalize_run_dir_naming(
+        external_run_dir,
+        provider_id=external_provider,
+        model_version=model_version,
+        dataset_hash=dataset_hash,
+        training_start_time=training_start_time,
+        workspace_root=workspace_root,
+    )
+    if effective.get("epochs") is not None:
+        epochs = int(effective["epochs"])
+    if effective.get("batch") is not None:
+        batch = effective["batch"]
+    if effective.get("img_size") is not None:
+        img_size = int(effective["img_size"])
     runtime_ops.save_training_metadata(
         model_dir=external_run_dir,
         dataset_path=data,
@@ -381,6 +400,17 @@ def _run_builtin_train_and_eval_flow(
         except Exception:
             dataset_hash = None
         if not model_dir:
+            model_dir = recover_builtin_run_dir_after_train_error(
+                target_dir=target_dir,
+                dataset_path=data,
+                model_version=model_version,
+                epochs=epochs,
+                batch=batch,
+                img_size=img_size,
+                dataset_hash=dataset_hash,
+                training_start_time=training_start_time,
+            )
+        if not model_dir:
             dataset_name = os.path.basename(os.path.normpath(data))
             folder_name = runtime_ops.build_run_name(
                 "ultralytics",
@@ -388,18 +418,23 @@ def _run_builtin_train_and_eval_flow(
                 epochs,
                 batch,
                 dataset_hash,
+                img_size=img_size,
                 timestamp=training_start_time,
             )
             model_dir = os.path.join(target_dir, dataset_name, folder_name)
             os.makedirs(model_dir, exist_ok=True)
+        training_ok = run_dir_has_train_artifacts(model_dir) if model_dir else False
         meta_extras = {
             "task_type": task_to_metadata_task_type(u_cfg.get("task")),
             "train_kw": {k: v for k, v in u_cfg.items() if k != "data"},
-            "training_ok": False,
+            "training_ok": training_ok,
             "mpl_runtime": ensure_matplotlib_training_runtime(
                 non_interactive=args.non_interactive
             ).as_dict(),
         }
+        if training_ok:
+            training_success = True
+            training_error = None
 
     if training_success and model_dir:
         try:
@@ -435,6 +470,21 @@ def _run_builtin_train_and_eval_flow(
         if _mpl_meta is None and isinstance(inference_info, dict):
             _cand = inference_info.get("matplotlib_runtime")
             _mpl_meta = _cand if isinstance(_cand, dict) else None
+        if run_dir_has_train_artifacts(model_dir):
+            model_dir, effective = finalize_run_dir_naming(
+                model_dir,
+                provider_id="ultralytics",
+                model_version=model_version,
+                dataset_hash=dataset_hash,
+                training_start_time=training_start_time,
+                workspace_root=workspace_root,
+            )
+            if effective.get("epochs") is not None:
+                epochs = int(effective["epochs"])
+            if effective.get("batch") is not None:
+                batch = effective["batch"]
+            if effective.get("img_size") is not None:
+                img_size = int(effective["img_size"])
         runtime_ops.save_training_metadata(
             model_dir=model_dir,
             dataset_path=data,

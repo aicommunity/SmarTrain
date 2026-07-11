@@ -6,7 +6,14 @@ import sys
 from contextlib import contextmanager
 from typing import Iterator
 
-from smartrain.core.runtime.workspace_paths import resolve_workspace_root
+from smartrain.core.runtime.workspace_coordination import (
+    AUTO_SCAN_LOCK_TIMEOUT_SEC,
+    ScanLockBusy,
+    WorkspaceSession,
+    get_active_session,
+    try_resolve_layout_from_argv,
+)
+from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 from smartrain.services.datasets.datasets_json_former import main as scan_main
 
 _LEGACY_FUSION_FLAGS = frozenset(
@@ -89,11 +96,32 @@ def _suppress_scan_stdout() -> Iterator[object]:
         sys.stdout = old_stdout
 
 
-def run_quiet_workspace_scan(*, workspace_root: str) -> bool:
+def run_quiet_workspace_scan(*, workspace_root: str, session: WorkspaceSession | None = None) -> bool:
     """Run workspace scan with minimal logging. Returns True on success."""
+    layout = WorkspaceLayout(workspace_root)
+    active = session or get_active_session()
+    try:
+        if active is not None:
+            active.acquire_lock("scan", blocking=False, timeout_sec=AUTO_SCAN_LOCK_TIMEOUT_SEC)
+            try:
+                return _run_scan_locked(workspace_root)
+            finally:
+                active.release_lock("scan")
+        with WorkspaceSession(layout, ["auto-scan"], register_peer=False, warn_peers=False) as local:
+            local.acquire_lock("scan", blocking=False, timeout_sec=AUTO_SCAN_LOCK_TIMEOUT_SEC)
+            try:
+                return _run_scan_locked(workspace_root)
+            finally:
+                local.release_lock("scan")
+    except ScanLockBusy as exc:
+        print(f"[INFO] Skipping auto-scan: {exc.holder_summary()}", flush=True)
+        return True
+
+
+def _run_scan_locked(workspace_root: str) -> bool:
     print("[INFO] Running dataset scan…", flush=True)
     with _suppress_scan_stdout() as stdout_filter:
-        scan_main(["--workspace", workspace_root])
+        scan_main(["--workspace", workspace_root, "--auto-scan"])
     if stdout_filter.had_error:
         print("[ERROR] Dataset scan failed.", flush=True)
         return False
@@ -108,8 +136,20 @@ def maybe_run_auto_scan(argv: list[str], *, ensure_scan: bool, auto_scan_disable
     workspace_root = try_resolve_workspace_from_argv(argv)
     if workspace_root is None:
         return
-    if not run_quiet_workspace_scan(workspace_root=workspace_root):
-        raise SystemExit(1)
+    session = get_active_session()
+    if session is not None:
+        if not run_quiet_workspace_scan(workspace_root=workspace_root, session=session):
+            raise SystemExit(1)
+        return
+    layout = try_resolve_layout_from_argv(argv)
+    if layout is None:
+        return
+    try:
+        with WorkspaceSession(layout, ["auto-scan"], register_peer=False, warn_peers=False) as local:
+            if not run_quiet_workspace_scan(workspace_root=workspace_root, session=local):
+                raise SystemExit(1)
+    except ScanLockBusy as exc:
+        print(f"[INFO] Skipping auto-scan: {exc.holder_summary()}", flush=True)
 
 
 __all__ = [

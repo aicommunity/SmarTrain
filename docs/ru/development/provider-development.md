@@ -70,7 +70,7 @@
 
 Имя run должно быть path-safe и стабильным:
 
-- `YYYY-MM-DD_HH-MM_<provider>_<model>_<epochs>epochs_b<batch>-<dataset_hash>`
+- `YYYY-MM-DD_HH-MM_<provider>_<model>_<imgsz>px_<epochs>epochs_b<batch>[-<dataset_hash>]`
 
 Токен модели обязательно санитизируется из пути/имени файла, чтобы не создавать вложенные некорректные каталоги.
 

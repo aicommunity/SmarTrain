@@ -243,6 +243,7 @@ def train_yolo(
         epochs,
         batch,
         dataset_hash,
+        img_size=img_size,
         timestamp=training_start_time,
     )
 
@@ -388,6 +389,8 @@ def train_yolo(
             print(f"[INFO] Model saved at path:\n{model_path}")
     except Exception as exc:
         logger.warning("Failed to report training completion for %s: %s", model_dir, exc)
+
+    weights_dest = resolve_run_model(model_dir)
     training_weights_ok = weights_dest is not None and weights_dest.is_file()
 
     meta_extras = {

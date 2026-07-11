@@ -204,6 +204,11 @@ def build_datasets_json_arg_parser() -> argparse.ArgumentParser:
         help="Scan only: for newly added datasets, remove class names with zero label instances "
         "(remaps class ids in annotations). Default: on; use --no-strip-unused-classes to disable.",
     )
+    parser.add_argument(
+        "--auto-scan",
+        action="store_true",
+        help="Internal: quiet preflight scan invoked before other commands.",
+    )
 
     return parser
 
@@ -437,6 +442,39 @@ def _append_explicit_dataset(
     _append_to_datasets_list(os.path.join(layout.raw_data, DEFAULT_DATASETS_LIST_FILE), list_value)
 
 
+def _auto_scan_can_skip(layout: WorkspaceLayout) -> bool:
+    """True when raw_data sources match datasets_info signatures and materialized dirs exist."""
+    info_path = layout.work_datasets_info_path()
+    if not os.path.isdir(layout.raw_data):
+        return True
+    catalog: dict = {}
+    if os.path.isfile(info_path):
+        try:
+            with open(info_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                catalog = loaded
+        except Exception:
+            return False
+    for src_name in os.listdir(layout.raw_data):
+        src_path = os.path.join(layout.raw_data, src_name)
+        if src_name == DEFAULT_DATASETS_LIST_FILE:
+            continue
+        if not (os.path.isdir(src_path) or src_name.lower().endswith(".zip")):
+            continue
+        logical_name = os.path.splitext(src_name)[0] if src_name.lower().endswith(".zip") else src_name
+        sig = _compute_source_signature(src_path)
+        entry = catalog.get(logical_name)
+        if not isinstance(entry, dict):
+            return False
+        if entry.get(SOURCE_SIGNATURE_KEY) != sig:
+            return False
+        dst = os.path.join(layout.datasets, logical_name)
+        if not _dir_has_content(dst):
+            return False
+    return True
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -455,6 +493,8 @@ def main(argv=None):
         layout = WorkspaceLayout(root)
         os.makedirs(layout.raw_data, exist_ok=True)
         os.makedirs(layout.datasets, exist_ok=True)
+        if getattr(args, "auto_scan", False) and _auto_scan_can_skip(layout):
+            return
 
     if use_workspace:
         # The source of truth for the index is the datasets directory (ready-made datasets).
@@ -872,16 +912,20 @@ def main(argv=None):
     cn_added, cn_removed = _sorted_diff(previous_cn_keys, new_cn_keys)
 
     try:
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(datasets_info, f, ensure_ascii=False, indent=4)
-        print(f"[OK] Information saved successfully in {output_file}")
-    except Exception as e:
-        print(f"[ERROR] Failed to write JSON: {e}")
-        return
+        from smartrain.core.runtime.workspace_coordination import catalog_write_lock, get_active_session
+        from smartrain.services.datasets.dataset_cli_common import _write_json_atomic
 
-    try:
-        with open(output_class_names_file, "w", encoding="utf-8") as f:
-            json.dump(class_names, f, ensure_ascii=False, indent=4)
+        session = get_active_session()
+        if use_workspace and layout is not None:
+            with catalog_write_lock(layout, session=session):
+                _write_json_atomic(output_file, datasets_info)
+                _write_json_atomic(output_class_names_file, class_names)
+        else:
+            with open(output_file, "w", encoding="utf-8") as f:
+                json.dump(datasets_info, f, ensure_ascii=False, indent=4)
+            with open(output_class_names_file, "w", encoding="utf-8") as f:
+                json.dump(class_names, f, ensure_ascii=False, indent=4)
+        print(f"[OK] Information saved successfully in {output_file}")
         print(f"[OK] Information saved successfully in {output_class_names_file}")
     except Exception as e:
         print(f"[ERROR] Failed to write JSON: {e}")

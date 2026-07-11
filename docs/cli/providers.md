@@ -51,7 +51,7 @@ When `--external-provider` is set and explicit values are not passed:
 - default model comes from provider catalog;
 - default runtime launcher values are used (`epochs=70`, `batch=8`, `img_size=640`);
 - run folder naming is normalized and sanitized:
-  - `YYYY-MM-DD_HH-MM_<provider>_<model>_<epochs>epochs_b<batch>-<dataset_hash>`
+  - `YYYY-MM-DD_HH-MM_<provider>_<model>_<imgsz>px_<epochs>epochs_b<batch>[-<dataset_hash>]`
 
 ## Artifact contract for external runs
 
