@@ -31,6 +31,7 @@ def finalize_all_session(
     metric_sources_payload: dict[str, Any] | None,
     recompute_missing_metrics: bool,
     build_abbreviations_for_report_cb: Callable[[list[str]], dict[str, str]],
+    build_report_manifest_labels_cb: Callable[[str, list[str]], dict[str, Any]] | None = None,
     collect_ultralytics_test_artifacts_cb: Callable[..., tuple[list[dict[str, Any]], list[dict[str, str]]]],
     write_format_compare_artifacts_cb: Callable[[str, list[str]], dict[str, Any] | None],
     collect_confidence_recommendation_tables_cb: Callable[[list[str], str], dict[str, str]],
@@ -39,7 +40,13 @@ def finalize_all_session(
     record_failure_cb: Callable[..., None],
     replay_parser: argparse.ArgumentParser | None = None,
 ) -> None:
-    abbreviations = build_abbreviations_for_report_cb([baseline] + others)
+    if build_report_manifest_labels_cb is not None:
+        label_ctx = build_report_manifest_labels_cb(baseline, others)
+        abbreviations = label_ctx.get("abbreviations") or {}
+        run_legend = label_ctx.get("run_legend") or []
+    else:
+        abbreviations = build_abbreviations_for_report_cb([baseline] + others)
+        run_legend = []
     ensure_ultralytics_test_for_runs(
         [baseline] + others,
         args=args,
@@ -129,6 +136,7 @@ def finalize_all_session(
             "conclusion",
         ],
         "abbreviations": abbreviations,
+        "run_legend": run_legend,
         "run_data_yaml_map": run_data_yaml_map,
         "runs_with_unresolved_data_yaml": unresolved_data_yaml_runs,
     }

@@ -1,5 +1,38 @@
 <!-- BLOCK: EXECUTIVE_SUMMARY -->
-This report captures the comparison of selected runs across quality and performance metrics. The objective is to provide a reproducible basis for model selection and deployment trade-offs.
+The executive summary provides a table of main test metrics per run, confidence recommendations (A/B/C), and paired Ultralytics test figures (PR curve and confusion matrix) for visual comparison. Detailed analysis follows in later sections.
+
+<!-- BLOCK: NARR_PREAMBLE_EXEC_METRICS -->
+Main test metrics for each selected run for direct side-by-side comparison.
+
+<!-- BLOCK: NARR_PREAMBLE_EXEC_CONFIDENCE -->
+Recommended confidence thresholds for objectives A, B, and C per run.
+
+<!-- BLOCK: SUB_EXEC_ULTRA_PAIRS -->
+For each run: PR curve and normalized confusion matrix from Ultralytics test (one caption per pair).
+
+<!-- BLOCK: SUB_ULTRA_APPENDIX -->
+Additional Ultralytics test illustrations (PR/F1/P/R curves, etc.) excluded from the main body in compact mode to reduce visual noise.
+
+<!-- BLOCK: NARR_PREAMBLE_LEADERBOARD -->
+Summary ranking of runs by composite score combining quality and speed metrics.
+
+<!-- BLOCK: NARR_PREAMBLE_COMPARE_DELTA -->
+Shows metric deltas for each candidate relative to the baseline run.
+
+<!-- BLOCK: NARR_PREAMBLE_RUNS_SUMMARY -->
+Run parameters and aggregated test metrics for selected training runs.
+
+<!-- BLOCK: NARR_PREAMBLE_FORMAT_METRICS -->
+Compares quality metrics across export formats (pt/onnx/engine) on aligned splits.
+
+<!-- BLOCK: NARR_PREAMBLE_SPEED_QUALITY -->
+Summary of run positions on the speed–quality axes; use together with the scatter figure.
+
+<!-- BLOCK: SUB_ULTRA_SECTION -->
+Figure captions below list runs (one model per line) with split and eval parameters. In compact mode the main body is shortened; see the appendix for the full illustration set.
+
+<!-- BLOCK: NARR_FIG_ULTRA -->
+Ultralytics test illustration for the run named in the caption (split and params included).
 
 <!-- BLOCK: INTRO -->
 The analysis is built on a consistent artifact and metric set. The report is organized into engineering-focused blocks: overall quality, computational cost, per-class stability, and implementation-level recommendations.

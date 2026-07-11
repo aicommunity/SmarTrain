@@ -66,3 +66,36 @@ def test_analyze_all_replay_includes_baseline_others_and_recompute_choice() -> N
     tok = [t for t in tok if t not in TYPER_META_NON_INTERACTIVE_FLAGS]
     ns2 = root.parse_args(tok[tok.index("all") :])
     assert ns2.others == ns.others
+
+
+def test_analyze_all_replay_nit_stripped_before_argparse() -> None:
+    """Typer analyze forwarding must drop replay suffix ``--nit`` before argparse."""
+    root = build_analyze_arg_parser()
+    p_all = _p_all_subparser(root)
+    ns = root.parse_args(
+        [
+            "all",
+            "--baseline",
+            "/workspace/runs/ds/2026-01-01",
+            "--others",
+            "/workspace/runs/ds/2026-01-02",
+            "--profile",
+            "full",
+        ]
+    )
+    cmd = build_non_interactive_command("analyze all", p_all, ns)
+    tok = shlex.split(cmd)
+    assert tok[-1] == "--nit"
+
+    # Simulate ``_forward_analyze_command``: prepend subcommand, strip Typer meta flags.
+    from smartrain.cli_entrypoints.support.typer_non_interactive import strip_typer_meta_non_interactive_flags
+
+    ctx_args = tok[tok.index("all") + 1 :]
+    filtered, stripped = strip_typer_meta_non_interactive_flags(ctx_args)
+    assert stripped is True
+    assert "--nit" not in filtered
+
+    ns2 = root.parse_args(["all", *filtered])
+    assert ns2.baseline == ns.baseline
+    assert ns2.others == ns.others
+    assert ns2.profile == ns.profile

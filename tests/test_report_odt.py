@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from smartrain.services.analyze import report_odt
@@ -29,3 +30,111 @@ def test_postprocess_odt_layout_updates_styles(tmp_path: Path) -> None:
         zf.writestr("mimetype", "application/vnd.oasis.opendocument.text")
 
     assert report_odt._postprocess_odt_layout(str(odt)) is True
+
+
+def test_split_merged_figure_paragraphs() -> None:
+    ns = {
+        "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+        "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+        "draw": "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0",
+    }
+    for pfx, uri in ns.items():
+        ET.register_namespace(pfx, uri)
+    content = f"""<?xml version='1.0' encoding='UTF-8'?>
+<office:document-content xmlns:office="{ns['office']}"
+ xmlns:text="{ns['text']}"
+ xmlns:draw="{ns['draw']}">
+<office:body><office:text>
+<text:p text:style-name="SmarTrainCenter">
+<draw:frame draw:name="img1"><draw:image /></draw:frame>
+M1 · yolo11m · D1 — базовый M2 · yolo11m · D2 M3 · yolo11m · D3 Рисунок 1. Caption text
+</text:p>
+</office:text></office:body>
+</office:document-content>"""
+    root = ET.fromstring(content)
+    text_root = root.find("office:body/office:text", ns)
+    assert text_root is not None
+    assert report_odt._split_merged_figure_paragraphs(
+        text_root,
+        ns,
+        center_style_name="SmarTrainCenter",
+        caption_style_name="SmarTrainCaption",
+    )
+    paragraphs = text_root.findall("text:p", ns)
+    assert len(paragraphs) == 5
+    assert paragraphs[0].find("draw:frame", ns) is not None
+    assert (paragraphs[1].text or "").startswith("M1 ·")
+    assert (paragraphs[2].text or "").startswith("M2 ·")
+    assert (paragraphs[3].text or "").startswith("M3 ·")
+    assert (paragraphs[4].text or "").startswith("Рисунок 1.")
+    assert paragraphs[4].attrib.get(f"{{{ns['text']}}}style-name") == "SmarTrainCaption"
+
+
+def test_split_merged_table_footer_paragraphs() -> None:
+    ns = {
+        "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+        "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+    }
+    for pfx, uri in ns.items():
+        ET.register_namespace(pfx, uri)
+    content = f"""<?xml version='1.0' encoding='UTF-8'?>
+<office:document-content xmlns:office="{ns['office']}"
+ xmlns:text="{ns['text']}">
+<office:body><office:text>
+<text:p text:style-name="SmarTrainCenter">
+Источник данных: artifacts/compare/compare_delta.csv - Наибольший выигрыш по mAP50-95: M3 (+0.12). - Лидер по composite_score: M2 (1.05).
+</text:p>
+</office:text></office:body>
+</office:document-content>"""
+    root = ET.fromstring(content)
+    text_root = root.find("office:body/office:text", ns)
+    assert text_root is not None
+    assert report_odt._split_merged_table_footer_paragraphs(
+        text_root,
+        ns,
+        body_style_name="SmarTrainBody",
+    )
+    paragraphs = text_root.findall("text:p", ns)
+    assert len(paragraphs) == 3
+    assert "Источник данных:" in (paragraphs[0].text or "")
+    assert (paragraphs[1].text or "").startswith("Наибольший выигрыш")
+    assert (paragraphs[2].text or "").startswith("Лидер по")
+
+
+def test_table_preamble_and_title_detection() -> None:
+    assert report_odt._is_table_title_paragraph("Таблица 9. Профиль запуска (train)")
+    assert report_odt._is_table_preamble_paragraph("Сводка параметров обучения и агрегированных test-метрик")
+    assert not report_odt._is_table_title_paragraph("Показывает изменение ключевых метрик")
+    assert report_odt._is_table_takeaway_paragraph("test mAP50-95: лучший запуск M3 (0.9044), худший M2 (0.8983).")
+
+
+def test_split_merged_takeaway_paragraphs() -> None:
+    ns = {
+        "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+        "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+    }
+    for pfx, uri in ns.items():
+        ET.register_namespace(pfx, uri)
+    raw = (
+        "test mAP50-95: лучший запуск M1 (0.9044), худший M2 (0.8983). "
+        "test mAP50: лучший запуск M1 (0.9950), худший M3 (0.9918)."
+    )
+    content = f"""<?xml version='1.0' encoding='UTF-8'?>
+<office:document-content xmlns:office="{ns['office']}"
+ xmlns:text="{ns['text']}">
+<office:body><office:text>
+<text:p text:style-name="SmarTrainBody">{raw}</text:p>
+</office:text></office:body>
+</office:document-content>"""
+    root = ET.fromstring(content)
+    text_root = root.find("office:body/office:text", ns)
+    assert text_root is not None
+    assert report_odt._split_merged_takeaway_paragraphs(
+        text_root,
+        ns,
+        body_style_name="SmarTrainBody",
+    )
+    paragraphs = text_root.findall("text:p", ns)
+    assert len(paragraphs) == 2
+    assert (paragraphs[0].text or "").startswith("test mAP50-95")
+    assert (paragraphs[1].text or "").startswith("test mAP50")

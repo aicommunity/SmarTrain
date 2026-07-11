@@ -57,7 +57,7 @@ def test_build_run_display_labels_format(tmp_path: Path) -> None:
     _write_training_metadata(run_a)
     yaml.safe_dump({"model": "yolo11n.pt"}, (train_a / "args.yaml").open("w", encoding="utf-8"))
 
-    run_b = tmp_path / "2026-07-04_10-34_ultralytics_yolov8n_400epochs_b16-c78211ca"
+    run_b = tmp_path / "2026-07-04_10-34_ultralytics_yolov8n_640px_400epochs_b16-c78211ca"
     train_b = run_b / "train-ultralytics"
     train_b.mkdir(parents=True)
     _write_training_metadata(run_b)
@@ -77,12 +77,12 @@ def test_write_speed_quality_includes_promoted_run_with_tests_recomputed(tmp_pat
         tests / "test_metrics_recomputed.csv", index=False
     )
 
-    run_b = tmp_path / "runs" / "2026-07-04_10-34_ultralytics_yolov8n_400epochs_b16-c78211ca"
+    run_b = tmp_path / "runs" / "2026-07-04_10-34_ultralytics_yolov8n_640px_400epochs_b16-c78211ca"
     run_b.mkdir(parents=True)
     _write_training_metadata(run_b)
     pd.DataFrame([{"Class": "all", "mAP50-95": 0.8}]).to_csv(run_b / "test_metrics.csv", index=False)
 
-    run_c = tmp_path / "runs" / "2026-07-04_18-41_ultralytics_yolo11s_400epochs_b16-d3bc56f2"
+    run_c = tmp_path / "runs" / "2026-07-04_18-41_ultralytics_yolo11s_640px_400epochs_b16-d3bc56f2"
     run_c.mkdir(parents=True)
     _write_training_metadata(run_c)
     pd.DataFrame([{"Class": "all", "mAP50-95": 0.78}]).to_csv(run_c / "test_metrics.csv", index=False)

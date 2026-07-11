@@ -51,7 +51,7 @@ smartrain inference --weights dr-yolo:yolov8n --data-mode folder --source-dir im
 - модель по умолчанию берётся из каталога провайдера;
 - применяются launcher-дефолты (`epochs=70`, `batch=8`, `img_size=640`);
 - имя run-папки нормализуется и санитизируется:
-  - `YYYY-MM-DD_HH-MM_<provider>_<model>_<epochs>epochs_b<batch>-<dataset_hash>`
+  - `YYYY-MM-DD_HH-MM_<provider>_<model>_<imgsz>px_<epochs>epochs_b<batch>[-<dataset_hash>]`
 
 ## Контракт артефактов внешнего запуска
 

@@ -1,43 +1,65 @@
-"""Report markdown section builders."""
+"""Report figure captions and narrative helpers."""
 
 from __future__ import annotations
 
 import os
 import re
-from datetime import datetime
 from typing import Any, Callable
 
-import numpy as np
 import pandas as pd
 
 from smartrain.services.analyze.report_markdown_formatting import (
     MAX_NARRATIVE_BULLETS,
-    _abbrev_df,
-    _build_test_metrics_summary,
-    _center_close,
-    _center_open,
+    _abbrev_value,
     _column_display_name,
-    _filter_generic_table_for_selection,
-    _filter_runs_summary_for_selection,
     _justify_block,
-    _md_table_from_df,
-    _os_display_train_profile_row,
     _pr_summary_takeaways,
-    _read_template,
-    _row_label_from_df,
-    _select_table_columns,
-    _should_hide_system_profile_table,
     _speed_quality_takeaways,
-    _subsection_intro_lines,
-    _table_preamble_lines,
-    _table_takeaway_lines,
 )
 from smartrain.core.runtime.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
-from smartrain.services.analyze.report_sections.report_tables import _table_title
+
+_ULTRALYTICS_DIAG_BASENAMES = frozenset(
+    {
+        "boxpr_curve.png",
+        "pr_curve.png",
+        "boxf1_curve.png",
+        "f1_curve.png",
+        "boxp_curve.png",
+        "p_curve.png",
+        "boxr_curve.png",
+        "r_curve.png",
+    }
+)
+
+_ULTRALYTICS_COMPACT_BASENAMES = frozenset(
+    {
+        "confusion_matrix_normalized.png",
+        "val_batch0_pred.jpg",
+    }
+)
+
+_COMPARE_CURVE_METRICS = ("mAP50-95", "mAP50", "Box-F1", "Box-P", "Box-R")
+
+
+def ultralytics_report_mode(manifest: dict[str, Any]) -> str:
+    explicit = str(manifest.get("ultralytics_report_mode") or "").strip().lower()
+    if explicit in {"compact", "full"}:
+        return explicit
+    single = bool(manifest.get("single_run_mode")) or not (manifest.get("others") or [])
+    return "full" if single else "compact"
+
+
+def is_ultralytics_compact_main_image(rel: str) -> bool:
+    return os.path.basename(rel.replace("\\", "/")).lower() in _ULTRALYTICS_COMPACT_BASENAMES
+
+
+def is_ultralytics_diagnostic_image(rel: str) -> bool:
+    return os.path.basename(rel.replace("\\", "/")).lower() in _ULTRALYTICS_DIAG_BASENAMES
+
 
 def _figure_narrative_key(rel: str) -> str:
     low = rel.replace("\\", "/").lower()
@@ -49,15 +71,205 @@ def _figure_narrative_key(rel: str) -> str:
         return "NARR_FIG_SPEED_MAP"
     if "pr_" in low or "pr_all" in low or "per_class" in low:
         return "NARR_FIG_PR"
+    if "ultralytics-test/" in low:
+        return "NARR_FIG_ULTRA"
     return "NARR_FIG_DEFAULT"
 
 
 def _figure_preamble_lines(rel: str, is_ru: bool, tpl: dict[str, str]) -> list[str]:
+    if "ultralytics-test/" in rel.replace("\\", "/").lower():
+        return []
     key = _figure_narrative_key(rel)
     t = str(tpl.get(key) or tpl.get("NARR_FIG_DEFAULT") or "").strip()
     if not t:
         return []
     return _justify_block(t)
+
+
+def _ultra_item_for_rel(manifest: dict[str, Any], rel: str) -> dict[str, Any] | None:
+    norm = rel.replace("\\", "/").lower()
+    m = re.search(r"ultralytics-test/([^/]+)/", norm)
+    if not m:
+        return None
+    run_code = m.group(1).lower()
+    rows = manifest.get("ultralytics_test") or []
+    if not isinstance(rows, list):
+        return None
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("run_code") or item.get("run_name") or "").lower()
+        if code == run_code or run_code.startswith(code) or code.startswith(run_code):
+            return item
+    return None
+
+
+def _ultralytics_split_hint(item: dict[str, Any]) -> str:
+    comp_raw = item.get("completeness")
+    if isinstance(comp_raw, dict):
+        split_hint = str(comp_raw.get("primary_split") or comp_raw.get("split") or "").strip()
+        if split_hint:
+            return split_hint.lower()
+    comp = str(comp_raw or "").strip().lower()
+    if comp == "complete":
+        return "test"
+    if comp == "train_val_fallback":
+        return "val"
+    sources = item.get("artifact_sources") or {}
+    if isinstance(sources, dict) and sources:
+        provs = {str(v).strip().lower() for v in sources.values()}
+        if provs & {"test", "legacy"} and "train_val_fallback" not in provs:
+            return "test"
+        if "train_val_fallback" in provs:
+            return "val"
+    note = str(item.get("completeness_note") or "").lower()
+    if "not test-split" in note or "train-ultralytics" in note or "train-val" in note or "validation during training" in note:
+        return "val"
+    if "test-split" in note:
+        return "test"
+    return ""
+
+
+def _run_legend_rows_from_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = manifest.get("run_legend") or []
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)]
+
+
+def _legend_line_for_row(row: dict[str, Any], *, is_ru: bool, split: str = "") -> str:
+    label = str(row.get("short_label") or row.get("enriched_label") or "").strip()
+    if not label:
+        idx = row.get("index")
+        label = f"M{idx}" if idx is not None else "?"
+    extras: list[str] = []
+    if split:
+        extras.append(f"split: {split}")
+    role = str(row.get("role") or "").strip()
+    if role == "baseline":
+        extras.append("базовый" if is_ru else "baseline")
+    if extras:
+        return f"{label} — {', '.join(extras)}"
+    return label
+
+
+def _match_legend_row(manifest: dict[str, Any], *, run_name: str = "", run_code: str = "") -> dict[str, Any] | None:
+    for row in _run_legend_rows_from_manifest(manifest):
+        rn = str(row.get("run_name") or "")
+        rd = os.path.basename(str(row.get("run_dir") or "").rstrip("/"))
+        sl = str(row.get("short_label") or "")
+        if run_name and run_name in {rn, rd}:
+            return row
+        if run_code and run_code in {sl, rn, rd}:
+            return row
+        if run_code and run_code.replace("_", " ") in sl:
+            return row
+    return None
+
+
+def _build_ultra_legend_line(item: dict[str, Any], manifest: dict[str, Any], abbreviations: dict[str, str], is_ru: bool) -> str:
+    run_name = str(item.get("run_name") or "")
+    run_code = str(item.get("run_code") or "")
+    row = _match_legend_row(manifest, run_name=run_name, run_code=run_code)
+    split = _ultralytics_split_hint(item)
+    if row:
+        return _legend_line_for_row(row, is_ru=is_ru, split=split)
+    run_info = item.get("run_info") if isinstance(item.get("run_info"), dict) else {}
+    label = _abbrev_value(run_code, abbreviations) if run_code else run_name
+    parts = [label or "?"]
+    model = str(run_info.get("model") or "").strip()
+    dataset = str(run_info.get("dataset_name") or "").strip()
+    if model and model.lower() not in label.lower():
+        parts.append(model)
+    if dataset:
+        parts.append(_abbrev_value(dataset, abbreviations))
+    epochs = run_info.get("epochs")
+    batch = run_info.get("batch_size")
+    val_img = run_info.get("val_imgsz") or run_info.get("train_image_size")
+    cfg: list[str] = []
+    if epochs is not None:
+        cfg.append(f"epochs={epochs}")
+    if batch is not None:
+        cfg.append(f"batch={batch}")
+    if val_img is not None:
+        cfg.append(f"imgsz={val_img}")
+    line = " · ".join(parts)
+    if cfg:
+        line = f"{line} — {', '.join(cfg)}"
+    if split:
+        line = f"{line} — split: {split}"
+    return line
+
+
+def _figure_legend_lines(
+    rel: str,
+    manifest: dict[str, Any],
+    abbreviations: dict[str, str],
+    is_ru: bool,
+) -> list[str]:
+    norm = rel.replace("\\", "/")
+    low = norm.lower()
+    lines: list[str] = []
+
+    if "ultralytics-test/" in low:
+        item = _ultra_item_for_rel(manifest, rel)
+        if item:
+            lines.append(_build_ultra_legend_line(item, manifest, abbreviations, is_ru))
+        return lines
+
+    legend_rows = _run_legend_rows_from_manifest(manifest)
+    if not legend_rows:
+        return lines
+
+    if "compare_curves" in low or "benchmark" in low or "speed_vs_map" in low or "pr_all_classes" in low or (
+        "pr/" in low and "per_class" in low
+    ) or "pr_class_" in low:
+        baseline_name = os.path.basename(str(manifest.get("baseline", "")).rstrip("/"))
+        ordered: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in legend_rows:
+            rn = str(row.get("run_name") or "")
+            if rn == baseline_name or os.path.basename(str(row.get("run_dir") or "").rstrip("/")) == baseline_name:
+                ordered.append(row)
+                seen.add(rn)
+                break
+        for row in legend_rows:
+            rn = str(row.get("run_name") or "")
+            if rn not in seen:
+                ordered.append(row)
+                seen.add(rn)
+        for row in ordered or legend_rows:
+            lines.append(_legend_line_for_row(row, is_ru=is_ru))
+        return lines
+
+    return lines
+
+
+def _figure_description_extra(rel: str, manifest: dict[str, Any], abbreviations: dict[str, str], is_ru: bool) -> str:
+    low = rel.replace("\\", "/").lower()
+    parts: list[str] = []
+
+    if "compare_curves" in low:
+        parts.append(", ".join(_COMPARE_CURVE_METRICS))
+
+    if "speed_vs_map" in low:
+        sq = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
+        x_name = _column_display_name(str(sq.get("scatter_x") or "avg_inference_ms_per_frame"), is_ru)
+        y_name = _column_display_name(str(sq.get("scatter_y") or "mAP50-95"), is_ru)
+        parts.append(f"{x_name} vs {y_name}")
+
+    if "benchmark" in low and low.endswith(".png"):
+        parts.append("PT CPU benchmark")
+
+    if "pr_class_" in low:
+        m = re.search(r"pr_class_\d+_(.+)\.png$", os.path.basename(rel), flags=re.IGNORECASE)
+        if m:
+            cls = m.group(1).replace("_", " ")
+            parts.append(f"{'класс' if is_ru else 'class'}: {cls}")
+
+    if not parts:
+        return ""
+    return f" ({'; '.join(parts)})"
 
 
 def _figure_takeaway_lines(
@@ -67,9 +279,15 @@ def _figure_takeaway_lines(
     manifest: dict[str, Any],
     report_root: str,
     tpl: dict[str, str],
+    abbreviations: dict[str, str] | None = None,
 ) -> list[str]:
+    abbreviations = abbreviations or {}
+    if isinstance(manifest.get("abbreviations"), dict):
+        abbreviations = {**manifest["abbreviations"], **abbreviations}
     lines: list[str] = []
     low = rel.replace("\\", "/").lower()
+    if "ultralytics-test/" in low and is_ultralytics_diagnostic_image(rel):
+        return lines
     rr = str(report_root or "")
     if "speed_vs_map" in low and rr:
         sq = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
@@ -79,7 +297,15 @@ def _figure_takeaway_lines(
             if os.path.isfile(p):
                 try:
                     df = pd.read_csv(p)
-                    lines.extend(_speed_quality_takeaways(df, is_ru))
+                    lines.extend(
+                        _speed_quality_takeaways(
+                            df,
+                            is_ru,
+                            abbreviations,
+                            scatter_x_metric=str(sq.get("scatter_x") or "avg_inference_ms_per_frame"),
+                            scatter_y_metric=str(sq.get("scatter_y") or "mAP50-95"),
+                        )
+                    )
                 except Exception as exc:
                     logger.debug("Figure takeaway skipped for %s: %s", rel, exc)
     if "benchmark" in low and rr:
@@ -95,11 +321,15 @@ def _figure_takeaway_lines(
                             s = pd.to_numeric(pdf[col], errors="coerce")
                             if s.notna().sum() > 0:
                                 i = s.idxmax()
-                                lab = _row_label_from_df(pdf, i)
+                                lab = _abbrev_value(pdf.loc[i].get("run_name", pdf.loc[i].get("model", i)), abbreviations)
                                 if is_ru:
-                                    lines.append(f"- Максимум **{_column_display_name(col, is_ru)}**: **{lab}** ({float(s.max()):.4g}).")
+                                    lines.append(
+                                        f"- Максимум **{_column_display_name(col, is_ru)}**: **{lab}** ({float(s.max()):.4g})."
+                                    )
                                 else:
-                                    lines.append(f"- Max **{_column_display_name(col, is_ru)}**: **{lab}** ({float(s.max()):.4g}).")
+                                    lines.append(
+                                        f"- Max **{_column_display_name(col, is_ru)}**: **{lab}** ({float(s.max()):.4g})."
+                                    )
                                 break
                 except Exception as exc:
                     logger.debug("Figure takeaway skipped for %s: %s", rel, exc)
@@ -121,14 +351,13 @@ def _figure_takeaway_lines(
             if os.path.isfile(p):
                 try:
                     pdf = pd.read_csv(p)
-                    lines.extend(_pr_summary_takeaways(pdf, is_ru))
+                    lines.extend(_pr_summary_takeaways(pdf, is_ru, abbreviations))
                 except Exception as exc:
                     logger.debug("Figure takeaway skipped for %s: %s", rel, exc)
     if not lines:
-        t = str(tpl.get("NARR_TAKEAWAY_NO_DATA") or "").strip()
-        if t:
-            lines.append(f"- {t}")
+        return []
     return lines[:MAX_NARRATIVE_BULLETS]
+
 
 def _figure_title(rel: str, is_ru: bool) -> str:
     low = rel.lower()
@@ -173,18 +402,165 @@ def _figure_title(rel: str, is_ru: bool) -> str:
         return f"Пример разметки (batch {n})" if is_ru else f"Label sample (batch {n})"
     return "Иллюстрация результатов" if is_ru else "Result illustration"
 
-def _figure_caption(rel: str, figure_no: int, abbreviations: dict[str, str], manifest: dict[str, Any], is_ru: bool) -> str:
+
+def _figure_caption_lines(
+    rel: str,
+    figure_no: int,
+    abbreviations: dict[str, str],
+    manifest: dict[str, Any],
+    is_ru: bool,
+) -> list[str]:
+    """Legend lines (one run per line), then italic figure number + description."""
+    legend = _figure_legend_lines(rel, manifest, abbreviations, is_ru)
     base = _figure_title(rel, is_ru)
-    if "compare_curves" in rel:
-        baseline = os.path.basename(str(manifest.get("baseline", "")).rstrip("/"))
-        others = [os.path.basename(str(x).rstrip("/")) for x in (manifest.get("others") or [])]
-        b = abbreviations.get(baseline, baseline)
-        o = ",".join(abbreviations.get(x, x) for x in others)
-        suffix = f" ({'базовый' if is_ru else 'baseline'}: {b}; {'сравнение' if is_ru else 'others'}: {o})" if o else ""
-    else:
-        suffix = ""
+    extra = _figure_description_extra(rel, manifest, abbreviations, is_ru)
     title = "Рисунок" if is_ru else "Figure"
-    return f"{title} {figure_no}. {base}{suffix}"
+    caption = f"*{title} {figure_no}. {base}{extra}*"
+    return [*legend, caption]
+
+
+def _figure_caption(rel: str, figure_no: int, abbreviations: dict[str, str], manifest: dict[str, Any], is_ru: bool) -> str:
+    return "\n".join(_figure_caption_lines(rel, figure_no, abbreviations, manifest, is_ru))
+
+
+def append_figure_caption_lines(
+    lines: list[str],
+    rel: str,
+    figure_no: int,
+    abbreviations: dict[str, str],
+    manifest: dict[str, Any],
+    is_ru: bool,
+) -> None:
+    cap_lines = _figure_caption_lines(rel, figure_no, abbreviations, manifest, is_ru)
+    if not cap_lines:
+        return
+    if lines and lines[-1].strip():
+        lines.append("")
+    for idx, cap_line in enumerate(cap_lines):
+        if idx > 0:
+            lines.append("")
+        lines.append(cap_line)
+
+
+_ULTRA_PR_IMAGE_CANDIDATES = ("BoxPR_curve.png", "PR_curve.png")
+_ULTRA_CM_IMAGE_CANDIDATES = ("confusion_matrix_normalized.png", "confusion_matrix.png")
+
+
+def _pick_ultra_image_rel(images: list[str], candidates: tuple[str, ...]) -> str | None:
+    for name in candidates:
+        for rel in images:
+            if os.path.basename(str(rel)) == name:
+                return str(rel)
+    return None
+
+
+def _markdown_figure_pair_row(left_rel: str, right_rel: str, *, left_alt: str, right_alt: str) -> list[str]:
+    cell_l = f"![{left_alt}](../{left_rel}){{ width=95% }}"
+    cell_r = f"![{right_alt}](../{right_rel}){{ width=95% }}"
+    return ["", "|  |  |", "|:---:|:---:|", f"| {cell_l} | {cell_r} |", ""]
+
+
+def append_exec_ultra_pair_caption_lines(
+    lines: list[str],
+    *,
+    figure_no: int,
+    run_label: str,
+    item: dict[str, Any],
+    is_ru: bool,
+) -> None:
+    run_info = item.get("run_info") if isinstance(item.get("run_info"), dict) else {}
+    model = str(run_info.get("model") or "").strip()
+    dataset = str(run_info.get("dataset_name") or "").strip()
+    split = "test"
+    sources = item.get("artifact_sources") if isinstance(item.get("artifact_sources"), dict) else {}
+    pr_src = str(sources.get("BoxPR_curve.png") or sources.get("PR_curve.png") or "")
+    cm_src = str(sources.get("confusion_matrix_normalized.png") or sources.get("confusion_matrix.png") or "")
+    prov = {"test": "test-split", "train_val_fallback": "train-val", "legacy": "legacy"}
+    prov_txt = ", ".join(
+        x
+        for x in (
+            f"PR←{prov.get(pr_src, pr_src)}" if pr_src else "",
+            f"CM←{prov.get(cm_src, cm_src)}" if cm_src else "",
+        )
+        if x
+    )
+    title = "Рисунок" if is_ru else "Figure"
+    base = (
+        f"PR-кривая и матрица ошибок — **{run_label}**"
+        if is_ru
+        else f"PR curve and confusion matrix — **{run_label}**"
+    )
+    extra_bits = []
+    if model:
+        extra_bits.append(f"model={model}")
+    if dataset:
+        extra_bits.append(f"dataset={dataset}")
+    extra_bits.append(f"split={split}")
+    if prov_txt:
+        extra_bits.append(prov_txt)
+    extra = f" ({'; '.join(extra_bits)})" if extra_bits else ""
+    if lines and lines[-1].strip():
+        lines.append("")
+    lines.append(f"*{title} {figure_no}. {base}{extra}*")
+    lines.append("")
+
+
+def render_executive_ultralytics_figure_pairs(
+    manifest: dict[str, Any],
+    *,
+    report_root: str,
+    is_ru: bool,
+    abbreviations: dict[str, str],
+    figure_no: int,
+    tpl: dict[str, str],
+    abbrev_label_fn: Callable[[Any, dict[str, str]], str],
+) -> tuple[list[str], int, set[str]]:
+    from smartrain.services.analyze.report_markdown_formatting import _center_close, _center_open, _subsection_intro_lines
+
+    lines: list[str] = []
+    emitted: set[str] = set()
+    ultra_rows = manifest.get("ultralytics_test") if isinstance(manifest.get("ultralytics_test"), list) else []
+    if not ultra_rows:
+        return lines, figure_no, emitted
+    pair_intro = _subsection_intro_lines(tpl, "SUB_EXEC_ULTRA_PAIRS") if tpl.get("SUB_EXEC_ULTRA_PAIRS") else []
+    if pair_intro:
+        lines.append("### " + ("Ultralytics test: PR и матрица ошибок" if is_ru else "Ultralytics test: PR and confusion matrix"))
+        lines.append("")
+        lines.extend(pair_intro)
+    for item in ultra_rows:
+        if not isinstance(item, dict):
+            continue
+        images = [str(x) for x in (item.get("images") or []) if str(x).strip()]
+        pr_rel = _pick_ultra_image_rel(images, _ULTRA_PR_IMAGE_CANDIDATES)
+        cm_rel = _pick_ultra_image_rel(images, _ULTRA_CM_IMAGE_CANDIDATES)
+        if not pr_rel or not cm_rel:
+            continue
+        if report_root and (
+            not os.path.isfile(os.path.join(report_root, pr_rel))
+            or not os.path.isfile(os.path.join(report_root, cm_rel))
+        ):
+            continue
+        run_name = str(item.get("run_name") or item.get("run_code") or "")
+        run_label = abbrev_label_fn(run_name, abbreviations)
+        pr_alt = "PR"
+        cm_alt = "CM"
+        lines.extend(_center_open())
+        lines.extend(_markdown_figure_pair_row(pr_rel, cm_rel, left_alt=pr_alt, right_alt=cm_alt))
+        append_exec_ultra_pair_caption_lines(
+            lines,
+            figure_no=figure_no,
+            run_label=run_label,
+            item=item,
+            is_ru=is_ru,
+        )
+        lines.extend(_center_close())
+        figure_no += 1
+        emitted.add(pr_rel)
+        emitted.add(cm_rel)
+    if emitted:
+        lines.append("")
+    return lines, figure_no, emitted
+
 
 def _discover_missing_pr_images(report_root: str, manifest_images: list[str]) -> list[str]:
     discovered: list[str] = []
