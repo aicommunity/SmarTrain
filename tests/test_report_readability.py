@@ -113,6 +113,34 @@ def test_figure_caption_multi_run_legend_lines() -> None:
     assert "mAP50-95" in lines[2]
 
 
+def test_append_figure_caption_lines_inserts_blank_lines() -> None:
+    from smartrain.services.analyze.report_sections.report_figures import append_figure_caption_lines
+
+    manifest = {
+        "baseline": "/runs/run_a",
+        "others": ["/runs/run_b"],
+        "run_legend": [
+            {"index": 1, "short_label": "M1 yolo11n", "run_name": "run_a", "role": "baseline"},
+            {"index": 2, "short_label": "M2 yolov8n", "run_name": "run_b", "role": "candidate"},
+        ],
+    }
+    lines = ["![](../artifacts/compare/compare_curves.png){ width=95% }"]
+    append_figure_caption_lines(
+        lines,
+        "artifacts/compare/compare_curves.png",
+        1,
+        {"run_a": "M1 yolo11n", "run_b": "M2 yolov8n"},
+        manifest,
+        True,
+    )
+    assert lines[1] == ""
+    assert lines[2].startswith("M1 yolo11n")
+    assert lines[3] == ""
+    assert lines[4].startswith("M2 yolov8n")
+    assert lines[5] == ""
+    assert lines[6].startswith("*Рисунок 1.")
+
+
 def test_executive_summary_is_first_section(tmp_path: Path) -> None:
     from smartrain.services.analyze.report_writer import write_analysis_report
 

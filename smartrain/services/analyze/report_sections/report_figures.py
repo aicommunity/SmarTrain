@@ -431,7 +431,14 @@ def append_figure_caption_lines(
     manifest: dict[str, Any],
     is_ru: bool,
 ) -> None:
-    for cap_line in _figure_caption_lines(rel, figure_no, abbreviations, manifest, is_ru):
+    cap_lines = _figure_caption_lines(rel, figure_no, abbreviations, manifest, is_ru)
+    if not cap_lines:
+        return
+    if lines and lines[-1].strip():
+        lines.append("")
+    for idx, cap_line in enumerate(cap_lines):
+        if idx > 0:
+            lines.append("")
         lines.append(cap_line)
 
 

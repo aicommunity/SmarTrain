@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +11,71 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from smartrain.services.reporting.document_export import _pandoc_executable, _try_pandoc_odt
+
+_FIGURE_CAPTION_TAIL_RE = re.compile(r"((?:Рисунок|Figure) \d+\..*)$")
+_FIGURE_CAPTION_START_RE = re.compile(r"^(?:Рисунок|Figure) \d+\.")
+_LEGEND_LINE_SPLIT_RE = re.compile(r"(?=M\d+ ·)")
+
+
+def _figure_caption_tail(raw: str) -> str | None:
+    m = _FIGURE_CAPTION_TAIL_RE.search(str(raw or "").strip())
+    return m.group(1).strip() if m else None
+
+
+def _is_standalone_figure_caption(raw: str) -> bool:
+    return bool(_FIGURE_CAPTION_START_RE.match(str(raw or "").strip()))
+
+
+def _split_merged_figure_paragraphs(
+    text_root: ET.Element,
+    ns: dict[str, str],
+    *,
+    center_style_name: str,
+    caption_style_name: str,
+) -> bool:
+    """Split pandoc paragraphs that combine image, run legend, and figure caption."""
+    text_tag = f"{{{ns['text']}}}p"
+    changed = False
+    for parent in text_root.iter():
+        children = list(parent)
+        idx = 0
+        while idx < len(children):
+            p = children[idx]
+            if p.tag != text_tag:
+                idx += 1
+                continue
+            frame = p.find("draw:frame", ns)
+            if frame is None:
+                idx += 1
+                continue
+            raw = "".join(p.itertext()).strip()
+            caption_text = _figure_caption_tail(raw)
+            if not caption_text:
+                idx += 1
+                continue
+            legend_blob = raw[: raw.rfind(caption_text)].strip()
+            legend_lines = [ln.strip() for ln in _LEGEND_LINE_SPLIT_RE.split(legend_blob) if ln.strip()]
+            parent.remove(p)
+            insert_at = idx
+            img_p = ET.Element(text_tag)
+            img_p.set(f"{{{ns['text']}}}style-name", center_style_name)
+            img_p.append(frame)
+            parent.insert(insert_at, img_p)
+            insert_at += 1
+            for line in legend_lines:
+                leg_p = ET.Element(text_tag)
+                leg_p.set(f"{{{ns['text']}}}style-name", center_style_name)
+                leg_p.text = line
+                parent.insert(insert_at, leg_p)
+                insert_at += 1
+            cap_p = ET.Element(text_tag)
+            cap_p.set(f"{{{ns['text']}}}style-name", caption_style_name)
+            cap_p.text = caption_text
+            parent.insert(insert_at, cap_p)
+            children = list(parent)
+            idx = insert_at + 1
+            changed = True
+    return changed
 
 def _try_pandoc_odt_analyze(report_root: str, lang: str) -> bool:
     exe = _pandoc_executable()
@@ -230,14 +296,29 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
             body = ct_root.find("office:body", ns)
             text_root = body.find("office:text", ns) if body is not None else None
             if text_root is not None:
+                if _split_merged_figure_paragraphs(
+                    text_root,
+                    ns,
+                    center_style_name=center_style_name,
+                    caption_style_name=caption_style_name,
+                ):
+                    changed = True
                 table_paragraphs = set(text_root.findall(".//table:table-cell//text:p", ns))
                 for p in text_root.iterfind(".//text:p", ns):
                     raw = "".join(p.itertext()).strip()
+                    existing_style = p.attrib.get(f"{{{ns['text']}}}style-name", "")
+                    if existing_style in (
+                        center_style_name,
+                        caption_style_name,
+                        table_text_style_name,
+                        table_header_text_style,
+                    ):
+                        continue
                     if p in table_paragraphs:
                         p.set(f"{{{ns['text']}}}style-name", table_text_style_name)
                         changed = True
                         continue
-                    if raw.startswith(("Рисунок ", "Figure ", "Таблица ", "Table ")):
+                    if _is_standalone_figure_caption(raw) or raw.startswith(("Таблица ", "Table ")):
                         p.set(f"{{{ns['text']}}}style-name", caption_style_name)
                         changed = True
                         continue
@@ -330,7 +411,7 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                             continue
                         raw = "".join(node.itertext()).strip()
                         is_table_caption = raw.startswith("Таблица ") or raw.startswith("Table ")
-                        is_figure_caption = raw.startswith("Рисунок ") or raw.startswith("Figure ")
+                        is_figure_caption = _is_standalone_figure_caption(raw)
                         if is_table_caption:
                             prev = children[i - 1] if i > 0 else None
                             prev_txt = "".join(prev.itertext()).strip() if prev is not None and prev.tag == f"{{{ns['text']}}}p" else ""

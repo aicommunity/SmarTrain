@@ -32,6 +32,7 @@ app = plain_typer(
 
 from smartrain.cli_entrypoints.cli_forwarding import (
     _format_columns,
+    _forward_analyze_command,
     _forward_argparse_command,
     _interactive_flag_env,
     _invoke_module_main,
@@ -850,7 +851,7 @@ analyze_app = plain_sub_typer(
 )
 def cmd_analyze_all(ctx: typer.Context) -> None:
     """Run end-to-end analysis session and build report artifacts."""
-    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["all", *list(ctx.args)])
+    _forward_analyze_command(ctx, "all", prog="smartrain analyze all")
 
 
 @analyze_app.command(
@@ -866,7 +867,7 @@ def cmd_analyze_scan(ctx: typer.Context) -> None:
       smartrain analyze scan --models-root runs
       smartrain analyze scan --workspace /data/MarsSmarTrain
     """
-    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["scan", *list(ctx.args)])
+    _forward_analyze_command(ctx, "scan", prog="smartrain analyze scan")
 
 
 @analyze_app.command(
@@ -882,7 +883,7 @@ def cmd_analyze_export_table(ctx: typer.Context) -> None:
       smartrain analyze export-table --models-root runs --output-dir analytics
       smartrain analyze export-table --workspace /data/MarsSmarTrain
     """
-    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["export-table", *list(ctx.args)])
+    _forward_analyze_command(ctx, "export-table", prog="smartrain analyze export-table")
 
 
 @analyze_app.command(
@@ -898,7 +899,7 @@ def cmd_analyze_compare(ctx: typer.Context) -> None:
       smartrain analyze compare --baseline runs/ds/2026-01-01_00-00-00 --others runs/ds/2026-01-02_00-00-00 -o compare.csv --out-png compare.png
       smartrain analyze compare --workspace /data/MarsSmarTrain --baseline runs/ds/2026-01-01_00-00-00 --others runs/ds/2026-01-02_00-00-00
     """
-    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["compare", *list(ctx.args)])
+    _forward_analyze_command(ctx, "compare", prog="smartrain analyze compare")
 
 
 @analyze_app.command(
@@ -914,7 +915,7 @@ def cmd_analyze_pr_curves(ctx: typer.Context) -> None:
       smartrain analyze pr-curves --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml --out-png analytics/pr.png
       smartrain analyze pr-curves --workspace /data/MarsSmarTrain --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml
     """
-    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["pr-curves", *list(ctx.args)])
+    _forward_analyze_command(ctx, "pr-curves", prog="smartrain analyze pr-curves")
 
 
 @analyze_app.command(
@@ -930,7 +931,7 @@ def cmd_analyze_inference_benchmark(ctx: typer.Context) -> None:
       smartrain analyze inference-benchmark --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml --split test --frames 200
       smartrain analyze inference-benchmark --runs-group-dir runs/ds_a --data-yaml datasets/ds_a/data.yaml --device 0 --half
     """
-    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["inference-benchmark", *list(ctx.args)])
+    _forward_analyze_command(ctx, "inference-benchmark", prog="smartrain analyze inference-benchmark")
 
 
 @analyze_app.command(
@@ -946,7 +947,7 @@ def cmd_analyze_inference_plot(ctx: typer.Context) -> None:
       smartrain analyze inference-plot --csv analytics/inference_tests/ds_a.csv --metric avg_total_fps
       smartrain analyze inference-plot --csv analytics/inference_tests/ds_a.csv --out-png analytics/ds_a_speed.png
     """
-    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["inference-plot", *list(ctx.args)])
+    _forward_analyze_command(ctx, "inference-plot", prog="smartrain analyze inference-plot")
 
 
 @analyze_app.command(
@@ -955,7 +956,7 @@ def cmd_analyze_inference_plot(ctx: typer.Context) -> None:
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def cmd_analyze_test_metrics_plot(ctx: typer.Context) -> None:
-    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["test-metrics-plot", *list(ctx.args)])
+    _forward_analyze_command(ctx, "test-metrics-plot", prog="smartrain analyze test-metrics-plot")
 
 
 @analyze_app.command(
@@ -971,7 +972,7 @@ def cmd_analyze_leaderboard(ctx: typer.Context) -> None:
       smartrain analyze leaderboard --quality-metric mAP50-95 --speed-metric avg_inference_fps
       smartrain analyze leaderboard --weight-quality 0.7 --weight-speed 0.2 --weight-stability 0.1
     """
-    _invoke_module_main("smartrain.workflows.analyze.analyze_entry", ["leaderboard", *list(ctx.args)])
+    _forward_analyze_command(ctx, "leaderboard", prog="smartrain analyze leaderboard")
 
 
 def _analyze_group_callback(ctx: typer.Context) -> None:

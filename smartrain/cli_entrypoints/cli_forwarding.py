@@ -140,6 +140,28 @@ def _run_with_coordination(
             raise typer.Exit(1) from exc
 
 
+def _forward_analyze_command(
+    ctx: typer.Context,
+    subcommand: str,
+    *,
+    prog: str | None = None,
+    empty_args_mode: str = "help",
+    ensure_scan: bool = False,
+) -> None:
+    """Forward ``smartrain analyze <subcommand>`` with Typer meta-flag stripping."""
+    from smartrain.workflows.analyze.analyze_entry import build_analyze_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.analyze.analyze_entry",
+        build_parser=build_analyze_arg_parser,
+        prog=prog or f"smartrain analyze {subcommand}",
+        prepend_args=[subcommand],
+        empty_args_mode=empty_args_mode,
+        ensure_scan=ensure_scan,
+    )
+
+
 def _forward_argparse_command(
     ctx: typer.Context,
     *,
