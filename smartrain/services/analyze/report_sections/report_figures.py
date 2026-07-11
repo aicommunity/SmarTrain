@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -440,6 +440,126 @@ def append_figure_caption_lines(
         if idx > 0:
             lines.append("")
         lines.append(cap_line)
+
+
+_ULTRA_PR_IMAGE_CANDIDATES = ("BoxPR_curve.png", "PR_curve.png")
+_ULTRA_CM_IMAGE_CANDIDATES = ("confusion_matrix_normalized.png", "confusion_matrix.png")
+
+
+def _pick_ultra_image_rel(images: list[str], candidates: tuple[str, ...]) -> str | None:
+    for name in candidates:
+        for rel in images:
+            if os.path.basename(str(rel)) == name:
+                return str(rel)
+    return None
+
+
+def _markdown_figure_pair_row(left_rel: str, right_rel: str, *, left_alt: str, right_alt: str) -> list[str]:
+    cell_l = f"![{left_alt}](../{left_rel}){{ width=95% }}"
+    cell_r = f"![{right_alt}](../{right_rel}){{ width=95% }}"
+    return ["", "|  |  |", "|:---:|:---:|", f"| {cell_l} | {cell_r} |", ""]
+
+
+def append_exec_ultra_pair_caption_lines(
+    lines: list[str],
+    *,
+    figure_no: int,
+    run_label: str,
+    item: dict[str, Any],
+    is_ru: bool,
+) -> None:
+    run_info = item.get("run_info") if isinstance(item.get("run_info"), dict) else {}
+    model = str(run_info.get("model") or "").strip()
+    dataset = str(run_info.get("dataset_name") or "").strip()
+    split = "test"
+    sources = item.get("artifact_sources") if isinstance(item.get("artifact_sources"), dict) else {}
+    pr_src = str(sources.get("BoxPR_curve.png") or sources.get("PR_curve.png") or "")
+    cm_src = str(sources.get("confusion_matrix_normalized.png") or sources.get("confusion_matrix.png") or "")
+    prov = {"test": "test-split", "train_val_fallback": "train-val", "legacy": "legacy"}
+    prov_txt = ", ".join(
+        x
+        for x in (
+            f"PR←{prov.get(pr_src, pr_src)}" if pr_src else "",
+            f"CM←{prov.get(cm_src, cm_src)}" if cm_src else "",
+        )
+        if x
+    )
+    title = "Рисунок" if is_ru else "Figure"
+    base = (
+        f"PR-кривая и матрица ошибок — **{run_label}**"
+        if is_ru
+        else f"PR curve and confusion matrix — **{run_label}**"
+    )
+    extra_bits = []
+    if model:
+        extra_bits.append(f"model={model}")
+    if dataset:
+        extra_bits.append(f"dataset={dataset}")
+    extra_bits.append(f"split={split}")
+    if prov_txt:
+        extra_bits.append(prov_txt)
+    extra = f" ({'; '.join(extra_bits)})" if extra_bits else ""
+    if lines and lines[-1].strip():
+        lines.append("")
+    lines.append(f"*{title} {figure_no}. {base}{extra}*")
+    lines.append("")
+
+
+def render_executive_ultralytics_figure_pairs(
+    manifest: dict[str, Any],
+    *,
+    report_root: str,
+    is_ru: bool,
+    abbreviations: dict[str, str],
+    figure_no: int,
+    tpl: dict[str, str],
+    abbrev_label_fn: Callable[[Any, dict[str, str]], str],
+) -> tuple[list[str], int, set[str]]:
+    from smartrain.services.analyze.report_markdown_formatting import _center_close, _center_open, _subsection_intro_lines
+
+    lines: list[str] = []
+    emitted: set[str] = set()
+    ultra_rows = manifest.get("ultralytics_test") if isinstance(manifest.get("ultralytics_test"), list) else []
+    if not ultra_rows:
+        return lines, figure_no, emitted
+    pair_intro = _subsection_intro_lines(tpl, "SUB_EXEC_ULTRA_PAIRS") if tpl.get("SUB_EXEC_ULTRA_PAIRS") else []
+    if pair_intro:
+        lines.append("### " + ("Ultralytics test: PR и матрица ошибок" if is_ru else "Ultralytics test: PR and confusion matrix"))
+        lines.append("")
+        lines.extend(pair_intro)
+    for item in ultra_rows:
+        if not isinstance(item, dict):
+            continue
+        images = [str(x) for x in (item.get("images") or []) if str(x).strip()]
+        pr_rel = _pick_ultra_image_rel(images, _ULTRA_PR_IMAGE_CANDIDATES)
+        cm_rel = _pick_ultra_image_rel(images, _ULTRA_CM_IMAGE_CANDIDATES)
+        if not pr_rel or not cm_rel:
+            continue
+        if report_root and (
+            not os.path.isfile(os.path.join(report_root, pr_rel))
+            or not os.path.isfile(os.path.join(report_root, cm_rel))
+        ):
+            continue
+        run_name = str(item.get("run_name") or item.get("run_code") or "")
+        run_label = abbrev_label_fn(run_name, abbreviations)
+        pr_alt = "PR"
+        cm_alt = "CM"
+        lines.extend(_center_open())
+        lines.extend(_markdown_figure_pair_row(pr_rel, cm_rel, left_alt=pr_alt, right_alt=cm_alt))
+        append_exec_ultra_pair_caption_lines(
+            lines,
+            figure_no=figure_no,
+            run_label=run_label,
+            item=item,
+            is_ru=is_ru,
+        )
+        lines.extend(_center_close())
+        figure_no += 1
+        emitted.add(pr_rel)
+        emitted.add(cm_rel)
+    if emitted:
+        lines.append("")
+    return lines, figure_no, emitted
 
 
 def _discover_missing_pr_images(report_root: str, manifest_images: list[str]) -> list[str]:

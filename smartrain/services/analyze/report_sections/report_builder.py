@@ -41,7 +41,14 @@ from smartrain.core.runtime.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
+from smartrain.services.analyze.report_sections.report_common import (
+    _append_takeaway_bullets,
+    append_numbered_table_title,
+    append_table_source,
+    append_table_takeaways,
+    emit_centered_table_block,
+    finalize_centered_table,
+)
 from smartrain.services.analyze.report_sections.report_figures import (
     _discover_missing_pr_images,
     append_figure_caption_lines,
@@ -135,18 +142,20 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 break
     table_no = 1
     figure_no = 1
+    exec_ultra_images: set[str] = set()
     appendix_images: list[tuple[str, dict[str, Any] | None]] = []
     early_figure1_inserted = False
     early_figure1_emitted_in_doc = False
 
     lines.append(_sec("exec"))
     lines.append("")
-    exec_lines, table_no = _render_executive_summary_section(
+    exec_lines, table_no, figure_no, exec_ultra_images = _render_executive_summary_section(
         manifest,
         is_ru=is_ru,
         tpl=tpl,
         abbreviations=abbreviations,
         table_no=table_no,
+        figure_no=figure_no,
     )
     lines.extend(exec_lines)
     legend_lines, table_no = _render_run_legend_table_lines(
@@ -271,27 +280,22 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 alias_df = _abbrev_df(alias_df, abbreviations)
                 _emit_figure_1_before_table_11()
                 ak = _infer_table_kind(alias_rel)
-                lines.extend(_table_preamble_lines(alias_rel, alias_df, ak, is_ru, tpl))
-                lines.extend(_center_open())
-                lines.append("")
-                lines.append(
-                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-                    + ("Легенда алиасов форматов" if is_ru else "Format alias legend")
-                    + "**"
-                )
-                lines.append("")
-                lines.extend(_md_table_from_df(alias_df, abbreviations, limit=None, is_ru=is_ru))
-                lines.append("")
-                lines.append("<!-- alias_legend_columns: alias,run_name,target_path -->")
-                lines.append("")
-                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{alias_rel}`"))
-                _append_takeaway_bullets(
+                emit_centered_table_block(
                     lines,
-                    _table_takeaway_lines(
+                    table_no=table_no,
+                    title=("Легенда алиасов форматов" if is_ru else "Format alias legend"),
+                    preamble_lines=_table_preamble_lines(alias_rel, alias_df, ak, is_ru, tpl, table_no=table_no),
+                    table_body_lines=[
+                        *_md_table_from_df(alias_df, abbreviations, limit=None, is_ru=is_ru),
+                        "",
+                        "<!-- alias_legend_columns: alias,run_name,target_path -->",
+                    ],
+                    source_rel=alias_rel,
+                    takeaways=_table_takeaway_lines(
                         alias_rel, alias_df, ak, is_ru, manifest=manifest, report_root=str(report_root), tpl=tpl
                     ),
+                    is_ru=is_ru,
                 )
-                lines.extend(_center_close())
                 table_no += 1
             except Exception as exc:
                 logger.warning("Failed to render report section: %s", exc)
@@ -308,25 +312,18 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 eval_df = _abbrev_df(eval_df, abbreviations)
                 _emit_figure_1_before_table_11()
                 ek = _infer_table_kind(eval_rel)
-                lines.extend(_table_preamble_lines(eval_rel, eval_df, ek, is_ru, tpl))
-                lines.extend(_center_open())
-                lines.append("")
-                lines.append(
-                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-                    + ("Параметры расчета метрик по форматам" if is_ru else "Metric calculation settings by format")
-                    + "**"
-                )
-                lines.append("")
-                lines.extend(_md_table_from_df(eval_df, abbreviations, limit=None, is_ru=is_ru))
-                lines.append("")
-                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{eval_rel}`"))
-                _append_takeaway_bullets(
+                emit_centered_table_block(
                     lines,
-                    _table_takeaway_lines(
+                    table_no=table_no,
+                    title=("Параметры расчета метрик по форматам" if is_ru else "Metric calculation settings by format"),
+                    preamble_lines=_table_preamble_lines(eval_rel, eval_df, ek, is_ru, tpl, table_no=table_no),
+                    table_body_lines=_md_table_from_df(eval_df, abbreviations, limit=None, is_ru=is_ru),
+                    source_rel=eval_rel,
+                    takeaways=_table_takeaway_lines(
                         eval_rel, eval_df, ek, is_ru, manifest=manifest, report_root=str(report_root), tpl=tpl
                     ),
+                    is_ru=is_ru,
                 )
-                lines.extend(_center_close())
                 table_no += 1
             except Exception as exc:
                 logger.warning("Failed to render report section: %s", exc)
@@ -376,12 +373,26 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         df_preview = _load_filtered_table_df(rel, abs_path, manifest)
         kind_preview = _infer_table_kind(rel)
         _emit_figure_1_before_table_11()
-        lines.extend(_table_preamble_lines(rel, df_preview, kind_preview, is_ru, tpl))
+        current_table_no = table_no
+        table_no += 1
         lines.extend(_center_open())
         lines.append("")
-        lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(rel, is_ru)}**")
-        lines.append("")
-        table_no += 1
+        table_takeaways: list[str] = []
+        deferred_table_title = _table_title(rel, is_ru)
+        deferred_preamble = _table_preamble_lines(
+            rel, df_preview, kind_preview, is_ru, tpl, table_no=current_table_no
+        )
+        table_header_emitted = False
+
+        def _ensure_table_header() -> None:
+            nonlocal table_header_emitted
+            if table_header_emitted:
+                return
+            append_numbered_table_title(lines, current_table_no, deferred_table_title, is_ru)
+            if deferred_preamble:
+                lines.extend(deferred_preamble)
+            table_header_emitted = True
+
         if abs_path and os.path.isfile(abs_path):
             try:
                 if df_preview is not None:
@@ -414,6 +425,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         if not run_card_intro_emitted:
                             lines.extend(_subsection_intro_lines(tpl, "SUB_QUALITY_RUN_CARD"))
                             run_card_intro_emitted = True
+                        _ensure_table_header()
                         for _, row in df.iterrows():
                             run_label = str(row.get("run_name") or row.get("run_dir") or "-")
                             run_code = abbreviations.get(run_label, run_label)
@@ -481,10 +493,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             )
                         )
                         lines.append("")
-                        lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{rel}`"))
-                        _append_takeaway_bullets(
+                        append_table_source(lines, source_rel=rel, is_ru=is_ru)
+                        finalize_centered_table(
                             lines,
-                            _table_takeaway_lines(
+                            takeaways=_table_takeaway_lines(
                                 rel,
                                 df,
                                 "system_profile_train_sparse",
@@ -494,7 +506,6 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                                 tpl=tpl,
                             ),
                         )
-                        lines.extend(_center_close())
                         continue
                     lines.append(
                         "#### " + ("Профиль запуска " if is_ru else "Run profile ") + "(train)"
@@ -503,6 +514,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     if not run_card_intro_emitted:
                         lines.extend(_subsection_intro_lines(tpl, "SUB_QUALITY_RUN_CARD"))
                         run_card_intro_emitted = True
+                    _ensure_table_header()
                     for _, row in df.iterrows():
                         run_label = str(row.get("run_name") or row.get("run_dir") or "-")
                         run_code = abbreviations.get(run_label, run_label)
@@ -523,10 +535,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         )
                         lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
                         lines.append("")
-                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{rel}`"))
-                    _append_takeaway_bullets(
+                    append_table_source(lines, source_rel=rel, is_ru=is_ru)
+                    finalize_centered_table(
                         lines,
-                        _table_takeaway_lines(
+                        takeaways=_table_takeaway_lines(
                             rel,
                             df,
                             "system_profile_train_cards",
@@ -536,11 +548,14 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             tpl=tpl,
                         ),
                     )
-                    lines.extend(_center_close())
                     continue
                 if "test_system_profile" in rel_lower:
                     grouped = df.groupby("run_name", dropna=False) if "run_name" in df.columns else [("-", df)]
+                    first_test_profile = True
                     for run_name, g in grouped:
+                        if first_test_profile:
+                            _ensure_table_header()
+                            first_test_profile = False
                         if not run_card_intro_emitted:
                             lines.extend(_subsection_intro_lines(tpl, "SUB_QUALITY_RUN_CARD"))
                             run_card_intro_emitted = True
@@ -563,14 +578,13 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         card = pd.DataFrame(card_rows)
                         lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
                         lines.append("")
-                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{rel}`"))
-                    _append_takeaway_bullets(
+                    append_table_source(lines, source_rel=rel, is_ru=is_ru)
+                    finalize_centered_table(
                         lines,
-                        _table_takeaway_lines(
+                        takeaways=_table_takeaway_lines(
                             rel, df, "test_system_profile", is_ru, manifest=manifest, report_root=str(report_root), tpl=tpl
                         ),
                     )
-                    lines.extend(_center_close())
                     continue
                 df = _select_table_columns(rel, df)
                 if "system_profile" in rel.lower() and _should_hide_system_profile_table(df):
@@ -583,6 +597,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         )
                     )
                     lines.append("")
+                    _ensure_table_header()
                     for _, row in df.iterrows():
                         run_label = str(row.get("run_name") or row.get("run_dir") or "-")
                         run_code = abbreviations.get(run_label, run_label)
@@ -638,13 +653,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         )
                     )
                     lines.append("")
-                    lines.append(
-                        ("_Источник данных:_ " if is_ru else "_Data source:_ ")
-                        + f"`{rel}`"
-                    )
-                    _append_takeaway_bullets(
+                    append_table_source(lines, source_rel=rel, is_ru=is_ru)
+                    finalize_centered_table(
                         lines,
-                        _table_takeaway_lines(
+                        takeaways=_table_takeaway_lines(
                             rel,
                             df,
                             "system_profile_train_sparse",
@@ -654,15 +666,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             tpl=tpl,
                         ),
                     )
-                    lines.extend(_center_close())
                     continue
                 df = _abbrev_df(df, abbreviations)
+                _ensure_table_header()
                 lines.extend(_md_table_from_df(df, abbreviations, limit=None, is_ru=is_ru))
-                lines.append("")
-                lines.append(
-                    ("_Источник данных:_ " if is_ru else "_Data source:_ ")
-                    + f"`{rel}`"
-                )
                 tk_kind = "system_profile_train" if "system_profile" in rel.lower() else kind_preview
                 takeaway_df = df
                 if "runs_summary" in rel.lower():
@@ -670,24 +677,22 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     if len(test_summary) > 0:
                         takeaway_df = test_summary
                         tk_kind = "runs_summary_extra"
-                _append_takeaway_bullets(
-                    lines,
-                    _table_takeaway_lines(
-                        rel,
-                        takeaway_df,
-                        tk_kind,
-                        is_ru,
-                        manifest=manifest,
-                        report_root=str(report_root),
-                        tpl=tpl,
-                        abbreviations=abbreviations,
-                    ),
+                table_takeaways = _table_takeaway_lines(
+                    rel,
+                    takeaway_df,
+                    tk_kind,
+                    is_ru,
+                    manifest=manifest,
+                    report_root=str(report_root),
+                    tpl=tpl,
+                    abbreviations=abbreviations,
                 )
+                append_table_source(lines, source_rel=rel, is_ru=is_ru)
             except Exception as e:
                 lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
         else:
             lines.append(f"- {('Файл не найден' if is_ru else 'File not found')}")
-        lines.extend(_center_close())
+        finalize_centered_table(lines, takeaways=table_takeaways)
     # images list may be extended by fallback PR image discovery.
     lines.append(_sec("format_compare"))
     lines.append("")
@@ -820,31 +825,29 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 fmt_df = _abbrev_df(fmt_df, abbreviations)
                 fmt_kind = _infer_table_kind(fmt_csv_rel)
                 _emit_figure_1_before_table_11()
-                lines.extend(_table_preamble_lines(fmt_csv_rel, fmt_df, fmt_kind, is_ru, tpl))
-                lines.extend(_center_open())
-                lines.append("")
-                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(fmt_csv_rel, is_ru)}**")
-                lines.append("")
-                lines.extend(_md_table_from_df(fmt_df, abbreviations, limit=None, is_ru=is_ru))
-                lines.append("")
-                lines.append(
-                    ("_Источник данных:_ " if is_ru else "_Data source:_ ")
-                    + f"`{fmt_csv_rel}`"
-                )
+                fmt_body = _md_table_from_df(fmt_df, abbreviations, limit=None, is_ru=is_ru)
+                fmt_extra: list[str] = []
                 low_rel = fmt_csv_rel.lower()
                 if "format_metrics_compare_test" in low_rel or "format_metrics_compare_val" in low_rel:
-                    lines.append(
+                    fmt_extra.append(
                         (
-                            "- Пустые quality-ячейки для `engine/trt` могут означать `invalid_metrics`: файл метрик найден, "
+                            "Пустые quality-ячейки для `engine/trt` могут означать `invalid_metrics`: файл метрик найден, "
                             "но все ключевые метрики равны нулю и помечены как невалидные."
                             if is_ru
-                            else "- Empty quality cells for `engine/trt` may indicate `invalid_metrics`: metrics file exists, "
+                            else "Empty quality cells for `engine/trt` may indicate `invalid_metrics`: metrics file exists, "
                             "but all key metrics are zeros and treated as invalid."
                         )
                     )
-                _append_takeaway_bullets(
+                emit_centered_table_block(
                     lines,
-                    _table_takeaway_lines(
+                    table_no=table_no,
+                    title=_table_title(fmt_csv_rel, is_ru),
+                    preamble_lines=_table_preamble_lines(
+                        fmt_csv_rel, fmt_df, fmt_kind, is_ru, tpl, table_no=table_no
+                    ),
+                    table_body_lines=[*fmt_body, *([""] + fmt_extra if fmt_extra else [])],
+                    source_rel=fmt_csv_rel,
+                    takeaways=_table_takeaway_lines(
                         fmt_csv_rel,
                         fmt_df,
                         fmt_kind,
@@ -853,8 +856,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         report_root=str(report_root),
                         tpl=tpl,
                     ),
+                    is_ru=is_ru,
                 )
-                lines.extend(_center_close())
                 seen_fmt_csv_paths.add(norm_rel)
                 table_no += 1
             except Exception as e:
@@ -1022,28 +1025,22 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 pure_df = perf_df[pure_cols].copy() if pure_cols else perf_df.copy()
                 pipeline_df = perf_df[pipeline_cols].copy() if pipeline_cols else perf_df.copy()
                 _emit_figure_1_before_table_11()
-                lines.extend(_table_preamble_lines(perf_csv_rel, pure_df, "perf_pure", is_ru, tpl))
                 lines.extend(_center_open())
                 lines.append("")
-                lines.append(
-                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-                    + (
-                        "Производительность форматов: чистый инференс"
-                        if is_ru
-                        else "Format performance: pure inference"
-                    )
-                    + "**"
+                append_numbered_table_title(
+                    lines,
+                    table_no,
+                    ("Производительность форматов: чистый инференс" if is_ru else "Format performance: pure inference"),
+                    is_ru,
                 )
-                lines.append("")
+                lines.extend(_table_preamble_lines(perf_csv_rel, pure_df, "perf_pure", is_ru, tpl, table_no=table_no))
                 lines.extend(_md_table_from_df(pure_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
-                lines.append("")
-                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
                 lines.append(
                     (
-                        "- Основной KPI: сопоставимые runtime-этапы по методике Ultralytics-like. "
+                        "Основной KPI: сопоставимые runtime-этапы по методике Ultralytics-like. "
                         "I/O загрузки источника и одноразовая инициализация бэкенда сюда не входят."
                         if is_ru
-                        else "- Primary KPI: comparable runtime stages in Ultralytics-like methodology. "
+                        else "Primary KPI: comparable runtime stages in Ultralytics-like methodology. "
                         "Source I/O and one-time backend initialization are excluded."
                     )
                 )
@@ -1075,9 +1072,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 for idx, (title, descr) in enumerate(legend, start=1):
                     lines.append(f"{idx}. **{title}** — {descr}")
                 lines.append("")
-                _append_takeaway_bullets(
+                append_table_source(lines, source_rel=perf_csv_rel, is_ru=is_ru)
+                finalize_centered_table(
                     lines,
-                    _table_takeaway_lines(
+                    takeaways=_table_takeaway_lines(
                         perf_csv_rel,
                         perf_df,
                         "perf_pure",
@@ -1088,31 +1086,26 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     ),
                 )
                 table_no += 1
-                lines.extend(_center_close())
                 lines.append("")
                 _emit_figure_1_before_table_11()
-                lines.extend(_table_preamble_lines(perf_csv_rel, pipeline_df, "perf_pipeline", is_ru, tpl))
                 lines.extend(_center_open())
                 lines.append("")
-                lines.append(
-                    f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-                    + (
-                        "Производительность форматов: полный e2e pipeline"
-                        if is_ru
-                        else "Format performance: full e2e pipeline"
-                    )
-                    + "**"
+                append_numbered_table_title(
+                    lines,
+                    table_no,
+                    ("Производительность форматов: полный e2e pipeline" if is_ru else "Format performance: full e2e pipeline"),
+                    is_ru,
                 )
-                lines.append("")
+                lines.extend(
+                    _table_preamble_lines(perf_csv_rel, pipeline_df, "perf_pipeline", is_ru, tpl, table_no=table_no)
+                )
                 lines.extend(_md_table_from_df(pipeline_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
-                lines.append("")
-                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
                 lines.append(
                     (
-                        "- Здесь показан полный runtime-конвейер (preprocess + inference + postprocess), "
+                        "Здесь показан полный runtime-конвейер (preprocess + inference + postprocess), "
                         "но без одноразовой инициализации."
                         if is_ru
-                        else "- This table shows full runtime pipeline "
+                        else "This table shows full runtime pipeline "
                         "(preprocess + inference + postprocess), without one-time initialization."
                     )
                 )
@@ -1148,7 +1141,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append("")
                 for idx, (title, descr) in enumerate(legend2, start=1):
                     lines.append(f"{idx}. **{title}** — {descr}")
-                _append_takeaway_bullets(
+                append_table_source(lines, source_rel=perf_csv_rel, is_ru=is_ru)
+                append_table_takeaways(
                     lines,
                     _table_takeaway_lines(
                         perf_csv_rel,
@@ -1160,6 +1154,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         tpl=tpl,
                     ),
                 )
+                table_no += 1
                 diag_cols = [
                     c
                     for c in (
@@ -1187,42 +1182,40 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     if len(diag_df.columns) > 0:
                         lines.append("")
                         table_no += 1
-                        _emit_figure_1_before_table_11()
-                        lines.append(
-                            f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-                            + (
+                        append_numbered_table_title(
+                            lines,
+                            table_no,
+                            (
                                 "Диагностика несопоставимых накладных расходов"
                                 if is_ru
                                 else "Diagnostics of non-comparable overheads"
-                            )
-                            + "**"
+                            ),
+                            is_ru,
                         )
-                        lines.append("")
                         lines.extend(
                             _md_table_from_df(
                                 diag_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1, diag_style=True
                             )
                         )
-                        lines.append("")
-                        lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{perf_csv_rel}`"))
-                        lines.append(
-                            (
-                                "- Эти метрики диагностические и не используются в основном сравнении форматов."
-                                if is_ru
-                                else "- These metrics are diagnostic and are not used for primary format comparison."
-                            )
-                        )
-                        _append_takeaway_bullets(
+                        append_table_source(lines, source_rel=perf_csv_rel, is_ru=is_ru)
+                        append_table_takeaways(
                             lines,
-                            _table_takeaway_lines(
-                                perf_csv_rel,
-                                perf_df,
-                                "perf_diag",
-                                is_ru,
-                                manifest=manifest,
-                                report_root=str(report_root),
-                                tpl=tpl,
-                            ),
+                            [
+                                (
+                                    "Эти метрики диагностические и не используются в основном сравнении форматов."
+                                    if is_ru
+                                    else "These metrics are diagnostic and are not used for primary format comparison."
+                                ),
+                                *_table_takeaway_lines(
+                                    perf_csv_rel,
+                                    perf_df,
+                                    "perf_diag",
+                                    is_ru,
+                                    manifest=manifest,
+                                    report_root=str(report_root),
+                                    tpl=tpl,
+                                ),
+                            ],
                         )
                 lines.extend(_center_close())
                 table_no += 1
@@ -1258,22 +1251,16 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         perf_df = perf_df[keep]
                     perf_df = _abbrev_df(perf_df, abbreviations)
                     _emit_figure_1_before_table_11()
-                    lines.extend(_table_preamble_lines(fallback_perf_rel, perf_df, "perf_fallback", is_ru, tpl))
-                    lines.extend(_center_open())
-                    lines.append("")
-                    lines.append(
-                        f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-                        + ("Fallback: скорость инференса по benchmark" if is_ru else "Fallback: inference benchmark speed")
-                        + "**"
-                    )
-                    lines.append("")
-                    lines.extend(_md_table_from_df(perf_df, abbreviations, limit=None, is_ru=is_ru))
-                    lines.append("")
-                    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{fallback_perf_rel}`"))
-                    lines.append("")
-                    _append_takeaway_bullets(
+                    emit_centered_table_block(
                         lines,
-                        _table_takeaway_lines(
+                        table_no=table_no,
+                        title=("Fallback: скорость инференса по benchmark" if is_ru else "Fallback: inference benchmark speed"),
+                        preamble_lines=_table_preamble_lines(
+                            fallback_perf_rel, perf_df, "perf_fallback", is_ru, tpl, table_no=table_no
+                        ),
+                        table_body_lines=_md_table_from_df(perf_df, abbreviations, limit=None, is_ru=is_ru),
+                        source_rel=fallback_perf_rel,
+                        takeaways=_table_takeaway_lines(
                             fallback_perf_rel,
                             perf_df,
                             "perf_fallback",
@@ -1282,8 +1269,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             report_root=str(report_root),
                             tpl=tpl,
                         ),
+                        is_ru=is_ru,
                     )
-                    lines.extend(_center_close())
                     table_no += 1
                     rendered_perf_table = True
                 except Exception as e:
@@ -1316,20 +1303,16 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 if len(pr_sum) > 0:
                     pr_sum = _abbrev_df(pr_sum, abbreviations)
                     _emit_figure_1_before_table_11()
-                    lines.extend(_table_preamble_lines(pr_csv_rel, pr_sum, "pr_per_class_summary", is_ru, tpl))
-                    lines.extend(_center_open())
-                    lines.append("")
-                    lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(pr_csv_rel, is_ru)}**")
-                    lines.append("")
-                    lines.extend(_md_table_from_df(pr_sum, abbreviations, limit=None, is_ru=is_ru))
-                    lines.append("")
-                    lines.append(
-                        ("_Источник данных:_ " if is_ru else "_Data source:_ ")
-                        + f"`{pr_csv_rel}`"
-                    )
-                    _append_takeaway_bullets(
+                    emit_centered_table_block(
                         lines,
-                        _table_takeaway_lines(
+                        table_no=table_no,
+                        title=_table_title(pr_csv_rel, is_ru),
+                        preamble_lines=_table_preamble_lines(
+                            pr_csv_rel, pr_sum, "pr_per_class_summary", is_ru, tpl, table_no=table_no
+                        ),
+                        table_body_lines=_md_table_from_df(pr_sum, abbreviations, limit=None, is_ru=is_ru),
+                        source_rel=pr_csv_rel,
+                        takeaways=_table_takeaway_lines(
                             pr_csv_rel,
                             pr_sum,
                             "pr_per_class_summary",
@@ -1338,8 +1321,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                             report_root=str(report_root),
                             tpl=tpl,
                         ),
+                        is_ru=is_ru,
                     )
-                    lines.extend(_center_close())
                     table_no += 1
             except Exception as e:
                 lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
@@ -1393,26 +1376,16 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 local_df = _abbrev_df(local_df, abbreviations)
                 conf_kind = _infer_table_kind(rel)
                 _emit_figure_1_before_table_11()
-                lines.extend(_table_preamble_lines(rel, local_df, conf_kind, is_ru, tpl))
-                lines.extend(_center_open())
-                lines.append("")
                 objective_title = _table_title(rel, is_ru)
-                if is_ru:
-                    full_title = f"{objective_title} — run {run_name}"
-                else:
-                    full_title = f"{objective_title} — run {run_name}"
-                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {full_title}**")
-                lines.append("")
-                lines.extend(_md_table_from_df(local_df, abbreviations, limit=None, is_ru=is_ru))
-                lines.append("")
-                lines.append(
-                    ("_Источник данных:_ " if is_ru else "_Data source:_ ")
-                    + f"`{rel}`"
-                )
-                lines.append("")
-                _append_takeaway_bullets(
+                full_title = f"{objective_title} — run {run_name}"
+                emit_centered_table_block(
                     lines,
-                    _table_takeaway_lines(
+                    table_no=table_no,
+                    title=full_title,
+                    preamble_lines=_table_preamble_lines(rel, local_df, conf_kind, is_ru, tpl, table_no=table_no),
+                    table_body_lines=_md_table_from_df(local_df, abbreviations, limit=None, is_ru=is_ru),
+                    source_rel=rel,
+                    takeaways=_table_takeaway_lines(
                         rel,
                         local_df,
                         conf_kind,
@@ -1421,8 +1394,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         report_root=str(report_root),
                         tpl=tpl,
                     ),
+                    is_ru=is_ru,
                 )
-                lines.extend(_center_close())
                 table_no += 1
         except Exception as e:
             lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
@@ -1570,6 +1543,8 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             for rel in item.get("images") or []:
                 rel = str(rel)
                 if not rel:
+                    continue
+                if rel in exec_ultra_images:
                     continue
                 if ultra_mode == "compact" and not is_ultralytics_compact_main_image(rel):
                     appendix_images.append((rel, item))

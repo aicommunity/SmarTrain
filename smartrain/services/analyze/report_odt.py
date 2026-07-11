@@ -15,6 +15,111 @@ from smartrain.services.reporting.document_export import _pandoc_executable, _tr
 _FIGURE_CAPTION_TAIL_RE = re.compile(r"((?:Рисунок|Figure) \d+\..*)$")
 _FIGURE_CAPTION_START_RE = re.compile(r"^(?:Рисунок|Figure) \d+\.")
 _LEGEND_LINE_SPLIT_RE = re.compile(r"(?=M\d+ ·)")
+_TABLE_TITLE_RE = re.compile(r"^(?:Таблица|Table) \d+\.\s+\S")
+_TABLE_PREAMBLE_RE = re.compile(
+    r"(?:показывает изменение|сводка параметров|сводный рейтинг|сравнивает метрики|сводка положения|"
+    r"shows metric|run parameters|summary ranking|compares quality|summary of run positions|"
+    r"^Сводка |^Показывает |^Сравнивает )",
+    re.IGNORECASE,
+)
+_DATA_SOURCE_RE = re.compile(r"(?:Источник данных:|Data source:)", re.IGNORECASE)
+_TAKEAWAY_SEGMENT_RE = re.compile(
+    r"\s-\s(?="
+    r"(?:"
+    r"Наибольший выигрыш|Лидер по|Лучший|Наиболее|Наименьший|Разброс|Строк со|Число|Качество по|"
+    r"Largest gain|Leader|Best |Fastest|Lowest|Worst|Spread|Rows with|Unique|Quality comparison|"
+    r"(?:\*\*)?(?:Таблица|Table) \d+"
+    r"|[A-ZА-Я]"
+    r")"
+    r")"
+)
+
+
+def _is_table_takeaway_paragraph(raw: str) -> bool:
+    text = str(raw or "").strip()
+    if not text or _DATA_SOURCE_RE.search(text):
+        return False
+    if _is_table_title_paragraph(text) or _is_table_preamble_paragraph(text):
+        return False
+    starters = (
+        "Наибольший",
+        "Лидер",
+        "Лучший",
+        "Наиболее",
+        "Наименьший",
+        "Разброс",
+        "Строк со",
+        "Число",
+        "Качество по",
+        "Largest",
+        "Leader",
+        "Best",
+        "Fastest",
+        "Lowest",
+        "Rows with",
+        "Unique",
+        "Quality comparison",
+    )
+    return any(text.startswith(s) for s in starters) or ": максимум" in text or ": max " in text or "лучший запуск" in text or "best run" in text
+
+
+_MULTI_TAKEAWAY_BOUNDARY_RE = re.compile(
+    r"(?<=\))\.\s+(?="
+    r"(?:"
+    r"test\s|test_|mAP|mask_|Mask-|"
+    r"Наибольший выигрыш|Лидер по|Лучший|Наиболее|"
+    r"Largest gain|Leader|Best |Fastest|Lowest|"
+    r"Unique|Строк со|Число|Качество по|Quality comparison|Rows with|Spread|Разброс"
+    r")"
+    r")"
+)
+
+
+def _split_takeaway_sentences(raw: str) -> list[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    parts = [p.strip() for p in _MULTI_TAKEAWAY_BOUNDARY_RE.split(text) if p.strip()]
+    return parts if len(parts) > 1 else [text]
+
+
+def _split_merged_takeaway_paragraphs(
+    text_root: ET.Element,
+    ns: dict[str, str],
+    *,
+    body_style_name: str,
+) -> bool:
+    """Split paragraphs where pandoc merged multiple table takeaway sentences."""
+    text_tag = f"{{{ns['text']}}}p"
+    changed = False
+    for parent in text_root.iter():
+        children = list(parent)
+        idx = 0
+        while idx < len(children):
+            p = children[idx]
+            if p.tag != text_tag:
+                idx += 1
+                continue
+            raw = "".join(p.itertext()).strip()
+            if _DATA_SOURCE_RE.search(raw) or _is_table_title_paragraph(raw) or _is_table_preamble_paragraph(raw):
+                idx += 1
+                continue
+            segments = _split_takeaway_sentences(raw)
+            if len(segments) <= 1:
+                idx += 1
+                continue
+            parent.remove(p)
+            insert_at = idx
+            for seg in segments:
+                seg_p = ET.Element(text_tag)
+                seg_p.set(f"{{{ns['text']}}}style-name", body_style_name)
+                seg_p.text = seg
+                parent.insert(insert_at, seg_p)
+                insert_at += 1
+            children = list(parent)
+            idx = insert_at
+            changed = True
+    return changed
 
 
 def _figure_caption_tail(raw: str) -> str | None:
@@ -74,6 +179,81 @@ def _split_merged_figure_paragraphs(
             parent.insert(insert_at, cap_p)
             children = list(parent)
             idx = insert_at + 1
+            changed = True
+    return changed
+
+
+def _is_table_title_paragraph(raw: str) -> bool:
+    text = str(raw or "").strip()
+    if not text:
+        return False
+    return bool(_TABLE_TITLE_RE.match(text))
+
+
+def _is_table_preamble_paragraph(raw: str) -> bool:
+    text = str(raw or "").strip()
+    if not text or _TABLE_TITLE_RE.match(text):
+        return False
+    return bool(_TABLE_PREAMBLE_RE.search(text))
+
+
+def _split_merged_table_footer_paragraphs(
+    text_root: ET.Element,
+    ns: dict[str, str],
+    *,
+    body_style_name: str,
+) -> bool:
+    """Split pandoc paragraphs that combine data source and table takeaways."""
+    text_tag = f"{{{ns['text']}}}p"
+    changed = False
+    for parent in text_root.iter():
+        children = list(parent)
+        idx = 0
+        while idx < len(children):
+            p = children[idx]
+            if p.tag != text_tag:
+                idx += 1
+                continue
+            raw = "".join(p.itertext()).strip()
+            if not _DATA_SOURCE_RE.search(raw):
+                idx += 1
+                continue
+            tail = _DATA_SOURCE_RE.split(raw, maxsplit=1)
+            if len(tail) < 2:
+                idx += 1
+                continue
+            after_source = tail[1].strip()
+            if not after_source:
+                idx += 1
+                continue
+            all_segments = [seg.strip() for seg in _TAKEAWAY_SEGMENT_RE.split(after_source) if seg.strip()]
+            path_parts = [s for s in all_segments if ("/" in s or s.endswith((".csv", ".json", ".parquet")))]
+            segments = [
+                s
+                for s in all_segments
+                if s not in path_parts and (_is_table_takeaway_paragraph(s) or not path_parts)
+            ]
+            if not segments:
+                idx += 1
+                continue
+            source_text = raw[: raw.find(all_segments[0])].strip().rstrip("-").strip()
+            if path_parts:
+                source_text = f"{source_text} {' '.join(path_parts)}".strip()
+            parent.remove(p)
+            insert_at = idx
+            src_p = ET.Element(text_tag)
+            src_p.set(f"{{{ns['text']}}}style-name", body_style_name)
+            src_p.text = source_text
+            parent.insert(insert_at, src_p)
+            insert_at += 1
+            for seg in segments:
+                take_p = ET.Element(text_tag)
+                take_p.set(f"{{{ns['text']}}}style-name", body_style_name)
+                take_p.text = seg
+                parent.insert(insert_at, take_p)
+                insert_at += 1
+            children = list(parent)
+            idx = insert_at
             changed = True
     return changed
 
@@ -293,6 +473,22 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                 capp = ET.SubElement(cap, f"{{{ns['style']}}}paragraph-properties")
                 capp.set(f"{{{ns['fo']}}}text-align", "center")
                 capp.set(f"{{{ns['fo']}}}margin-bottom", "0.15cm")
+            table_intro_style_name = "SmarTrainTableIntro"
+            if not any(
+                s.attrib.get(f"{{{ns['style']}}}name") == table_intro_style_name
+                for s in auto_styles.findall("style:style", ns)
+            ):
+                intro = ET.SubElement(
+                    auto_styles,
+                    f"{{{ns['style']}}}style",
+                    {
+                        f"{{{ns['style']}}}name": table_intro_style_name,
+                        f"{{{ns['style']}}}family": "paragraph",
+                    },
+                )
+                intro_pp = ET.SubElement(intro, f"{{{ns['style']}}}paragraph-properties")
+                intro_pp.set(f"{{{ns['fo']}}}text-align", "center")
+                intro_pp.set(f"{{{ns['fo']}}}text-indent", "0cm")
             body = ct_root.find("office:body", ns)
             text_root = body.find("office:text", ns) if body is not None else None
             if text_root is not None:
@@ -303,6 +499,18 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                     caption_style_name=caption_style_name,
                 ):
                     changed = True
+                if _split_merged_table_footer_paragraphs(
+                    text_root,
+                    ns,
+                    body_style_name=body_style_name,
+                ):
+                    changed = True
+                if _split_merged_takeaway_paragraphs(
+                    text_root,
+                    ns,
+                    body_style_name=body_style_name,
+                ):
+                    changed = True
                 table_paragraphs = set(text_root.findall(".//table:table-cell//text:p", ns))
                 for p in text_root.iterfind(".//text:p", ns):
                     raw = "".join(p.itertext()).strip()
@@ -310,6 +518,7 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                     if existing_style in (
                         center_style_name,
                         caption_style_name,
+                        table_intro_style_name,
                         table_text_style_name,
                         table_header_text_style,
                     ):
@@ -318,8 +527,20 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                         p.set(f"{{{ns['text']}}}style-name", table_text_style_name)
                         changed = True
                         continue
-                    if _is_standalone_figure_caption(raw) or raw.startswith(("Таблица ", "Table ")):
+                    if _is_standalone_figure_caption(raw):
                         p.set(f"{{{ns['text']}}}style-name", caption_style_name)
+                        changed = True
+                        continue
+                    if _is_table_preamble_paragraph(raw):
+                        p.set(f"{{{ns['text']}}}style-name", table_intro_style_name)
+                        changed = True
+                        continue
+                    if _is_table_title_paragraph(raw) or raw.startswith(("Таблица ", "Table ")):
+                        p.set(f"{{{ns['text']}}}style-name", caption_style_name)
+                        changed = True
+                        continue
+                    if _is_table_takeaway_paragraph(raw):
+                        p.set(f"{{{ns['text']}}}style-name", body_style_name)
                         changed = True
                         continue
                     if p.find("draw:frame", ns) is not None:
@@ -410,7 +631,7 @@ def _postprocess_odt_layout(odt_path: str) -> bool:
                             i += 1
                             continue
                         raw = "".join(node.itertext()).strip()
-                        is_table_caption = raw.startswith("Таблица ") or raw.startswith("Table ")
+                        is_table_caption = _is_table_title_paragraph(raw)
                         is_figure_caption = _is_standalone_figure_caption(raw)
                         if is_table_caption:
                             prev = children[i - 1] if i > 0 else None

@@ -1,5 +1,14 @@
 <!-- BLOCK: EXECUTIVE_SUMMARY -->
-The executive summary highlights model ranking, baseline deltas, and the main quality/speed trade-offs. Detailed tables and figures follow in later sections.
+The executive summary provides a table of main test metrics per run, confidence recommendations (A/B/C), and paired Ultralytics test figures (PR curve and confusion matrix) for visual comparison. Detailed analysis follows in later sections.
+
+<!-- BLOCK: NARR_PREAMBLE_EXEC_METRICS -->
+Main test metrics for each selected run for direct side-by-side comparison.
+
+<!-- BLOCK: NARR_PREAMBLE_EXEC_CONFIDENCE -->
+Recommended confidence thresholds for objectives A, B, and C per run.
+
+<!-- BLOCK: SUB_EXEC_ULTRA_PAIRS -->
+For each run: PR curve and normalized confusion matrix from Ultralytics test (one caption per pair).
 
 <!-- BLOCK: SUB_ULTRA_APPENDIX -->
 Additional Ultralytics test illustrations (PR/F1/P/R curves, etc.) excluded from the main body in compact mode to reduce visual noise.

@@ -22,6 +22,7 @@ from smartrain.services.analyze.report_markdown_formatting import (
     _justify_block,
     _md_table_from_df,
     _os_display_train_profile_row,
+    _pick_test_metric_columns,
     _pr_summary_takeaways,
     _read_template,
     _row_label_from_df,
@@ -310,6 +311,113 @@ def _find_table_rel(manifest: dict[str, Any], needle: str) -> str:
     return ""
 
 
+def _exec_runs_metrics_dataframe(df: pd.DataFrame, abbreviations: dict[str, str]) -> pd.DataFrame:
+    work = df.copy()
+    metric_cols = _pick_test_metric_columns(work)
+    run_col = next((c for c in ("run_name", "model", "run_dir") if c in work.columns), None)
+    keep: list[str] = []
+    if run_col:
+        keep.append(run_col)
+    for c in ("train_last_metrics/mAP50-95(B)", "train_last_metrics/mAP50(B)"):
+        if c in work.columns:
+            keep.append(c)
+    keep.extend(metric_cols)
+    if not keep:
+        work = _select_table_columns("runs_summary.csv", work)
+        return _abbrev_df(work, abbreviations)
+    out = work[keep].copy()
+    if run_col:
+        out[run_col] = out[run_col].astype(str).map(lambda x: _abbrev_label(x, abbreviations))
+    return out
+
+
+def _load_confidence_global_df(
+    report_root: str,
+    rel: str,
+    manifest: dict[str, Any],
+) -> pd.DataFrame | None:
+    df = _load_artifact_csv(report_root, rel)
+    if df is None or len(df) == 0:
+        return None
+    df = _filter_generic_table_for_selection(df, manifest)
+    if "level" in df.columns:
+        df = df[df["level"].astype(str) == "global"].copy()
+    return df if len(df) > 0 else None
+
+
+def _build_exec_confidence_summary_df(
+    manifest: dict[str, Any],
+    *,
+    report_root: str,
+    is_ru: bool,
+    abbreviations: dict[str, str],
+) -> pd.DataFrame | None:
+    conf_map = manifest.get("confidence_recommendations") if isinstance(manifest.get("confidence_recommendations"), dict) else {}
+    if not conf_map:
+        return None
+    by_objective: dict[str, pd.DataFrame] = {}
+    for objective in ("A", "B", "C"):
+        rel = str(conf_map.get(objective) or "")
+        if not rel:
+            continue
+        df = _load_confidence_global_df(report_root, rel, manifest)
+        if df is not None:
+            by_objective[objective] = df
+    if not by_objective:
+        return None
+    run_names: list[str] = []
+    seen: set[str] = set()
+    for df in by_objective.values():
+        if "run_name" not in df.columns:
+            continue
+        for name in df["run_name"].astype(str):
+            if name and name not in seen:
+                seen.add(name)
+                run_names.append(name)
+    if not run_names:
+        return None
+    rows: list[dict[str, Any]] = []
+    for run_name in run_names:
+        row: dict[str, Any] = {"run_name": _abbrev_label(run_name, abbreviations)}
+        for objective in ("A", "B", "C"):
+            df = by_objective.get(objective)
+            if df is None or "run_name" not in df.columns:
+                row[f"conf_{objective}"] = np.nan
+                row[f"f1_{objective}"] = np.nan
+                continue
+            sub = df[df["run_name"].astype(str) == run_name]
+            if len(sub) == 0:
+                row[f"conf_{objective}"] = np.nan
+                row[f"f1_{objective}"] = np.nan
+                continue
+            rec = sub.iloc[0]
+            row[f"conf_{objective}"] = rec.get("recommended_conf")
+            row[f"f1_{objective}"] = rec.get("f1", rec.get("target_metric"))
+        rows.append(row)
+    out = pd.DataFrame(rows)
+    if is_ru:
+        rename = {
+            "run_name": "Запуск",
+            "conf_A": "A: порог",
+            "f1_A": "A: F1",
+            "conf_B": "B: порог",
+            "f1_B": "B: F1",
+            "conf_C": "C: порог",
+            "f1_C": "C: F1",
+        }
+    else:
+        rename = {
+            "run_name": "Run",
+            "conf_A": "A: threshold",
+            "f1_A": "A: F1",
+            "conf_B": "B: threshold",
+            "f1_B": "B: F1",
+            "conf_C": "C: threshold",
+            "f1_C": "C: F1",
+        }
+    return out.rename(columns={k: v for k, v in rename.items() if k in out.columns})
+
+
 def _render_executive_summary_section(
     manifest: dict[str, Any],
     *,
@@ -317,150 +425,76 @@ def _render_executive_summary_section(
     tpl: dict[str, str],
     abbreviations: dict[str, str],
     table_no: int,
-) -> tuple[list[str], int]:
+    figure_no: int = 1,
+) -> tuple[list[str], int, int, set[str]]:
+    from smartrain.services.analyze.report_sections.report_common import emit_centered_table_block
+    from smartrain.services.analyze.report_sections.report_figures import render_executive_ultralytics_figure_pairs
+
     lines: list[str] = []
     report_root = str(manifest.get("_report_root") or "")
-    lang = "ru" if is_ru else "en"
     if tpl.get("EXECUTIVE_SUMMARY"):
         lines.extend(_justify_block(tpl["EXECUTIVE_SUMMARY"]))
-    leader_rel = _find_table_rel(manifest, "leaderboard")
-    lb_df = _load_artifact_csv(report_root, leader_rel)
-    if lb_df is not None and len(lb_df) > 0:
-        lb_df = _filter_generic_table_for_selection(lb_df, manifest)
-        keep = [c for c in ("model", "run_name", "composite_score", "quality_metric", "speed_metric") if c in lb_df.columns]
-        if "model" in lb_df.columns and "run_name" in lb_df.columns:
-            same = lb_df["model"].astype(str).equals(lb_df["run_name"].astype(str))
-            if same:
-                keep = [c for c in keep if c != "model"]
-        if keep:
-            lb_df = _abbrev_df(lb_df[keep], abbreviations)
-        lines.extend(_table_preamble_lines(leader_rel, lb_df, "leaderboard", is_ru, tpl))
-        lines.extend(_center_open())
-        lines.append("")
-        lines.append(
-            f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-            + ("Рейтинг моделей (сводка)" if is_ru else "Model leaderboard (summary)")
-            + "**"
+    rs_rel = _find_table_rel(manifest, "runs_summary")
+    rs_df = _load_artifact_csv(report_root, rs_rel)
+    if rs_df is not None and len(rs_df) > 0:
+        rs_df = _filter_runs_summary_for_selection(rs_df, manifest)
+        rs_df = _exec_runs_metrics_dataframe(rs_df, abbreviations)
+        preamble_lines = (
+            [str(tpl.get("NARR_PREAMBLE_EXEC_METRICS") or "").strip(), ""]
+            if tpl.get("NARR_PREAMBLE_EXEC_METRICS")
+            else []
         )
-        lines.append("")
-        lines.extend(_md_table_from_df(lb_df, abbreviations, limit=5, is_ru=is_ru))
-        lines.append("")
-        if leader_rel:
-            lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{leader_rel}`"))
-        lines.append("")
-        from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
-
-        _append_takeaway_bullets(
+        emit_centered_table_block(
             lines,
-            _table_takeaway_lines(
-                leader_rel,
-                lb_df,
-                "leaderboard",
-                is_ru,
-                manifest=manifest,
-                report_root=report_root,
-                tpl=tpl,
-            ),
+            table_no=table_no,
+            title=("Основные метрики по запускам" if is_ru else "Main metrics by run"),
+            preamble_lines=preamble_lines,
+            table_body_lines=_md_table_from_df(rs_df, abbreviations, limit=None, is_ru=is_ru),
+            source_rel=rs_rel or None,
+            takeaways=[],
+            is_ru=is_ru,
         )
-        lines.extend(_center_close())
         table_no += 1
-    delta_rel = _find_table_rel(manifest, "compare_delta")
-    delta_df = _load_artifact_csv(report_root, delta_rel)
-    if delta_df is not None and len(delta_df) > 0:
-        delta_df = _filter_generic_table_for_selection(delta_df, manifest)
-        delta_df = _select_table_columns(delta_rel, delta_df)
-        delta_df = _abbrev_df(delta_df, abbreviations)
-        lines.extend(_table_preamble_lines(delta_rel, delta_df, "compare_delta", is_ru, tpl))
-        lines.extend(_center_open())
-        lines.append("")
-        lines.append(
-            f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-            + ("Ключевые дельты относительно baseline" if is_ru else "Key deltas vs baseline")
-            + "**"
+    conf_df = _build_exec_confidence_summary_df(
+        manifest,
+        report_root=report_root,
+        is_ru=is_ru,
+        abbreviations=abbreviations,
+    )
+    if conf_df is not None and len(conf_df) > 0:
+        conf_source = ""
+        conf_map = manifest.get("confidence_recommendations") if isinstance(manifest.get("confidence_recommendations"), dict) else {}
+        for objective in ("A", "B", "C"):
+            rel = str(conf_map.get(objective) or "")
+            if rel:
+                conf_source = rel
+                break
+        preamble = (
+            [str(tpl.get("NARR_PREAMBLE_EXEC_CONFIDENCE") or "").strip(), ""]
+            if tpl.get("NARR_PREAMBLE_EXEC_CONFIDENCE")
+            else []
         )
-        lines.append("")
-        lines.extend(_md_table_from_df(delta_df, abbreviations, limit=5, is_ru=is_ru))
-        lines.append("")
-        if delta_rel:
-            lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{delta_rel}`"))
-        lines.append("")
-        from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
-
-        _append_takeaway_bullets(
+        emit_centered_table_block(
             lines,
-            _table_takeaway_lines(
-                delta_rel,
-                delta_df,
-                "compare_delta",
-                is_ru,
-                manifest=manifest,
-                report_root=report_root,
-                tpl=tpl,
-                abbreviations=abbreviations,
-            ),
+            table_no=table_no,
+            title=("Рекомендации confidence (A/B/C)" if is_ru else "Confidence recommendations (A/B/C)"),
+            preamble_lines=preamble,
+            table_body_lines=_md_table_from_df(conf_df, abbreviations, limit=None, is_ru=is_ru),
+            source_rel=conf_source or None,
+            takeaways=[],
+            is_ru=is_ru,
         )
-        lines.extend(_center_close())
         table_no += 1
-    sq_meta = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
-    sq_rel = _find_table_rel(manifest, "speed_quality")
-    if not sq_rel:
-        sq_rel = str(sq_meta.get("csv") or "")
-    sq_df = _load_artifact_csv(report_root, sq_rel)
-    if sq_df is not None and len(sq_df) > 0:
-        sq_df = _filter_generic_table_for_selection(sq_df, manifest)
-        keep = [
-            c
-            for c in (
-                "model",
-                "scatter_x_metric",
-                "scatter_x_value",
-                "scatter_y_metric",
-                "scatter_y_value",
-                "quality_source",
-            )
-            if c in sq_df.columns
-        ]
-        if keep:
-            sq_df = _abbrev_df(sq_df[keep], abbreviations)
-        lines.extend(_table_preamble_lines(sq_rel, sq_df, "speed_quality", is_ru, tpl))
-        lines.extend(_center_open())
-        lines.append("")
-        lines.append(
-            f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-            + ("Компромисс скорость–качество (сводка)" if is_ru else "Speed–quality trade-off (summary)")
-            + "**"
-        )
-        lines.append("")
-        lines.extend(_md_table_from_df(sq_df, abbreviations, limit=5, is_ru=is_ru))
-        lines.append("")
-        if sq_rel:
-            lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{sq_rel}`"))
-        lines.append("")
-        from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
-
-        _append_takeaway_bullets(
-            lines,
-            _table_takeaway_lines(
-                sq_rel,
-                sq_df,
-                "speed_quality",
-                is_ru,
-                manifest=manifest,
-                report_root=report_root,
-                tpl=tpl,
-                abbreviations=abbreviations,
-            ),
-        )
-        lines.extend(_center_close())
-        table_no += 1
-    exec_insights = _executive_insights_from_manifest(manifest, lang, abbreviations)
-    if exec_insights:
-        lines.append("### " + ("Ключевые выводы" if is_ru else "Key findings"))
-        lines.append("")
-        lines.extend(exec_insights)
-        lines.append("")
-    if tpl.get("CONCLUSION"):
-        lines.extend(_justify_block(tpl["CONCLUSION"]))
+    ultra_lines, figure_no, exec_ultra_images = render_executive_ultralytics_figure_pairs(
+        manifest,
+        report_root=report_root,
+        is_ru=is_ru,
+        abbreviations=abbreviations,
+        figure_no=figure_no,
+        tpl=tpl,
+        abbrev_label_fn=_abbrev_label,
+    )
+    lines.extend(ultra_lines)
     detail_ref = (
         "Подробные таблицы и графики — в разделах «Анализ качества», «Сравнение форматов» и «Анализ по классам»."
         if is_ru
@@ -468,7 +502,7 @@ def _render_executive_summary_section(
     )
     lines.extend(_justify_block(detail_ref))
     lines.append("")
-    return lines, table_no
+    return lines, table_no, figure_no, exec_ultra_images
 
 
 def _missing_reasons_from_manifest(manifest: dict[str, Any], lang: str) -> list[str]:

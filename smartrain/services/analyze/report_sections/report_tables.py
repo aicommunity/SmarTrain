@@ -36,7 +36,7 @@ from smartrain.core.runtime.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
+from smartrain.services.analyze.report_sections.report_common import append_table_footer, emit_centered_table_block
 
 def _infer_table_kind(
     rel: str,
@@ -205,18 +205,14 @@ def _append_speed_quality_table(
         return table_no
     if emit_before_table is not None:
         emit_before_table()
-    lines.extend(_table_preamble_lines(rel, df, "speed_quality", is_ru, tpl))
-    lines.extend(_center_open())
-    lines.append("")
-    lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(rel, is_ru)}**")
-    lines.append("")
-    lines.extend(_md_table_from_df(df, abbreviations, limit=None, is_ru=is_ru))
-    lines.append("")
-    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{rel}`"))
-    lines.append("")
-    _append_takeaway_bullets(
+    emit_centered_table_block(
         lines,
-        _table_takeaway_lines(
+        table_no=table_no,
+        title=_table_title(rel, is_ru),
+        preamble_lines=_table_preamble_lines(rel, df, "speed_quality", is_ru, tpl, table_no=table_no),
+        table_body_lines=_md_table_from_df(df, abbreviations, limit=None, is_ru=is_ru),
+        source_rel=rel,
+        takeaways=_table_takeaway_lines(
             rel,
             df,
             "speed_quality",
@@ -225,6 +221,6 @@ def _append_speed_quality_table(
             report_root=str(report_root),
             tpl=tpl,
         ),
+        is_ru=is_ru,
     )
-    lines.extend(_center_close())
     return table_no + 1

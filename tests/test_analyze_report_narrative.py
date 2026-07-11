@@ -67,5 +67,6 @@ def test_table_preamble_before_first_table_and_runs_summary_takeaways(tmp_path: 
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
     pos_tbl = ru_md.find("**Таблица")
     assert pos_tbl != -1
+    assert "**Таблица 1.**" in ru_md or "**Таблица 1." in ru_md
     assert "Сводка параметров" in ru_md or "runs_summary" in ru_md
     assert "лучший" in ru_md or "худший" in ru_md

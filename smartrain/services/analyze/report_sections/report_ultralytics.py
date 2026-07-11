@@ -10,27 +10,15 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+from smartrain.services.analyze.report_sections.report_common import (
+    append_numbered_table_title,
+    append_table_source,
+    finalize_centered_table,
+)
 from smartrain.services.analyze.report_markdown_formatting import (
-    MAX_NARRATIVE_BULLETS,
-    _abbrev_df,
-    _build_test_metrics_summary,
     _center_close,
     _center_open,
-    _column_display_name,
-    _filter_generic_table_for_selection,
-    _filter_runs_summary_for_selection,
-    _justify_block,
     _md_table_from_df,
-    _os_display_train_profile_row,
-    _pr_summary_takeaways,
-    _read_template,
-    _row_label_from_df,
-    _select_table_columns,
-    _should_hide_system_profile_table,
-    _speed_quality_takeaways,
-    _subsection_intro_lines,
-    _table_preamble_lines,
-    _table_takeaway_lines,
 )
 from smartrain.core.runtime.logging_config import get_logger
 
@@ -133,11 +121,8 @@ def _ultralytics_per_class_ap_table_lines(
     lines.extend(_center_open())
     lines.append("")
     title = "AP по классам (Ultralytics test)" if is_ru else "Per-class AP (Ultralytics test)"
-    lines.append(f"**{('Таблица' if is_ru else 'Table')} {table_no}. {title}**")
-    lines.append("")
+    append_numbered_table_title(lines, table_no, title, is_ru)
     lines.extend(_md_table_from_df(summary, {}, limit=None, is_ru=is_ru))
-    lines.append("")
-    lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{csv_rel}`"))
-    lines.append("")
-    lines.extend(_center_close())
+    append_table_source(lines, source_rel=csv_rel, is_ru=is_ru)
+    finalize_centered_table(lines, takeaways=[])
     return lines, table_no + 1
