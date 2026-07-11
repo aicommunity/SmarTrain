@@ -47,13 +47,17 @@ from smartrain.services.analyze.report_sections.report_figures import (
     _figure_caption,
     _figure_preamble_lines,
     _figure_takeaway_lines,
+    is_ultralytics_compact_main_image,
+    ultralytics_report_mode,
 )
 from smartrain.services.analyze.report_sections.report_manifest import (
     _build_run_model_abbreviations,
-    _insights_from_manifest,
     _missing_reasons_from_manifest,
     _path_for_report,
     _perf_not_collected_hint_lines,
+    _render_executive_summary_section,
+    _render_run_legend_table_lines,
+    _technical_insights_from_manifest,
 )
 from smartrain.services.analyze.report_sections.report_tables import (
     _append_speed_quality_table,
@@ -84,8 +88,9 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         "ultra": "Результаты Ultralytics test" if is_ru else "Ultralytics Test Results",
         "conclusion": "Заключение и рекомендации" if is_ru else "Conclusions and Actions",
     }
-    section_order = ["context", "quality", "speed", "format_compare", "per_class", "ultra", "conclusion", "exec"]
+    section_order = ["exec", "context", "quality", "format_compare", "per_class", "ultra", "appendix", "conclusion"]
     section_index = {k: i + 1 for i, k in enumerate(section_order)}
+    section_titles["appendix"] = "Приложение: полные иллюстрации Ultralytics" if is_ru else "Appendix: full Ultralytics illustrations"
     def _sec(key: str) -> str:
         return f"## {section_index[key]}. {section_titles[key]}"
     lines: list[str] = ["# " + ("Аналитический отчёт" if is_ru else "Analyze report"), ""]
@@ -128,6 +133,33 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             if os.path.isfile(os.path.join(str(report_root), _img)):
                 early_figure1_rel = _img
                 break
+    table_no = 1
+    figure_no = 1
+    appendix_images: list[tuple[str, dict[str, Any] | None]] = []
+    early_figure1_inserted = False
+    early_figure1_emitted_in_doc = False
+
+    lines.append(_sec("exec"))
+    lines.append("")
+    exec_lines, table_no = _render_executive_summary_section(
+        manifest,
+        is_ru=is_ru,
+        tpl=tpl,
+        abbreviations=abbreviations,
+        table_no=table_no,
+    )
+    lines.extend(exec_lines)
+    legend_lines, table_no = _render_run_legend_table_lines(
+        manifest,
+        is_ru=is_ru,
+        workspace_root=workspace_root,
+        table_no=table_no,
+    )
+    if legend_lines:
+        lines.append("### " + ("Справочник запусков" if is_ru else "Run reference"))
+        lines.append("")
+        lines.extend(legend_lines)
+    lines.append("")
     lines.append(_sec("context"))
     lines.append("")
     if tpl.get("INTRO"):
@@ -192,10 +224,6 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     fmt_cmp = manifest.get("format_comparison") if isinstance(manifest.get("format_comparison"), dict) else {}
     alias_rel = str(fmt_cmp.get("alias_legend_csv") or "")
     eval_rel = str(fmt_cmp.get("eval_csv") or "")
-    table_no = 1
-    figure_no = 1
-    early_figure1_inserted = False
-    early_figure1_emitted_in_doc = False
 
     def _emit_figure_1_before_table_11() -> None:
         nonlocal figure_no, early_figure1_inserted, early_figure1_emitted_in_doc
@@ -216,7 +244,14 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         lines.extend(_center_close())
         _append_takeaway_bullets(
             lines,
-            _figure_takeaway_lines(rel_e, is_ru, manifest=manifest, report_root=str(report_root), tpl=tpl),
+            _figure_takeaway_lines(
+                rel_e,
+                is_ru,
+                manifest=manifest,
+                report_root=str(report_root),
+                tpl=tpl,
+                abbreviations=abbreviations,
+            ),
         )
         early_figure1_emitted_in_doc = True
 
@@ -629,58 +664,30 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     + f"`{rel}`"
                 )
                 tk_kind = "system_profile_train" if "system_profile" in rel.lower() else kind_preview
+                takeaway_df = df
+                if "runs_summary" in rel.lower():
+                    test_summary = _build_test_metrics_summary(df, abbreviations)
+                    if len(test_summary) > 0:
+                        takeaway_df = test_summary
+                        tk_kind = "runs_summary_extra"
                 _append_takeaway_bullets(
                     lines,
-                    _table_takeaway_lines(rel, df, tk_kind, is_ru, manifest=manifest, report_root=str(report_root), tpl=tpl),
+                    _table_takeaway_lines(
+                        rel,
+                        takeaway_df,
+                        tk_kind,
+                        is_ru,
+                        manifest=manifest,
+                        report_root=str(report_root),
+                        tpl=tpl,
+                        abbreviations=abbreviations,
+                    ),
                 )
             except Exception as e:
                 lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
         else:
             lines.append(f"- {('Файл не найден' if is_ru else 'File not found')}")
         lines.extend(_center_close())
-        if "runs_summary" in rel.lower():
-            try:
-                full_df = pd.read_csv(abs_path)
-                full_df = _filter_runs_summary_for_selection(full_df, manifest)
-                test_summary = _build_test_metrics_summary(full_df, abbreviations)
-                if len(test_summary) > 0:
-                    _emit_figure_1_before_table_11()
-                    lines.extend(
-                        _table_preamble_lines(
-                            rel, test_summary, "runs_summary_extra", is_ru, tpl
-                        )
-                    )
-                    lines.extend(_center_open())
-                    lines.append("")
-                    lines.append(
-                        f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
-                        + ("Сводка test-метрик Ultralytics" if is_ru else "Ultralytics test metrics summary")
-                        + "**"
-                    )
-                    lines.append("")
-                    lines.extend(_md_table_from_df(test_summary, abbreviations, limit=None, is_ru=is_ru))
-                    lines.append("")
-                    lines.append(
-                        ("_Источник данных:_ " if is_ru else "_Data source:_ ")
-                        + f"`{rel}`"
-                    )
-                    lines.append("")
-                    _append_takeaway_bullets(
-                        lines,
-                        _table_takeaway_lines(
-                            rel,
-                            test_summary,
-                            "runs_summary_extra",
-                            is_ru,
-                            manifest=manifest,
-                            report_root=str(report_root),
-                            tpl=tpl,
-                        ),
-                    )
-                    lines.extend(_center_close())
-                    table_no += 1
-            except Exception as exc:
-                logger.warning("Failed to render report section: %s", exc)
     # images list may be extended by fallback PR image discovery.
     lines.append(_sec("format_compare"))
     lines.append("")
@@ -1558,9 +1565,13 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     lines.extend(pc_lines)
             if lines and not lines[-1] == "":
                 lines.append("")
+            ultra_mode = ultralytics_report_mode(manifest)
             for rel in item.get("images") or []:
                 rel = str(rel)
                 if not rel:
+                    continue
+                if ultra_mode == "compact" and not is_ultralytics_compact_main_image(rel):
+                    appendix_images.append((rel, item))
                     continue
                 lines.extend(_figure_preamble_lines(rel, is_ru, tpl))
                 lines.extend(_center_open())
@@ -1572,8 +1583,27 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.extend(_center_close())
                 _append_takeaway_bullets(
                     lines,
-                    _figure_takeaway_lines(rel, is_ru, manifest=manifest, report_root=str(report_root), tpl=tpl),
+                    _figure_takeaway_lines(
+                        rel,
+                        is_ru,
+                        manifest=manifest,
+                        report_root=str(report_root),
+                        tpl=tpl,
+                        abbreviations=abbreviations,
+                    ),
                 )
+            if ultra_mode == "compact":
+                deferred = [r for r, _ in appendix_images if r.startswith("artifacts/ultralytics-test/")]
+                if deferred:
+                    lines.append(
+                        "- "
+                        + (
+                            "Дополнительные кривые и диаграммы — в приложении ниже."
+                            if is_ru
+                            else "Additional curves and plots are in the appendix below."
+                        )
+                    )
+                    lines.append("")
     else:
         lines.append("- " + ("Артефакты Ultralytics test не обнаружены." if is_ru else "No Ultralytics test artifacts found."))
         lines.append("")
@@ -1601,44 +1631,61 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     else:
         lines.append("- " + ("Данных по cross-dataset тестам нет." if is_ru else "No cross-dataset test data found."))
         lines.append("")
+    if appendix_images:
+        lines.append(_sec("appendix"))
+        lines.append("")
+        lines.extend(
+            _subsection_intro_lines(
+                tpl,
+                "SUB_ULTRA_APPENDIX",
+            )
+        )
+        if not tpl.get("SUB_ULTRA_APPENDIX"):
+            lines.extend(
+                _justify_block(
+                    "Полный набор Ultralytics test-иллюстраций для каждого запуска."
+                    if is_ru
+                    else "Full Ultralytics test illustration set for each run."
+                )
+            )
+        for rel, item in appendix_images:
+            run_code = ""
+            if isinstance(item, dict):
+                run_code = str(item.get("run_code") or item.get("run_name") or "")
+            if run_code:
+                lines.append(f"#### {run_code}")
+                lines.append("")
+            lines.extend(_figure_preamble_lines(rel, is_ru, tpl))
+            lines.extend(_center_open())
+            lines.append("")
+            lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
+            lines.append(f"*{_figure_caption(rel, figure_no, abbreviations, manifest, is_ru)}*")
+            figure_no += 1
+            lines.append("")
+            lines.extend(_center_close())
+            _append_takeaway_bullets(
+                lines,
+                _figure_takeaway_lines(
+                    rel,
+                    is_ru,
+                    manifest=manifest,
+                    report_root=str(report_root),
+                    tpl=tpl,
+                    abbreviations=abbreviations,
+                ),
+            )
     lines.append(_sec("conclusion"))
     lines.append("")
     if leaderboard_rel:
-        lb_abs = os.path.join(report_root, leaderboard_rel)
-        if os.path.isfile(lb_abs):
-            try:
-                lb_df = pd.read_csv(lb_abs)
-                lb_df = _filter_generic_table_for_selection(lb_df, manifest)
-                lb_keep = [c for c in ("model", "run_name", "run_dir", "composite_score", "quality_metric", "speed_metric") if c in lb_df.columns]
-                if lb_keep:
-                    lb_df = lb_df[lb_keep]
-                lb_df = _abbrev_df(lb_df, abbreviations)
-                _emit_figure_1_before_table_11()
-                lines.extend(_table_preamble_lines(leaderboard_rel, lb_df, "leaderboard", is_ru, tpl))
-                lines.extend(_center_open())
-                lines.append("")
-                lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {_table_title(leaderboard_rel, is_ru)}**")
-                lines.append("")
-                lines.extend(_md_table_from_df(lb_df, abbreviations, limit=None, is_ru=is_ru))
-                lines.append("")
-                lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{leaderboard_rel}`"))
-                lines.append("")
-                _append_takeaway_bullets(
-                    lines,
-                    _table_takeaway_lines(
-                        leaderboard_rel,
-                        lb_df,
-                        "leaderboard",
-                        is_ru,
-                        manifest=manifest,
-                        report_root=str(report_root),
-                        tpl=tpl,
-                    ),
-                )
-                lines.extend(_center_close())
-                table_no += 1
-            except Exception as exc:
-                logger.warning("Failed to render report section: %s", exc)
+        lines.append(
+            "- "
+            + (
+                f"Итоговый рейтинг моделей см. в разделе «{section_titles['exec']}» (таблица leaderboard)."
+                if is_ru
+                else f"See model leaderboard in «{section_titles['exec']}»."
+            )
+        )
+        lines.append("")
     if tpl.get("CONCLUSION"):
         lines.extend(_justify_block(tpl["CONCLUSION"]))
     else:
@@ -1650,12 +1697,12 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         lines.append("")
         lines.extend(_subsection_intro_lines(tpl, "SUB_CONCLUSION_MISSING"))
         lines.extend(missing_lines)
-    lines.append("")
-    lines.append(_sec("exec"))
-    lines.append("")
-    if tpl.get("EXECUTIVE_SUMMARY"):
-        lines.extend(_justify_block(tpl["EXECUTIVE_SUMMARY"]))
-    lines.extend(_insights_from_manifest(manifest, lang))
+    tech_lines = _technical_insights_from_manifest(manifest, lang)
+    if tech_lines:
+        lines.append("")
+        lines.append("### " + ("Служебная информация" if is_ru else "Technical metadata"))
+        lines.append("")
+        lines.extend(tech_lines)
     lines.append("")
     lines.append("")
     return lines

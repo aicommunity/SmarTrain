@@ -1,5 +1,20 @@
 <!-- BLOCK: EXECUTIVE_SUMMARY -->
-This report captures the comparison of selected runs across quality and performance metrics. The objective is to provide a reproducible basis for model selection and deployment trade-offs.
+The executive summary highlights model ranking, baseline deltas, and the main quality/speed trade-offs. Detailed tables and figures follow in later sections.
+
+<!-- BLOCK: SUB_ULTRA_APPENDIX -->
+Additional Ultralytics test illustrations (PR/F1/P/R curves, etc.) excluded from the main body in compact mode to reduce visual noise.
+
+<!-- BLOCK: NARR_PREAMBLE_LEADERBOARD -->
+Summary ranking of runs by composite score combining quality and speed metrics.
+
+<!-- BLOCK: NARR_PREAMBLE_COMPARE_DELTA -->
+Shows metric deltas for each candidate relative to the baseline run.
+
+<!-- BLOCK: NARR_PREAMBLE_RUNS_SUMMARY -->
+Run parameters and aggregated test metrics for selected training runs.
+
+<!-- BLOCK: NARR_FIG_ULTRA -->
+Ultralytics test illustration for the run named in the caption (split and params included).
 
 <!-- BLOCK: INTRO -->
 The analysis is built on a consistent artifact and metric set. The report is organized into engineering-focused blocks: overall quality, computational cost, per-class stability, and implementation-level recommendations.

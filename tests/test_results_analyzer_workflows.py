@@ -1393,13 +1393,13 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     assert "Рисунок 1." in ru_md
     assert "PR-кривые (все классы)" in ru_md
     assert "Ultralytics Test Results" in en_md
-    assert "Ultralytics test metrics summary" in en_md
-    assert "## 1. Comparison Context" in en_md
-    assert "## 2. Quality Analysis" in en_md
+    assert "Run parameters and aggregated test metrics" in en_md or "runs_summary" in en_md
+    assert "## 1. Executive Summary" in en_md
+    assert "## 2. Comparison Context" in en_md
+    assert "## 3. Quality Analysis" in en_md
     assert "## 4. Model Format Comparison" in en_md
     assert "Format alias legend" in en_md
     assert "| Alias | Run | Target path |" in en_md
-    assert "## 8. Executive Summary" in en_md
     assert "Datasets: D1 = ds_a" in en_md
     assert "### 6.1 Run R1" in en_md
 

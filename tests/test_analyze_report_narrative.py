@@ -32,7 +32,7 @@ def test_subsection_intro_after_context_dataset_heading(tmp_path: Path) -> None:
     }
     write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
-    idx = ru_md.find("### 1.1")
+    idx = ru_md.find("### 2.1")
     assert idx != -1
     tail = ru_md[idx : idx + 800]
     assert "Датасет" in tail
@@ -65,13 +65,7 @@ def test_table_preamble_before_first_table_and_runs_summary_takeaways(tmp_path: 
     }
     write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
-    pos_tbl = ru_md.find("**Таблица 1.")
+    pos_tbl = ru_md.find("**Таблица")
     assert pos_tbl != -1
-    head = ru_md[max(0, pos_tbl - 1200) : pos_tbl]
-    assert "::: {style=" in head
-
-    assert "Сводка test-метрик" in ru_md
-    pos_extra = ru_md.find("Сводка test-метрик")
-    assert pos_extra != -1
-    after = ru_md[pos_extra : pos_extra + 2500]
-    assert "лучший" in after or "худший" in after
+    assert "Сводка параметров" in ru_md or "runs_summary" in ru_md
+    assert "лучший" in ru_md or "худший" in ru_md

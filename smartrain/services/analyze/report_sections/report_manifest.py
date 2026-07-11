@@ -79,7 +79,93 @@ def _ordered_abbreviations(manifest: dict[str, Any], abbreviations: dict[str, st
     return out
 
 
-def _insights_from_manifest(manifest: dict[str, Any], lang: str) -> list[str]:
+def _abbrev_label(value: Any, abbreviations: dict[str, str]) -> str:
+    s = str(value or "").strip()
+    if not s:
+        return s
+    if s in abbreviations:
+        return abbreviations[s]
+    base = os.path.basename(s.rstrip("/"))
+    return abbreviations.get(base, abbreviations.get(s, s))
+
+
+def _executive_insights_from_manifest(
+    manifest: dict[str, Any],
+    lang: str,
+    abbreviations: dict[str, str],
+) -> list[str]:
+    lines: list[str] = []
+    report_root = str(manifest.get("_report_root") or "")
+    sq = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
+    sq_meta = sq or {}
+    x_metric = str(sq_meta.get("scatter_x") or "scatter_x_value")
+    y_metric = str(sq_meta.get("scatter_y") or "scatter_y_value")
+    sq_csv_rel = str(sq_meta.get("csv") or "")
+    if report_root and sq_csv_rel:
+        sq_csv = os.path.join(report_root, sq_csv_rel)
+        if os.path.isfile(sq_csv):
+            try:
+                df = pd.read_csv(sq_csv)
+                x_col, y_col = "scatter_x_value", "scatter_y_value"
+                if {x_col, y_col, "model"}.issubset(df.columns):
+                    best = df.sort_values(y_col, ascending=False).iloc[0]
+                    fastest = df.sort_values(x_col, ascending=True).iloc[0]
+                    best_label = _abbrev_label(best["model"], abbreviations)
+                    fast_label = _abbrev_label(fastest["model"], abbreviations)
+                    x_name = _column_display_name(x_metric, lang == "ru")
+                    y_name = _column_display_name(y_metric, lang == "ru")
+                    if lang == "ru":
+                        lines.append(
+                            f"- Лучший компромисс качество/скорость: **{best_label}** ({y_name}={float(best[y_col]):.4f})."
+                        )
+                        lines.append(
+                            f"- Самый быстрый запуск: **{fast_label}** ({x_name}={float(fastest[x_col]):.2f})."
+                        )
+                    else:
+                        lines.append(
+                            f"- Best quality/speed trade-off: **{best_label}** ({y_name}={float(best[y_col]):.4f})."
+                        )
+                        lines.append(
+                            f"- Fastest run: **{fast_label}** ({x_name}={float(fastest[x_col]):.2f})."
+                        )
+            except Exception as exc:
+                logger.warning("Failed to render executive insight: %s", exc)
+    pr = manifest.get("pr_per_class") if isinstance(manifest.get("pr_per_class"), dict) else {}
+    pr_csv_rel = str((pr or {}).get("csv") or "")
+    if report_root and pr_csv_rel:
+        pr_csv = os.path.join(report_root, pr_csv_rel)
+        if os.path.isfile(pr_csv):
+            try:
+                pdf = pd.read_csv(pr_csv)
+                if {"model", "class_name", "ap"}.issubset(pdf.columns):
+                    pdf = pdf.copy()
+                    pdf["model"] = pdf["model"].astype(str).map(lambda x: _abbrev_label(x, abbreviations))
+                    grp = pdf.groupby(["model", "class_name"], as_index=False)["ap"].mean()
+                    if len(grp["model"].unique()) >= 2:
+                        best_model = (
+                            grp.groupby("model", as_index=False)["ap"]
+                            .mean()
+                            .sort_values("ap", ascending=False)
+                            .iloc[0]["model"]
+                        )
+                        pivot = grp.pivot(index="class_name", columns="model", values="ap")
+                        diff = pivot.sub(pivot[best_model], axis=0).drop(columns=[best_model], errors="ignore")
+                        if len(diff.columns) > 0:
+                            worst_class = diff.min(axis=1).idxmin()
+                            if lang == "ru":
+                                lines.append(
+                                    f"- Наибольшая деградация по классу относительно **{best_model}**: **{worst_class}**."
+                                )
+                            else:
+                                lines.append(
+                                    f"- Largest per-class degradation vs **{best_model}**: **{worst_class}**."
+                                )
+            except Exception as exc:
+                logger.warning("Failed to render executive insight: %s", exc)
+    return lines[:MAX_NARRATIVE_BULLETS]
+
+
+def _technical_insights_from_manifest(manifest: dict[str, Any], lang: str) -> list[str]:
     lines: list[str] = []
     ms = manifest.get("metric_sources") or {}
     sources = ms.get("sources") if isinstance(ms, dict) else {}
@@ -142,52 +228,195 @@ def _insights_from_manifest(manifest: dict[str, Any], lang: str) -> list[str]:
             f"- Recomputed metrics: **{recomputed}**, missing quality: **{missing}**, missing runtime: **{missing_runtime}**."
         )
         lines.append(f"- Single-run cache: **hit={hits}**, **miss={misses}**.")
-    sq = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
-    sq_csv_rel = str((sq or {}).get("csv") or "")
-    if report_root and sq_csv_rel:
-        sq_csv = os.path.join(report_root, sq_csv_rel)
-        if os.path.isfile(sq_csv):
-            try:
-                df = pd.read_csv(sq_csv)
-                x = "scatter_x_value"
-                y = "scatter_y_value"
-                if {x, y, "model"}.issubset(df.columns):
-                    best = df.sort_values(y, ascending=False).iloc[0]
-                    fastest = df.sort_values(x, ascending=True).iloc[0]
-                    if lang == "ru":
-                        lines.append(f"- Лучшая quality-модель: **{best['model']}** ({best[y]:.4f}).")
-                        lines.append(f"- Самая быстрая модель: **{fastest['model']}** ({fastest[x]:.2f}).")
-                    else:
-                        lines.append(f"- Best quality model: **{best['model']}** ({best[y]:.4f}).")
-                        lines.append(f"- Fastest model: **{fastest['model']}** ({fastest[x]:.2f}).")
-            except Exception as exc:
-                logger.warning("Failed to render report section: %s", exc)
-    pr = manifest.get("pr_per_class") if isinstance(manifest.get("pr_per_class"), dict) else {}
-    pr_csv_rel = str((pr or {}).get("csv") or "")
-    if report_root and pr_csv_rel:
-        pr_csv = os.path.join(report_root, pr_csv_rel)
-        if os.path.isfile(pr_csv):
-            try:
-                pdf = pd.read_csv(pr_csv)
-                if {"model", "class_name", "ap"}.issubset(pdf.columns):
-                    grp = pdf.groupby(["model", "class_name"], as_index=False)["ap"].mean()
-                    if len(grp["model"].unique()) >= 2:
-                        pivot = grp.pivot(index="class_name", columns="model", values="ap")
-                        best_model = grp.groupby("model", as_index=False)["ap"].mean().sort_values("ap", ascending=False).iloc[0]["model"]
-                        diff = pivot.sub(pivot[best_model], axis=0).drop(columns=[best_model], errors="ignore")
-                        if len(diff.columns) > 0:
-                            worst_class = diff.min(axis=1).idxmin()
-                            if lang == "ru":
-                                lines.append(
-                                    f"- Класс с наибольшей деградацией относительно **{best_model}**: **{worst_class}**."
-                                )
-                            else:
-                                lines.append(
-                                    f"- Most degraded class vs **{best_model}**: **{worst_class}**."
-                                )
-            except Exception as exc:
-                logger.warning("Failed to render report section: %s", exc)
     return lines
+
+
+def _insights_from_manifest(
+    manifest: dict[str, Any],
+    lang: str,
+    abbreviations: dict[str, str] | None = None,
+) -> list[str]:
+    abbreviations = abbreviations or {}
+    if isinstance(manifest.get("abbreviations"), dict):
+        abbreviations = {**manifest["abbreviations"], **abbreviations}
+    return _executive_insights_from_manifest(manifest, lang, abbreviations)
+
+
+def _render_run_legend_table_lines(
+    manifest: dict[str, Any],
+    *,
+    is_ru: bool,
+    workspace_root: str,
+    table_no: int,
+) -> tuple[list[str], int]:
+    rows = manifest.get("run_legend") or []
+    if not isinstance(rows, list) or not rows:
+        return [], table_no
+    lines: list[str] = []
+    lines.extend(_center_open())
+    lines.append("")
+    title = "Легенда запусков" if is_ru else "Run legend"
+    lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {title}**")
+    lines.append("")
+    if is_ru:
+        header = ["M", "Архитектура", "Датасет", "Эпохи", "Batch", "Путь run"]
+    else:
+        header = ["M", "Architecture", "Dataset", "Epochs", "Batch", "Run path"]
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("| " + " | ".join(["---"] * len(header)) + " |")
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        short_label = str(row.get("short_label") or f"M{row.get('index', '?')}")
+        architecture = str(row.get("architecture") or "-")
+        dataset_label = str(row.get("dataset_label") or row.get("dataset_name") or "-")
+        epochs = str(row.get("epochs") or "-")
+        batch = str(row.get("batch") or "-")
+        run_name = str(row.get("run_name") or "")
+        run_path = _path_for_report(str(row.get("run_dir") or run_name), workspace_root)
+        if run_path == run_name or not run_path:
+            run_display = f"`{run_name}`"
+        else:
+            run_display = f"`{run_path}`"
+        role = str(row.get("role") or "")
+        m_cell = f"**{short_label}**" + (f" ({'базовый' if is_ru else 'baseline'})" if role == "baseline" else "")
+        lines.append(
+            "| "
+            + " | ".join([m_cell, architecture, dataset_label, epochs, batch, run_display])
+            + " |"
+        )
+    lines.append("")
+    lines.extend(_center_close())
+    return lines, table_no + 1
+
+
+def _load_artifact_csv(report_root: str, rel: str) -> pd.DataFrame | None:
+    if not report_root or not rel:
+        return None
+    path = os.path.join(report_root, rel)
+    if not os.path.isfile(path):
+        return None
+    try:
+        return pd.read_csv(path)
+    except Exception as exc:
+        logger.warning("Failed to read artifact csv %s: %s", rel, exc)
+        return None
+
+
+def _find_table_rel(manifest: dict[str, Any], needle: str) -> str:
+    for rel in manifest.get("tables") or []:
+        if isinstance(rel, str) and needle in rel.lower():
+            return rel
+    return ""
+
+
+def _render_executive_summary_section(
+    manifest: dict[str, Any],
+    *,
+    is_ru: bool,
+    tpl: dict[str, str],
+    abbreviations: dict[str, str],
+    table_no: int,
+) -> tuple[list[str], int]:
+    lines: list[str] = []
+    report_root = str(manifest.get("_report_root") or "")
+    lang = "ru" if is_ru else "en"
+    if tpl.get("EXECUTIVE_SUMMARY"):
+        lines.extend(_justify_block(tpl["EXECUTIVE_SUMMARY"]))
+    leader_rel = _find_table_rel(manifest, "leaderboard")
+    lb_df = _load_artifact_csv(report_root, leader_rel)
+    if lb_df is not None and len(lb_df) > 0:
+        lb_df = _filter_generic_table_for_selection(lb_df, manifest)
+        keep = [c for c in ("model", "run_name", "composite_score", "quality_metric", "speed_metric") if c in lb_df.columns]
+        if "model" in lb_df.columns and "run_name" in lb_df.columns:
+            same = lb_df["model"].astype(str).equals(lb_df["run_name"].astype(str))
+            if same:
+                keep = [c for c in keep if c != "model"]
+        if keep:
+            lb_df = _abbrev_df(lb_df[keep], abbreviations)
+        lines.extend(_table_preamble_lines(leader_rel, lb_df, "leaderboard", is_ru, tpl))
+        lines.extend(_center_open())
+        lines.append("")
+        lines.append(
+            f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+            + ("Рейтинг моделей (сводка)" if is_ru else "Model leaderboard (summary)")
+            + "**"
+        )
+        lines.append("")
+        lines.extend(_md_table_from_df(lb_df, abbreviations, limit=5, is_ru=is_ru))
+        lines.append("")
+        if leader_rel:
+            lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{leader_rel}`"))
+        lines.append("")
+        from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
+
+        _append_takeaway_bullets(
+            lines,
+            _table_takeaway_lines(
+                leader_rel,
+                lb_df,
+                "leaderboard",
+                is_ru,
+                manifest=manifest,
+                report_root=report_root,
+                tpl=tpl,
+            ),
+        )
+        lines.extend(_center_close())
+        table_no += 1
+    delta_rel = _find_table_rel(manifest, "compare_delta")
+    delta_df = _load_artifact_csv(report_root, delta_rel)
+    if delta_df is not None and len(delta_df) > 0:
+        delta_df = _filter_generic_table_for_selection(delta_df, manifest)
+        delta_df = _select_table_columns(delta_rel, delta_df)
+        delta_df = _abbrev_df(delta_df, abbreviations)
+        lines.extend(_table_preamble_lines(delta_rel, delta_df, "compare_delta", is_ru, tpl))
+        lines.extend(_center_open())
+        lines.append("")
+        lines.append(
+            f"**{'Таблица' if is_ru else 'Table'} {table_no}. "
+            + ("Ключевые дельты относительно baseline" if is_ru else "Key deltas vs baseline")
+            + "**"
+        )
+        lines.append("")
+        lines.extend(_md_table_from_df(delta_df, abbreviations, limit=5, is_ru=is_ru))
+        lines.append("")
+        if delta_rel:
+            lines.append((("_Источник данных:_ " if is_ru else "_Data source:_ ") + f"`{delta_rel}`"))
+        lines.append("")
+        from smartrain.services.analyze.report_sections.report_common import _append_takeaway_bullets
+
+        _append_takeaway_bullets(
+            lines,
+            _table_takeaway_lines(
+                delta_rel,
+                delta_df,
+                "compare_delta",
+                is_ru,
+                manifest=manifest,
+                report_root=report_root,
+                tpl=tpl,
+                abbreviations=abbreviations,
+            ),
+        )
+        lines.extend(_center_close())
+        table_no += 1
+    exec_insights = _executive_insights_from_manifest(manifest, lang, abbreviations)
+    if exec_insights:
+        lines.append("### " + ("Ключевые выводы" if is_ru else "Key findings"))
+        lines.append("")
+        lines.extend(exec_insights)
+        lines.append("")
+    if tpl.get("CONCLUSION"):
+        lines.extend(_justify_block(tpl["CONCLUSION"]))
+    detail_ref = (
+        "Подробные таблицы и графики — в разделах «Анализ качества», «Сравнение форматов» и «Анализ по классам»."
+        if is_ru
+        else "Detailed tables and figures are in Quality, Format comparison, and Per-class sections."
+    )
+    lines.extend(_justify_block(detail_ref))
+    lines.append("")
+    return lines, table_no
 
 
 def _missing_reasons_from_manifest(manifest: dict[str, Any], lang: str) -> list[str]:

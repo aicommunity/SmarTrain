@@ -62,6 +62,8 @@ def _infer_table_kind(
         return "format_metrics"
     if "speed_quality" in low and low.endswith(".csv"):
         return "speed_quality"
+    if "compare_delta" in low:
+        return "compare_delta"
     if "leaderboard" in low:
         return "leaderboard"
     if "confidence_recommendations" in low or ("confidence" in low and "recommend" in low):

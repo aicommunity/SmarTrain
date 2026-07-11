@@ -247,6 +247,26 @@ def _drop_all_nan_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df[keep].copy() if keep else df.copy()
 
 
+def _drop_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or len(df.columns) < 2:
+        return df
+    out = df.copy()
+    drop: list[str] = []
+    cols = list(out.columns)
+    for i, left in enumerate(cols):
+        if left in drop:
+            continue
+        left_series = out[left].astype(str)
+        for right in cols[i + 1 :]:
+            if right in drop:
+                continue
+            if left_series.equals(out[right].astype(str)):
+                drop.append(right)
+    if drop:
+        out = out.drop(columns=[c for c in drop if c in out.columns])
+    return out
+
+
 def _should_drop_split_column(rel: str, df: pd.DataFrame) -> bool:
     if "split" not in df.columns or len(df) == 0:
         return False
@@ -489,7 +509,7 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
         if not chosen:
             chosen = cols[:8]
     out = df[chosen].copy()
-    return out
+    return _drop_duplicate_columns(out)
 
 
 def _build_pr_per_class_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -697,7 +717,7 @@ def _center_close() -> list[str]:
 MAX_NARRATIVE_BULLETS = 5
 MAX_SPREAD_METRICS = 3
 
-_ID_COLS_FOR_ROW_LABEL = ("run_name", "alias", "model", "run", "run_dir")
+_ID_COLS_FOR_ROW_LABEL = ("run_name", "alias", "model", "run", "run_dir", "baseline", "other")
 _NUMERIC_TAKEAWAY_SKIP = frozenset(
     {
         "run_name",
@@ -729,6 +749,8 @@ def _preamble_template_key(kind: str) -> str:
         return "NARR_PREAMBLE_ALIAS"
     if kind == "eval_settings":
         return "NARR_PREAMBLE_EVAL"
+    if kind in ("leaderboard", "compare_delta", "speed_quality", "format_metrics", "runs_summary"):
+        return f"NARR_PREAMBLE_{kind.upper()}"
     return "NARR_PREAMBLE_GENERIC"
 
 
@@ -740,7 +762,12 @@ def _table_preamble_lines(
     tpl: dict[str, str],
 ) -> list[str]:
     key = _preamble_template_key(kind)
-    static = str(tpl.get(key) or tpl.get("NARR_PREAMBLE_GENERIC") or "").strip()
+    static = str(tpl.get(key) or "").strip()
+    if not static and key != "NARR_PREAMBLE_GENERIC":
+        static = str(tpl.get("NARR_PREAMBLE_GENERIC") or "").strip()
+    if kind not in ("alias_legend", "eval_settings") and key == "NARR_PREAMBLE_GENERIC":
+        # Skip generic boilerplate for routine tables; title + takeaways are enough.
+        return []
     out: list[str] = []
     if static:
         out.extend(_justify_block(static))
@@ -760,7 +787,30 @@ def _row_label_from_df(df: pd.DataFrame, idx: Any) -> str:
     return str(idx)
 
 
-def _numeric_spread_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
+def _compare_delta_takeaways(df: pd.DataFrame, is_ru: bool, abbreviations: dict[str, str] | None = None) -> list[str]:
+    abbreviations = abbreviations or {}
+    lines: list[str] = []
+    if df is None or len(df) == 0:
+        return lines
+    metric_cols = [c for c in df.columns if c not in {"baseline", "other", "run_name", "run_dir", "model"}]
+    for col in metric_cols[:3]:
+        s = pd.to_numeric(df[col], errors="coerce")
+        if s.notna().sum() == 0:
+            continue
+        idx = s.idxmax()
+        row = df.loc[idx]
+        other = _abbrev_value(row.get("other", row.get("run_name", "?")), abbreviations)
+        delta = float(s.loc[idx])
+        lab = _column_display_name(col, is_ru)
+        if is_ru:
+            lines.append(f"- Наибольший выигрыш по **{lab}**: **{other}** ({delta:+.4f}).")
+        else:
+            lines.append(f"- Largest gain on **{lab}**: **{other}** ({delta:+.4f}).")
+    return lines[:MAX_NARRATIVE_BULLETS]
+
+
+def _numeric_spread_takeaways(df: pd.DataFrame, is_ru: bool, abbreviations: dict[str, str] | None = None) -> list[str]:
+    abbreviations = abbreviations or {}
     lines: list[str] = []
     if df is None or len(df) < 2:
         return lines
@@ -780,8 +830,8 @@ def _numeric_spread_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
     candidates.sort(key=lambda x: -x[1])
     label_fn = lambda c: _column_display_name(c, is_ru)
     for col, _sp, imax, imin, vmax, vmin in candidates[:MAX_SPREAD_METRICS]:
-        rmax = _row_label_from_df(df, imax)
-        rmin = _row_label_from_df(df, imin)
+        rmax = _abbrev_value(_row_label_from_df(df, imax), abbreviations)
+        rmin = _abbrev_value(_row_label_from_df(df, imin), abbreviations)
         lab = label_fn(col)
         if is_ru:
             lines.append(f"- {lab}: максимум у **{rmax}** ({vmax:.4g}), минимум у **{rmin}** ({vmin:.4g}).")
@@ -837,7 +887,14 @@ def _perf_status_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
     return lines
 
 
-def _speed_quality_takeaways(df: pd.DataFrame, is_ru: bool, abbreviations: dict[str, str] | None = None) -> list[str]:
+def _speed_quality_takeaways(
+    df: pd.DataFrame,
+    is_ru: bool,
+    abbreviations: dict[str, str] | None = None,
+    *,
+    scatter_x_metric: str = "avg_inference_ms_per_frame",
+    scatter_y_metric: str = "mAP50-95",
+) -> list[str]:
     lines: list[str] = []
     abbreviations = abbreviations or {}
     if df is None or len(df) == 0:
@@ -849,19 +906,21 @@ def _speed_quality_takeaways(df: pd.DataFrame, is_ru: bool, abbreviations: dict[
         if sy.notna().sum() > 0:
             best = df.loc[sy.idxmax()]
             model_label = abbreviations.get(str(best[mcol]), str(best[mcol]))
+            y_name = _column_display_name(scatter_y_metric, is_ru)
             if is_ru:
-                lines.append(f"- Лучший компромисс по качеству (**{y}**): **{model_label}** ({float(sy.max()):.4f}).")
+                lines.append(f"- Лучший компромисс по качеству (**{y_name}**): **{model_label}** ({float(sy.max()):.4f}).")
             else:
-                lines.append(f"- Best quality (**{y}**): **{model_label}** ({float(sy.max()):.4f}).")
+                lines.append(f"- Best quality (**{y_name}**): **{model_label}** ({float(sy.max()):.4f}).")
     if mcol and x in df.columns:
         sx = pd.to_numeric(df[x], errors="coerce")
         if sx.notna().sum() > 0:
             fast = df.loc[sx.idxmin()]
             model_label = abbreviations.get(str(fast[mcol]), str(fast[mcol]))
+            x_name = _column_display_name(scatter_x_metric, is_ru)
             if is_ru:
-                lines.append(f"- Наиболее быстрый по **{x}**: **{model_label}** ({float(sx.min()):.4f}).")
+                lines.append(f"- Наиболее быстрый по **{x_name}**: **{model_label}** ({float(sx.min()):.4f}).")
             else:
-                lines.append(f"- Fastest on **{x}**: **{model_label}** ({float(sx.min()):.4f}).")
+                lines.append(f"- Fastest on **{x_name}**: **{model_label}** ({float(sx.min()):.4f}).")
     return lines[:MAX_NARRATIVE_BULLETS]
 
 
@@ -883,7 +942,8 @@ def _leaderboard_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
     return lines[:MAX_NARRATIVE_BULLETS]
 
 
-def _pr_summary_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
+def _pr_summary_takeaways(df: pd.DataFrame, is_ru: bool, abbreviations: dict[str, str] | None = None) -> list[str]:
+    abbreviations = abbreviations or {}
     lines: list[str] = []
     if df is None or len(df) == 0:
         return lines
@@ -892,13 +952,13 @@ def _pr_summary_takeaways(df: pd.DataFrame, is_ru: bool) -> list[str]:
         if len(g) > 0:
             worst = g.sort_values("ap", ascending=True).iloc[0]
             cn = str(worst["class_name"])
-            md = str(worst["model"])
+            md = _abbrev_value(worst["model"], abbreviations)
             apv = float(worst["ap"])
             if is_ru:
                 lines.append(f"- Наименьший средний AP: класс **{cn}**, модель **{md}** ({apv:.4f}).")
             else:
                 lines.append(f"- Lowest mean AP: class **{cn}**, model **{md}** ({apv:.4f}).")
-    lines.extend(_numeric_spread_takeaways(df, is_ru))
+    lines.extend(_numeric_spread_takeaways(df, is_ru, abbreviations))
     return lines[:MAX_NARRATIVE_BULLETS]
 
 
@@ -934,33 +994,50 @@ def _table_takeaway_lines(
     manifest: dict[str, Any],
     report_root: str,
     tpl: dict[str, str],
+    abbreviations: dict[str, str] | None = None,
 ) -> list[str]:
     lines: list[str] = []
+    abbreviations = abbreviations or {}
+    if isinstance(manifest.get("abbreviations"), dict):
+        abbreviations = {**manifest["abbreviations"], **abbreviations}
     no_data = str(tpl.get("NARR_TAKEAWAY_NO_DATA") or "").strip()
     if df is None or len(df) == 0:
         if no_data:
             lines.append(f"- {no_data}")
         return lines[:MAX_NARRATIVE_BULLETS]
 
+    if kind == "compare_delta":
+        lines.extend(_compare_delta_takeaways(df, is_ru, abbreviations))
+        return lines[:MAX_NARRATIVE_BULLETS]
+
     if kind == "runs_summary_extra":
         lines.extend(_quality_metric_comments(df, is_ru))
         if len(lines) >= 2:
             return lines[:MAX_NARRATIVE_BULLETS]
-        lines.extend(_numeric_spread_takeaways(df, is_ru))
+        lines.extend(_numeric_spread_takeaways(df, is_ru, abbreviations))
         return lines[:MAX_NARRATIVE_BULLETS]
 
     if kind in ("format_metrics", "format_metrics_pt_uni"):
         lines.extend(_format_metrics_takeaways(df, is_ru))
-        lines.extend(_numeric_spread_takeaways(df, is_ru))
+        lines.extend(_numeric_spread_takeaways(df, is_ru, abbreviations))
         return lines[:MAX_NARRATIVE_BULLETS]
 
     if kind.startswith("perf_"):
         lines.extend(_perf_status_takeaways(df, is_ru))
-        lines.extend(_numeric_spread_takeaways(df, is_ru))
+        lines.extend(_numeric_spread_takeaways(df, is_ru, abbreviations))
         return lines[:MAX_NARRATIVE_BULLETS]
 
     if kind == "speed_quality":
-        lines.extend(_speed_quality_takeaways(df, is_ru))
+        sq = manifest.get("speed_quality") if isinstance(manifest.get("speed_quality"), dict) else {}
+        lines.extend(
+            _speed_quality_takeaways(
+                df,
+                is_ru,
+                abbreviations,
+                scatter_x_metric=str(sq.get("scatter_x") or "avg_inference_ms_per_frame"),
+                scatter_y_metric=str(sq.get("scatter_y") or "mAP50-95"),
+            )
+        )
         return lines[:MAX_NARRATIVE_BULLETS]
 
     if kind == "leaderboard":
@@ -968,7 +1045,7 @@ def _table_takeaway_lines(
         return lines[:MAX_NARRATIVE_BULLETS]
 
     if kind == "pr_per_class_summary":
-        lines.extend(_pr_summary_takeaways(df, is_ru))
+        lines.extend(_pr_summary_takeaways(df, is_ru, abbreviations))
         return lines[:MAX_NARRATIVE_BULLETS]
 
     if kind in ("system_profile_train_sparse", "system_profile_train_cards", "test_system_profile", "system_profile_train"):
@@ -984,7 +1061,7 @@ def _table_takeaway_lines(
                 lines.append(f"- Unique aliases: **{nu}**.")
         return lines[:MAX_NARRATIVE_BULLETS]
 
-    lines.extend(_numeric_spread_takeaways(df, is_ru))
+    lines.extend(_numeric_spread_takeaways(df, is_ru, abbreviations))
     if not lines and no_data:
         lines.append(f"- {no_data}")
     return lines[:MAX_NARRATIVE_BULLETS]
