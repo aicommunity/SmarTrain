@@ -30,6 +30,8 @@ from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.workflow_adapters.inference_runtime_api import (
     find_yaml_file,
     infer_img_size_from_model_context,
+    infer_img_size_with_source,
+    resolve_inference_imgsz,
     resolve_dataset_root_for_entry,
     _clamp_crop,
     _full_image_crop,
@@ -231,6 +233,29 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
 
 def infer_img_size_from_model_context_safe(model_path: Path) -> int | None:
     return infer_img_size_from_model_context(model_path)
+
+
+def infer_img_size_with_source_safe(model_path: Path) -> tuple[int | None, str]:
+    return infer_img_size_with_source(model_path)
+
+
+def apply_inference_imgsz_from_model(model_path: Path, args: argparse.Namespace) -> tuple[int, str]:
+    """Resolve args.img_size from model context unless explicitly set on CLI."""
+    from smartrain.workflows.models.model_context import FALLBACK_IMGSZ_SOURCE
+
+    explicit = getattr(args, "img_size", None)
+    imgsz, source = resolve_inference_imgsz(model_path, explicit=explicit)
+    args.img_size = int(imgsz)
+    args.img_size_source = source
+    if explicit is None:
+        if source == FALLBACK_IMGSZ_SOURCE:
+            print(
+                f"[WARN] Model input size not found. Using fallback {imgsz}. "
+                "Set --img-size to override."
+            )
+        else:
+            print(f"[INFO] Resolved input size: {imgsz} (source: {source})")
+    return int(imgsz), source
 
 
 def discover_model_entries(layout: WorkspaceLayout) -> list[tuple[str, str, str]]:
@@ -462,6 +487,7 @@ def build_report(
         "parameters": {
             "conf": args.conf,
             "img_size": int(args.img_size),
+            "img_size_source": str(getattr(args, "img_size_source", "") or ""),
             "device": args.device,
             "half": bool(args.half),
             "limit": int(args.limit),

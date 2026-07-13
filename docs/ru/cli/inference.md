@@ -95,6 +95,19 @@ smartrain inference --weights yolo11s-seg.pt --data-mode folder --source-dir ./i
 - Устройство по умолчанию: `GPU 0`, если CUDA доступна, иначе `cpu`.
 - Те же правила выбора применяются в `train` и `test`.
 
+## Разрешение входа (`--img-size`)
+
+Если `--img-size` не задан, inference определяет размер входа из контекста модели (в порядке приоритета):
+
+1. `training_metadata.json`, `args.yaml` и другие metadata-файлы рядом с моделью или в родительских каталогах до `models/`
+2. sidecar `*.meta.json` рядом с весами
+3. имя артефакта с токеном `_imgsz{N}x{N}_` (например ONNX после `model convert`)
+4. статическая H/W входа ONNX-графа
+
+Если ни один источник не найден, используется fallback **640** с предупреждением `[WARN]`. Явный `--img-size` всегда имеет приоритет (`img_size_source: cli`).
+
+В `inference_results.json` → `parameters.img_size_source` сохраняется метка источника (например `training_metadata`, `artifact_filename`, `fallback_640`).
+
 ## Контракт метрик производительности
 
 Отчет содержит dual-профиль в `performance`:

@@ -112,6 +112,19 @@ smartrain inference --weights runs/ds/run_seg/models/best-seg.pt --data-mode fol
 - Default device is `GPU 0` when CUDA is available, otherwise `cpu`.
 - The same rules are used in `train` and `test`.
 
+## Input resolution (`--img-size`)
+
+When `--img-size` is omitted, inference resolves input size from model context (priority order):
+
+1. `training_metadata.json`, `args.yaml`, and other metadata files next to the model or in ancestor directories up to `models/`
+2. sidecar `*.meta.json` next to the weights file
+3. artifact filename token `_imgsz{N}x{N}_` (e.g. ONNX after `model convert`)
+4. static ONNX graph input H/W
+
+If no source is found, fallback **640** is used with a `[WARN]` message. Explicit `--img-size` always wins (`img_size_source: cli`).
+
+`inference_results.json` → `parameters.img_size_source` records the resolved source label (e.g. `training_metadata`, `artifact_filename`, `fallback_640`).
+
 ## Performance contract
 
 Report contains dual profile under `performance`:

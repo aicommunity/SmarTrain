@@ -39,7 +39,7 @@ from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 from smartrain.services.inference_runtime_helpers import (
     build_report,
-    infer_img_size_from_model_context_safe,
+    apply_inference_imgsz_from_model,
     predict_roi_crop,
     resolve_inference_source,
     resolve_model,
@@ -405,9 +405,19 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         except Exception as e:
             print(f"[ERROR] Failed to resolve model: {e}", file=sys.stderr)
             return 1, False
-    if args.img_size is None:
-        inferred = infer_img_size_from_model_context_safe(model_path) if isinstance(model_path, Path) else None
-        args.img_size = int(inferred) if inferred is not None else 640
+    if args.img_size is None and isinstance(model_path, Path):
+        apply_inference_imgsz_from_model(model_path, args)
+    elif args.img_size is None:
+        from smartrain.workflows.models.model_context import DEFAULT_INFERENCE_IMGSZ, FALLBACK_IMGSZ_SOURCE
+
+        args.img_size = DEFAULT_INFERENCE_IMGSZ
+        args.img_size_source = FALLBACK_IMGSZ_SOURCE
+        print(
+            f"[WARN] Model input size not found. Using fallback {DEFAULT_INFERENCE_IMGSZ}. "
+            "Set --img-size to override."
+        )
+    else:
+        args.img_size_source = "cli"
 
     if ext_provider:
         location = get_provider_location(ext_provider)
@@ -486,6 +496,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             "parameters": {
                 "conf": args.conf,
                 "img_size": int(args.img_size),
+                "img_size_source": str(getattr(args, "img_size_source", "") or ""),
                 "device": args.device,
                 "data_mode": args.data_mode,
             },

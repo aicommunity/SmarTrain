@@ -28,10 +28,11 @@ from smartrain.services.inference_runtime_helpers import (
     ON_EMPTY_MODES,
     ROI_POLICIES,
     discover_model_entries,
-    infer_img_size_from_model_context_safe,
+    infer_img_size_with_source_safe,
     load_catalog,
     resolve_model,
 )
+from smartrain.workflows.models.model_context import DEFAULT_INFERENCE_IMGSZ, FALLBACK_IMGSZ_SOURCE
 
 # Test / integration imports (canonical model resolution).
 _resolve_model = resolve_model
@@ -89,11 +90,13 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         args.weights = prompt_text("Weights path", default="models").strip()
 
     inferred_imgsz = None
+    inferred_imgsz_source = FALLBACK_IMGSZ_SOURCE
     try:
         mpath, _mname, _msrc = resolve_model(args, layout)
-        inferred_imgsz = infer_img_size_from_model_context_safe(mpath)
+        inferred_imgsz, inferred_imgsz_source = infer_img_size_with_source_safe(mpath)
     except Exception:
         inferred_imgsz = None
+        inferred_imgsz_source = FALLBACK_IMGSZ_SOURCE
 
     args.data_mode = prompt_choice("Data mode", list(DATA_MODES), default=args.data_mode)
     if args.data_mode == "folder":
@@ -122,8 +125,23 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         args.source_dir = None
 
     args.limit = int(prompt_text("Images limit (0=all)", default=str(args.limit)).strip() or str(args.limit))
-    img_default = inferred_imgsz if inferred_imgsz is not None else (args.img_size if args.img_size is not None else 640)
-    args.img_size = int(prompt_text("Input resolution (--img-size)", default=str(img_default)).strip() or str(img_default))
+    if args.img_size is None:
+        if inferred_imgsz is not None:
+            print(f"[INFO] Resolved input size: {inferred_imgsz} (source: {inferred_imgsz_source})")
+        else:
+            print(
+                f"[WARN] Model input size not found. Using fallback {DEFAULT_INFERENCE_IMGSZ}. "
+                "Set --img-size to override."
+            )
+    img_default = (
+        args.img_size
+        if args.img_size is not None
+        else (inferred_imgsz if inferred_imgsz is not None else DEFAULT_INFERENCE_IMGSZ)
+    )
+    img_source = inferred_imgsz_source if inferred_imgsz is not None else FALLBACK_IMGSZ_SOURCE
+    chosen = prompt_text("Input resolution (--img-size)", default=str(img_default)).strip() or str(img_default)
+    args.img_size = int(chosen)
+    args.img_size_source = img_source if str(args.img_size) == str(img_default) else "cli"
     args.conf = float(prompt_text("Inference conf", default=str(args.conf)).strip() or str(args.conf))
     args.device = prompt_device_selection(
         title="inference devices",
