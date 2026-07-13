@@ -49,11 +49,14 @@ This section describes class-level quality heterogeneity and identifies AP/PR bo
 <!-- BLOCK: CONCLUSION -->
 Conclusion: model choice should follow the target operating profile and SLA constraints. For latency-critical production paths, prioritize predictable speed with acceptable quality; for quality-critical paths, prioritize metric maximum with controlled per-class degradation and bounded compute cost.
 
+<!-- BLOCK: SUB_CONTEXT_RUNS -->
+This subsection lists the baseline run and comparison candidates with paths to run directories. Abbreviated M* labels match the run legend at the start of the report.
+
 <!-- BLOCK: SUB_CONTEXT_DATASET -->
 This subsection lists datasets involved in the comparison using the report’s abbreviated legend. It provides a quick anchor for which data underlies the metrics below.
 
 <!-- BLOCK: SUB_CONTEXT_MODELS -->
-Next we enumerate the baseline run and candidates, plus tables for format aliases and eval settings. This defines the artifact namespace referenced in later sections.
+The following tables define format comparison aliases and eval settings. They establish the artifact namespace referenced in later sections.
 
 <!-- BLOCK: SUB_QUALITY_GENERAL -->
 This subsection collects quality summary tables: per-run aggregates, recomputed metrics, and optional baseline deltas. It lets you compare runs without digging into raw logs.

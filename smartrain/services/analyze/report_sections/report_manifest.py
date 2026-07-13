@@ -260,9 +260,9 @@ def _render_run_legend_table_lines(
     lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {title}**")
     lines.append("")
     if is_ru:
-        header = ["M", "Архитектура", "Датасет", "Эпохи", "Batch", "Путь run"]
+        header = ["M", "Архитектура", "Датасет", "Эпохи", "Batch", "Разрешение", "Путь run"]
     else:
-        header = ["M", "Architecture", "Dataset", "Epochs", "Batch", "Run path"]
+        header = ["M", "Architecture", "Dataset", "Epochs", "Batch", "Input size", "Run path"]
     lines.append("| " + " | ".join(header) + " |")
     lines.append("| " + " | ".join(["---"] * len(header)) + " |")
     for row in rows:
@@ -273,6 +273,7 @@ def _render_run_legend_table_lines(
         dataset_label = str(row.get("dataset_label") or row.get("dataset_name") or "-")
         epochs = str(row.get("epochs") or "-")
         batch = str(row.get("batch") or "-")
+        image_size = str(row.get("image_size") or "-")
         run_name = str(row.get("run_name") or "")
         run_path = _path_for_report(str(row.get("run_dir") or run_name), workspace_root)
         if run_path == run_name or not run_path:
@@ -283,7 +284,7 @@ def _render_run_legend_table_lines(
         m_cell = f"**{short_label}**" + (f" ({'базовый' if is_ru else 'baseline'})" if role == "baseline" else "")
         lines.append(
             "| "
-            + " | ".join([m_cell, architecture, dataset_label, epochs, batch, run_display])
+            + " | ".join([m_cell, architecture, dataset_label, epochs, batch, image_size, run_display])
             + " |"
         )
     lines.append("")
@@ -318,9 +319,19 @@ def _exec_runs_metrics_dataframe(df: pd.DataFrame, abbreviations: dict[str, str]
     keep: list[str] = []
     if run_col:
         keep.append(run_col)
-    for c in ("train_last_metrics/mAP50-95(B)", "train_last_metrics/mAP50(B)"):
-        if c in work.columns:
-            keep.append(c)
+    best_map = next(
+        (c for c in ("train_best_metrics/mAP50-95(B)", "train_best_metrics/mAP50(B)") if c in work.columns),
+        None,
+    )
+    if best_map:
+        keep.append(best_map)
+    elif "train_last_metrics/mAP50-95(B)" in work.columns:
+        keep.append("train_last_metrics/mAP50-95(B)")
+    imgsz_col = "train_image_size" if "train_image_size" in work.columns else ("val_imgsz" if "val_imgsz" in work.columns else None)
+    if imgsz_col:
+        work = work.copy()
+        work["input_imgsz"] = work[imgsz_col]
+        keep.append("input_imgsz")
     keep.extend(metric_cols)
     if not keep:
         work = _select_table_columns("runs_summary.csv", work)
@@ -363,36 +374,51 @@ def _build_exec_confidence_summary_df(
         df = _load_confidence_global_df(report_root, rel, manifest)
         if df is not None:
             by_objective[objective] = df
-    if not by_objective:
-        return None
+    legend = manifest.get("run_legend") if isinstance(manifest.get("run_legend"), list) else []
     run_names: list[str] = []
     seen: set[str] = set()
-    for df in by_objective.values():
-        if "run_name" not in df.columns:
+    for item in legend:
+        if not isinstance(item, dict):
             continue
-        for name in df["run_name"].astype(str):
-            if name and name not in seen:
-                seen.add(name)
-                run_names.append(name)
+        name = str(item.get("run_name") or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            run_names.append(name)
+    if not run_names:
+        for df in by_objective.values():
+            if "run_name" not in df.columns:
+                continue
+            for name in df["run_name"].astype(str):
+                if name and name not in seen:
+                    seen.add(name)
+                    run_names.append(name)
     if not run_names:
         return None
+    not_calc = "не рассчитано" if is_ru else "not computed"
     rows: list[dict[str, Any]] = []
     for run_name in run_names:
         row: dict[str, Any] = {"run_name": _abbrev_label(run_name, abbreviations)}
         for objective in ("A", "B", "C"):
             df = by_objective.get(objective)
             if df is None or "run_name" not in df.columns:
-                row[f"conf_{objective}"] = np.nan
-                row[f"f1_{objective}"] = np.nan
+                row[f"conf_{objective}"] = not_calc
+                row[f"f1_{objective}"] = not_calc
                 continue
             sub = df[df["run_name"].astype(str) == run_name]
             if len(sub) == 0:
-                row[f"conf_{objective}"] = np.nan
-                row[f"f1_{objective}"] = np.nan
+                row[f"conf_{objective}"] = not_calc
+                row[f"f1_{objective}"] = not_calc
                 continue
             rec = sub.iloc[0]
-            row[f"conf_{objective}"] = rec.get("recommended_conf")
-            row[f"f1_{objective}"] = rec.get("f1", rec.get("target_metric"))
+            status = str(rec.get("status") or "").strip().lower()
+            if status in {"not_available", "fallback"} and rec.get("recommended_conf") is None:
+                row[f"conf_{objective}"] = not_calc
+                row[f"f1_{objective}"] = not_calc
+                continue
+            conf_val = rec.get("recommended_conf")
+            f1_val = rec.get("f1", rec.get("target_metric"))
+            row[f"conf_{objective}"] = conf_val if conf_val is not None and str(conf_val).strip() not in {"", "nan"} else not_calc
+            row[f"f1_{objective}"] = f1_val if f1_val is not None and str(f1_val).strip() not in {"", "nan"} else not_calc
         rows.append(row)
     out = pd.DataFrame(rows)
     if is_ru:
@@ -474,6 +500,14 @@ def _render_executive_summary_section(
             if tpl.get("NARR_PREAMBLE_EXEC_CONFIDENCE")
             else []
         )
+        conf_takeaways: list[str] = []
+        not_calc = "не рассчитано" if is_ru else "not computed"
+        if conf_df.astype(str).apply(lambda col: col.str.contains(not_calc, regex=False)).any().any():
+            conf_takeaways.append(
+                "Для запусков с пометкой «не рассчитано» выполните `smartrain model test` или перезапустите `smartrain analyze all`."
+                if is_ru
+                else "For runs marked «not computed», run `smartrain model test` or re-run `smartrain analyze all`."
+            )
         emit_centered_table_block(
             lines,
             table_no=table_no,
@@ -481,7 +515,7 @@ def _render_executive_summary_section(
             preamble_lines=preamble,
             table_body_lines=_md_table_from_df(conf_df, abbreviations, limit=None, is_ru=is_ru),
             source_rel=conf_source or None,
-            takeaways=[],
+            takeaways=conf_takeaways,
             is_ru=is_ru,
         )
         table_no += 1

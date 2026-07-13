@@ -75,6 +75,12 @@ def export_runs_table(
                     last = train_df.iloc[-1]
                     row["train_last_epoch"] = last.get("epoch")
                     row[f"train_last_{map_col}"] = last.get(map_col)
+                    map_series = pd.to_numeric(train_df[map_col], errors="coerce")
+                    if map_series.notna().any():
+                        best_idx = int(map_series.idxmax())
+                        best = train_df.loc[best_idx]
+                        row["train_best_epoch"] = best.get("epoch")
+                        row[f"train_best_{map_col}"] = best.get(map_col)
             except Exception as exc:
                 row["train_read_error"] = str(exc)
         rows.append(row)

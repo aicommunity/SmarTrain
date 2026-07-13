@@ -177,14 +177,25 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     baseline_name = os.path.basename(baseline.rstrip("/")) if baseline else ""
     baseline_abbr = abbreviations.get(baseline_name, "")
     baseline_display = _path_for_report(baseline, workspace_root)
-    if baseline_abbr:
-        lines.append(f"- {('Базовый' if is_ru else 'Baseline')} ({baseline_abbr}): `{baseline_display}`")
-    else:
-        lines.append(f"- {('Базовый' if is_ru else 'Baseline')}: `{baseline_display}`")
     others = manifest.get("others") or []
     single_run_mode = bool(manifest.get("single_run_mode")) or (
         isinstance(others, list) and len(others) == 0 and bool(baseline)
     )
+    dataset_pairs: list[str] = []
+    for k, v in abbreviations.items():
+        if str(v).startswith("D"):
+            dataset_pairs.append(f"{v} = {k}")
+    context_idx = section_index["context"]
+    lines.append(
+        f"### {context_idx}.1 " + ("Модели" if is_ru else "Models")
+    )
+    lines.append("")
+    lines.extend(_subsection_intro_lines(tpl, "SUB_CONTEXT_RUNS"))
+    if baseline:
+        if baseline_abbr:
+            lines.append(f"- {('Базовый' if is_ru else 'Baseline')} ({baseline_abbr}): `{baseline_display}`")
+        else:
+            lines.append(f"- {('Базовый' if is_ru else 'Baseline')}: `{baseline_display}`")
     if single_run_mode:
         lines.append(
             "- "
@@ -204,20 +215,9 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append(f"- {('Кандидат' if is_ru else 'Candidate')} ({item_abbr}): `{item_display}`")
             else:
                 lines.append(f"- {('Кандидат' if is_ru else 'Candidate')}: `{item_display}`")
-    dataset_pairs: list[str] = []
-    for k, v in abbreviations.items():
-        if str(v).startswith("D"):
-            dataset_pairs.append(f"{v} = {k}")
-    if dataset_pairs:
-        lines.append(
-            "- "
-            + ("Датасеты: " if is_ru else "Datasets: ")
-            + "; ".join(sorted(dataset_pairs))
-        )
     lines.append("")
-    context_idx = section_index["context"]
     lines.append(
-        f"### {context_idx}.1 " + ("Датасет" if is_ru else "Dataset")
+        f"### {context_idx}.2 " + ("Датасет" if is_ru else "Dataset")
     )
     lines.append("")
     lines.extend(_subsection_intro_lines(tpl, "SUB_CONTEXT_DATASET"))
@@ -226,7 +226,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.append(f"- {pair}")
     lines.append("")
     lines.append(
-        f"### {context_idx}.2 " + ("Модели и артефакты" if is_ru else "Models and artifacts")
+        f"### {context_idx}.3 " + ("Модели и артефакты" if is_ru else "Models and artifacts")
     )
     lines.append("")
     lines.extend(_subsection_intro_lines(tpl, "SUB_CONTEXT_MODELS"))
@@ -275,8 +275,18 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     alias_df = alias_df[preferred_alias]
                 dedup_cols = [c for c in ("run_name", "target_path") if c in alias_df.columns]
                 if dedup_cols:
-                    alias_df = alias_df.sort_values(by=[c for c in ("run_name", "alias") if c in alias_df.columns])
-                    alias_df = alias_df.drop_duplicates(subset=dedup_cols, keep="first")
+                    alias_df = alias_df.sort_values(
+                        by=[c for c in ("run_name", "alias") if c in alias_df.columns],
+                        ascending=[True, True],
+                    )
+                    if "target_path" in alias_df.columns:
+                        alias_df["_has_path"] = alias_df["target_path"].astype(str).str.strip().ne("")
+                        alias_df = alias_df.sort_values(
+                            by=["_has_path"] + [c for c in ("run_name", "alias") if c in alias_df.columns],
+                            ascending=[False, True, True],
+                        )
+                        alias_df = alias_df.drop(columns=["_has_path"])
+                    alias_df = alias_df.drop_duplicates(subset=["run_name"] if "run_name" in alias_df.columns else dedup_cols, keep="first")
                 alias_df = _abbrev_df(alias_df, abbreviations)
                 _emit_figure_1_before_table_11()
                 ak = _infer_table_kind(alias_rel)
@@ -525,14 +535,41 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         else:
                             lines.append(f"**{('Запуск' if is_ru else 'Run')} `{run_label}`**")
                         lines.append("")
-                        card = pd.DataFrame(
-                            [
-                                {"Параметр" if is_ru else "Parameter": "CPU", "Значение" if is_ru else "Value": row.get("sys_cpu_model")},
-                                {"Параметр" if is_ru else "Parameter": "GPU", "Значение" if is_ru else "Value": row.get("sys_gpu_0_name")},
-                                {"Параметр" if is_ru else "Parameter": "RAM, GB", "Значение" if is_ru else "Value": row.get("sys_ram_total_gb")},
-                                {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": _os_display_train_profile_row(row)},
-                            ]
-                        )
+                        cpu_v = row.get("sys_cpu_model")
+                        gpu_v = row.get("sys_gpu_0_name")
+                        ram_v = row.get("sys_ram_total_gb")
+                        os_v = _os_display_train_profile_row(row)
+                        all_na = True
+                        for key in (cpu_v, gpu_v, ram_v, os_v):
+                            if key is None or (isinstance(key, float) and pd.isna(key)):
+                                continue
+                            if str(key).strip().lower() in {"", "nan", "none"}:
+                                continue
+                            all_na = False
+                            break
+                        if all_na:
+                            status_msg = (
+                                "Профиль не сохранён при обучении (нет system_profile в training_metadata.json)."
+                                if is_ru
+                                else "Profile was not saved during training (no system_profile in training_metadata.json)."
+                            )
+                            card = pd.DataFrame(
+                                [
+                                    {
+                                        "Параметр" if is_ru else "Parameter": ("Статус" if is_ru else "Status"),
+                                        "Значение" if is_ru else "Value": status_msg,
+                                    },
+                                ]
+                            )
+                        else:
+                            card = pd.DataFrame(
+                                [
+                                    {"Параметр" if is_ru else "Parameter": "CPU", "Значение" if is_ru else "Value": cpu_v},
+                                    {"Параметр" if is_ru else "Parameter": "GPU", "Значение" if is_ru else "Value": gpu_v},
+                                    {"Параметр" if is_ru else "Parameter": "RAM, GB", "Значение" if is_ru else "Value": ram_v},
+                                    {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": os_v},
+                                ]
+                            )
                         lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
                         lines.append("")
                     append_table_source(lines, source_rel=rel, is_ru=is_ru)
@@ -932,13 +969,19 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             try:
                 perf_df = pd.read_csv(perf_csv_abs)
                 perf_df = _filter_generic_table_for_selection(perf_df, manifest)
+                perf_reason_series = (
+                    perf_df["performance_reason"].copy() if "performance_reason" in perf_df.columns else None
+                )
                 # Hide legacy target-mismatch rows in the report table to keep
                 # the performance view focused on current comparable artifacts.
-                if "performance_reason" in perf_df.columns:
+                if perf_reason_series is not None:
                     perf_df = perf_df[
                         perf_df["performance_reason"].astype(str) != "perf_target_mismatch_legacy_variant"
                     ].copy()
+                    perf_reason_series = perf_df["performance_reason"].copy()
                 perf_df = _select_table_columns(perf_csv_rel, perf_df)
+                if perf_reason_series is not None:
+                    perf_df["performance_reason"] = perf_reason_series.reindex(perf_df.index).to_numpy()
                 perf_df = _abbrev_df(perf_df, abbreviations)
                 if _should_drop_split_column(perf_csv_rel, perf_df):
                     perf_df = perf_df.drop(columns=["split"], errors="ignore")
@@ -1024,6 +1067,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 ]
                 pure_df = perf_df[pure_cols].copy() if pure_cols else perf_df.copy()
                 pipeline_df = perf_df[pipeline_cols].copy() if pipeline_cols else perf_df.copy()
+                if "performance_reason" in perf_df.columns:
+                    pure_df["performance_reason"] = perf_df["performance_reason"].values
+                    pipeline_df["performance_reason"] = perf_df["performance_reason"].values
+                perf_hide = {"performance_reason"}
                 _emit_figure_1_before_table_11()
                 lines.extend(_center_open())
                 lines.append("")
@@ -1034,7 +1081,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     is_ru,
                 )
                 lines.extend(_table_preamble_lines(perf_csv_rel, pure_df, "perf_pure", is_ru, tpl, table_no=table_no))
-                lines.extend(_md_table_from_df(pure_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                lines.extend(_md_table_from_df(pure_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1, hide_cols=perf_hide))
                 lines.append(
                     (
                         "Основной KPI: сопоставимые runtime-этапы по методике Ultralytics-like. "
@@ -1099,7 +1146,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.extend(
                     _table_preamble_lines(perf_csv_rel, pipeline_df, "perf_pipeline", is_ru, tpl, table_no=table_no)
                 )
-                lines.extend(_md_table_from_df(pipeline_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                lines.extend(_md_table_from_df(pipeline_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1, hide_cols=perf_hide))
                 lines.append(
                     (
                         "Здесь показан полный runtime-конвейер (preprocess + inference + postprocess), "

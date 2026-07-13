@@ -12,6 +12,8 @@ from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_c
 
 from smartrain.services.analyze.ultralytics_test_ensure import ensure_ultralytics_test_for_runs
 from smartrain.services.analyze.eval_dataset_test_artifacts import collect_eval_dataset_test_artifacts
+from smartrain.services.analyze.confidence_ensure import ensure_confidence_recommendations_for_analyze_runs
+from smartrain.core.runtime.workspace_paths import resolve_workspace_root
 
 
 def finalize_all_session(
@@ -97,6 +99,18 @@ def finalize_all_session(
                         reason_detail=str(e),
                         split="test",
                     )
+
+    try:
+        workspace_root = resolve_workspace_root(getattr(args, "workspace", None))
+    except ValueError:
+        workspace_root = os.getcwd()
+    ensure_confidence_recommendations_for_analyze_runs(
+        [baseline] + others,
+        run_data_yaml_map=run_data_yaml_map,
+        workspace_root=workspace_root,
+        val_batch=int(getattr(args, "val_batch", 1) or 1),
+        val_imgsz=int(getattr(args, "val_imgsz", 640) or 640),
+    )
 
     conf_tables = collect_confidence_recommendation_tables_cb(
         [baseline] + others,

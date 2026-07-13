@@ -24,8 +24,18 @@ def _write_training_run(tmp_path: Path, name: str, *, model: str, dataset: str, 
         + ', "batch_size": 16}}}',
         encoding="utf-8",
     )
-    yaml.safe_dump({"model": f"{model}.pt", "epochs": epochs, "batch": 16}, (train / "args.yaml").open("w", encoding="utf-8"))
+    yaml.safe_dump({"model": f"{model}.pt", "epochs": epochs, "batch": 16, "imgsz": 640}, (train / "args.yaml").open("w", encoding="utf-8"))
     return run_dir
+
+
+def test_collision_labels_include_imgsz(tmp_path: Path) -> None:
+    from smartrain.services.analyze.report_labels import build_run_legend_rows
+
+    run_a = _write_training_run(tmp_path, "run_a", model="yolo11m", dataset="ds_a", epochs=200)
+    run_b = _write_training_run(tmp_path, "run_b", model="yolo11m", dataset="ds_b", epochs=100)
+    legend = build_run_legend_rows([str(run_a), str(run_b)])
+    assert "i640" in legend[0].short_label
+    assert legend[0].image_size == "640"
 
 
 def test_collision_labels_include_dataset(tmp_path: Path) -> None:
@@ -139,6 +149,34 @@ def test_append_figure_caption_lines_inserts_blank_lines() -> None:
     assert lines[4].startswith("M2 yolov8n")
     assert lines[5] == ""
     assert lines[6].startswith("*Рисунок 1.")
+
+
+def test_context_section_structure(tmp_path: Path) -> None:
+    from smartrain.services.analyze.report_writer import write_analysis_report
+
+    (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"run_name": "run_a", "test_mAP50-95": 0.9}]).to_csv(
+        tmp_path / "artifacts" / "table" / "runs_summary.csv", index=False
+    )
+    manifest = {
+        "session_name": "s_ctx",
+        "profile": "full",
+        "baseline": "run_a",
+        "others": ["run_b"],
+        "tables": ["artifacts/table/runs_summary.csv"],
+        "images": [],
+        "artifacts": [],
+        "format_comparison": {},
+        "abbreviations": {"run_a": "M1 yolo11m", "run_b": "M2 yolo11m", "ds_a": "D1"},
+        "run_legend": [],
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "### 2.1 Модели" in ru_md
+    assert "### 2.2 Датасет" in ru_md
+    assert "### 2.3 Модели и артефакты" in ru_md
+    ctx = ru_md[ru_md.find("## 2. Контекст") : ru_md.find("### 2.1")]
+    assert "Датасеты:" not in ctx or "D1 =" not in ctx
 
 
 def test_executive_summary_is_first_section(tmp_path: Path) -> None:

@@ -827,12 +827,20 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         alias_counters[prefix] = int(alias_counters.get(prefix, 0)) + 1
         alias = f"{prefix}{alias_counters[prefix]}"
         row["alias"] = alias
+        target_path = str(row.get("target_path") or "").strip()
+        if not target_path and fmt in {"pt", "pt_uni"}:
+            run_dir = str(row.get("run_dir") or "").strip()
+            if run_dir:
+                resolved = resolve_run_model(run_dir, ".pt")
+                if resolved is not None and os.path.isfile(resolved):
+                    target_path = os.path.relpath(str(resolved), run_dir)
+                    row["target_path"] = target_path
         alias_legend.append(
             {
                 "alias": alias,
                 "format": fmt,
                 "run_name": str(row.get("run_name") or ""),
-                "target_path": str(row.get("target_path") or ""),
+                "target_path": target_path,
             }
         )
     if test_rows:

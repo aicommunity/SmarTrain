@@ -73,6 +73,20 @@ def test_executive_summary_includes_confidence_and_ultra_pairs(tmp_path: Path) -
                 },
             }
         ],
+        "run_legend": [
+            {
+                "index": 1,
+                "short_label": "M1 yolo11m",
+                "architecture": "yolo11m",
+                "dataset_label": "D1",
+                "epochs": "200",
+                "batch": "16",
+                "image_size": "640",
+                "run_name": "run_a",
+                "run_dir": "run_a",
+                "role": "baseline",
+            }
+        ],
     }
     write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
@@ -81,6 +95,7 @@ def test_executive_summary_includes_confidence_and_ultra_pairs(tmp_path: Path) -
     assert "Основные метрики по запускам" in exec_body
     assert "Рекомендации confidence (A/B/C)" in exec_body
     assert "A: порог" in exec_body
+    assert "run_a" in exec_body or "M1 yolo11m" in exec_body
     assert "PR-кривая и матрица ошибок" in exec_body
     assert pr_rel.split("/")[-1] in exec_body or "BoxPR_curve" in exec_body
     assert exec_body.count("|:---:|") >= 1

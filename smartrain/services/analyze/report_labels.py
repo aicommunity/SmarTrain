@@ -21,9 +21,30 @@ class RunLegendRow:
     dataset_name: str
     epochs: str
     batch: str
+    image_size: str
     run_name: str
     run_dir: str
     role: str
+
+
+def _format_imgsz_token(train_image_size: Any, val_imgsz: Any) -> str:
+    train_txt = ""
+    val_txt = ""
+    for raw, slot in ((train_image_size, "train"), (val_imgsz, "val")):
+        if raw is None or str(raw).strip() in {"", "nan", "None"}:
+            continue
+        try:
+            val = int(float(raw))
+        except (TypeError, ValueError):
+            continue
+        if slot == "train":
+            train_txt = str(val)
+        else:
+            val_txt = str(val)
+    if train_txt and val_txt and train_txt != val_txt:
+        return f"i{train_txt}/{val_txt}"
+    token = train_txt or val_txt
+    return f"i{token}" if token else ""
 
 
 def infer_short_model_name(run_dir: str, *, model_hint: str | None = None) -> str:
@@ -72,6 +93,8 @@ def format_enriched_display_label(
     dataset_label: str = "",
     epochs: Any = None,
     batch: Any = None,
+    train_image_size: Any = None,
+    val_imgsz: Any = None,
     collision: bool = False,
     run_name: str = "",
 ) -> str:
@@ -93,6 +116,9 @@ def format_enriched_display_label(
             parts.append(f"b{int(float(batch))}")
         except (TypeError, ValueError):
             parts.append(f"b{batch}")
+    imgsz_token = _format_imgsz_token(train_image_size, val_imgsz)
+    if imgsz_token:
+        parts.append(imgsz_token)
     if len(parts) <= 2 and run_name:
         tail = run_dir_display_suffix(run_name)
         if tail:
@@ -159,6 +185,8 @@ def build_run_legend_rows(
                 "dataset_label": dataset_label,
                 "epochs": fields.get("epochs"),
                 "batch_size": fields.get("batch_size"),
+                "train_image_size": fields.get("train_image_size"),
+                "val_imgsz": fields.get("val_imgsz"),
                 "role": role,
             }
         )
@@ -172,6 +200,8 @@ def build_run_legend_rows(
             dataset_label=str(meta["dataset_label"] or ""),
             epochs=meta.get("epochs"),
             batch=meta.get("batch_size"),
+            train_image_size=meta.get("train_image_size"),
+            val_imgsz=meta.get("val_imgsz"),
             collision=collision,
             run_name=str(meta["run_name"]),
         )
@@ -188,6 +218,7 @@ def build_run_legend_rows(
                 batch_txt = str(int(float(meta["batch_size"])))
             except (TypeError, ValueError):
                 batch_txt = str(meta["batch_size"])
+        imgsz_txt = _format_imgsz_token(meta.get("train_image_size"), meta.get("val_imgsz")).lstrip("i")
         out.append(
             RunLegendRow(
                 index=int(meta["index"]),
@@ -198,6 +229,7 @@ def build_run_legend_rows(
                 dataset_name=str(meta["dataset_name"] or ""),
                 epochs=epochs_txt,
                 batch=batch_txt,
+                image_size=imgsz_txt,
                 run_name=str(meta["run_name"]),
                 run_dir=str(meta["run_dir_abs"]),
                 role=str(meta["role"]),
