@@ -97,7 +97,10 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
 
     args.data_mode = prompt_choice("Data mode", list(DATA_MODES), default=args.data_mode)
     if args.data_mode == "folder":
-        args.source_dir = prompt_text("Source directory", default=args.source_dir or "datasets").strip()
+        args.source_dir = prompt_text(
+            "Source directory or archive",
+            default=str(getattr(args, "source", None) or args.source_dir or "datasets"),
+        ).strip()
         args.roi_pre_detect = prompt_yes_no("Enable ROI pre-detect", default=bool(args.roi_pre_detect))
         if args.roi_pre_detect:
             args.roi_weights = prompt_text("ROI weights (empty = main model)", default=str(args.roi_weights or "")).strip() or None
@@ -153,8 +156,14 @@ def _ensure_device_available_or_exit(device: str | None) -> None:
 
 
 def _validate_non_interactive_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    if args.data_mode == "folder" and not args.source_dir:
-        parser.error("incomplete arguments: --source-dir is required for --data-mode folder.")
+    if args.data_mode == "folder":
+        source_path = getattr(args, "source", None) or args.source_dir
+        if getattr(args, "source", None) and args.source_dir:
+            parser.error("Specify only one of --source or --source-dir.")
+        if not source_path:
+            parser.error("incomplete arguments: --source or --source-dir is required for --data-mode folder.")
+        if not args.source_dir:
+            args.source_dir = str(source_path)
     if args.data_mode == "dataset-split" and not args.dataset:
         parser.error("incomplete arguments: --dataset is required for --data-mode dataset-split.")
     if not args.model_name and not args.run and not args.weights:

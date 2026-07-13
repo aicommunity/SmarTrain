@@ -39,15 +39,13 @@ from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 from smartrain.services.inference_runtime_helpers import (
     build_report,
-    collect_folder_images,
-    collect_split_images_for_dataset,
     infer_img_size_from_model_context_safe,
     predict_roi_crop,
-    resolve_external_source,
+    resolve_inference_source,
     resolve_model,
     resolve_output_root,
     sanitize_segment,
-    source_descriptor,
+    source_descriptor_from_resolved,
     write_report,
 )
 from smartrain.services.inference_dataset_export import (
@@ -266,6 +264,7 @@ def _write_local_inference_report(
     skipped: int,
     performance_payload: dict[str, Any],
     environment_artifact_path: str,
+    source_archive: str | None = None,
 ) -> None:
     write_report(
         report_path,
@@ -284,6 +283,7 @@ def _write_local_inference_report(
             skipped=skipped,
             performance=performance_payload,
             environment_artifact_path=environment_artifact_path,
+            source_archive=source_archive,
         ),
     )
 
@@ -431,12 +431,13 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         )
         if model_validation_outcome is not None:
             return model_validation_outcome
-        source_for_external = resolve_external_source(args, layout)
-        source_short = (
-            os.path.basename(os.path.abspath(os.path.expanduser(str(args.source_dir))).rstrip(os.sep)) or "folder"
-            if args.data_mode == "folder"
-            else f"{args.dataset}-{args.split}"
-        )
+        try:
+            _, resolved_source = resolve_inference_source(args, layout)
+        except Exception as e:
+            print(f"[ERROR] Failed to resolve inference source: {e}", file=sys.stderr)
+            return 1, True
+        source_for_external = resolved_source.working_path
+        source_short = resolved_source.display_name
         out_root = resolve_output_root(layout, model_name, source_short)
         report_path = os.path.join(out_root, "inference_results.json")
         env_profile = collect_environment_profile()
@@ -488,7 +489,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 "device": args.device,
                 "data_mode": args.data_mode,
             },
-            "source": source_descriptor(args, source_for_external, source_short, layout),
+            "source": source_descriptor_from_resolved(args, resolved_source, layout),
             "output": {
                 "dir_absolute": out_root,
                 "dir_relative": relativize_if_under(layout.root, out_root) or out_root,
@@ -581,19 +582,10 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         args._ultralytics_roi_project = ultralytics_sidecar_dir(layout.root, ".cache", "ultralytics_roi_infer")
 
     try:
-        if args.data_mode == "folder":
-            images = collect_folder_images(str(args.source_dir), int(args.limit))
-            source_abs = os.path.abspath(os.path.expanduser(str(args.source_dir)))
-            source_short = os.path.basename(source_abs.rstrip(os.sep)) or "folder"
-        else:
-            images, split_dir = collect_split_images_for_dataset(
-                layout,
-                str(args.dataset),
-                str(args.split),
-                int(args.limit),
-            )
-            source_abs = split_dir
-            source_short = f"{args.dataset}-{args.split}"
+        images, resolved_source = resolve_inference_source(args, layout)
+        source_abs = resolved_source.working_path
+        source_short = resolved_source.display_name
+        source_archive = resolved_source.source_archive
     except Exception as e:
         print(f"[ERROR] Failed to resolve inference source: {e}", file=sys.stderr)
         return 1, False
@@ -633,6 +625,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         skipped=skipped,
         performance_payload=perf.to_payload(methodology=perf_methodology),
         environment_artifact_path=env_path,
+        source_archive=source_archive,
     )
     progress_desc = f"inference:{args.data_mode}"
     for image_path in tqdm(images, desc=progress_desc, unit="img"):
@@ -662,6 +655,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                         skipped=skipped,
                         performance_payload=perf.to_payload(methodology=perf_methodology),
                         environment_artifact_path=env_path,
+                        source_archive=source_archive,
                     )
                     perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
                     continue
@@ -715,6 +709,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
             skipped=skipped,
             performance_payload=perf.to_payload(methodology=perf_methodology),
             environment_artifact_path=env_path,
+            source_archive=source_archive,
         )
 
     print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")

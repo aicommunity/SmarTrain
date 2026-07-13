@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tarfile
+import zipfile
 from pathlib import Path
 from types import ModuleType
 
@@ -1022,4 +1024,190 @@ def test_inference_visualize_without_dataset(tmp_path: Path, monkeypatch) -> Non
     out_dir = _latest_report_path(tmp_path).parent
     overlays = list((out_dir / "pred_overlays").glob("*"))
     assert len(overlays) == 2
+
+
+def _make_images_zip(tmp_path: Path, *, inner_dir: str = "images_set", count: int = 2) -> Path:
+    source = tmp_path / "build" / inner_dir
+    source.mkdir(parents=True)
+    for idx in range(count):
+        _write_image(source / f"img_{idx}.jpg")
+    zip_path = tmp_path / f"{inner_dir}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in source.rglob("*"):
+            if path.is_file():
+                zf.write(path, arcname=str(path.relative_to(source.parent)))
+    return zip_path
+
+
+def _make_images_tar_gz(tmp_path: Path, *, inner_dir: str = "images_set", count: int = 2) -> Path:
+    source = tmp_path / "build" / inner_dir
+    source.mkdir(parents=True)
+    for idx in range(count):
+        _write_image(source / f"img_{idx}.jpg")
+    archive_path = tmp_path / f"{inner_dir}.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        for path in source.rglob("*"):
+            if path.is_file():
+                tf.add(path, arcname=str(path.relative_to(source.parent)))
+    return archive_path
+
+
+def _setup_demo_model(tmp_path: Path) -> None:
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def test_inference_folder_zip_archive(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    _setup_demo_model(tmp_path)
+    zip_path = _make_images_zip(tmp_path)
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source",
+            str(zip_path),
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["source"]["mode"] == "folder"
+    assert report["source"]["name"] == "images_set"
+    assert report["source"]["source_archive_absolute"] == str(zip_path.resolve())
+    assert report["summary"]["images_processed"] == 2
+
+
+def test_inference_folder_tar_gz_archive(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    _setup_demo_model(tmp_path)
+    archive_path = _make_images_tar_gz(tmp_path)
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(archive_path),
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["summary"]["images_processed"] == 2
+    assert report["source"]["source_archive_absolute"] == str(archive_path.resolve())
+
+
+def test_inference_dataset_split_archive_catalog(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    _setup_demo_model(tmp_path)
+
+    ds_root = tmp_path / "build" / "ds_zip"
+    test_images = ds_root / "test" / "images"
+    test_images.mkdir(parents=True)
+    _write_image(test_images / "x.jpg")
+    (ds_root / "test" / "labels").mkdir(parents=True)
+    (ds_root / "data.yaml").write_text(
+        "train: train/images\nval: val/images\ntest: test/images\nnc: 1\nnames: ['obj']\n",
+        encoding="utf-8",
+    )
+    zip_path = tmp_path / "ds_a.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in ds_root.rglob("*"):
+            if path.is_file():
+                zf.write(path, arcname=str(path.relative_to(ds_root.parent)))
+
+    (tmp_path / "datasets" / "datasets_info.json").write_text(
+        json.dumps(
+            {
+                "ds_a": {
+                    "structure": "split",
+                    "data_path": str(zip_path),
+                    "classes": {"obj": 0},
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "dataset-split",
+            "--dataset",
+            "ds_a",
+            "--split",
+            "test",
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["source"]["mode"] == "dataset-split"
+    assert report["source"]["dataset"] == "ds_a"
+    assert report["source"]["split"] == "test"
+    assert report["source"]["source_archive_absolute"] == str(zip_path.resolve())
+    assert report["summary"]["images_processed"] == 1
+
+
+def test_inference_external_provider_zip_source_is_directory(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    zip_path = _make_images_zip(tmp_path, count=1)
+    captured: dict[str, str] = {}
+
+    def _fake_run_external_infer(provider_id: str, repo_path: str, venv_path: str, **kwargs) -> int:
+        captured["provider_id"] = provider_id
+        captured["source_path"] = str(kwargs.get("source_path"))
+        return 0
+
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
+    with pytest.raises(SystemExit) as ex:
+        inference_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--weights",
+                "dr-yolo:yolov8n",
+                "--external-repo",
+                str(tmp_path / "dr-repo"),
+                "--data-mode",
+                "folder",
+                "--source-dir",
+                str(zip_path),
+                "--no-export-dataset",
+                "--no-export-visualize",
+            ]
+        )
+    assert int(ex.value.code or 0) == 0
+    assert captured["source_path"]
+    assert not captured["source_path"].endswith(".zip")
+    assert Path(captured["source_path"]).is_dir()
 

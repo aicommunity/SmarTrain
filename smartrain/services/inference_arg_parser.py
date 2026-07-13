@@ -16,7 +16,18 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--run", type=str, default=None, help="Run path or run index from workspace/runs list.")
     p.add_argument("--weights", type=str, default=None, help="Explicit model weights path (.pt/.onnx/.engine/.trt).")
     p.add_argument("--data-mode", choices=DATA_MODES, default="folder", help="Data source mode.")
-    p.add_argument("--source-dir", type=str, default=None, help="Folder with images (recursive).")
+    p.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        help="Folder or archive with images (.zip, .tar, .tar.gz, .tgz) for folder mode.",
+    )
+    p.add_argument(
+        "--source-dir",
+        type=str,
+        default=None,
+        help="Folder or archive with images (.zip, .tar, .tar.gz, .tgz); alias for --source.",
+    )
     p.add_argument("--dataset", type=str, default=None, help="Dataset key from datasets/datasets_info.json.")
     p.add_argument("--split", choices=("train", "val", "test"), default="test", help="Dataset split for dataset-split mode.")
     p.add_argument("--limit", type=int, default=0, help="Max images to process (0 = all).")

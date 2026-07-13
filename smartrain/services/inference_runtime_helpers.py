@@ -5,6 +5,7 @@ import json
 import os
 import re
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime
 from glob import glob
 from pathlib import Path
@@ -19,7 +20,12 @@ from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.core.runtime.run_artifacts import is_internal_conversion_artifact
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
-from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+from smartrain.core.runtime.workspace_paths import (
+    WorkspaceLayout,
+    extract_dataset_archive_to_cache,
+    is_dataset_archive_path,
+    resolve_dataset_root,
+)
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.workflow_adapters.inference_runtime_api import (
     find_yaml_file,
@@ -35,6 +41,74 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
 SUPPORTED_INFERENCE_EXTS = {".pt", ".onnx", ".engine", ".trt"}
 DATA_MODES = ("folder", "dataset-split")
+
+
+@dataclass(frozen=True)
+class ResolvedInferenceSource:
+    working_path: str
+    display_name: str
+    source_archive: str | None = None
+
+
+def _archive_display_name(path: str | os.PathLike[str]) -> str:
+    name = os.path.basename(str(path))
+    for suffix in (".tar.gz", ".tgz", ".tar", ".zip"):
+        if name.lower().endswith(suffix):
+            return name[: -len(suffix)]
+    return Path(name).stem
+
+
+def resolve_inference_folder_source(source_path: str, workspace_root: str) -> ResolvedInferenceSource:
+    abs_path = os.path.abspath(os.path.expanduser(source_path))
+    if os.path.isdir(abs_path):
+        display = os.path.basename(abs_path.rstrip(os.sep)) or "folder"
+        return ResolvedInferenceSource(working_path=abs_path, display_name=display)
+    if os.path.isfile(abs_path) and is_dataset_archive_path(abs_path):
+        print(f"[INFO] Extracting archive to cache: {abs_path}")
+        extracted = extract_dataset_archive_to_cache(workspace_root, abs_path)
+        return ResolvedInferenceSource(
+            working_path=extracted,
+            display_name=_archive_display_name(abs_path),
+            source_archive=abs_path,
+        )
+    raise FileNotFoundError(f"Source directory or archive not found: {abs_path}")
+
+
+def _dataset_catalog_archive_path(layout: WorkspaceLayout, dataset: str, entry: dict[str, Any]) -> str | None:
+    try:
+        raw_root = resolve_dataset_root(layout.root, dataset, entry, layout.datasets)
+    except Exception:
+        return None
+    abs_root = os.path.abspath(os.path.expanduser(raw_root))
+    if os.path.isfile(abs_root) and is_dataset_archive_path(abs_root):
+        return abs_root
+    return None
+
+
+def resolve_inference_source(
+    args: argparse.Namespace, layout: WorkspaceLayout
+) -> tuple[list[str], ResolvedInferenceSource]:
+    limit = int(args.limit)
+    if args.data_mode == "folder":
+        source_path = str(getattr(args, "source", None) or args.source_dir or "")
+        resolved = resolve_inference_folder_source(source_path, layout.root)
+        images = collect_folder_images(resolved.working_path, limit)
+        return images, resolved
+
+    images, split_dir = collect_split_images_for_dataset(
+        layout,
+        str(args.dataset),
+        str(args.split),
+        limit,
+    )
+    catalog = load_catalog(layout)
+    entry = catalog.get(str(args.dataset), {})
+    source_archive = _dataset_catalog_archive_path(layout, str(args.dataset), entry) if isinstance(entry, dict) else None
+    return images, ResolvedInferenceSource(
+        working_path=split_dir,
+        display_name=f"{args.dataset}-{args.split}",
+        source_archive=source_archive,
+    )
 
 
 def sanitize_segment(value: str) -> str:
@@ -283,7 +357,12 @@ def resolve_output_root(layout: WorkspaceLayout, model_name: str, source_short: 
 
 
 def source_descriptor(
-    args: argparse.Namespace, source_abs: str, source_short: str, layout: WorkspaceLayout
+    args: argparse.Namespace,
+    source_abs: str,
+    source_short: str,
+    layout: WorkspaceLayout,
+    *,
+    source_archive: str | None = None,
 ) -> dict[str, Any]:
     source: dict[str, Any] = {
         "mode": args.data_mode,
@@ -291,10 +370,25 @@ def source_descriptor(
         "path_absolute": source_abs,
         "path_relative": relativize_if_under(layout.root, source_abs) or source_abs,
     }
+    if source_archive:
+        source["source_archive_absolute"] = source_archive
+        source["source_archive_relative"] = relativize_if_under(layout.root, source_archive) or source_archive
     if args.data_mode == "dataset-split":
         source["dataset"] = args.dataset
         source["split"] = args.split
     return source
+
+
+def source_descriptor_from_resolved(
+    args: argparse.Namespace, resolved: ResolvedInferenceSource, layout: WorkspaceLayout
+) -> dict[str, Any]:
+    return source_descriptor(
+        args,
+        resolved.working_path,
+        resolved.display_name,
+        layout,
+        source_archive=resolved.source_archive,
+    )
 
 
 def build_report(
@@ -313,6 +407,7 @@ def build_report(
     skipped: int,
     performance: dict[str, Any] | None = None,
     environment_artifact_path: str | None = None,
+    source_archive: str | None = None,
 ) -> dict[str, Any]:
     task_type = task_to_metadata_task_type(getattr(args, "task", None))
     detections_total = sum(len(x.get("detections", [])) for x in image_rows)
@@ -374,7 +469,13 @@ def build_report(
                 else bool(getattr(args, "export_dataset", True))
             ),
         },
-        "source": source_descriptor(args, source_abs, source_short, layout),
+        "source": source_descriptor(
+            args,
+            source_abs,
+            source_short,
+            layout,
+            source_archive=source_archive,
+        ),
         "output": {
             "dir_absolute": out_root,
             "dir_relative": relativize_if_under(layout.root, out_root) or out_root,
@@ -408,13 +509,6 @@ def write_report(path: str, report: dict[str, Any]) -> None:
 
 
 def resolve_external_source(args: argparse.Namespace, layout: WorkspaceLayout) -> str:
-    if args.data_mode == "folder":
-        return os.path.abspath(os.path.expanduser(str(args.source_dir)))
-    _, split_dir = collect_split_images_for_dataset(
-        layout,
-        str(args.dataset),
-        str(args.split),
-        int(args.limit),
-    )
-    return split_dir
+    _, resolved = resolve_inference_source(args, layout)
+    return resolved.working_path
 

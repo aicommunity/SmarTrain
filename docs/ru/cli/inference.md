@@ -2,7 +2,7 @@
 
 # CLI: inference
 
-`smartrain inference` запускает инференс по папке или split датасета (детекция, instance segmentation, классификация — в зависимости от модели/task).
+`smartrain inference` запускает инференс по папке, архиву или split датасета (детекция, instance segmentation, классификация — в зависимости от модели/task).
 
 Команда пишет:
 
@@ -30,7 +30,17 @@
   autolabel_manifest.json
 ```
 
-- **`basename`** — имя исходной папки (`--source-dir`) или `{dataset}-{split}` для `dataset-split`.
+- **`basename`** — имя исходной папки или архива (`--source` / `--source-dir`) или `{dataset}-{split}` для `dataset-split`.
+
+## Источники данных
+
+| Режим | Флаги | Поддержка архивов |
+|-------|-------|-------------------|
+| `folder` | `--source` или `--source-dir` | Да: `.zip`, `.tar`, `.tar.gz`, `.tgz` — распаковка в `tmp/extracted_datasets/` |
+| `dataset-split` | `--dataset`, `--split` | Да, если `data_path` в `datasets_info.json` указывает на архив |
+
+Архивы распаковываются в кэш workspace (`tmp/extracted_datasets/`) с инвалидацией по mtime/size. В отчёте `source.source_archive_*` сохраняет путь к исходному архиву, если он был использован.
+
 - В датасет попадают **только кадры с ≥1 детекцией/сегментом** после фильтра confidence.
 - **`autolabel_manifest.json`** — модель, параметры инференса/экспорта, статистика, `file_mapping`.
 
@@ -66,6 +76,7 @@ Classification в YOLO не экспортируется (предупрежде
 
 ```bash
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
+smartrain inference --model-name my_model --data-mode folder --source raw_data/images.zip --device cpu
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --no-export-dataset
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --export-label-conf-min 0.4 --export-label-conf-max 0.9
 smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mode folder --source-dir ./images

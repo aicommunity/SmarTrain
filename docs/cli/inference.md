@@ -2,7 +2,7 @@
 
 # CLI: inference
 
-`smartrain inference` runs inference on a folder or a dataset split (detection, instance segmentation, classification depending on model/task).
+`smartrain inference` runs inference on a folder, archive, or dataset split (detection, instance segmentation, classification depending on model/task).
 
 It writes:
 
@@ -30,7 +30,17 @@ Directory layout `<basename>_autolabeled/` (inside the inference run folder):
   autolabel_manifest.json
 ```
 
-- **`basename`** is the source folder name (`--source-dir`) or `{dataset}-{split}` for `dataset-split`.
+- **`basename`** is the source folder or archive name (`--source` / `--source-dir`) or `{dataset}-{split}` for `dataset-split`.
+
+## Data sources
+
+| Mode | Flags | Archive support |
+|------|-------|-----------------|
+| `folder` | `--source` or `--source-dir` | Yes: `.zip`, `.tar`, `.tar.gz`, `.tgz` — extracted to `tmp/extracted_datasets/` |
+| `dataset-split` | `--dataset`, `--split` | Yes when `data_path` in `datasets_info.json` points to an archive |
+
+Archives are unpacked into the workspace cache (`tmp/extracted_datasets/`) with mtime/size invalidation. When an archive was used, `source.source_archive_*` in the report keeps the original archive path.
+
 - Only frames with **≥1 detection/segment** after the export confidence filter are included.
 - **`autolabel_manifest.json`** records model, inference/export parameters, summary stats, and `file_mapping`.
 
@@ -79,6 +89,7 @@ Note: `pt_uni` is an internal metrics-comparison mode (PT vs PT-uni, test/val) a
 
 ```bash
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
+smartrain inference --model-name my_model --data-mode folder --source raw_data/images.zip --device cpu
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --no-export-dataset
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --export-label-conf-min 0.4 --export-label-conf-max 0.9
 smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mode folder --source-dir ./images
