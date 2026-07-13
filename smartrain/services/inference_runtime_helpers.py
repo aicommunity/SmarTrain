@@ -182,9 +182,22 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
         return p
 
     if args.model_name:
+        name = str(args.model_name).strip()
+        candidate = Path(name)
+        models_root = Path(layout.models).resolve()
+        if candidate.suffix.lower() in SUPPORTED_INFERENCE_EXTS:
+            file_path = candidate.resolve() if candidate.is_absolute() else (models_root / candidate).resolve()
+            if file_path.is_file():
+                if candidate.is_absolute():
+                    display_name = file_path.parent.name
+                else:
+                    parts = candidate.as_posix().split("/")
+                    display_name = parts[0] if parts else file_path.stem
+                return file_path, display_name, "models"
+
         from smartrain.run_model_contract.gateway import load_target, resolve_task_context
 
-        mdir = (Path(layout.models) / str(args.model_name).strip()).resolve()
+        mdir = (models_root / name).resolve()
         _ = resolve_task_context(str(mdir), source_kind="model")
         payload = load_target(str(mdir), source_kind="model")
         if not payload.models:

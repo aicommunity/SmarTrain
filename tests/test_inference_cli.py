@@ -1211,3 +1211,66 @@ def test_inference_external_provider_zip_source_is_directory(tmp_path: Path, mon
     assert not captured["source_path"].endswith(".zip")
     assert Path(captured["source_path"]).is_dir()
 
+
+def test_resolve_model_accepts_relative_weights_path_in_model_name(tmp_path: Path, monkeypatch) -> None:
+    import argparse
+
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+    from smartrain.services.inference_runtime_helpers import resolve_model
+
+    model_dir = tmp_path / "models" / "merged2_fltd_aug"
+    model_dir.mkdir(parents=True)
+    weights = model_dir / "detect_yolo11s_20260708_214400.pt"
+    weights.write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "detect_yolo11s_20260708_214400.pt", "task_type": "detection"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        model_name="merged2_fltd_aug/detect_yolo11s_20260708_214400.pt",
+        run=None,
+        weights=None,
+    )
+    model_path, model_name, source = resolve_model(args, WorkspaceLayout(str(tmp_path)))
+    assert source == "models"
+    assert model_path == weights.resolve()
+    assert model_name == "merged2_fltd_aug"
+
+
+def test_inference_model_name_file_path_cli(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "merged2_fltd_aug"
+    model_dir.mkdir(parents=True)
+    weights = model_dir / "detect_yolo11s_20260708_214400.pt"
+    weights.write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "detect_yolo11s_20260708_214400.pt", "task_type": "detection"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "merged2_fltd_aug/detect_yolo11s_20260708_214400.pt",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["summary"]["images_processed"] == 1
+    assert report["model"]["source"] == "models"
+

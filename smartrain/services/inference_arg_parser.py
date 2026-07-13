@@ -29,7 +29,7 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
         help="Folder or archive with images (.zip, .tar, .tar.gz, .tgz); alias for --source.",
     )
     p.add_argument("--dataset", type=str, default=None, help="Dataset key from datasets/datasets_info.json.")
-    p.add_argument("--split", choices=("train", "val", "test"), default="test", help="Dataset split for dataset-split mode.")
+    p.add_argument("--split", choices=("train", "val", "test"), default=None, help="Dataset split for dataset-split mode.")
     p.add_argument("--limit", type=int, default=0, help="Max images to process (0 = all).")
     p.add_argument("--conf", type=float, default=0.25, help="Confidence threshold for inference model.")
     p.add_argument("--img-size", type=int, default=None, help="Inference input resolution (imgsz).")

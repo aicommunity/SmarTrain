@@ -117,7 +117,7 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
             return False
         print_numbered_options("datasets", ds_names)
         args.dataset = prompt_choice("Select dataset", ds_names, default=ds_names[0], show_options=False)
-        args.split = prompt_choice("Split", ["train", "val", "test"], default=args.split)
+        args.split = prompt_choice("Split", ["train", "val", "test"], default=args.split or "test")
         args.roi_pre_detect = False
         args.source_dir = None
 
@@ -166,6 +166,8 @@ def _validate_non_interactive_args(parser: argparse.ArgumentParser, args: argpar
             args.source_dir = str(source_path)
     if args.data_mode == "dataset-split" and not args.dataset:
         parser.error("incomplete arguments: --dataset is required for --data-mode dataset-split.")
+    if args.data_mode == "dataset-split" and not args.split:
+        args.split = "test"
     if not args.model_name and not args.run and not args.weights:
         parser.error("incomplete arguments: specify --model-name, --run or --weights.")
 
