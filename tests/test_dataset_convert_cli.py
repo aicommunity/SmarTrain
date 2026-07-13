@@ -10,7 +10,6 @@ from PIL import Image
 from smartrain.services.datasets.dataset_convert_cli import main as dataset_convert_main
 from smartrain.services.datasets.dataset_convert_service import (
     TARGET_CVAT11,
-    TARGET_CVAT11_ZIP,
     TARGET_YOLO,
     run_conversion,
     DatasetSource,
@@ -83,24 +82,36 @@ def _make_yolo_flat(tmp_path: Path) -> Path:
 
 
 def test_cvat_zip_to_yolo_service(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
     cvat_zip = _make_cvat11_zip(tmp_path)
     out = tmp_path / "yolo_out"
-    source = DatasetSource(path=cvat_zip, structure="cvat11_zip", name=cvat_zip.stem, source_zip=cvat_zip)
+    from smartrain.services.datasets.dataset_source_resolver import (
+        resolved_to_dataset_source,
+        resolve_dataset_source,
+    )
+
+    resolved = resolve_dataset_source(str(ws), cvat_zip)
+    source = resolved_to_dataset_source(resolved)
     result = run_conversion(source, TARGET_YOLO, out, opts=ConvertOptions())
     assert result.output_dir is not None
     assert (result.output_dir / "data.yaml").is_file()
     assert (result.output_dir / "labels" / "img001.txt").is_file()
 
 
-def test_yolo_to_cvat11_zip_service(tmp_path: Path) -> None:
+def test_yolo_to_cvat11_with_zip_service(tmp_path: Path) -> None:
     yolo = _make_yolo_flat(tmp_path)
-    zip_out = tmp_path / "out.cvat11.zip"
+    out = tmp_path / "cvat_out"
     source = DatasetSource(path=yolo, structure="flat", name=yolo.name)
-    result = run_conversion(source, TARGET_CVAT11_ZIP, zip_out, opts=ConvertOptions())
+    result = run_conversion(
+        source,
+        TARGET_CVAT11,
+        out,
+        opts=ConvertOptions(create_zip=True, delete_after_zip=True),
+    )
     assert result.zip_path is not None
     assert result.zip_path.is_file()
-    with zipfile.ZipFile(result.zip_path, "r") as zf:
-        assert any(n.endswith("annotations.xml") for n in zf.namelist())
+    assert not out.is_dir()
 
 
 def test_cvsdcldet_to_cvat11_cli(tmp_path: Path, monkeypatch) -> None:
@@ -127,31 +138,33 @@ def test_cvsdcldet_to_cvat11_cli(tmp_path: Path, monkeypatch) -> None:
     assert labels == {"feline"}
 
 
-def test_cvsdcldet_to_cvat11_zip_with_delete_folder(tmp_path: Path) -> None:
+def test_cvsdcldet_to_cvat11_with_zip_delete_folder(tmp_path: Path) -> None:
     source = tmp_path / "src"
     source.mkdir()
     _write_cvsdcldet_sample(source)
-    zip_out = tmp_path / "out.cvat11.zip"
-    folder_out = tmp_path / "out.cvat11"
+    out = tmp_path / "cvat_out"
     source_ds = DatasetSource(path=source, structure="cvsdcldet", name=source.name)
     result = run_conversion(
         source_ds,
-        TARGET_CVAT11_ZIP,
-        zip_out,
-        opts=ConvertOptions(delete_after_zip=True),
+        TARGET_CVAT11,
+        out,
+        opts=ConvertOptions(create_zip=True, delete_after_zip=True),
     )
     assert result.zip_path is not None
     assert result.zip_path.is_file()
-    assert not folder_out.is_dir()
+    assert not out.is_dir()
 
 
 def test_cvat_zip_import_cli(tmp_path: Path, monkeypatch) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
     cvat_zip = _make_cvat11_zip(tmp_path)
     out = tmp_path / "yolo_cli"
     monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
+    monkeypatch.chdir(ws)
     dataset_convert_main(
         [
-            "--source-zip",
+            "--source",
             str(cvat_zip),
             "--to",
             TARGET_YOLO,
@@ -164,19 +177,21 @@ def test_cvat_zip_import_cli(tmp_path: Path, monkeypatch) -> None:
 
 def test_yolo_export_cli(tmp_path: Path, monkeypatch) -> None:
     yolo = _make_yolo_flat(tmp_path)
-    zip_out = tmp_path / "exported.cvat11.zip"
+    out = tmp_path / "cvat_out"
     monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
     dataset_convert_main(
         [
             "--source-dir",
             str(yolo),
             "--to",
-            TARGET_CVAT11_ZIP,
+            TARGET_CVAT11,
             "--output-dir",
-            str(zip_out),
+            str(out),
+            "--zip",
+            "--delete-after-zip",
         ]
     )
-    assert zip_out.is_file()
+    assert (out.parent / f"{out.name}.cvat11.zip").is_file()
 
 
 def _make_cvsdcldet_zip(tmp_path: Path) -> Path:

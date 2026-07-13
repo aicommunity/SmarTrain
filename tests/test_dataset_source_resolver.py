@@ -129,7 +129,7 @@ def test_resolve_dataset_source_cvsdcldet_tar_gz(tmp_path: Path) -> None:
     assert resolved.working_path.is_dir()
 
 
-def test_peek_archive_structure_cvat11_zip(tmp_path: Path) -> None:
+def test_peek_archive_structure_cvat11(tmp_path: Path) -> None:
     task = tmp_path / "task1"
     images = task / "images"
     images.mkdir(parents=True)
@@ -140,10 +140,10 @@ def test_peek_archive_structure_cvat11_zip(tmp_path: Path) -> None:
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.write(ann, arcname="task1/annotations.xml")
         zf.write(images / "img001.jpg", arcname="task1/images/img001.jpg")
-    assert peek_archive_structure(zip_path) == "cvat11_zip"
+    assert peek_archive_structure(zip_path) == "cvat11"
 
 
-def test_resolve_dataset_source_cvat11_zip_without_extract(tmp_path: Path) -> None:
+def test_resolve_dataset_source_cvat11_zip_extracts_to_cache(tmp_path: Path) -> None:
     task = tmp_path / "task1"
     images = task / "images"
     images.mkdir(parents=True)
@@ -154,10 +154,13 @@ def test_resolve_dataset_source_cvat11_zip_without_extract(tmp_path: Path) -> No
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.write(ann, arcname="task1/annotations.xml")
         zf.write(images / "img001.jpg", arcname="task1/images/img001.jpg")
-    resolved = resolve_dataset_source(None, zip_path)
-    assert resolved.is_cvat11_zip
-    assert resolved.structure == "cvat11_zip"
-    assert resolved.working_path == zip_path.resolve()
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    resolved = resolve_dataset_source(str(ws), zip_path)
+    assert resolved.structure == "cvat11"
+    assert resolved.source_archive == zip_path.resolve()
+    assert resolved.working_path.is_dir()
+    assert resolved.working_path != zip_path.resolve()
 
 
 def test_external_candidates_from_datasets_list(tmp_path: Path) -> None:

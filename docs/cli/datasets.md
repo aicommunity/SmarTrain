@@ -147,19 +147,18 @@ Convert datasets between supported formats (CVAT for images 1.1, YOLO, CvsDclDet
 
 ```bash
 smartrain dataset convert
-smartrain dataset convert --source-zip /path/to/export.zip --to yolo --output-dir datasets/task_yolo
-smartrain dataset convert --source datasets/task_yolo --to cvat11_zip --output-dir /path/to/out.cvat11.zip
+smartrain dataset convert --source /path/to/export.zip --to yolo --output-dir datasets/task_yolo
+smartrain dataset convert --source datasets/task_yolo --to cvat11 --output-dir converted_raw_data/task --zip
 smartrain dataset convert --source raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
-smartrain dataset convert --source raw_data/StartMarker14_PU50.zip --to cvat11_zip --output-dir converted_raw_data/StartMarker14_PU50.cvat11.zip
+smartrain dataset convert --source raw_data/StartMarker14_PU50.zip --to cvat11 --output-dir converted_raw_data/StartMarker14_PU50 --zip
 smartrain dataset convert --source /data/external/dataset.tar.gz --to cvat11 --output-dir converted_raw_data/external
 smartrain dataset convert --source raw_data/my_det --to cvat11 --rename-classes white_line line --zip
-smartrain dataset convert --dataset my_dataset --to cvat11_zip --output-dir /tmp/my_dataset.cvat11.zip
+smartrain dataset convert --dataset my_dataset --to cvat11 --output-dir converted_raw_data/my_dataset --zip
 ```
 
-- **Interactive mode** (`smartrain dataset convert` from TTY): unified menu with `[datasets]`, `[raw_data]` (folders and `.zip`/`.tar`/`.tar.gz` archives), `[external]` from `datasets_list.txt`, and manual path entry; then detected format, target (`yolo`, `cvat11`, `cvat11_zip`), output path, optional CvsDclDet class rename, optional zip (default **off**) and folder deletion after zip (default **on** when zip is enabled).
-- **`--source`**: preferred flag for a folder or archive (`.zip`, `.tar`, `.tar.gz`, `.tgz`). `--source-dir` has the same meaning (backward compatible).
-- **`--source-zip`**: CVAT for images 1.1 zip; for CvsDclDet/YOLO container archives use `--source`.
-- **`--to`**: `yolo` (flat `images/` + `labels/` + `data.yaml`), `cvat11` (folder), `cvat11_zip` (zip only).
+- **Interactive mode** (`smartrain dataset convert` from TTY): unified menu with `[datasets]`, `[raw_data]` (folders and `.zip`/`.tar`/`.tar.gz` archives), `[external]` from `datasets_list.txt`, and manual path entry; then detected format, target (`yolo`, `cvat11`), output path, optional CvsDclDet class rename, optional zip (default **off**) and folder deletion after zip (default **on** when zip is enabled).
+- **`--source`**: directory or archive (`.zip`, `.tar`, `.tar.gz`, `.tgz`). Archives are extracted to a cache directory (`tmp/extracted_datasets/` under workspace or current directory), then structure is detected. `--source-dir` is a backward-compatible alias.
+- **`--to`**: `yolo` (flat `images/` + `labels/` + `data.yaml`), `cvat11` (folder `annotations.xml` + `images/`).
 - **`--zip` / `--no-zip`**: after folder output, optionally pack to zip (`.cvat11.zip` for CVAT folders, `.zip` for YOLO).
 - **`--delete-after-zip` / `--no-delete-after-zip`**: remove output folder after zip (default: delete when `--zip`).
 - Writes `dataset_passport.json` in folder outputs. Run `smartrain scan` separately to update `datasets_info.json`.
@@ -168,8 +167,8 @@ Migration from removed `smartrain cvat`:
 
 | Old | New |
 |-----|-----|
-| `cvat import --cvat-zip X --output-dir Y` | `dataset convert --source-zip X --to yolo --output-dir Y` |
-| `cvat export --dataset-dir D --zip-path Z` | `dataset convert --source-dir D --to cvat11_zip --output-dir Z` |
+| `cvat import --cvat-zip X --output-dir Y` | `dataset convert --source X --to yolo --output-dir Y` |
+| `cvat export --dataset-dir D --zip-path Z` | `dataset convert --source-dir D --to cvat11 --output-dir Z --zip` |
 | `cvat from-cvsdcldet --source-dir S --output-dir O --zip` | `dataset convert --source S --to cvat11 --output-dir O --zip` |
 
 ## `dataset report`

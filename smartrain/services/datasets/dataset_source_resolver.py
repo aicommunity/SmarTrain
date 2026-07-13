@@ -22,7 +22,6 @@ from smartrain.services.datasets.datasets_json_scan_index_service import _load_d
 
 MANUAL_SOURCE_OPTION = "<enter path to directory or archive>"
 DATASETS_LIST_FILE = "datasets_list.txt"
-CVAT11_ZIP_STRUCTURE = "cvat11_zip"
 
 SourceGroup = Literal["datasets", "raw_data", "external", "manual"]
 
@@ -43,7 +42,6 @@ class ResolvedDatasetSource:
     structure: str
     display_name: str
     source_archive: Path | None = None
-    is_cvat11_zip: bool = False
     dataset_key: str | None = None
     structures: list[str] | None = None
 
@@ -76,7 +74,7 @@ def _peek_zip_structure(zip_path: Path) -> str | None:
             names = zf.namelist()
             members = set(names)
             if any(n.endswith("annotations.xml") for n in names):
-                return CVAT11_ZIP_STRUCTURE
+                return "cvat11"
             json_names = [n for n in names if n.lower().endswith(".json") and not n.endswith("/")]
             for json_name in json_names[:8]:
                 try:
@@ -102,7 +100,7 @@ def _peek_tar_structure(archive_path: Path) -> str | None:
             members = [m.name for m in tf.getmembers() if m.isfile()]
             member_set = set(members)
             if any(n.endswith("annotations.xml") for n in members):
-                return CVAT11_ZIP_STRUCTURE
+                return "cvat11"
             json_names = [n for n in members if n.lower().endswith(".json")]
             for json_name in json_names[:8]:
                 member = tf.getmember(json_name)
@@ -138,23 +136,18 @@ def peek_archive_structure(archive_path: Path) -> str | None:
     return _peek_tar_structure(archive_path)
 
 
+def _workspace_for_archive_extract(workspace_root: str | None) -> str:
+    return workspace_root or str(Path.cwd())
+
+
 def detect_path_structure(path: Path, *, workspace_root: str | None = None) -> str:
     """Detect dataset structure for a directory or archive path."""
     if path.is_dir():
         return detect_structure(str(path))
     if path.is_file() and is_dataset_archive_path(path):
-        peeked = peek_archive_structure(path)
-        if peeked == CVAT11_ZIP_STRUCTURE:
-            return CVAT11_ZIP_STRUCTURE
-        if peeked:
-            return peeked
-        if workspace_root is None:
-            raise ValueError(
-                f"Could not detect dataset structure in archive: {path}. "
-                "Specify --workspace to allow extraction to cache."
-            )
+        ws = _workspace_for_archive_extract(workspace_root)
         print(f"[INFO] Extracting archive to cache: {path}")
-        extracted = Path(extract_dataset_archive_to_cache(workspace_root, str(path)))
+        extracted = Path(extract_dataset_archive_to_cache(ws, str(path)))
         return detect_structure(str(extracted))
     return detect_structure(str(path))
 
@@ -412,18 +405,9 @@ def resolve_dataset_source(
 
     if resolved.is_file() and is_dataset_archive_path(resolved):
         peeked_list = peek_archive_structures(resolved)
-        if CVAT11_ZIP_STRUCTURE in peeked_list:
-            return ResolvedDatasetSource(
-                working_path=resolved,
-                structure=CVAT11_ZIP_STRUCTURE,
-                display_name=_display_name_for_path(resolved),
-                is_cvat11_zip=True,
-                structures=[CVAT11_ZIP_STRUCTURE],
-            )
-        if workspace_root is None:
-            raise ValueError("Workspace is required when source is a dataset archive container.")
+        ws = _workspace_for_archive_extract(workspace_root)
         print(f"[INFO] Extracting archive to cache: {resolved}")
-        extracted = Path(extract_dataset_archive_to_cache(workspace_root, str(resolved)))
+        extracted = Path(extract_dataset_archive_to_cache(ws, str(resolved)))
         structures = detect_structures(str(extracted))
         if peeked_list:
             structures = _merge_structures(structures, peeked_list)
@@ -446,15 +430,6 @@ def resolve_dataset_source(
 def resolved_to_dataset_source(resolved: ResolvedDatasetSource):
     from smartrain.services.datasets.dataset_convert_service import DatasetSource
 
-    if resolved.is_cvat11_zip:
-        return DatasetSource(
-            path=resolved.working_path,
-            structure=CVAT11_ZIP_STRUCTURE,
-            name=resolved.display_name,
-            source_zip=resolved.working_path,
-            dataset_key=resolved.dataset_key,
-            structures=resolved.all_structures,
-        )
     return DatasetSource(
         path=resolved.working_path,
         structure=resolved.structure,
@@ -469,8 +444,6 @@ def replay_source_path(source) -> str:
     """Return the CLI path to replay for a resolved DatasetSource."""
     if source.dataset_key:
         return ""
-    if source.source_zip is not None and source.structure == CVAT11_ZIP_STRUCTURE:
-        return str(source.source_zip)
     if source.source_archive is not None:
         return str(source.source_archive)
     return str(source.path)

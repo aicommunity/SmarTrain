@@ -23,7 +23,6 @@ from smartrain.services.datasets.cvsdcldet_converter import (
 )
 from smartrain.services.datasets.dataset_convert_service import (
     TARGET_CVAT11,
-    TARGET_CVAT11_ZIP,
     TARGET_YOLO,
     ConvertOptions,
     DatasetSource,
@@ -142,8 +141,6 @@ def _prompt_target(source: DatasetSource) -> str:
 
 def _prompt_output_dir(workspace_root: str, source: DatasetSource, target: str) -> Path:
     default = _default_output_dir(workspace_root, source, target)
-    if target == TARGET_CVAT11_ZIP:
-        default = default.parent / f"{default.name}.cvat11.zip"
     rel_default = default
     try:
         rel_default = default.relative_to(Path(workspace_root))
@@ -226,23 +223,17 @@ def build_dataset_convert_arg_parser() -> argparse.ArgumentParser:
         help="Source dataset directory or archive (.zip, .tar, .tar.gz, .tgz)",
     )
     p.add_argument(
-        "--source-zip",
-        type=str,
-        default=None,
-        help="Source CVAT for images 1.1 zip archive",
-    )
-    p.add_argument(
         "--to",
         type=str,
         default=None,
-        choices=(TARGET_YOLO, TARGET_CVAT11, TARGET_CVAT11_ZIP),
-        help="Target format: yolo, cvat11, cvat11_zip",
+        choices=(TARGET_YOLO, TARGET_CVAT11),
+        help="Target format: yolo, cvat11",
     )
     p.add_argument(
         "--output-dir",
         type=str,
         default=None,
-        help="Output directory or zip path (for cvat11_zip)",
+        help="Output directory",
     )
     p.add_argument("--task-name", type=str, default=None, help="Task name for CVAT export/meta.")
     p.add_argument(
@@ -328,9 +319,9 @@ def _write_passport(
 def _transformation_type(source_structure: str, target: str) -> str:
     if source_structure == "cvsdcldet" and target == TARGET_CVAT11:
         return "cvsdcldet_to_cvat11"
-    if source_structure in ("cvat11", "cvat11_zip") and target == TARGET_YOLO:
+    if source_structure == "cvat11" and target == TARGET_YOLO:
         return "cvat11_to_yolo"
-    if target in (TARGET_CVAT11, TARGET_CVAT11_ZIP):
+    if target == TARGET_CVAT11:
         return "yolo_to_cvat11"
     return f"{source_structure}_to_{target}"
 
@@ -367,20 +358,18 @@ def main(argv: list[str] | None = None) -> None:
         output_path = _prompt_output_dir(workspace_root, source, target)
         if "cvsdcldet" in source.all_structures and not args.rename_classes:
             class_rename = _prompt_class_rename(source.path)
-        if target != TARGET_CVAT11_ZIP:
-            if create_zip is None:
-                create_zip = prompt_yes_no("Save output to zip archive?", default=False)
-            if create_zip:
-                delete_after_zip = prompt_yes_no("Delete output folder after zip?", default=True)
-            else:
-                delete_after_zip = False
+        if create_zip is None:
+            create_zip = prompt_yes_no("Save output to zip archive?", default=False)
+        if create_zip:
+            delete_after_zip = prompt_yes_no("Delete output folder after zip?", default=True)
+        else:
+            delete_after_zip = False
     else:
         try:
             source = resolve_source(
                 workspace_root=workspace_root,
                 dataset_key=args.dataset,
                 source_dir=args.source_dir,
-                source_zip=args.source_zip,
                 source=args.source,
             )
         except (ValueError, KeyError, FileNotFoundError) as e:
@@ -392,8 +381,6 @@ def main(argv: list[str] | None = None) -> None:
             if workspace_root is None:
                 raise SystemExit("--output-dir is required when workspace is not set.")
             output_path = _default_output_dir(workspace_root, source, target)
-            if target == TARGET_CVAT11_ZIP:
-                output_path = output_path.parent / f"{output_path.name}.cvat11.zip"
 
         if create_zip is None:
             create_zip = False
@@ -408,10 +395,9 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(str(e)) from e
 
     names = _parse_names_csv(args.names)
-    if not names and target in (TARGET_CVAT11, TARGET_CVAT11_ZIP) and source.structure not in (
+    if not names and target == TARGET_CVAT11 and source.structure not in (
         "cvsdcldet",
         "cvat11",
-        "cvat11_zip",
     ):
         names = _load_names_from_data_yaml(source.path)
 
@@ -422,7 +408,7 @@ def main(argv: list[str] | None = None) -> None:
         class_rename=class_rename or None,
         force=bool(args.force),
         tmp_base_dir=tmp_base_dir,
-        create_zip=bool(create_zip) and target != TARGET_CVAT11_ZIP,
+        create_zip=bool(create_zip),
         delete_after_zip=delete_after_zip,
         zip_path=None,
     )
@@ -470,12 +456,10 @@ def main(argv: list[str] | None = None) -> None:
             replay.dataset = source.dataset_key
             replay.source = None
             replay.source_dir = None
-            replay.source_zip = None
         else:
             replay_path = replay_source_path(source)
             replay.source = replay_path
             replay.source_dir = None
-            replay.source_zip = None
             replay.dataset = None
         replay.to = target
         replay.output_dir = str(output_path)

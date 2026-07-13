@@ -13,7 +13,6 @@ from smartrain.services.datasets.cvat11_converter import (
     YOLO_IMAGE_EXTS,
     export_yolo_to_cvat11_zip,
     generate_temp_yolo_labels_from_cvat11_extracted,
-    import_cvat11_zip_to_yolo,
 )
 from smartrain.services.datasets.cvsdcldet_converter import (
     _pack_cvat11_zip,
@@ -34,27 +33,22 @@ from smartrain.services.datasets.datasets_json_scan_core_service import (
 
 TARGET_YOLO = "yolo"
 TARGET_CVAT11 = "cvat11"
-TARGET_CVAT11_ZIP = "cvat11_zip"
 
-ALL_TARGETS = (TARGET_YOLO, TARGET_CVAT11, TARGET_CVAT11_ZIP)
-
-STRUCTURE_CVAT11_ZIP = "cvat11_zip"
+ALL_TARGETS = (TARGET_YOLO, TARGET_CVAT11)
 
 YOLO_SOURCE_STRUCTURES = frozenset({"flat", "subset_flat", "split", "nested_split", "darknet"})
 
 CONVERSION_TARGETS: dict[str, list[str]] = {
-    STRUCTURE_CVAT11_ZIP: [TARGET_YOLO],
-    "cvat11": [TARGET_YOLO, TARGET_CVAT11_ZIP],
-    "cvsdcldet": [TARGET_CVAT11, TARGET_YOLO, TARGET_CVAT11_ZIP],
-    "flat": [TARGET_CVAT11, TARGET_CVAT11_ZIP],
-    "subset_flat": [TARGET_CVAT11, TARGET_CVAT11_ZIP],
-    "split": [TARGET_CVAT11, TARGET_CVAT11_ZIP],
-    "nested_split": [TARGET_CVAT11, TARGET_CVAT11_ZIP],
-    "darknet": [TARGET_YOLO, TARGET_CVAT11, TARGET_CVAT11_ZIP],
+    "cvat11": [TARGET_YOLO, TARGET_CVAT11],
+    "cvsdcldet": [TARGET_CVAT11, TARGET_YOLO],
+    "flat": [TARGET_CVAT11],
+    "subset_flat": [TARGET_CVAT11],
+    "split": [TARGET_CVAT11],
+    "nested_split": [TARGET_CVAT11],
+    "darknet": [TARGET_YOLO, TARGET_CVAT11],
 }
 
 STRUCTURE_DISPLAY_NAMES: dict[str, str] = {
-    STRUCTURE_CVAT11_ZIP: "CVAT for images 1.1 (zip archive)",
     "cvat11": "CVAT for images 1.1 (folder)",
     "cvsdcldet": "CvsDclDet detection export",
     "flat": "YOLO flat paired directories layout",
@@ -68,7 +62,6 @@ STRUCTURE_DISPLAY_NAMES: dict[str, str] = {
 TARGET_DISPLAY_NAMES: dict[str, str] = {
     TARGET_YOLO: "YOLO flat dataset (images/ + labels/ + data.yaml)",
     TARGET_CVAT11: "CVAT for images 1.1 (folder: annotations.xml + images/)",
-    TARGET_CVAT11_ZIP: "CVAT for images 1.1 (zip archive)",
 }
 
 
@@ -84,7 +77,6 @@ class DatasetSource:
     structure: str
     name: str
     dataset_key: str | None = None
-    source_zip: Path | None = None
     source_archive: Path | None = None
     structures: list[str] = field(default_factory=list)
 
@@ -136,7 +128,6 @@ def pick_structure_for_target(structures: list[str], target: str) -> str:
         raise ValueError("structures is empty")
     if target == TARGET_YOLO:
         preference = [
-            STRUCTURE_CVAT11_ZIP,
             "cvat11",
             "cvsdcldet",
             "flat",
@@ -154,7 +145,6 @@ def pick_structure_for_target(structures: list[str], target: str) -> str:
             "nested_split",
             "darknet",
             "cvat11",
-            STRUCTURE_CVAT11_ZIP,
         ]
     for sid in preference:
         if sid in structures:
@@ -182,28 +172,9 @@ def list_available_targets(source_structure: str | list[str]) -> list[ConvertTar
 
 
 def detect_source_structure(path: Path, *, workspace_root: str | None = None) -> str:
-    from smartrain.core.runtime.workspace_paths import is_dataset_archive_path
-    from smartrain.services.datasets.dataset_source_resolver import (
-        CVAT11_ZIP_STRUCTURE,
-        detect_path_structure,
-        peek_archive_structure,
-    )
+    from smartrain.services.datasets.dataset_source_resolver import detect_path_structure
 
-    if path.is_file() and is_dataset_archive_path(path):
-        peeked = peek_archive_structure(path)
-        if peeked == CVAT11_ZIP_STRUCTURE:
-            return STRUCTURE_CVAT11_ZIP
-        if peeked:
-            return peeked
-        return detect_path_structure(path, workspace_root=workspace_root)
-    if path.is_file() and path.suffix.lower() == ".zip":
-        try:
-            with zipfile.ZipFile(path, "r") as zf:
-                if any(n.endswith("annotations.xml") for n in zf.namelist()):
-                    return STRUCTURE_CVAT11_ZIP
-        except zipfile.BadZipFile:
-            pass
-    return detect_structure(str(path))
+    return detect_path_structure(path, workspace_root=workspace_root)
 
 
 def resolve_source(
@@ -211,7 +182,6 @@ def resolve_source(
     workspace_root: str | None,
     dataset_key: str | None = None,
     source_dir: str | Path | None = None,
-    source_zip: str | Path | None = None,
     source: str | Path | None = None,
 ) -> DatasetSource:
     from smartrain.services.datasets.dataset_source_resolver import (
@@ -221,24 +191,8 @@ def resolve_source(
     )
 
     direct_path = source if source is not None else source_dir
-    if sum(bool(x) for x in (dataset_key, direct_path, source_zip)) != 1:
-        raise ValueError("Specify exactly one of --dataset, --source/--source-dir, or --source-zip.")
-
-    if source_zip is not None:
-        zip_path = Path(source_zip).expanduser().resolve()
-        if not zip_path.is_file():
-            raise FileNotFoundError(f"Source zip not found: {zip_path}")
-        structure = detect_source_structure(zip_path, workspace_root=workspace_root)
-        if structure != STRUCTURE_CVAT11_ZIP:
-            resolved = resolve_dataset_source(workspace_root, zip_path)
-            return resolved_to_dataset_source(resolved)
-        return DatasetSource(
-            path=zip_path,
-            structure=structure,
-            name=zip_path.stem,
-            source_zip=zip_path,
-            structures=[STRUCTURE_CVAT11_ZIP],
-        )
+    if sum(bool(x) for x in (dataset_key, direct_path)) != 1:
+        raise ValueError("Specify exactly one of --dataset, --source, or --source-dir.")
 
     if dataset_key is not None:
         if workspace_root is None:
@@ -522,7 +476,6 @@ def run_conversion(
         structure=effective_structure,
         name=source.name,
         dataset_key=source.dataset_key,
-        source_zip=source.source_zip,
         source_archive=source.source_archive,
         structures=source.all_structures,
     )
@@ -532,26 +485,6 @@ def run_conversion(
     output_path = output_path.expanduser().resolve()
 
     if target == TARGET_YOLO:
-        if source.structure == STRUCTURE_CVAT11_ZIP:
-            if source.source_zip is None:
-                raise ValueError("source_zip is required for cvat11_zip conversion")
-            info = import_cvat11_zip_to_yolo(
-                cvat_zip_path=source.source_zip,
-                output_dir=output_path,
-                task_name=opts.task_name,
-                force=opts.force,
-                tmp_base_dir=tmp_base,
-            )
-            result_dir = Path(str(info["output_dir"]))
-            zip_path = apply_zip_postprocess(result_dir, opts=opts)
-            return ConvertResult(
-                target=target,
-                output_dir=None if zip_path and opts.delete_after_zip else result_dir,
-                zip_path=zip_path,
-                info=info,
-                is_folder_output=True,
-            )
-
         if source.structure == "cvat11":
             info = convert_cvat11_folder_to_yolo_flat(
                 source.path,
@@ -665,83 +598,6 @@ def run_conversion(
                 zip_path=zip_path,
                 info=info,
                 is_folder_output=True,
-            )
-        finally:
-            if tmp_cleanup is not None:
-                try:
-                    shutil.rmtree(tmp_cleanup)
-                except OSError:
-                    pass
-
-    if target == TARGET_CVAT11_ZIP:
-        zip_path = output_path
-        if zip_path.suffix.lower() != ".zip":
-            zip_path = Path(str(output_path) + ".cvat11.zip")
-
-        if source.structure == "cvsdcldet":
-            out_dir = zip_path.parent / zip_path.stem.replace(".cvat11", "")
-            info = convert_cvsdcldet_to_cvat11(
-                source_dir=source.path,
-                output_dir=out_dir,
-                task_name=opts.task_name,
-                class_rename=opts.class_rename,
-                force=opts.force,
-                create_zip=True,
-                zip_path=zip_path,
-            )
-            if out_dir.is_dir() and opts.delete_after_zip:
-                try:
-                    shutil.rmtree(out_dir)
-                except OSError as exc:
-                    raise RuntimeError(f"Failed to delete temporary output directory: {out_dir}") from exc
-            return ConvertResult(
-                target=target,
-                output_dir=None,
-                zip_path=Path(str(info["zip_path"])),
-                info=info,
-                is_folder_output=False,
-            )
-
-        if source.structure == "cvat11":
-            task_name = opts.task_name or source.name
-            _pack_cvat11_zip(
-                output_dir=source.path,
-                task_name=task_name,
-                zip_path=zip_path,
-                force=opts.force,
-            )
-            info = {
-                "zip_path": str(zip_path),
-                "task_name": task_name,
-                "images_count": len(list((source.path / "images").glob("*"))) if (source.path / "images").is_dir() else 0,
-            }
-            return ConvertResult(
-                target=target,
-                output_dir=None,
-                zip_path=zip_path,
-                info=info,
-                is_folder_output=False,
-            )
-
-        yolo_dir, tmp_cleanup = _resolve_yolo_workdir(source, tmp_base_dir=tmp_base, force=opts.force)
-        try:
-            names = opts.names or _load_class_names(yolo_dir, "flat")
-            if not names:
-                raise ValueError("Could not determine class names: specify --names or provide data.yaml.")
-            info = export_yolo_to_cvat11_zip(
-                dataset_dir=yolo_dir,
-                task_name=opts.task_name,
-                output_zip_path=zip_path,
-                names=names,
-                force=opts.force,
-                tmp_base_dir=tmp_base,
-            )
-            return ConvertResult(
-                target=target,
-                output_dir=None,
-                zip_path=Path(str(info["zip_path"])),
-                info=info,
-                is_folder_output=False,
             )
         finally:
             if tmp_cleanup is not None:
