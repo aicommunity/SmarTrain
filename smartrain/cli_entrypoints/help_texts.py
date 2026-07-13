@@ -112,9 +112,9 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
         "Examples:\n"
         "  smartrain dataset convert\n"
         "  smartrain dataset convert --source-zip task.zip --to yolo --output-dir datasets/task_yolo\n"
-        "  smartrain dataset convert --source-dir datasets/task_yolo --to cvat11_zip --output-dir task.cvat11.zip\n"
-        "  smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det\n"
-        "  smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --rename-classes white_line line --zip\n"
+        "  smartrain dataset convert --source datasets/task_yolo --to cvat11_zip --output-dir task.cvat11.zip\n"
+        "  smartrain dataset convert --source raw_data/my_det.zip --to cvat11 --output-dir converted_raw_data/my_det\n"
+        "  smartrain dataset convert --source raw_data/my_det --to cvat11 --rename-classes white_line line --zip\n"
     ),
     "smartrain rotate": (
         "Examples:\n"

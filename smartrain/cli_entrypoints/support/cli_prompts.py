@@ -125,6 +125,21 @@ def print_numbered_options(label: str, options: Sequence[str]) -> None:
         print(f"  {i}. {opt}")
 
 
+def print_grouped_numbered_options(groups: Sequence[tuple[str, Sequence[str]]]) -> list[str]:
+    """Print grouped options with a single global index. Returns flat option list."""
+    flat: list[str] = []
+    idx = 1
+    for group_label, options in groups:
+        if not options:
+            continue
+        print(f"[INFO] {group_label}:")
+        for opt in options:
+            print(f"  {idx}. {opt}")
+            flat.append(opt)
+            idx += 1
+    return flat
+
+
 def prompt_choice(
     label: str,
     options: Sequence[str],

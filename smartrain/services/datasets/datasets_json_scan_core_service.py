@@ -204,63 +204,86 @@ def yolo_flat_image_label_buckets(folder_path: str):
     return buckets
 
 
-def detect_structure(folder_path: str) -> str:
+def _match_darknet(folder_path: str) -> bool:
+    obj_train_data_path = os.path.join(folder_path, "obj_train_data")
+    obj_names_path = find_obj_names_file(folder_path)
+    obj_data_path = find_obj_data_file(folder_path)
+    return os.path.exists(obj_train_data_path) and bool(obj_names_path or obj_data_path)
+
+
+def _match_split(folder_path: str, subfolders: list[str]) -> bool:
+    if not any(x in subfolders for x in ["train", "val", "test"]):
+        return False
+    _ic, _lc, pairs = _scan_split_buckets(folder_path)
+    return pairs > 0
+
+
+def _match_nested_split(folder_path: str) -> bool:
+    images_path = os.path.join(folder_path, "images")
+    if not os.path.isdir(images_path):
+        return False
+    images_entries = os.listdir(images_path)
+    if not any(os.path.isdir(os.path.join(images_path, d)) and _is_split_name(d) for d in images_entries):
+        return False
+    _ic, _lc, pairs = _scan_nested_split_buckets(folder_path)
+    return pairs > 0
+
+
+def _match_flat_or_subset(folder_path: str) -> str | None:
+    if not all(os.path.exists(os.path.join(folder_path, subdir)) for subdir in ["images", "labels"]):
+        return None
+    images_path = os.path.join(folder_path, "images")
+    images_entries = os.listdir(images_path)
+    if any(os.path.isdir(os.path.join(images_path, d)) and _is_split_name(d) for d in images_entries):
+        return None
+    buckets = yolo_flat_image_label_buckets(folder_path)
+    if not buckets:
+        return None
+    pairs_count = 0
+    for img_dir, lbl_dir in buckets:
+        _ic, _lc, pc = _count_yolo_pairs(img_dir, lbl_dir)
+        pairs_count += pc
+    if pairs_count <= 0:
+        return None
+    images_root = os.path.join(folder_path, "images")
+    has_subset = any(img != images_root for img, _ in buckets)
+    return "subset_flat" if has_subset else "flat"
+
+
+def _match_cvat11(folder_path: str) -> bool:
+    cvat_xml = _find_cvat_annotations_xml(folder_path)
+    return bool(cvat_xml and _cvat_has_images_dir_near_xml(cvat_xml) and _is_cvat11_images_xml(cvat_xml))
+
+
+def detect_structures(folder_path: str) -> list[str]:
+    """Return all dataset structure IDs that match the folder (priority order)."""
+    if not os.path.isdir(folder_path):
+        return []
     subfolders = [
         d.lower()
         for d in os.listdir(folder_path)
         if os.path.isdir(os.path.join(folder_path, d))
     ]
-
-    obj_train_data_path = os.path.join(folder_path, "obj_train_data")
-    obj_names_path = find_obj_names_file(folder_path)
-    obj_data_path = find_obj_data_file(folder_path)
-
-    if os.path.exists(obj_train_data_path) and (obj_names_path or obj_data_path):
-        return "darknet"
-
+    structures: list[str] = []
+    if _match_darknet(folder_path):
+        structures.append("darknet")
     if is_cvsdcldet_dir(folder_path):
-        return "cvsdcldet"
+        structures.append("cvsdcldet")
+    if _match_split(folder_path, subfolders):
+        structures.append("split")
+    if _match_nested_split(folder_path):
+        structures.append("nested_split")
+    flat_kind = _match_flat_or_subset(folder_path)
+    if flat_kind:
+        structures.append(flat_kind)
+    if _match_cvat11(folder_path):
+        structures.append("cvat11")
+    return structures
 
-    if any(x in subfolders for x in ["train", "val", "test"]):
-        _ic, _lc, pairs = _scan_split_buckets(folder_path)
-        if pairs > 0:
-            return "split"
 
-    if all(os.path.exists(os.path.join(folder_path, subdir)) for subdir in ["images", "labels"]):
-        images_path = os.path.join(folder_path, "images")
-        images_entries = os.listdir(images_path)
-        if any(
-            os.path.isdir(os.path.join(images_path, d)) and _is_split_name(d)
-            for d in images_entries
-        ):
-            _ic, _lc, pairs = _scan_nested_split_buckets(folder_path)
-            if pairs > 0:
-                return "nested_split"
-
-        buckets = yolo_flat_image_label_buckets(folder_path)
-        if not buckets:
-            pass
-        else:
-            images_count = 0
-            labels_count = 0
-            pairs_count = 0
-            for img_dir, lbl_dir in buckets:
-                ic, lc, pc = _count_yolo_pairs(img_dir, lbl_dir)
-                images_count += ic
-                labels_count += lc
-                pairs_count += pc
-            if pairs_count > 0:
-                images_root = os.path.join(folder_path, "images")
-                has_subset = any(img != images_root for img, _ in buckets)
-                if has_subset:
-                    return "subset_flat"
-                return "flat"
-
-    cvat_xml = _find_cvat_annotations_xml(folder_path)
-    if cvat_xml and _cvat_has_images_dir_near_xml(cvat_xml) and _is_cvat11_images_xml(cvat_xml):
-        return "cvat11"
-
-    return "unknown"
+def detect_structure(folder_path: str) -> str:
+    structures = detect_structures(folder_path)
+    return structures[0] if structures else "unknown"
 
 
 def load_yaml(file_path: str):

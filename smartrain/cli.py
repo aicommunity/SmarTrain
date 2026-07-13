@@ -1133,8 +1133,8 @@ def cmd_dataset_convert(ctx: typer.Context) -> None:
     Examples:
       smartrain dataset convert
       smartrain dataset convert --source-zip task.zip --to yolo --output-dir datasets/task_yolo
-      smartrain dataset convert --source-dir datasets/task_yolo --to cvat11_zip --output-dir task.cvat11.zip
-      smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
+      smartrain dataset convert --source datasets/task_yolo --to cvat11_zip --output-dir task.cvat11.zip
+      smartrain dataset convert --source raw_data/my_det.zip --to cvat11 --output-dir converted_raw_data/my_det
     """
     from smartrain.workflows.datasets.dataset_convert_cli import build_dataset_convert_arg_parser
 

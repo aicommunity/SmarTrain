@@ -177,3 +177,103 @@ def test_yolo_export_cli(tmp_path: Path, monkeypatch) -> None:
         ]
     )
     assert zip_out.is_file()
+
+
+def _make_cvsdcldet_zip(tmp_path: Path) -> Path:
+    source = tmp_path / "src_build"
+    source.mkdir()
+    _write_cvsdcldet_sample(source)
+    zip_path = tmp_path / "src.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in source.rglob("*"):
+            if path.is_file():
+                zf.write(path, arcname=f"src/{path.name}")
+    return zip_path
+
+
+def test_cvsdcldet_zip_to_cvat11_cli(tmp_path: Path, monkeypatch) -> None:
+    ws = tmp_path / "ws"
+    raw = ws / "raw_data"
+    raw.mkdir(parents=True)
+    zip_path = _make_cvsdcldet_zip(tmp_path)
+    target_zip = raw / "det.zip"
+    target_zip.write_bytes(zip_path.read_bytes())
+    out = ws / "converted_raw_data" / "out"
+    monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
+    monkeypatch.setenv("SMART_TRAIN_WORKSPACE", str(ws))
+    dataset_convert_main(
+        [
+            "--source",
+            str(target_zip),
+            "--to",
+            TARGET_CVAT11,
+            "--output-dir",
+            str(out),
+        ]
+    )
+    assert (out / "annotations.xml").is_file()
+
+
+def test_cvsdcldet_zip_source_dir_flag(tmp_path: Path, monkeypatch) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    zip_path = _make_cvsdcldet_zip(tmp_path)
+    out = tmp_path / "cvat_out"
+    monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
+    monkeypatch.setenv("SMART_TRAIN_WORKSPACE", str(ws))
+    dataset_convert_main(
+        [
+            "--source-dir",
+            str(zip_path),
+            "--to",
+            TARGET_CVAT11,
+            "--output-dir",
+            str(out),
+        ]
+    )
+    assert (out / "annotations.xml").is_file()
+
+
+def test_interactive_raw_data_zip_selection(tmp_path: Path, monkeypatch) -> None:
+    ws = tmp_path / "ws"
+    raw = ws / "raw_data"
+    raw.mkdir(parents=True)
+    zip_path = _make_cvsdcldet_zip(tmp_path)
+    target_zip = raw / "det_set.zip"
+    target_zip.write_bytes(zip_path.read_bytes())
+    out = ws / "converted_raw_data" / "out"
+    label = None
+    for candidate in __import__(
+        "smartrain.services.datasets.dataset_source_resolver",
+        fromlist=["list_raw_data_candidates"],
+    ).list_raw_data_candidates(str(ws)):
+        if candidate.path == target_zip.resolve():
+            label = candidate.label
+            break
+    assert label is not None
+
+    prompts = iter(
+        [
+            label,
+            "CVAT for images 1.1 (folder: annotations.xml + images/)",
+            str(out.relative_to(ws)),
+            "n",
+            "n",
+        ]
+    )
+    monkeypatch.setenv("SMART_TRAIN_WORKSPACE", str(ws))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(
+        "smartrain.services.datasets.dataset_convert_cli.prompt_choice",
+        lambda *_a, **_k: next(prompts),
+    )
+    monkeypatch.setattr(
+        "smartrain.services.datasets.dataset_convert_cli.prompt_text",
+        lambda *_a, **_k: next(prompts),
+    )
+    monkeypatch.setattr(
+        "smartrain.services.datasets.dataset_convert_cli.prompt_yes_no",
+        lambda *_a, **_k: next(prompts) == "y",
+    )
+    dataset_convert_main([])
+    assert (out / "annotations.xml").is_file()

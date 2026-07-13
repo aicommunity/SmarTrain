@@ -143,18 +143,22 @@ smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
 
 ## `dataset convert`
 
-Конвертация датасетов между поддерживаемыми форматами (CVAT for images 1.1, YOLO, CvsDclDet). Источники: каталог workspace (`datasets/`), `raw_data/` или явные внешние пути.
+Конвертация датасетов между поддерживаемыми форматами (CVAT for images 1.1, YOLO, CvsDclDet). Источники: каталог workspace (`datasets/`), `raw_data/` (каталоги и архивы), пути из `raw_data/datasets_list.txt` или явные внешние пути.
 
 ```bash
 smartrain dataset convert
 smartrain dataset convert --source-zip /path/to/export.zip --to yolo --output-dir datasets/task_yolo
-smartrain dataset convert --source-dir datasets/task_yolo --to cvat11_zip --output-dir /path/to/out.cvat11.zip
-smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
-smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --rename-classes white_line line --zip
+smartrain dataset convert --source datasets/task_yolo --to cvat11_zip --output-dir /path/to/out.cvat11.zip
+smartrain dataset convert --source raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
+smartrain dataset convert --source raw_data/StartMarker14_PU50.zip --to cvat11_zip --output-dir converted_raw_data/StartMarker14_PU50.cvat11.zip
+smartrain dataset convert --source /data/external/dataset.tar.gz --to cvat11 --output-dir converted_raw_data/external
+smartrain dataset convert --source raw_data/my_det --to cvat11 --rename-classes white_line line --zip
 smartrain dataset convert --dataset my_dataset --to cvat11_zip --output-dir /tmp/my_dataset.cvat11.zip
 ```
 
-- **Интерактивный режим** (`smartrain dataset convert` из TTY): выбор источника (каталог / `raw_data` / ручной путь или zip), показ формата, выбор цели (`yolo`, `cvat11`, `cvat11_zip`), путь вывода, опциональное переименование классов для CvsDclDet, затем zip-архив (по умолчанию **нет**) и удаление папки после zip (по умолчанию **да**, если zip включён).
+- **Интерактивный режим** (`smartrain dataset convert` из TTY): единое меню с секциями `[datasets]`, `[raw_data]` (каталоги и архивы `.zip`/`.tar`/`.tar.gz`), `[external]` из `datasets_list.txt`, ручной ввод пути к каталогу или архиву; затем показ формата, выбор цели (`yolo`, `cvat11`, `cvat11_zip`), путь вывода, опциональное переименование классов для CvsDclDet, zip-архив (по умолчанию **нет**) и удаление папки после zip (по умолчанию **да**, если zip включён).
+- **`--source`**: предпочтительный флаг — каталог или архив (`.zip`, `.tar`, `.tar.gz`, `.tgz`). `--source-dir` — тот же смысл (обратная совместимость).
+- **`--source-zip`**: CVAT for images 1.1 zip; для CvsDclDet/YOLO-контейнеров используйте `--source`.
 - **`--to`**: `yolo`, `cvat11` (папка), `cvat11_zip` (только zip).
 - **`--zip` / `--no-zip`**: упаковать папку в zip (`.cvat11.zip` для CVAT, `.zip` для YOLO).
 - **`--delete-after-zip` / `--no-delete-after-zip`**: удалить папку после zip (по умолчанию при `--zip`).
@@ -166,7 +170,7 @@ smartrain dataset convert --dataset my_dataset --to cvat11_zip --output-dir /tmp
 |------|-------|
 | `cvat import --cvat-zip X --output-dir Y` | `dataset convert --source-zip X --to yolo --output-dir Y` |
 | `cvat export --dataset-dir D --zip-path Z` | `dataset convert --source-dir D --to cvat11_zip --output-dir Z` |
-| `cvat from-cvsdcldet --source-dir S --output-dir O --zip` | `dataset convert --source-dir S --to cvat11 --output-dir O --zip` |
+| `cvat from-cvsdcldet --source-dir S --output-dir O --zip` | `dataset convert --source S --to cvat11 --output-dir O --zip` |
 
 ## `dataset report`
 

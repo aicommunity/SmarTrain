@@ -85,13 +85,18 @@ class DatasetSource:
     name: str
     dataset_key: str | None = None
     source_zip: Path | None = None
+    source_archive: Path | None = None
+    structures: list[str] = field(default_factory=list)
+
+    @property
+    def all_structures(self) -> list[str]:
+        if self.structures:
+            return list(self.structures)
+        return [self.structure]
 
     @property
     def display_structure(self) -> str:
-        official = STRUCTURE_DISPLAY_NAMES.get(self.structure, self.structure)
-        if self.structure == STRUCTURE_CVAT11_ZIP:
-            return official
-        return f"{official} (internal ID: {self.structure})"
+        return structures_display_name(self.all_structures)
 
 
 @dataclass
@@ -119,16 +124,78 @@ def structure_display_name(structure_id: str) -> str:
     return STRUCTURE_DISPLAY_NAMES.get(structure_id, structure_id)
 
 
+def structures_display_name(structure_ids: list[str]) -> str:
+    if not structure_ids:
+        return STRUCTURE_DISPLAY_NAMES.get("unknown", "unknown")
+    return "; ".join(STRUCTURE_DISPLAY_NAMES.get(sid, sid) for sid in structure_ids)
+
+
+def pick_structure_for_target(structures: list[str], target: str) -> str:
+    """Pick the structure ID best suited for a conversion target."""
+    if not structures:
+        raise ValueError("structures is empty")
+    if target == TARGET_YOLO:
+        preference = [
+            STRUCTURE_CVAT11_ZIP,
+            "cvat11",
+            "cvsdcldet",
+            "flat",
+            "subset_flat",
+            "split",
+            "nested_split",
+            "darknet",
+        ]
+    else:
+        preference = [
+            "cvsdcldet",
+            "flat",
+            "subset_flat",
+            "split",
+            "nested_split",
+            "darknet",
+            "cvat11",
+            STRUCTURE_CVAT11_ZIP,
+        ]
+    for sid in preference:
+        if sid in structures:
+            return sid
+    return structures[0]
+
+
 def target_display_name(target_id: str) -> str:
     return TARGET_DISPLAY_NAMES.get(target_id, target_id)
 
 
-def list_available_targets(source_structure: str) -> list[ConvertTarget]:
-    ids = CONVERSION_TARGETS.get(source_structure, [])
+def list_available_targets(source_structure: str | list[str]) -> list[ConvertTarget]:
+    if isinstance(source_structure, str):
+        structure_ids = [source_structure]
+    else:
+        structure_ids = list(source_structure)
+    seen: set[str] = set()
+    ids: list[str] = []
+    for sid in structure_ids:
+        for tid in CONVERSION_TARGETS.get(sid, []):
+            if tid not in seen:
+                seen.add(tid)
+                ids.append(tid)
     return [ConvertTarget(target_id=tid, label=target_display_name(tid)) for tid in ids]
 
 
-def detect_source_structure(path: Path) -> str:
+def detect_source_structure(path: Path, *, workspace_root: str | None = None) -> str:
+    from smartrain.core.runtime.workspace_paths import is_dataset_archive_path
+    from smartrain.services.datasets.dataset_source_resolver import (
+        CVAT11_ZIP_STRUCTURE,
+        detect_path_structure,
+        peek_archive_structure,
+    )
+
+    if path.is_file() and is_dataset_archive_path(path):
+        peeked = peek_archive_structure(path)
+        if peeked == CVAT11_ZIP_STRUCTURE:
+            return STRUCTURE_CVAT11_ZIP
+        if peeked:
+            return peeked
+        return detect_path_structure(path, workspace_root=workspace_root)
     if path.is_file() and path.suffix.lower() == ".zip":
         try:
             with zipfile.ZipFile(path, "r") as zf:
@@ -145,22 +212,32 @@ def resolve_source(
     dataset_key: str | None = None,
     source_dir: str | Path | None = None,
     source_zip: str | Path | None = None,
+    source: str | Path | None = None,
 ) -> DatasetSource:
-    if sum(bool(x) for x in (dataset_key, source_dir, source_zip)) != 1:
-        raise ValueError("Specify exactly one of --dataset, --source-dir, or --source-zip.")
+    from smartrain.services.datasets.dataset_source_resolver import (
+        resolved_to_dataset_source,
+        resolve_dataset_source,
+        structures_for_workspace_dataset,
+    )
+
+    direct_path = source if source is not None else source_dir
+    if sum(bool(x) for x in (dataset_key, direct_path, source_zip)) != 1:
+        raise ValueError("Specify exactly one of --dataset, --source/--source-dir, or --source-zip.")
 
     if source_zip is not None:
         zip_path = Path(source_zip).expanduser().resolve()
         if not zip_path.is_file():
             raise FileNotFoundError(f"Source zip not found: {zip_path}")
-        structure = detect_source_structure(zip_path)
+        structure = detect_source_structure(zip_path, workspace_root=workspace_root)
         if structure != STRUCTURE_CVAT11_ZIP:
-            raise ValueError(f"Not a CVAT 1.1 zip: {zip_path}")
+            resolved = resolve_dataset_source(workspace_root, zip_path)
+            return resolved_to_dataset_source(resolved)
         return DatasetSource(
             path=zip_path,
             structure=structure,
             name=zip_path.stem,
             source_zip=zip_path,
+            structures=[STRUCTURE_CVAT11_ZIP],
         )
 
     if dataset_key is not None:
@@ -184,19 +261,16 @@ def resolve_source(
             structure=structure if structure != "unknown" else detect_structure(root),
             name=dataset_key,
             dataset_key=dataset_key,
+            structures=structures_for_workspace_dataset(workspace_root, dataset_key, entry),
         )
 
-    if source_dir is None:
-        raise ValueError("source_dir is required for direct conversion")
-    root = Path(source_dir).expanduser().resolve()
+    if direct_path is None:
+        raise ValueError("source path is required for direct conversion")
+    root = Path(direct_path).expanduser().resolve()
     if not root.exists():
-        raise FileNotFoundError(f"Source directory not found: {root}")
-    structure = detect_structure(str(root))
-    return DatasetSource(
-        path=root,
-        structure=structure,
-        name=root.name,
-    )
+        raise FileNotFoundError(f"Source not found: {root}")
+    resolved = resolve_dataset_source(workspace_root, root)
+    return resolved_to_dataset_source(resolved)
 
 
 def _load_class_names(dataset_dir: Path, structure: str) -> list[str]:
@@ -436,11 +510,22 @@ def run_conversion(
     if target not in ALL_TARGETS:
         raise ValueError(f"Unsupported target format: {target!r}")
 
-    available = {t.target_id for t in list_available_targets(source.structure)}
+    effective_structure = pick_structure_for_target(source.all_structures, target)
+    available = {t.target_id for t in list_available_targets(source.all_structures)}
     if target not in available:
         raise ValueError(
             f"Cannot convert {source.display_structure} to {target_display_name(target)}."
         )
+
+    source = DatasetSource(
+        path=source.path,
+        structure=effective_structure,
+        name=source.name,
+        dataset_key=source.dataset_key,
+        source_zip=source.source_zip,
+        source_archive=source.source_archive,
+        structures=source.all_structures,
+    )
 
     tmp_base = opts.tmp_base_dir
     info: dict[str, Any] = {}

@@ -7,6 +7,7 @@ import json
 import os
 import hashlib
 import shutil
+import tarfile
 import zipfile
 from typing import Any
 
@@ -18,6 +19,8 @@ DATASETS_INFO_FILE = "datasets_info.json"
 CLASS_NAMES_FILE = "class_names.json"
 DATASETS_SCAN_SUMMARY_FILE = "datasets_scan_summary.json"
 WORKSPACE_QUEUE_BASENAME = "queue.txt"
+
+DATASET_ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz")
 
 
 class WorkspaceLayout:
@@ -101,6 +104,26 @@ def resolve_dataset_root(
     return os.path.join(catalog_dir, entry_key)
 
 
+def is_dataset_archive_path(path: str | os.PathLike[str]) -> bool:
+    """Return True when path looks like a supported dataset archive."""
+    name = os.path.basename(str(path)).lower()
+    return any(name.endswith(suffix) for suffix in DATASET_ARCHIVE_SUFFIXES)
+
+
+def archive_kind(path: str | os.PathLike[str]) -> str:
+    """Return archive kind: zip, tar, tar.gz, or tgz."""
+    name = os.path.basename(str(path)).lower()
+    if name.endswith(".tar.gz"):
+        return "tar.gz"
+    if name.endswith(".tgz"):
+        return "tgz"
+    if name.endswith(".tar"):
+        return "tar"
+    if name.endswith(".zip"):
+        return "zip"
+    raise ValueError(f"Unsupported dataset archive: {path}")
+
+
 def _safe_extract_zip(zip_path: str, target_dir: str) -> None:
     """
     Secure zip unpacking to target_dir with path traversal protection.
@@ -113,6 +136,29 @@ def _safe_extract_zip(zip_path: str, target_dir: str) -> None:
             if not out_path.startswith(abs_target + os.sep) and out_path != abs_target:
                 raise ValueError(f"The archive contains an unsafe path: {member_name!r}")
         zf.extractall(abs_target)
+
+
+def _safe_extract_tar(archive_path: str, target_dir: str) -> None:
+    """Secure tar/tar.gz unpacking to target_dir with path traversal protection."""
+    abs_target = os.path.abspath(target_dir)
+    kind = archive_kind(archive_path)
+    mode = "r:gz" if kind in ("tar.gz", "tgz") else "r:"
+    with tarfile.open(archive_path, mode) as tf:
+        members = [m for m in tf.getmembers() if m.isfile() or m.isdir()]
+        for member in members:
+            out_path = os.path.abspath(os.path.join(abs_target, member.name))
+            if not out_path.startswith(abs_target + os.sep) and out_path != abs_target:
+                raise ValueError(f"The archive contains an unsafe path: {member.name!r}")
+        for member in members:
+            tf.extract(member, path=abs_target)
+
+
+def _safe_extract_archive(archive_path: str, target_dir: str) -> None:
+    kind = archive_kind(archive_path)
+    if kind == "zip":
+        _safe_extract_zip(archive_path, target_dir)
+        return
+    _safe_extract_tar(archive_path, target_dir)
 
 
 def _choose_extracted_dataset_root(extract_dir: str) -> str:
@@ -131,8 +177,10 @@ def _choose_extracted_dataset_root(extract_dir: str) -> str:
     return extract_dir
 
 
-def _resolved_zip_path_from_meta(workspace_root: str, meta: dict[str, Any]) -> str | None:
-    raw = meta.get("zip_path")
+def _resolved_archive_path_from_meta(workspace_root: str, meta: dict[str, Any]) -> str | None:
+    raw = meta.get("archive_path")
+    if not isinstance(raw, str) or not raw.strip():
+        raw = meta.get("zip_path")
     if not isinstance(raw, str) or not raw.strip():
         return None
     s = raw.strip()
@@ -144,16 +192,21 @@ def _resolved_zip_path_from_meta(workspace_root: str, meta: dict[str, Any]) -> s
         return None
 
 
-def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
+def extract_dataset_archive_to_cache(workspace_root: str, archive_path: str) -> str:
     """
-    Unpacks a zip dataset into the workspace/tmp/extracted_datasets cache with invalidation
-    by size and mtime of the archive. Returns the path to the root of the unpacked dataset.
+    Unpacks a dataset archive into workspace/tmp/extracted_datasets cache with invalidation
+    by size and mtime. Returns the path to the root of the unpacked dataset.
     """
-    abs_zip = os.path.abspath(os.path.expanduser(zip_path))
-    if not os.path.isfile(abs_zip):
-        raise FileNotFoundError(f"Zip archive not found: {abs_zip}")
-    stat = os.stat(abs_zip)
-    key_src = f"{abs_zip}|{stat.st_size}|{stat.st_mtime_ns}"
+    abs_archive = os.path.abspath(os.path.expanduser(archive_path))
+    if not os.path.isfile(abs_archive):
+        raise FileNotFoundError(f"Dataset archive not found: {abs_archive}")
+    if not is_dataset_archive_path(abs_archive):
+        raise ValueError(
+            f"Unsupported dataset archive: {abs_archive} "
+            f"(supported: {', '.join(DATASET_ARCHIVE_SUFFIXES)})"
+        )
+    stat = os.stat(abs_archive)
+    key_src = f"{abs_archive}|{stat.st_size}|{stat.st_mtime_ns}"
     cache_key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:16]
 
     layout = WorkspaceLayout(workspace_root)
@@ -167,9 +220,9 @@ def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
         try:
             with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
-            meta_zip = _resolved_zip_path_from_meta(workspace_root, meta)
+            meta_archive = _resolved_archive_path_from_meta(workspace_root, meta)
             if (
-                meta_zip == abs_zip
+                meta_archive == abs_archive
                 and meta.get("size") == stat.st_size
                 and meta.get("mtime_ns") == stat.st_mtime_ns
             ):
@@ -183,19 +236,22 @@ def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
     if os.path.isdir(cache_dir):
         shutil.rmtree(cache_dir, ignore_errors=True)
     os.makedirs(cache_dir, exist_ok=True)
-    _safe_extract_zip(abs_zip, cache_dir)
+    _safe_extract_archive(abs_archive, cache_dir)
     dataset_root = _choose_extracted_dataset_root(cache_dir)
     rel_root = os.path.relpath(dataset_root, cache_dir)
 
-    zip_stored: str = abs_zip
-    rel_zip = relativize_if_under(wr_abs, abs_zip)
-    if isinstance(rel_zip, str) and rel_zip != abs_zip:
-        zip_stored = rel_zip
+    archive_stored: str = abs_archive
+    rel_archive = relativize_if_under(wr_abs, abs_archive)
+    if isinstance(rel_archive, str) and rel_archive != abs_archive:
+        archive_stored = rel_archive
 
+    kind = archive_kind(abs_archive)
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(
             {
-                "zip_path": zip_stored,
+                "archive_path": archive_stored,
+                "archive_kind": kind,
+                "zip_path": archive_stored if kind == "zip" else None,
                 "size": stat.st_size,
                 "mtime_ns": stat.st_mtime_ns,
                 "dataset_root_rel": "" if rel_root == "." else rel_root,
@@ -207,6 +263,11 @@ def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
     return dataset_root
 
 
+def extract_dataset_zip_to_cache(workspace_root: str, zip_path: str) -> str:
+    """Backward-compatible wrapper around extract_dataset_archive_to_cache for zip archives."""
+    return extract_dataset_archive_to_cache(workspace_root, zip_path)
+
+
 def resolve_or_extract_dataset_root(
     workspace_root: str,
     entry_key: str,
@@ -214,12 +275,12 @@ def resolve_or_extract_dataset_root(
     catalog_dir: str,
 ) -> str:
     """
-    Like resolve_dataset_root, but if the path points to a zip archive, returns
+    Like resolve_dataset_root, but if the path points to a dataset archive, returns
     the root of the unpacked dataset from the workspace cache.
     """
     root = resolve_dataset_root(workspace_root, entry_key, entry_dict, catalog_dir)
-    if root.lower().endswith(".zip"):
-        return extract_dataset_zip_to_cache(workspace_root, root)
+    if is_dataset_archive_path(root):
+        return extract_dataset_archive_to_cache(workspace_root, root)
     return root
 
 

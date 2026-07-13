@@ -8,27 +8,25 @@ from typing import Optional
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import (
-    print_numbered_options,
+    print_grouped_numbered_options,
     prompt_choice,
     prompt_text,
     prompt_yes_no,
 )
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
 from smartrain.services.datasets.cvsdcldet_converter import (
     collect_cvsdcldet_class_names,
     is_cvsdcldet_dir,
     parse_rename_classes_args,
 )
-from smartrain.services.datasets.dataset_cli_common import load_dataset_catalog
 from smartrain.services.datasets.dataset_convert_service import (
     TARGET_CVAT11,
     TARGET_CVAT11_ZIP,
     TARGET_YOLO,
     ConvertOptions,
     DatasetSource,
-    detect_source_structure,
     list_available_targets,
     resolve_source,
     run_conversion,
@@ -36,7 +34,14 @@ from smartrain.services.datasets.dataset_convert_service import (
     target_display_name,
 )
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
-from smartrain.services.datasets.datasets_json_scan_core_service import detect_structure
+from smartrain.services.datasets.dataset_source_resolver import (
+    MANUAL_SOURCE_OPTION,
+    build_interactive_source_options,
+    resolved_to_dataset_source,
+    resolve_dataset_source,
+    resolve_manual_source_token,
+    replay_source_path,
+)
 
 
 def _workspace_root_if_inside(output_dir: str) -> str | None:
@@ -51,13 +56,21 @@ def _workspace_root_if_inside(output_dir: str) -> str | None:
     return None
 
 
+def _is_raw_data_like_source(workspace_root: str, source: DatasetSource) -> bool:
+    raw_root = str(Path(workspace_root) / "raw_data")
+    for candidate in (source.path, source.source_archive):
+        if candidate is not None and str(candidate).startswith(raw_root):
+            return True
+    return source.structure == "cvsdcldet"
+
+
 def _default_output_dir(workspace_root: str, source: DatasetSource, target: str) -> Path:
     suffix = target.replace("_zip", "")
     if source.dataset_key:
         base = Path(workspace_root) / "datasets"
         name = next_dataset_name(str(base), f"{source.dataset_key}_{suffix}")
         return base / name
-    if is_cvsdcldet_dir(source.path) or str(source.path).startswith(str(Path(workspace_root) / "raw_data")):
+    if _is_raw_data_like_source(workspace_root, source):
         base = Path(workspace_root) / "converted_raw_data"
         name = next_dataset_name(str(base), f"{source.name}_{suffix}")
         return base / name
@@ -66,101 +79,57 @@ def _default_output_dir(workspace_root: str, source: DatasetSource, target: str)
     return base / name
 
 
-def _list_raw_data_sources(raw_data: str) -> list[tuple[str, str]]:
-    root = Path(raw_data)
-    if not root.is_dir():
-        return []
-    out: list[tuple[str, str]] = []
-    for entry in sorted(root.iterdir()):
-        if not entry.is_dir():
-            continue
-        structure = detect_structure(str(entry))
-        if structure == "unknown":
-            continue
-        out.append((str(entry), structure))
-    return out
-
-
 def _prompt_source(workspace_root: str) -> DatasetSource:
-    layout = WorkspaceLayout(workspace_root)
-    catalog = load_dataset_catalog(layout)
-    dataset_names = sorted(catalog.keys())
-    raw_entries = _list_raw_data_sources(layout.raw_data)
+    candidates, manual_option = build_interactive_source_options(workspace_root)
+    if not candidates:
+        raise SystemExit("No dataset sources found.")
 
-    options: list[str] = []
-    option_map: dict[str, DatasetSource | str] = {}
+    groups: list[tuple[str, list[str]]] = []
+    workspace_opts = [c.label for c in candidates if c.group == "datasets"]
+    raw_opts = [c.label for c in candidates if c.group == "raw_data"]
+    external_opts = [c.label for c in candidates if c.group == "external"]
+    manual_opts = [c.label for c in candidates if c.group == "manual"]
+    if workspace_opts:
+        groups.append(("Workspace datasets", workspace_opts))
+    if raw_opts:
+        groups.append(("raw_data", raw_opts))
+    if external_opts:
+        groups.append(("External (datasets_list.txt)", external_opts))
+    if manual_opts:
+        groups.append(("Manual", manual_opts))
 
-    for name in dataset_names:
-        key = f"[datasets] {name}"
-        entry = catalog[name]
-        structure = str(entry.get("structure") or "unknown")
-        options.append(key)
-        option_map[key] = DatasetSource(
-            path=Path("."),
-            structure=structure,
-            name=name,
-            dataset_key=name,
-        )
-
-    for path, structure in raw_entries:
-        key = f"[raw_data] {Path(path).name}"
-        options.append(key)
-        option_map[key] = DatasetSource(
-            path=Path(path),
-            structure=structure,
-            name=Path(path).name,
-        )
-
-    options.append("<enter directory path>")
-    options.append("<enter CVAT zip path>")
-
+    option_map = {c.label: c for c in candidates}
+    flat_options = print_grouped_numbered_options(groups)
     print("[INFO] Select dataset source.")
-    if dataset_names:
-        print_numbered_options("workspace datasets", dataset_names)
-    if raw_entries:
-        print(f"[INFO] raw_data sources: {', '.join(Path(p).name for p, _ in raw_entries)}")
+    default = flat_options[0] if flat_options else manual_option
+    selected = prompt_choice("Source", flat_options, default=default, show_options=False)
 
-    selected = prompt_choice("Source", options, default=options[0] if options else "<enter directory path>")
-
-    if selected == "<enter directory path>":
-        manual = prompt_text("Source directory", default="").strip()
+    if selected == MANUAL_SOURCE_OPTION:
+        manual = prompt_text("Source path (directory or archive)", default="").strip()
         if not manual:
-            raise SystemExit("Source directory is required.")
-        path = Path(manual).expanduser().resolve()
-        if not path.is_dir():
-            raise SystemExit(f"Not a directory: {path}")
-        structure = detect_structure(str(path))
-        if structure == "unknown":
-            raise SystemExit(f"Unsupported dataset structure: {path}")
-        return DatasetSource(path=path, structure=structure, name=path.name)
-
-    if selected == "<enter CVAT zip path>":
-        manual = prompt_text("CVAT 1.1 zip path", default="").strip()
-        if not manual:
-            raise SystemExit("CVAT zip path is required.")
-        zip_path = Path(manual).expanduser().resolve()
-        if not zip_path.is_file():
-            raise SystemExit(f"File not found: {zip_path}")
-        structure = detect_source_structure(zip_path)
-        if structure != "cvat11_zip":
-            raise SystemExit(f"Not a CVAT 1.1 zip: {zip_path}")
-        return DatasetSource(
-            path=zip_path,
-            structure=structure,
-            name=zip_path.stem,
-            source_zip=zip_path,
-        )
+            raise SystemExit("Source path is required.")
+        try:
+            path = resolve_manual_source_token(workspace_root, manual)
+        except (ValueError, FileNotFoundError) as e:
+            raise SystemExit(str(e)) from e
+        try:
+            resolved = resolve_dataset_source(workspace_root, path)
+        except (ValueError, FileNotFoundError) as e:
+            raise SystemExit(str(e)) from e
+        return resolved_to_dataset_source(resolved)
 
     picked = option_map[selected]
-    if isinstance(picked, DatasetSource) and picked.dataset_key:
+    if picked.dataset_key:
         return resolve_source(workspace_root=workspace_root, dataset_key=picked.dataset_key)
-    if isinstance(picked, DatasetSource):
-        return picked
-    raise SystemExit("Invalid source selection.")
+    try:
+        resolved = resolve_dataset_source(workspace_root, picked.path, dataset_key=picked.dataset_key)
+    except (ValueError, FileNotFoundError) as e:
+        raise SystemExit(str(e)) from e
+    return resolved_to_dataset_source(resolved)
 
 
 def _prompt_target(source: DatasetSource) -> str:
-    targets = list_available_targets(source.structure)
+    targets = list_available_targets(source.all_structures)
     if not targets:
         raise SystemExit(f"No conversion targets available for {source.display_structure}.")
     print(f"[INFO] Source format: {source.display_structure}")
@@ -248,7 +217,13 @@ def build_dataset_convert_arg_parser() -> argparse.ArgumentParser:
         "--source-dir",
         type=str,
         default=None,
-        help="Source dataset directory (workspace or external path)",
+        help="Source dataset directory or archive (workspace or external path)",
+    )
+    p.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        help="Source dataset directory or archive (.zip, .tar, .tar.gz, .tgz)",
     )
     p.add_argument(
         "--source-zip",
@@ -335,7 +310,7 @@ def _write_passport(
             source_datasets=[
                 {
                     "name": source.name,
-                    "path": str(source.path),
+                    "path": replay_source_path(source) or str(source.path),
                     "dataset_hash": None,
                 }
             ],
@@ -390,7 +365,7 @@ def main(argv: list[str] | None = None) -> None:
         source = _prompt_source(workspace_root)
         target = _prompt_target(source)
         output_path = _prompt_output_dir(workspace_root, source, target)
-        if source.structure == "cvsdcldet" and not args.rename_classes:
+        if "cvsdcldet" in source.all_structures and not args.rename_classes:
             class_rename = _prompt_class_rename(source.path)
         if target != TARGET_CVAT11_ZIP:
             if create_zip is None:
@@ -406,6 +381,7 @@ def main(argv: list[str] | None = None) -> None:
                 dataset_key=args.dataset,
                 source_dir=args.source_dir,
                 source_zip=args.source_zip,
+                source=args.source,
             )
         except (ValueError, KeyError, FileNotFoundError) as e:
             raise SystemExit(str(e)) from e
@@ -452,7 +428,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     stats_before: dict = {}
-    if source.structure == "cvsdcldet":
+    if "cvsdcldet" in source.all_structures:
         stats_before = {"classes": collect_cvsdcldet_class_names(source.path)}
 
     try:
@@ -492,16 +468,15 @@ def main(argv: list[str] | None = None) -> None:
         replay = argparse.Namespace(**vars(args))
         if source.dataset_key:
             replay.dataset = source.dataset_key
+            replay.source = None
             replay.source_dir = None
             replay.source_zip = None
-        elif source.source_zip:
-            replay.source_zip = str(source.source_zip)
-            replay.dataset = None
-            replay.source_dir = None
         else:
-            replay.source_dir = str(source.path)
-            replay.dataset = None
+            replay_path = replay_source_path(source)
+            replay.source = replay_path
+            replay.source_dir = None
             replay.source_zip = None
+            replay.dataset = None
         replay.to = target
         replay.output_dir = str(output_path)
         replay.rename_classes = [[k, v] for k, v in class_rename.items()] if class_rename else None
