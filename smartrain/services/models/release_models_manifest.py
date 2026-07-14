@@ -60,6 +60,45 @@ def is_nested_release_layout(pt_path: Path) -> bool:
     return pt_path.is_file() and pt_path.parent.name == pt_path.stem
 
 
+def _path_has_ancestor_named(path: Path, name: str) -> bool:
+    return any(part == name for part in path.parts)
+
+
+def is_workspace_release_bundle(path: Path) -> bool:
+    """True if ``path`` is inside a workspace release catalog entry (flat or nested).
+
+    Used to keep ``model convert`` from treating release dirs as training runs
+    (they also contain ``training_metadata.json``).
+    """
+    p = path.expanduser().resolve()
+    if p.is_file() and p.suffix.lower() == ".pt":
+        if load_release_metadata(release_json_path_for_pt(p)):
+            return True
+        if is_nested_release_layout(p) and _path_has_ancestor_named(p, "models") and not _path_has_ancestor_named(
+            p, "runs"
+        ):
+            return True
+
+    start = p if p.is_dir() else p.parent
+    for cand in [start, *start.parents]:
+        if _path_has_ancestor_named(cand, "runs"):
+            continue
+        nested_pt = cand / f"{cand.name}.pt"
+        if nested_pt.is_file():
+            if load_release_metadata(release_json_path_for_pt(nested_pt)):
+                return True
+            if (
+                is_nested_release_layout(nested_pt)
+                and _path_has_ancestor_named(cand, "models")
+                and not _path_has_ancestor_named(cand, "runs")
+            ):
+                return True
+        sibling_pt = cand.parent / f"{cand.name}.pt"
+        if sibling_pt.is_file() and load_release_metadata(release_json_path_for_pt(sibling_pt)):
+            return True
+    return False
+
+
 def release_dir_for_pt(pt_path: Path) -> Path:
     if is_nested_release_layout(pt_path):
         return pt_path.parent.resolve()

@@ -85,7 +85,7 @@ def test_resolve_imgsz_from_run_models_uses_training_metadata(tmp_path: Path):
     assert source == "training_metadata"
 
 
-def test_resolve_public_onnx_target_uses_variant_name_without_train_dir(tmp_path: Path):
+def test_resolve_public_onnx_target_uses_short_name_without_train_dir(tmp_path: Path):
     run_dir = tmp_path / "runs" / "ds1" / "run-no-train"
     models_dir = run_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
@@ -104,10 +104,10 @@ def test_resolve_public_onnx_target_uses_variant_name_without_train_dir(tmp_path
         "nms": False,
     }
     target = mcc._resolve_public_onnx_target(pt, models_dir, expected)
-    assert target.name == "run-no-train_imgsz640x640_b1_static_op17_fp32_simplify1_nms0.onnx"
+    assert target.name == "run-no-train.onnx"
 
 
-def test_resolve_public_onnx_target_uses_variant_name_for_runs_models_without_metadata(tmp_path: Path):
+def test_resolve_public_onnx_target_uses_short_name_for_runs_models_without_metadata(tmp_path: Path):
     run_dir = tmp_path / "runs" / "ds1" / "run-no-meta"
     models_dir = run_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
@@ -124,7 +124,122 @@ def test_resolve_public_onnx_target_uses_variant_name_for_runs_models_without_me
         "nms": False,
     }
     target = mcc._resolve_public_onnx_target(pt, models_dir, expected)
-    assert target.name == "run-no-meta_imgsz640x640_b1_static_op17_fp32_simplify1_nms0.onnx"
+    assert target.name == "run-no-meta.onnx"
+
+
+def test_nested_release_uses_short_onnx_name_beside_pt(tmp_path: Path):
+    import json
+
+    stem = "detect_yolo11s_20260714_213230"
+    release_dir = tmp_path / "models" / "ds1" / stem
+    release_dir.mkdir(parents=True, exist_ok=True)
+    pt = release_dir / f"{stem}.pt"
+    pt.write_text("pt", encoding="utf-8")
+    (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    json_path = release_dir / f"{stem}.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "source": {"source_run": "/x"},
+                "artifacts": {"release_dir": str(release_dir)},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert mcc._guess_run_root_for_path(pt) is None
+    assert mcc._default_output_dir_for_source(pt) == release_dir.resolve()
+    expected = {
+        "h": 640,
+        "w": 640,
+        "batch": 1,
+        "dynamic": False,
+        "opset": 17,
+        "half": False,
+        "simplify": True,
+        "nms": False,
+    }
+    target = mcc._resolve_public_onnx_target(pt, release_dir, expected)
+    assert target == release_dir / f"{stem}.onnx"
+    assert "models" not in target.relative_to(release_dir).parts
+
+
+def test_flat_release_uses_short_onnx_name(tmp_path: Path):
+    import json
+
+    stem = "detect_yolo11s_20260708_214400"
+    dataset_dir = tmp_path / "models" / "ds1"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    pt = dataset_dir / f"{stem}.pt"
+    pt.write_text("pt", encoding="utf-8")
+    release_dir = dataset_dir / stem
+    release_dir.mkdir(parents=True, exist_ok=True)
+    (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (dataset_dir / f"{stem}.json").write_text(
+        json.dumps(
+            {
+                "source": {"source_run": "/x"},
+                "artifacts": {"release_dir": str(release_dir)},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert mcc._guess_run_root_for_path(pt) is None
+    assert mcc._default_output_dir_for_source(pt) == dataset_dir.resolve()
+    expected = {
+        "h": 640,
+        "w": 640,
+        "batch": 1,
+        "dynamic": False,
+        "opset": 17,
+        "half": False,
+        "simplify": True,
+        "nms": False,
+    }
+    target = mcc._resolve_public_onnx_target(pt, dataset_dir, expected)
+    assert target.name == f"{stem}.onnx"
+
+
+def test_convert_onnx_only_nested_release_short_name(monkeypatch, tmp_path: Path):
+    import json
+
+    stem = "detect_yolo11s_20260714_213230"
+    release_dir = tmp_path / "models" / "ds1" / stem
+    release_dir.mkdir(parents=True, exist_ok=True)
+    pt = release_dir / f"{stem}.pt"
+    pt.write_text("pt", encoding="utf-8")
+    (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (release_dir / f"{stem}.json").write_text(
+        json.dumps(
+            {
+                "source": {"source_run": "/x"},
+                "artifacts": {"release_dir": str(release_dir)},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(mcc, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (640, "cli"))
+    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
+
+    class _FakeYOLO:
+        def __init__(self, _path: str):
+            self.path = _path
+
+        def export(self, **_kwargs):
+            exported = tmp_path / "tmp_export_nested.onnx"
+            exported.write_text("onnx", encoding="utf-8")
+            return str(exported)
+
+    import ultralytics
+
+    monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
+
+    ok_any, failed_any, *_rest = mcc._convert_one(pt, _base_args(format="onnx"))
+    assert ok_any is True
+    assert failed_any is False
+    assert (release_dir / f"{stem}.onnx").is_file()
+    assert not (release_dir / "models").exists()
+    assert not sorted(release_dir.glob("*_trtprep.onnx"))
 
 
 def _base_args(**overrides):
@@ -290,15 +405,15 @@ def test_convert_trt_only_materializes_public_and_cache_onnx_for_run(monkeypatch
     assert failed_any is False
     assert artifacts_failed == 0
     assert artifacts_ok >= 2
-    assert not (models_dir / "run-1.onnx").exists()
-    assert (models_dir / "run-1_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx").exists()
+    assert (models_dir / "run-1.onnx").exists()
+    assert not (models_dir / "run-1_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx").exists()
     dedicated = sorted(models_dir.glob("*_trtprep.onnx"))
     assert dedicated, "dedicated trtprep ONNX must exist"
-    assert not (models_dir / "run-1.trt").exists()
-    assert (models_dir / "run-1_imgsz1280x1280_b1_static_fp32.trt").exists()
+    assert (models_dir / "run-1.trt").exists()
+    assert not (models_dir / "run-1_imgsz1280x1280_b1_static_fp32.trt").exists()
 
 
-def test_convert_onnx_only_syncs_public_and_trtprep_for_run(monkeypatch, tmp_path: Path):
+def test_convert_onnx_only_writes_public_without_trtprep_for_run(monkeypatch, tmp_path: Path):
     run_dir = tmp_path / "runs" / "ds1" / "run-1"
     models_dir = run_dir / "models"
     train_dir = run_dir / "train"
@@ -331,13 +446,12 @@ def test_convert_onnx_only_syncs_public_and_trtprep_for_run(monkeypatch, tmp_pat
     assert failed_any is False
     assert artifacts_failed == 0
     assert artifacts_ok >= 1
-    assert not (models_dir / "run-1.onnx").exists()
-    assert (models_dir / "run-1_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx").exists()
-    dedicated = sorted(models_dir.glob("*_trtprep.onnx"))
-    assert dedicated, "dedicated trtprep ONNX must be synchronized in onnx-only mode"
+    assert (models_dir / "run-1.onnx").exists()
+    assert not (models_dir / "run-1_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx").exists()
+    assert not sorted(models_dir.glob("*_trtprep.onnx")), "onnx-only must not leave *_trtprep.onnx"
 
 
-def test_sync_onnx_artifact_removes_legacy_plain_onnx_for_run(tmp_path: Path):
+def test_sync_onnx_artifact_removes_stale_signature_onnx_for_run(tmp_path: Path):
     run_dir = tmp_path / "runs" / "ds1" / "run-cleanup"
     models_dir = run_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
@@ -345,10 +459,10 @@ def test_sync_onnx_artifact_removes_legacy_plain_onnx_for_run(tmp_path: Path):
     source_pt.write_text("pt", encoding="utf-8")
     src_onnx = models_dir / "tmp_src.onnx"
     src_onnx.write_text("onnx", encoding="utf-8")
-    plain = models_dir / "run-cleanup.onnx"
-    plain.write_text("legacy", encoding="utf-8")
-    (models_dir / "run-cleanup.onnx.meta.json").write_text("{}", encoding="utf-8")
-    target = models_dir / "run-cleanup_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx"
+    stale = models_dir / "run-cleanup_imgsz1280x1280_b1_static_op17_fp32_simplify1_nms0.onnx"
+    stale.write_text("stale", encoding="utf-8")
+    (models_dir / f"{stale.name}.meta.json").write_text("{}", encoding="utf-8")
+    target = models_dir / "run-cleanup.onnx"
     ok, reason = mcc._sync_onnx_artifact(
         src_onnx,
         target,
@@ -359,8 +473,8 @@ def test_sync_onnx_artifact_removes_legacy_plain_onnx_for_run(tmp_path: Path):
     )
     assert ok is True, reason
     assert target.exists()
-    assert not plain.exists()
-    assert not (models_dir / "run-cleanup.onnx.meta.json").exists()
+    assert not stale.exists()
+    assert not (models_dir / f"{stale.name}.meta.json").exists()
 
 
 def test_interactive_onnx_plus_trt_exports_onnx_once(monkeypatch, tmp_path: Path):
@@ -423,7 +537,7 @@ def test_interactive_onnx_plus_trt_exports_onnx_once(monkeypatch, tmp_path: Path
     assert result.stats.failed == 0
     assert export_calls["onnx"] == 1
     assert (tmp_path / "m.onnx").exists()
-    assert sorted(tmp_path.glob("*_trtprep.onnx"))
+    assert not sorted(tmp_path.glob("*_trtprep.onnx")), "release/catalog convert cleans *_trtprep after TRT"
 
 
 def test_interactive_onnx_engine_trt_exports_onnx_once(monkeypatch, tmp_path: Path):
@@ -491,7 +605,7 @@ def test_interactive_onnx_engine_trt_exports_onnx_once(monkeypatch, tmp_path: Pa
     assert export_calls["onnx"] == 1
     assert export_calls["engine"] == 1
     assert (tmp_path / "m.onnx").exists()
-    assert sorted(tmp_path.glob("*_trtprep.onnx"))
+    assert not sorted(tmp_path.glob("*_trtprep.onnx")), "catalog convert cleans *_trtprep after TRT"
     assert (tmp_path / "m.engine").exists()
     assert (tmp_path / "m.trt").exists()
 
@@ -556,12 +670,10 @@ def test_interactive_onnx_skip_syncs_trtprep_for_trt(monkeypatch, tmp_path: Path
     )
     result = mcc._run_interactive_pipeline(ctx)
     assert result.stats.failed == 0
-    dedicated = sorted(tmp_path.glob("*_trtprep.onnx"))
-    assert dedicated, "dedicated trtprep ONNX must be created from existing public ONNX"
-    assert dedicated[0].read_text(encoding="utf-8") == "public-onnx"
     assert len(used_onnx) == 1
     assert used_onnx[0].name.endswith("_trtprep.onnx")
     assert (tmp_path / "m.trt").exists()
+    assert not sorted(tmp_path.glob("*_trtprep.onnx")), "catalog convert cleans *_trtprep after TRT"
 
 
 def test_interactive_onnx_decline_overwrite_skips_export(monkeypatch, tmp_path: Path):

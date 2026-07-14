@@ -62,11 +62,12 @@ smartrain model convert --help
 - В интерактивном режиме команда автоматически находит `.pt/.onnx` в `models/` и `runs/` workspace и даёт выбор источника по номеру или ручной ввод пути.
 - Выходные модели выбираются отдельно (`onnx`, `engine`, `trt`) с мультивыбором (`1,2` или `onnx,trt`), недоступные варианты показываются с причиной.
 - Для run-источников интерактивный выбор использует канонические артефакты (`<run_dir>/<run_dir_name>.<ext>`). Legacy-раскладка run автоматически канонизируется при первом обращении.
-- Если экспорт ONNX пропущен (уже есть публичный `.onnx`), интерактивный ONNX+TRT и пропуск в `--format onnx` всё равно создают dedicated `*_trtprep.onnx` для `trtexec` при совпадении подписи ONNX.
+- Release-модели в `models/<dataset>/` используют имя папки исходного run как identity stem (`models/<dataset>/<run_name>/<run_name>.pt` + такой же `.json`); convert пишет короткие `{stem}.onnx`/`.engine`/`.trt` рядом с `.pt` и для runs, и для release.
+- Dedicated `*_trtprep.onnx` — внутренний кэш только для `trtexec`: создаётся при запросе TensorRT-trt, сохраняется после успеха для training runs и удаляется для каталога/release. Чистый `--format onnx` не пишет `*_trtprep`.
 
 Особенности `model release`:
 
-- `smartrain model release` публикует canonical run-модель `<run_dir_name>.pt` из выбранного run в самодостаточную папку `models/<dataset>/<task>_<model>_<train_datetime>/` (веса, sidecar JSON и копия артефактов train).
+- `smartrain model release` публикует canonical run-модель `<run_dir_name>.pt` из выбранного run в самодостаточную папку `models/<dataset>/<run_dir_name>/` (то же подробное имя, что у training run: веса, sidecar JSON и копия артефактов train).
 - Общий каталог `models/releases_manifest.json` хранит однострочные комментарии ко всем release-моделям; тот же комментарий дублируется в sidecar JSON модели.
 - В интерактивном режиме запрашивается необязательный однострочный комментарий (на любом языке); в non-interactive — флаг `--comment`.
 - Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`).

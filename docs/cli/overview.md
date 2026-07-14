@@ -68,7 +68,8 @@ Model convert highlights:
 - Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows source selection by number or manual path input.
 - Target selection is model-based (`onnx`, `engine`, `trt`) with multi-select input (`1,2` or `onnx,trt`), and unavailable targets are shown with reason.
 - For run sources, interactive discovery uses canonical run artifacts (`<run_dir>/<run_dir_name>.<ext>`). Legacy run layouts are canonized automatically on first access.
-- When ONNX export is skipped because a public `.onnx` already exists, interactive ONNX+TRT (and `--format onnx` skip) still materialize the dedicated `*_trtprep.onnx` cache for `trtexec` when signatures match.
+- Released models under `models/<dataset>/` use the source run folder name as identity stem (`models/<dataset>/<run_name>/<run_name>.pt` + matching `.json`); convert writes short `{stem}.onnx`/`.engine`/`.trt` next to the `.pt` for both runs and releases.
+- Dedicated `*_trtprep.onnx` is an internal cache for `trtexec` only: created when TensorRT-trt is requested, kept for training runs after success, and cleaned up for catalog/release models. Pure `--format onnx` does not write `*_trtprep`.
 
 Inference highlights:
 
@@ -81,7 +82,7 @@ Inference highlights:
 
 Model release highlights:
 
-- `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into a self-contained folder `models/<dataset>/<task>_<model>_<train_datetime>/` (weights, sidecar JSON, and copied train artifacts).
+- `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into a self-contained folder `models/<dataset>/<run_dir_name>/` (same detailed name as the training run: weights, sidecar JSON, and copied train artifacts).
 - A global catalog `models/releases_manifest.json` stores one-line comments for all release models; the same comment is duplicated in each model's sidecar JSON.
 - Interactive mode prompts for an optional one-line comment (any language); non-interactive mode accepts `--comment`.
 - Re-running for the same run with the same source hash performs a no-op skip.

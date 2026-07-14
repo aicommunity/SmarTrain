@@ -212,6 +212,81 @@ def test_rename_parses_canonical_stem_updates_training_info(tmp_path: Path) -> N
     assert train_meta["training_info"]["model"] == "newmodel"
 
 
+def test_rename_run_style_stem_does_not_patch_training_info(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    layout = WorkspaceLayout(str(tmp_path))
+    old_stem = "2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc"
+    new_stem = "2026-07-14_21-00_ultralytics_yolo11s_640px_400epochs_b16-cafe0001"
+    models_dir = tmp_path / "models" / "ds1"
+    release_dir = models_dir / old_stem
+    release_dir.mkdir(parents=True, exist_ok=True)
+    pt_path = release_dir / f"{old_stem}.pt"
+    json_path = release_dir / f"{old_stem}.json"
+    (release_dir / "training_metadata.json").write_text(
+        json.dumps(
+            {
+                "training_info": {
+                    "model": "yolo11s",
+                    "task_type": "detect",
+                    "dataset": {"name": "ds1"},
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    pt_path.write_bytes(b"pt-bytes")
+    (release_dir / f"{old_stem}.onnx").write_bytes(b"onnx")
+    json_path.write_text(
+        json.dumps(
+            {
+                "source": {
+                    "source_run": str(tmp_path / "runs" / "ds1" / old_stem),
+                    "source_run_relative": f"runs/ds1/{old_stem}",
+                    "source_weights": f"{old_stem}.pt",
+                    "source_sha256": "abc",
+                    "released_at": "2026-07-14T20:42:00+00:00",
+                },
+                "training": {
+                    "training_info": {
+                        "model": "yolo11s",
+                        "task_type": "detect",
+                        "dataset": {"name": "ds1"},
+                    }
+                },
+                "artifacts": {
+                    "model_path": str(pt_path),
+                    "json_path": str(json_path),
+                    "release_dir": str(release_dir),
+                    "train_copy_dir": str(release_dir / "train"),
+                    "test_copy_dir": str(release_dir / "test"),
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    entry = discover_release_models(layout)[0]
+    plan = build_rename_plan(entry, new_stem)
+    apply_release_rename(plan)
+
+    new_pt = models_dir / new_stem / f"{new_stem}.pt"
+    new_json = models_dir / new_stem / f"{new_stem}.json"
+    new_onnx = models_dir / new_stem / f"{new_stem}.onnx"
+    assert new_pt.is_file()
+    assert new_json.is_file()
+    assert new_onnx.is_file()
+
+    release_json = json.loads(new_json.read_text(encoding="utf-8"))
+    assert release_json["training"]["training_info"]["model"] == "yolo11s"
+    train_meta = json.loads(
+        (models_dir / new_stem / "training_metadata.json").read_text(encoding="utf-8")
+    )
+    assert train_meta["training_info"]["model"] == "yolo11s"
+
+
 def test_model_rename_cli_non_interactive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     deploy_workspace(str(tmp_path))
     stem = "detect_yolov8n_20260115_120000"

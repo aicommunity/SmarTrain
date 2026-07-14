@@ -74,6 +74,11 @@ class ParsedReleaseStem:
 
 
 def parse_canonical_release_stem(stem: str) -> ParsedReleaseStem | None:
+    """Parse legacy ``task_model_YYYYMMDD_HHMMSS`` stems only.
+
+    Modern releases use the training run folder name (``build_run_name`` style);
+    those stems do not match this pattern and return ``None``.
+    """
     m = _RELEASE_STEM_RE.match(str(stem).strip())
     if not m:
         return None

@@ -34,6 +34,7 @@ from smartrain.core.runtime.run_artifacts import (
 from smartrain.workflows.models import tensorrt_checks as trt_checks
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
+from smartrain.services.models.release_models_manifest import is_workspace_release_bundle
 
 
 @dataclass
@@ -426,14 +427,16 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
         model = YOLO(str(source_path))
         public_onnx = public_onnx_target
         session_onnx = session_onnx_target
-        if (public_onnx.exists() or session_onnx.exists()) and not ctx.force_onnx:
-            print(
-                f"[WARN] Skip ONNX (exists): {public_onnx.name} / {session_onnx.name}. Use --force to rebuild."
-            )
+        need_trtprep = bool(ctx.target_trt)
+        export_target = session_onnx if need_trtprep else public_onnx
+        if (public_onnx.exists() or (need_trtprep and session_onnx.exists())) and not ctx.force_onnx:
+            skip_msg = f"[WARN] Skip ONNX (exists): {public_onnx.name}"
+            if need_trtprep:
+                skip_msg += f" / {session_onnx.name}"
+            print(f"{skip_msg}. Use --force to rebuild.")
             stats.skipped += 1
             stats.artifacts_skipped += 1
-            if not session_onnx.exists() and public_onnx.exists():
-                run_root = _guess_run_root_for_path(source_path)
+            if need_trtprep and not session_onnx.exists() and public_onnx.exists():
                 onnx_params = {
                     "imgsz": _format_imgsz(ctx.onnx_imgsz),
                     "batch": ctx.onnx_batch,
@@ -456,11 +459,12 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                     stats.failed += 1
                     return result
         else:
-            _cleanup_trtprep_artifacts(out_dir, source_path.stem)
+            if need_trtprep:
+                _cleanup_trtprep_artifacts(out_dir, source_path.stem)
             ok_onnx, onnx_reason = _export_named_onnx_from_pt(
                 model,
                 source_path=source_path,
-                target_path=session_onnx,
+                target_path=export_target,
                 base_common=base_common,
                 args=argparse.Namespace(
                     simplify=ctx.simplify,
@@ -473,7 +477,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 print(f"[ERROR] ONNX export failed for {source_path}: {onnx_reason}")
                 stats.failed += 1
                 return result
-            print(f"[OK] ONNX: {session_onnx}")
+            print(f"[OK] ONNX: {export_target}")
             run_root = _guess_run_root_for_path(source_path)
             onnx_params = {
                 "imgsz": _format_imgsz(ctx.onnx_imgsz),
@@ -485,14 +489,14 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 "nms": bool(ctx.nms),
             }
             write_model_sidecar_metadata(
-                session_onnx,
+                export_target,
                 format_name="onnx",
                 run_dir=str(run_root) if run_root else None,
                 source_path=str(source_path),
                 tool="ultralytics",
                 params=onnx_params,
             )
-            if public_onnx.resolve() != session_onnx.resolve():
+            if need_trtprep and public_onnx.resolve() != session_onnx.resolve():
                 ok_sync, sync_reason = _sync_onnx_artifact(
                     session_onnx,
                     public_onnx,
@@ -508,16 +512,16 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
                 print(f"[OK] Public ONNX: {public_onnx}")
             stats.ok += 1
             stats.artifacts_ok += 1
-        if session_onnx.exists():
+        if need_trtprep and session_onnx.exists():
             result.session_onnx = session_onnx
+        elif public_onnx.exists():
+            result.session_onnx = public_onnx
 
-    if ctx.source_kind == "pt" and (ctx.target_engine or ctx.target_trt) and (
-        session_onnx is None or not session_onnx.exists()
+    if ctx.source_kind == "pt" and ctx.target_trt and (
+        session_onnx is None or not Path(session_onnx).exists()
     ):
-        if (not ctx.target_engine or (engine_target.exists() and not ctx.force_engine)) and (
-            not ctx.target_trt or (trt_target.exists() and not ctx.force_trt)
-        ):
-            print("[INFO] Skip ONNX cache: all requested TensorRT outputs already exist and overwrite is disabled.")
+        if trt_target.exists() and not ctx.force_trt:
+            print("[INFO] Skip ONNX cache: requested TensorRT trt output already exists and overwrite is disabled.")
             session_onnx = session_onnx_target
             result.session_onnx = session_onnx
         else:
@@ -727,6 +731,8 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
             stats.ok += 1
             stats.artifacts_ok += 1
             result.trt_path = trt_target
+            if not _keep_trtprep_cache_after_build(source_path):
+                _cleanup_trtprep_artifacts(out_dir, source_path.stem)
 
     return result
 
@@ -1095,12 +1101,21 @@ def _guess_run_root_for_path(path: Path) -> Path | None:
     current = path.expanduser().resolve()
     if current.is_file():
         current = current.parent
+    # Release catalog entries also contain training_metadata.json; they must not
+    # be treated as training runs (that would force long names and <stem>/models/).
+    if is_workspace_release_bundle(path):
+        return None
     for cand in [current, *current.parents]:
+        if is_workspace_release_bundle(cand):
+            continue
+        under_runs = any(part == "runs" for part in cand.parts)
         # Some workspaces can prune train artifacts after export; in this case
         # the run context must still be detected from stable run markers.
         if (cand / "training_metadata.json").is_file():
-            return cand
-        if (cand / "models").is_dir() and (cand / "test").is_dir():
+            if under_runs:
+                return cand
+            continue
+        if (cand / "models").is_dir() and (cand / "test").is_dir() and under_runs:
             return cand
         # Canonical layout fallback: runs/<dataset>/<run>/models/*
         # Keep run-context even if metadata/test dir is temporarily absent.
@@ -1109,6 +1124,11 @@ def _guess_run_root_for_path(path: Path) -> Path | None:
             if run_dir.is_dir() and run_dir.parent.is_dir() and run_dir.parent.parent.name == "runs":
                 return run_dir
     return None
+
+
+def _keep_trtprep_cache_after_build(source_path: Path) -> bool:
+    """Keep dedicated *_trtprep.onnx only for real training runs (idempotent TRT rebuilds)."""
+    return _guess_run_root_for_path(source_path) is not None
 
 
 def _guess_run_tmp_dir_for_path(path: Path) -> Path | None:
@@ -1257,10 +1277,8 @@ def _make_variant_tensor_name(stem: str, ext: str, args: argparse.Namespace, img
 
 
 def _variant_or_legacy_name(source_path: Path, *, ext: str, args: argparse.Namespace, imgsz: int | tuple[int, int]) -> str:
-    run_root = _guess_run_root_for_path(source_path)
-    if run_root is None:
-        return f"{source_path.stem}{ext}"
-    return _make_variant_tensor_name(source_path.stem, ext, args, imgsz)
+    # Public engine/trt names always match the weights stem (same for runs and release).
+    return f"{source_path.stem}{ext}"
 
 
 def _next_available_path(path: Path) -> Path:
@@ -1286,30 +1304,31 @@ def _cleanup_trtprep_artifacts(out_dir: Path, source_stem: str) -> None:
 
 
 def _resolve_public_onnx_target(source_path: Path, out_dir: Path, expected: dict[str, Any]) -> Path:
-    run_root = _guess_run_root_for_path(source_path)
-    in_runs_models = out_dir.name == "models" and out_dir.parent.parent.name == "runs"
-    if run_root is None and not in_runs_models:
-        return out_dir / f"{source_path.stem}.onnx"
-    public_name = _make_dedicated_onnx_name(source_path.stem, expected).replace("_trtprep", "")
-    return out_dir / f"{public_name}.onnx"
+    return out_dir / f"{source_path.stem}.onnx"
 
 
-def _cleanup_legacy_plain_onnx_for_run(source_path: Path, target_onnx: Path) -> None:
+def _cleanup_stale_signature_onnx_for_run(source_path: Path, target_onnx: Path) -> None:
+    """Best-effort: remove old long-signature public ONNX next to the new short name."""
     try:
         target = target_onnx.expanduser().resolve()
         out_dir = target.parent
-        if out_dir.name != "models" or out_dir.parent.parent.parent.name != "runs":
+        stem = source_path.stem
+        short = (out_dir / f"{stem}.onnx").resolve()
+        if short != target or not short.is_file():
             return
-        plain = out_dir / f"{source_path.stem}.onnx"
-        plain = plain.resolve()
-        if plain == target or not plain.exists():
-            return
-        plain.unlink(missing_ok=True)
-        plain_meta = plain.with_suffix(plain.suffix + ".meta.json")
-        plain_meta.unlink(missing_ok=True)
-        print(f"[INFO] Removed legacy plain ONNX artifact: {plain}")
+        for candidate in out_dir.glob(f"{stem}_imgsz*_op*_nms*.onnx"):
+            if not candidate.is_file():
+                continue
+            if "trtprep" in candidate.name:
+                continue
+            try:
+                candidate.unlink(missing_ok=True)
+                meta = candidate.with_name(candidate.name + ".meta.json")
+                meta.unlink(missing_ok=True)
+                print(f"[INFO] Removed stale signature ONNX artifact: {candidate}")
+            except Exception:
+                pass
     except Exception:
-        # Best-effort cleanup: must not fail conversion.
         return
 
 
@@ -1420,7 +1439,7 @@ def _sync_onnx_artifact(
             tool="ultralytics",
             params=params,
         )
-        _cleanup_legacy_plain_onnx_for_run(source_path_for_meta, target_onnx)
+        _cleanup_stale_signature_onnx_for_run(source_path_for_meta, target_onnx)
         return True, "ok"
     except Exception as exc:
         return False, str(exc)
@@ -1569,32 +1588,11 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
         expected = _expected_onnx_signature(args, imgsz)
         run_root = _guess_run_root_for_path(source_path)
         public_onnx = _resolve_public_onnx_target(source_path, out_dir, expected)
-        dedicated_onnx = out_dir / (_make_dedicated_onnx_name(source_path.stem, expected) + ".onnx")
         if public_onnx.exists() and not args.force:
             print(f"[WARN] Skip ONNX (exists): {public_onnx}. Use --force to rebuild.")
             skipped_any = True
             artifacts_skipped += 1
-            if dedicated_onnx.resolve() != public_onnx.resolve():
-                ok_cache, cache_reason = _ensure_dedicated_onnx_cache(
-                    public_onnx=public_onnx,
-                    dedicated_onnx=dedicated_onnx,
-                    expected_sig=expected,
-                    source_path=source_path,
-                    out_dir=out_dir,
-                    onnx_params={
-                        "imgsz": _format_imgsz(imgsz),
-                        "batch": int(args.batch),
-                        "dynamic": bool(args.dynamic),
-                        "opset": int(args.opset),
-                        "simplify": bool(getattr(args, "simplify", True)),
-                        "half": bool(getattr(args, "half", False)),
-                        "nms": bool(getattr(args, "nms", False)),
-                    },
-                )
-                if not ok_cache:
-                    print(f"[ERROR] Failed to prepare dedicated ONNX cache: {cache_reason}")
-                    failed_any = True
-                    artifacts_failed += 1
+            # Do not materialize *_trtprep for onnx-only converts.
         else:
             onnx_kw = {
                 **base_common,
@@ -1634,23 +1632,7 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                     artifacts_failed += 1
                 else:
                     print(f"[OK] ONNX: {target_primary}")
-                    # Keep trtprep cache synchronized without second export.
-                    if dedicated_onnx.resolve() != target_primary.resolve():
-                        _cleanup_trtprep_artifacts(out_dir, source_path.stem)
-                        ok_cache, cache_reason = _sync_onnx_artifact(
-                            target_primary,
-                            dedicated_onnx,
-                            force=True,
-                            source_path_for_meta=source_path,
-                            run_root=run_root,
-                            params=onnx_params,
-                        )
-                        if not ok_cache:
-                            print(f"[ERROR] Failed to update dedicated ONNX cache from public ONNX: {cache_reason}")
-                            failed_any = True
-                            artifacts_failed += 1
-                        else:
-                            print(f"[OK] Dedicated ONNX cache: {dedicated_onnx}")
+                    # onnx-only: keep a single public artifact (no *_trtprep sibling).
                     print(
                         "[INFO] ONNX post-check passed. PyTorch export warnings (e.g. aten::index) are treated as non-fatal unless validation fails."
                     )
@@ -1923,6 +1905,8 @@ def _convert_one(pt_path: Path, args: argparse.Namespace) -> tuple[bool, bool, b
                             "workspace_gib": getattr(args, "workspace_gib", None),
                         },
                     )
+                    if not _keep_trtprep_cache_after_build(source_path):
+                        _cleanup_trtprep_artifacts(out_dir, source_path.stem)
                     ok_any = True
                     artifacts_ok += 1
                 else:

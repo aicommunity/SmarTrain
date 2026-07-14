@@ -64,22 +64,29 @@ def _write_nested_release_model(
     return pt_path
 
 
-def test_target_paths_use_nested_layout(tmp_path: Path) -> None:
+def test_target_paths_use_nested_layout_with_run_basename(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     layout = WorkspaceLayout(str(tmp_path))
+    run_dir = (
+        tmp_path
+        / "runs"
+        / "my_ds"
+        / "2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc"
+    )
     md = {
         "training_info": {
             "dataset": {"name": "my_ds"},
-            "model": "yolov8n",
+            "model": "yolo11s",
             "task_type": "detect",
         },
         "timestamps": {"training": {"end": "2026-01-15T12:00:00+00:00"}},
     }
-    release_dir, target_pt, target_json = _target_paths(layout, tmp_path / "runs" / "run1", md)
-    assert release_dir.name == "detect_yolov8n_20260115_120000"
+    release_dir, target_pt, target_json = _target_paths(layout, run_dir, md)
+    assert release_dir.name == run_dir.name
     assert target_pt.parent == release_dir
     assert target_json.parent == release_dir
-    assert target_pt.name == f"{release_dir.name}.pt"
+    assert target_pt.name == f"{run_dir.name}.pt"
+    assert target_json.name == f"{run_dir.name}.json"
 
 
 def test_manifest_upsert_and_get_comment(tmp_path: Path) -> None:

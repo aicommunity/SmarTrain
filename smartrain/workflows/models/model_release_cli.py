@@ -5,7 +5,6 @@ import csv
 import hashlib
 import json
 import os
-import re
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -28,7 +27,6 @@ from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceL
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
 from smartrain.core.runtime.run_bundle_copy import copy_run_bundle
 from smartrain.services.models.release_model_naming import (
-    normalize_release_task,
     sanitize_release_stem,
 )
 from smartrain.services.models.release_models_manifest import (
@@ -82,19 +80,6 @@ def _read_csv_last_row(csv_path: Path) -> dict[str, Any] | None:
         for row in rdr:
             last = {str(k).strip(): v for k, v in row.items()}
     return last
-
-
-def _timestamp_for_name(md: dict[str, Any]) -> str:
-    ts = (((md.get("timestamps") or {}).get("training") or {}).get("end")) or (
-        ((md.get("timestamps") or {}).get("training") or {}).get("start")
-    )
-    if not ts:
-        return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    try:
-        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-    except ValueError:
-        return sanitize_release_stem(str(ts))[:32]
-    return dt.strftime("%Y%m%d_%H%M%S")
 
 
 def _resolve_run_ref(layout: WorkspaceLayout, ref: str) -> Path:
@@ -308,11 +293,8 @@ def _build_release_json(
 def _target_paths(layout: WorkspaceLayout, run_dir: Path, md: dict[str, Any]) -> tuple[Path, Path, Path]:
     ti = md.get("training_info") or {}
     dataset_name = sanitize_release_stem(str((ti.get("dataset") or {}).get("name") or "dataset"))
-    task = normalize_release_task(str(ti.get("task_type") or "detect"))
-    model_name = sanitize_release_stem(str(ti.get("model") or "model"))
-    model_name = re.sub(r"\.(pt|onnx|engine)$", "", model_name, flags=re.IGNORECASE)
-    dt = _timestamp_for_name(md)
-    stem = f"{task}_{model_name}_{dt}"
+    # Identity stem matches the training run folder name (build_run_name / finalize).
+    stem = sanitize_release_stem(run_dir.name)
     release_dir = (Path(layout.models) / dataset_name / stem).resolve()
     target_pt = (release_dir / f"{stem}.pt").resolve()
     target_json = (release_dir / f"{stem}.json").resolve()

@@ -82,7 +82,7 @@ Quick examples:
   smartrain model convert --input models/my_model.onnx --format tensorrt-trt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00
   smartrain model comment --release 1 --comment "Production line 3"
-  smartrain model rename --release models/my_ds/detect_yolov8n_20260115_120000/detect_yolov8n_20260115_120000.pt --new-name my_detector_v2
+  smartrain model rename --release models/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234.pt --new-name my_detector_v2
 
 Interactive convert:
   - choose source model type: pt or onnx
@@ -92,8 +92,9 @@ Interactive convert:
   - run sources use canonical artifacts <run_dir>/<run_dir_name>.<ext>; legacy run layouts are canonized automatically
 
 Artifacts:
+  - public convert outputs use short names matching the weights stem: <stem>.onnx / <stem>.engine / <stem>.trt
   - tensorrt-engine: Ultralytics export to .engine
-  - tensorrt-trt: trtexec export to .trt
+  - tensorrt-trt: trtexec export to .trt (may use internal *_trtprep.onnx cache)
 """
 
 HELP_DEPS_GROUP = """Dependency management helpers.
