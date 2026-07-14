@@ -12,6 +12,7 @@ from smartrain.cli_entrypoints.support.cli_prompts import (
     print_numbered_options,
     prompt_choice,
     prompt_int,
+    prompt_multi_choice_csv,
     prompt_text,
     prompt_yes_no,
 )
@@ -39,6 +40,9 @@ from smartrain.services.inference_runtime_helpers import (
     load_catalog,
     resolve_inference_source,
     resolve_model,
+    load_model_class_names,
+    format_model_class_option_labels,
+    export_classes_csv_from_picked_labels,
 )
 from smartrain.workflows.models.model_context import DEFAULT_INFERENCE_IMGSZ, FALLBACK_IMGSZ_SOURCE
 
@@ -102,6 +106,21 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
     try:
         mpath, _mname, _msrc = resolve_model(args, layout)
         inferred_imgsz, inferred_imgsz_source = infer_img_size_with_source_safe(mpath)
+        try:
+            class_names = load_model_class_names(mpath)
+        except Exception as exc:
+            print(f"[WARN] Could not load model classes: {exc}")
+            class_names = {}
+        if class_names:
+            class_labels = format_model_class_option_labels(class_names)
+            picked = prompt_multi_choice_csv(
+                "Export classes (empty=all; counts after export conf filter)",
+                class_labels,
+                default_values=[],
+            )
+            args.export_classes = export_classes_csv_from_picked_labels(picked)
+        elif getattr(args, "export_classes", None):
+            print("[WARN] Model classes unavailable; --export-classes will use numeric ids only.")
     except Exception:
         inferred_imgsz = None
         inferred_imgsz_source = FALLBACK_IMGSZ_SOURCE

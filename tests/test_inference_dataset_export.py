@@ -15,10 +15,17 @@ from smartrain.services.datasets.yolo_labels import (
 from smartrain.services.inference_dataset_export import (
     ExportOptions,
     export_yolo_dataset,
+    filter_export_task_outputs,
+    filter_inference_report_by_classes,
     filter_task_outputs,
     resolve_autolabel_dataset_dir,
     resolve_export_options,
     validate_export_options,
+)
+from smartrain.services.inference_runtime_helpers import (
+    export_classes_csv_from_picked_labels,
+    format_model_class_option_labels,
+    resolve_export_class_filter,
 )
 
 
@@ -433,3 +440,140 @@ def test_export_prediction_overlays_mirror_parts(tmp_path: Path) -> None:
 def test_validate_export_options_rejects_bad_files_per_dir() -> None:
     with pytest.raises(ValueError):
         validate_export_options(ExportOptions(True, True, 0.25, 1.0, export_split_dirs=True, export_files_per_dir=0))
+
+
+def test_resolve_export_class_filter_names_and_ids() -> None:
+    names = {0: "person", 1: "car", 2: "bike"}
+    assert resolve_export_class_filter("person,car", names) == {0, 1}
+    assert resolve_export_class_filter("1,2", names) == {1, 2}
+    assert resolve_export_class_filter(None, names) is None
+    assert resolve_export_class_filter("", names) is None
+
+
+def test_resolve_export_class_filter_unknown_raises() -> None:
+    with pytest.raises(ValueError, match="Unknown export classes"):
+        resolve_export_class_filter("missing", {0: "person"})
+
+
+def test_format_and_parse_picked_class_labels() -> None:
+    labels = format_model_class_option_labels({0: "person", 2: "car"})
+    assert labels == ["0: person", "2: car"]
+    assert export_classes_csv_from_picked_labels(["0: person", "2: car"]) == "person,car"
+    assert export_classes_csv_from_picked_labels([]) is None
+
+
+def test_filter_export_task_outputs_by_class() -> None:
+    row = {
+        "task_outputs": {
+            "detections": [
+                {"class_index": 0, "confidence": 0.9, "bbox_original_xyxy": [1, 2, 3, 4]},
+                {"class_index": 1, "confidence": 0.8, "bbox_original_xyxy": [5, 6, 7, 8]},
+            ]
+        }
+    }
+    all_items = filter_export_task_outputs(row, "detection", conf_min=0.25, conf_max=1.0, class_ids=None)
+    assert len(all_items) == 2
+    only_one = filter_export_task_outputs(row, "detection", conf_min=0.25, conf_max=1.0, class_ids={1})
+    assert len(only_one) == 1
+    assert only_one[0]["class_index"] == 1
+
+
+def test_export_yolo_dataset_skips_frame_without_selected_class(tmp_path: Path) -> None:
+    src = tmp_path / "raw"
+    src.mkdir()
+    img_a = src / "a.jpg"
+    img_b = src / "b.jpg"
+    Image.new("RGB", (50, 50)).save(img_a)
+    Image.new("RGB", (50, 50)).save(img_b)
+    report = {
+        "task_type": "detection",
+        "source": {"mode": "folder", "path_absolute": str(src)},
+        "model": {"source": "models", "name": "demo", "weights_absolute": "/w.pt", "provider": {"type": "builtin", "id": "ultralytics"}},
+        "parameters": {"conf": 0.25, "img_size": 640, "device": "cpu", "half": False},
+        "images": [
+            _det_row(img_a, conf=0.9),
+            {
+                "image_path_absolute": str(img_b),
+                "image_size": {"width": 50, "height": 50},
+                "task_outputs": {
+                    "detections": [
+                        {
+                            "bbox_original_xyxy": [5.0, 5.0, 20.0, 20.0],
+                            "class_index": 1,
+                            "class_name": "car",
+                            "confidence": 0.9,
+                        }
+                    ]
+                },
+            },
+        ],
+    }
+    out_root = tmp_path / "run"
+    out_root.mkdir()
+    report_path = out_root / "inference_results.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    class _Layout:
+        root = str(tmp_path)
+
+    summary, exported = export_yolo_dataset(
+        report,
+        out_root=out_root,
+        source_short="raw",
+        report_path=report_path,
+        options=ExportOptions(
+            True,
+            False,
+            0.25,
+            1.0,
+            export_split_dirs=False,
+            export_class_ids=frozenset({0}),
+        ),
+        layout=_Layout(),  # type: ignore[arg-type]
+    )
+    assert summary.images_exported == 1
+    assert summary.images_skipped_no_class == 1
+    assert len(exported) == 1
+    assert (out_root / "raw_autolabeled" / "images" / "a.jpg").is_file()
+
+
+def test_filter_inference_report_by_classes(tmp_path: Path) -> None:
+    report = {
+        "task_type": "detection",
+        "summary": {"images_processed": 2, "detections_total": 2},
+        "images": [
+            {
+                "image_path_absolute": "/tmp/a.jpg",
+                "detections": [
+                    {"class_index": 0, "confidence": 0.9, "bbox_original_xyxy": [1, 2, 3, 4]},
+                    {"class_index": 1, "confidence": 0.8, "bbox_original_xyxy": [5, 6, 7, 8]},
+                ],
+                "task_outputs": {
+                    "detections": [
+                        {"class_index": 0, "confidence": 0.9, "bbox_original_xyxy": [1, 2, 3, 4]},
+                        {"class_index": 1, "confidence": 0.8, "bbox_original_xyxy": [5, 6, 7, 8]},
+                    ]
+                },
+            },
+            {
+                "image_path_absolute": "/tmp/b.jpg",
+                "detections": [{"class_index": 1, "confidence": 0.7, "bbox_original_xyxy": [1, 2, 3, 4]}],
+                "task_outputs": {
+                    "detections": [{"class_index": 1, "confidence": 0.7, "bbox_original_xyxy": [1, 2, 3, 4]}]
+                },
+            },
+        ],
+    }
+    filtered, skipped = filter_inference_report_by_classes(
+        report,
+        class_ids={0},
+        conf_min=0.25,
+        conf_max=1.0,
+    )
+    assert skipped == 1
+    assert len(filtered["images"]) == 1
+    assert filtered["images"][0]["image_path_absolute"] == "/tmp/a.jpg"
+    assert len(filtered["images"][0]["task_outputs"]["detections"]) == 1
+    assert filtered["images"][0]["task_outputs"]["detections"][0]["class_index"] == 0
+    assert filtered["summary"]["images_processed"] == 1
+

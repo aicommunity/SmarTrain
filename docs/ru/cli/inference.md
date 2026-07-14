@@ -73,11 +73,12 @@ pred_overlays/
 | `--export-visualize` / `--no-export-visualize` | вкл при export-dataset | Папка `pred_overlays/` с отрисовкой как в `vis` |
 | `--export-split-dirs` / `--no-export-split-dirs` | вкл | Независимые поддатасеты `part_XXX/` (+ зеркало overlays) |
 | `--export-files-per-dir` | `500` | Макс. экспортированных кадров на поддатасет |
+| `--export-classes` | все | Оставлять в результатах только кадры с указанными классами (имена/id) |
 | `--batch-size` | `8` | Размер батча локального Ultralytics-инференса (для external не применяется) |
 
 `--conf` задаёт порог инференса; `--export-label-conf-*` дополнительно фильтрует метки при записи в датасет (из уже полученных предсказаний).
 
-Classification в YOLO не экспортируется (предупреждение, каталог датасета не создаётся). Если ни один кадр не проходит фильтр confidence при экспорте, каталоги `<basename>_autolabeled/` и `pred_overlays/` не создаются. При OOM уменьшите `--batch-size`.
+Classification в YOLO не экспортируется (предупреждение, каталог датасета не создаётся). Если ни один кадр не проходит фильтр confidence при экспорте, каталоги `<basename>_autolabeled/` и `pred_overlays/` не создаются. При OOM уменьшите `--batch-size`. В интерактивном режиме после выбора модели показывается список классов; пустой выбор = все классы. `--export-classes` вместе с `--export-label-conf-*` исключает из `inference_results.json`, autolabel и overlays кадры без выбранных классов.
 
 ## Поддерживаемые типы моделей
 

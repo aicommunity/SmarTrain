@@ -73,6 +73,7 @@ Export / inference flags:
 | `--export-visualize` / `--no-export-visualize` | on when export-dataset | `pred_overlays/` vis-style renders |
 | `--export-split-dirs` / `--no-export-split-dirs` | on | Independent `part_XXX/` sub-datasets (+ mirrored overlays) |
 | `--export-files-per-dir` | `500` | Max exported images per sub-dataset |
+| `--export-classes` | all | Keep only frames with these class names/ids in saved results |
 | `--batch-size` | `8` | Local Ultralytics inference batch size (ignored for external providers) |
 
 `--conf` is the inference threshold; `--export-label-conf-*` further filters labels written to the dataset from predictions already returned by the model.
@@ -80,6 +81,7 @@ Export / inference flags:
 - Classification is not exported to YOLO (warning, no dataset folder created).
 - If no images pass the export confidence filter, `<basename>_autolabeled/` and `pred_overlays/` are not created.
 - Large `--batch-size` with high `--img-size` may OOM; lower `--batch-size` if needed.
+- Interactive mode lists model classes after model selection; empty selection exports all classes. `--export-classes` applies together with `--export-label-conf-*`: frames without selected classes are omitted from `inference_results.json`, autolabel export, and overlays.
 
 ## External provider capability matrix (task × payload)
 

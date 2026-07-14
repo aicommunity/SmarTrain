@@ -36,6 +36,7 @@ class ExportOptions:
     label_conf_max: float
     export_split_dirs: bool = True
     export_files_per_dir: int = 500
+    export_class_ids: frozenset[int] | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class ExportSummary:
     parts_count: int = 0
     files_per_dir: int | None = None
     layout: str = "flat"
+    images_skipped_no_class: int = 0
 
 
 def resolve_export_options(args: argparse.Namespace) -> ExportOptions:
@@ -59,6 +61,10 @@ def resolve_export_options(args: argparse.Namespace) -> ExportOptions:
         export_visualize = export_dataset
     else:
         export_visualize = bool(raw_visualize)
+    raw_class_ids = getattr(args, "export_class_ids", None)
+    export_class_ids: frozenset[int] | None = None
+    if raw_class_ids:
+        export_class_ids = frozenset(int(x) for x in raw_class_ids)
     return ExportOptions(
         export_dataset=export_dataset,
         export_visualize=export_visualize,
@@ -66,6 +72,7 @@ def resolve_export_options(args: argparse.Namespace) -> ExportOptions:
         label_conf_max=float(getattr(args, "export_label_conf_max", 1.0)),
         export_split_dirs=bool(getattr(args, "export_split_dirs", True)),
         export_files_per_dir=int(getattr(args, "export_files_per_dir", 500)),
+        export_class_ids=export_class_ids,
     )
 
 
@@ -148,6 +155,154 @@ def filter_task_outputs(row: dict[str, Any], task_type: str, conf_min: float, co
             legacy = row.get("detections")
             items = legacy if isinstance(legacy, list) else []
     return [x for x in items if isinstance(x, dict) and _passes_conf_filter(x, conf_min, conf_max)]
+
+
+def _item_class_index(item: dict[str, Any]) -> int | None:
+    for key in ("class_index", "class_id"):
+        if key not in item:
+            continue
+        try:
+            return int(item[key])
+        except Exception:
+            continue
+    return None
+
+
+def filter_task_outputs_by_class(items: list[dict[str, Any]], class_ids: set[int] | frozenset[int] | None) -> list[dict[str, Any]]:
+    if not class_ids:
+        return items
+    allowed = set(class_ids)
+    out: list[dict[str, Any]] = []
+    for item in items:
+        cls_id = _item_class_index(item)
+        if cls_id is not None and cls_id in allowed:
+            out.append(item)
+    return out
+
+
+def _classification_top1_index(row: dict[str, Any]) -> int | None:
+    task_outputs = row.get("task_outputs") if isinstance(row.get("task_outputs"), dict) else {}
+    classification = task_outputs.get("classification")
+    if not isinstance(classification, dict):
+        return None
+    top1 = classification.get("top1")
+    if not isinstance(top1, dict):
+        return None
+    try:
+        return int(top1.get("class_index"))
+    except Exception:
+        return None
+
+
+def filter_export_task_outputs(
+    row: dict[str, Any],
+    task_type: str,
+    *,
+    conf_min: float,
+    conf_max: float,
+    class_ids: set[int] | frozenset[int] | None,
+) -> list[dict[str, Any]]:
+    resolved = task_to_metadata_task_type(row.get("task_type", task_type))
+    if resolved == "classification":
+        if not class_ids:
+            return []
+        top1_idx = _classification_top1_index(row)
+        if top1_idx is None or top1_idx not in set(class_ids):
+            return []
+        return [{"class_index": top1_idx}]
+    filtered = filter_task_outputs(row, task_type, conf_min, conf_max)
+    return filter_task_outputs_by_class(filtered, class_ids)
+
+
+def _apply_filtered_outputs_to_row(row: dict[str, Any], task_type: str, filtered: list[dict[str, Any]]) -> dict[str, Any]:
+    resolved = task_to_metadata_task_type(row.get("task_type", task_type))
+    out = dict(row)
+    task_outputs = dict(out.get("task_outputs") if isinstance(out.get("task_outputs"), dict) else {})
+    if resolved == "segmentation":
+        task_outputs["segments"] = filtered
+        out["detections"] = filtered
+    elif resolved == "classification":
+        cls_obj = dict(task_outputs.get("classification") if isinstance(task_outputs.get("classification"), dict) else {})
+        top1 = cls_obj.get("top1")
+        if isinstance(top1, dict) and filtered:
+            task_outputs["classification"] = {"top1": top1, "top_k": cls_obj.get("top_k", [])}
+        else:
+            task_outputs["classification"] = {}
+        out["detections"] = []
+    else:
+        task_outputs["detections"] = filtered
+        out["detections"] = filtered
+    out["task_outputs"] = task_outputs
+    return out
+
+
+def _recompute_report_summary(report: dict[str, Any]) -> None:
+    task_type = task_to_metadata_task_type(report.get("task_type"))
+    images = report.get("images") if isinstance(report.get("images"), list) else []
+    detections_total = 0
+    task_outputs_total = 0
+    for row in images:
+        if not isinstance(row, dict):
+            continue
+        detections_total += len(row.get("detections") if isinstance(row.get("detections"), list) else [])
+        task_outputs = row.get("task_outputs")
+        if not isinstance(task_outputs, dict):
+            continue
+        if task_type == "classification":
+            cls = task_outputs.get("classification")
+            if isinstance(cls, dict) and cls:
+                task_outputs_total += 1
+            continue
+        if task_type == "segmentation":
+            segs = task_outputs.get("segments")
+            if isinstance(segs, list):
+                task_outputs_total += len(segs)
+            continue
+        dets = task_outputs.get("detections")
+        if isinstance(dets, list):
+            task_outputs_total += len(dets)
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    summary["images_processed"] = len([r for r in images if isinstance(r, dict)])
+    summary["detections_total"] = detections_total
+    summary["task_outputs_total"] = task_outputs_total
+    report["summary"] = summary
+
+
+def filter_inference_report_by_classes(
+    report: dict[str, Any],
+    *,
+    class_ids: set[int] | frozenset[int] | None,
+    conf_min: float,
+    conf_max: float,
+) -> tuple[dict[str, Any], int]:
+    """Drop image rows without selected classes; trim outputs to selected classes only."""
+    if not class_ids:
+        return report, 0
+    task_type = task_to_metadata_task_type(report.get("task_type"))
+    images = report.get("images") if isinstance(report.get("images"), list) else []
+    kept: list[dict[str, Any]] = []
+    skipped_no_class = 0
+    for row in images:
+        if not isinstance(row, dict):
+            continue
+        filtered = filter_export_task_outputs(
+            row,
+            task_type,
+            conf_min=conf_min,
+            conf_max=conf_max,
+            class_ids=class_ids,
+        )
+        if not filtered:
+            skipped_no_class += 1
+            continue
+        kept.append(_apply_filtered_outputs_to_row(row, task_type, filtered))
+    out = dict(report)
+    out["images"] = kept
+    summary = dict(out.get("summary") if isinstance(out.get("summary"), dict) else {})
+    summary["images_skipped_no_class"] = int(summary.get("images_skipped_no_class", 0)) + skipped_no_class
+    out["summary"] = summary
+    _recompute_report_summary(out)
+    return out, skipped_no_class
 
 
 def _allocate_unique_stem(base_stem: str, used: set[str]) -> str:
@@ -245,7 +400,7 @@ def _det_for_render(det: dict[str, Any], img_w: int, img_h: int) -> dict[str, An
     return out
 
 
-def _empty_summary(*, images_skipped_empty: int = 0) -> ExportSummary:
+def _empty_summary(*, images_skipped_empty: int = 0, images_skipped_no_class: int = 0) -> ExportSummary:
     return ExportSummary(
         dataset_dir=None,
         manifest_path=None,
@@ -257,6 +412,7 @@ def _empty_summary(*, images_skipped_empty: int = 0) -> ExportSummary:
         parts_count=0,
         files_per_dir=None,
         layout="flat",
+        images_skipped_no_class=images_skipped_no_class,
     )
 
 
@@ -299,6 +455,7 @@ def _write_flat_dataset(
             "layout": "flat",
             "export_split_dirs": False,
             "export_files_per_dir": options.export_files_per_dir,
+            "export_class_ids": sorted(options.export_class_ids) if options.export_class_ids else None,
         },
         "provenance": {
             "inference_report_absolute": str(Path(report_path).resolve()),
@@ -388,6 +545,7 @@ def _write_independent_parts(
                 "export_files_per_dir": files_per_dir,
                 "part_id": part_id,
                 "part_index": part_index,
+                "export_class_ids": sorted(options.export_class_ids) if options.export_class_ids else None,
             },
             "provenance": provenance,
             "summary": {
@@ -423,6 +581,7 @@ def _write_independent_parts(
             "export_split_dirs": True,
             "export_files_per_dir": files_per_dir,
             "parts": part_count,
+            "export_class_ids": sorted(options.export_class_ids) if options.export_class_ids else None,
         },
         "provenance": provenance,
         "summary": {
@@ -464,6 +623,7 @@ def export_yolo_dataset(
     labels_total = 0
     images_exported = 0
     images_skipped_empty = 0
+    images_skipped_no_class = 0
     # (src, image_name, label_name, yolo_labels, class_names)
     pending_exports: list[tuple[str, str, str, list, dict[int, str]]] = []
 
@@ -473,11 +633,21 @@ def export_yolo_dataset(
         src = str(row.get("image_path_absolute") or "")
         if not src or not os.path.isfile(src):
             continue
-        filtered = filter_task_outputs(row, task_type, options.label_conf_min, options.label_conf_max)
+        conf_filtered = filter_task_outputs(row, task_type, options.label_conf_min, options.label_conf_max)
+        filtered = filter_export_task_outputs(
+            row,
+            task_type,
+            conf_min=options.label_conf_min,
+            conf_max=options.label_conf_max,
+            class_ids=options.export_class_ids,
+        )
         img_w, img_h = _image_size(row)
         yolo_labels = task_outputs_to_yolo_labels(task_type, filtered, img_w, img_h)
         if not yolo_labels:
-            images_skipped_empty += 1
+            if conf_filtered and options.export_class_ids:
+                images_skipped_no_class += 1
+            else:
+                images_skipped_empty += 1
             continue
 
         stem = Path(src).stem
@@ -497,7 +667,10 @@ def export_yolo_dataset(
             "[INFO] Autolabel dataset export skipped: no images with labels after confidence filter.",
             file=sys.stderr,
         )
-        return _empty_summary(images_skipped_empty=images_skipped_empty), set()
+        return _empty_summary(
+            images_skipped_empty=images_skipped_empty,
+            images_skipped_no_class=images_skipped_no_class,
+        ), set()
 
     images_input = len([r for r in images if isinstance(r, dict)])
     split_dirs = bool(options.export_split_dirs)
@@ -533,6 +706,7 @@ def export_yolo_dataset(
                 parts_count=parts_count,
                 files_per_dir=int(options.export_files_per_dir),
                 layout="independent_parts",
+                images_skipped_no_class=images_skipped_no_class,
             ),
             exported_paths,
         )
@@ -573,6 +747,7 @@ def export_yolo_dataset(
             parts_count=1,
             files_per_dir=None,
             layout="flat",
+            images_skipped_no_class=images_skipped_no_class,
         ),
         exported_paths,
     )
@@ -607,7 +782,13 @@ def export_prediction_overlays(
         if exported_only is not None and src_abs not in exported_only:
             continue
         if use_export_filter:
-            preds = filter_task_outputs(row, task_type, options.label_conf_min, options.label_conf_max)
+            preds = filter_export_task_outputs(
+                row,
+                task_type,
+                conf_min=options.label_conf_min,
+                conf_max=options.label_conf_max,
+                class_ids=options.export_class_ids,
+            )
         else:
             task_outputs = row.get("task_outputs") if isinstance(row.get("task_outputs"), dict) else {}
             if task_type == "segmentation":
@@ -672,6 +853,7 @@ def patch_inference_report_artifacts(
             "export_visualize": options.export_visualize,
             "export_split_dirs": options.export_split_dirs,
             "export_files_per_dir": options.export_files_per_dir,
+            "export_class_ids": sorted(options.export_class_ids) if options.export_class_ids else None,
         }
     )
     payload["parameters"] = params
@@ -758,6 +940,7 @@ def run_inference_exports(
             parts_count=summary.parts_count,
             files_per_dir=summary.files_per_dir,
             layout=summary.layout,
+            images_skipped_no_class=summary.images_skipped_no_class,
         )
         if overlay_paths:
             print(f"[OK] Saved {len(overlay_paths)} prediction overlay image(s) to {overlay_dir}")

@@ -101,5 +101,14 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
             "(after label conf filter). Default: 500. Used when --export-split-dirs is on."
         ),
     )
+    p.add_argument(
+        "--export-classes",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated class names or ids to keep when saving results "
+            "(empty = all classes). Frames without selected classes are omitted."
+        ),
+    )
     return p
 

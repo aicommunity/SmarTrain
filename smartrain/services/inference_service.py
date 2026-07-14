@@ -44,11 +44,13 @@ from smartrain.services.inference_runtime_helpers import (
     resolve_inference_source,
     resolve_model,
     resolve_output_root,
+    resolve_export_class_ids_for_args,
     sanitize_segment,
     source_descriptor_from_resolved,
     write_report,
 )
 from smartrain.services.inference_dataset_export import (
+    filter_inference_report_by_classes,
     resolve_export_options,
     run_inference_exports,
     validate_export_options,
@@ -360,6 +362,25 @@ def _run_inference_postprocess(
         overlays = save_inference_segment_overlays(report_path)
         if overlays:
             print(f"[OK] Saved {len(overlays)} segmentation overlay image(s)")
+
+    options = resolve_export_options(args)
+    if options.export_class_ids:
+        import json
+
+        payload = json.loads(Path(report_path).read_text(encoding="utf-8"))
+        filtered, skipped = filter_inference_report_by_classes(
+            payload,
+            class_ids=options.export_class_ids,
+            conf_min=options.label_conf_min,
+            conf_max=options.label_conf_max,
+        )
+        if skipped:
+            print(
+                f"[INFO] Omitted {skipped} image(s) from saved results "
+                f"(no detections of selected classes after export filters)."
+            )
+        write_report(report_path, filtered)
+
     run_inference_exports(
         report_path=report_path,
         out_root=out_root,
@@ -367,6 +388,21 @@ def _run_inference_postprocess(
         args=args,
         layout=layout,
     )
+
+
+def _prepare_export_class_filter(args: argparse.Namespace, model_path: Path) -> tuple[int, bool] | None:
+    raw = getattr(args, "export_classes", None)
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        if model_path.is_file():
+            resolve_export_class_ids_for_args(args, model_path)
+        else:
+            args.export_class_ids = resolve_export_class_filter(str(raw), {})
+    except ValueError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1, False
+    return None
 
 
 def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[int, bool]:
@@ -405,6 +441,9 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         except Exception as e:
             print(f"[ERROR] Failed to resolve model: {e}", file=sys.stderr)
             return 1, False
+    class_filter_outcome = _prepare_export_class_filter(args, Path(model_path))
+    if class_filter_outcome is not None:
+        return class_filter_outcome
     if args.img_size is None and isinstance(model_path, Path):
         apply_inference_imgsz_from_model(model_path, args)
     elif args.img_size is None:

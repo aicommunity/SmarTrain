@@ -133,6 +133,111 @@ def _parse_roi_class_ids(raw: str | None) -> list[int] | None:
     return out or None
 
 
+def load_model_class_names(model_path: Path) -> dict[int, str]:
+    """Read class id → name mapping from Ultralytics weights."""
+    from ultralytics import YOLO
+
+    names_raw = getattr(YOLO(str(model_path)), "names", {}) or {}
+    if not isinstance(names_raw, dict):
+        return {}
+    out: dict[int, str] = {}
+    for key, value in names_raw.items():
+        try:
+            cls_id = int(key)
+        except Exception:
+            continue
+        out[cls_id] = str(value)
+    return out
+
+
+def format_model_class_option_labels(class_names: dict[int, str]) -> list[str]:
+    return [f"{cls_id}: {name}" for cls_id, name in sorted(class_names.items())]
+
+
+def export_classes_csv_from_picked_labels(picked: list[str]) -> str | None:
+    """Convert interactive picks like ``0: person`` into CSV class names."""
+    if not picked:
+        return None
+    names: list[str] = []
+    for label in picked:
+        text = str(label).strip()
+        if not text:
+            continue
+        if ": " in text:
+            names.append(text.split(": ", 1)[1].strip())
+        else:
+            names.append(text)
+    if not names:
+        return None
+    return ",".join(names)
+
+
+def resolve_export_class_filter(raw: str | None, class_names: dict[int, str]) -> set[int] | None:
+    """Parse ``--export-classes`` CSV (names or numeric ids). Empty/None → all classes."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    if not class_names:
+        wanted_numeric: set[int] = set()
+        unknown: list[str] = []
+        for part in text.split(","):
+            token = part.strip()
+            if not token:
+                continue
+            if token.lstrip("-").isdigit():
+                wanted_numeric.add(int(token))
+            else:
+                unknown.append(token)
+        if unknown:
+            raise ValueError(f"Unknown export classes: {', '.join(unknown)}")
+        return wanted_numeric or None
+    name_to_id = {str(name): cls_id for cls_id, name in class_names.items()}
+    lower_name_to_id = {str(name).lower(): cls_id for cls_id, name in class_names.items()}
+    valid_ids = set(class_names.keys())
+    wanted: set[int] = set()
+    unknown: list[str] = []
+    for part in text.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if token.lstrip("-").isdigit():
+            cls_id = int(token)
+            if cls_id in valid_ids:
+                wanted.add(cls_id)
+            else:
+                unknown.append(token)
+            continue
+        if token in name_to_id:
+            wanted.add(name_to_id[token])
+            continue
+        lowered = token.lower()
+        if lowered in lower_name_to_id:
+            wanted.add(lower_name_to_id[lowered])
+            continue
+        unknown.append(token)
+    if unknown:
+        raise ValueError(f"Unknown export classes: {', '.join(unknown)}")
+    return wanted or None
+
+
+def resolve_export_class_ids_for_args(args: argparse.Namespace, model_path: Path) -> set[int] | None:
+    cached = getattr(args, "export_class_ids", None)
+    if cached is not None:
+        if isinstance(cached, set):
+            return cached if cached else None
+        if isinstance(cached, (list, tuple)):
+            return set(int(x) for x in cached) if cached else None
+    raw = getattr(args, "export_classes", None)
+    if raw is None or not str(raw).strip():
+        return None
+    class_names = load_model_class_names(model_path)
+    resolved = resolve_export_class_filter(str(raw), class_names)
+    args.export_class_ids = resolved
+    return resolved
+
+
 def resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, str]:
     """Resolve promoted model directory name into a resolved weights path."""
     models_root = Path(layout.models).resolve()
@@ -510,6 +615,12 @@ def build_report(
             ),
             "export_split_dirs": bool(getattr(args, "export_split_dirs", True)),
             "export_files_per_dir": int(getattr(args, "export_files_per_dir", 500)),
+            "export_classes": getattr(args, "export_classes", None),
+            "export_class_ids": (
+                sorted(int(x) for x in getattr(args, "export_class_ids"))
+                if getattr(args, "export_class_ids", None)
+                else None
+            ),
         },
         "source": source_descriptor(
             args,
