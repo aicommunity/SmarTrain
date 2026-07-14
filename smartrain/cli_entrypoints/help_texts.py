@@ -81,7 +81,8 @@ Quick examples:
   smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/2026-01-01_00-00-00.pt --format tensorrt-engine --precision fp16
   smartrain model convert --input models/my_model.onnx --format tensorrt-trt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00
-  smartrain model rename --release models/my_ds/detect_yolov8n_20260115_120000.pt --new-name my_detector_v2
+  smartrain model comment --release 1 --comment "Production line 3"
+  smartrain model rename --release models/my_ds/detect_yolov8n_20260115_120000/detect_yolov8n_20260115_120000.pt --new-name my_detector_v2
 
 Interactive convert:
   - choose source model type: pt or onnx

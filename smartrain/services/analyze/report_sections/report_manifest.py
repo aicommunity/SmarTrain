@@ -253,6 +253,7 @@ def _render_run_legend_table_lines(
     rows = manifest.get("run_legend") or []
     if not isinstance(rows, list) or not rows:
         return [], table_no
+    show_comment = any(str(row.get("comment") or "").strip() for row in rows if isinstance(row, dict))
     lines: list[str] = []
     lines.extend(_center_open())
     lines.append("")
@@ -260,9 +261,15 @@ def _render_run_legend_table_lines(
     lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {title}**")
     lines.append("")
     if is_ru:
-        header = ["M", "Архитектура", "Датасет", "Эпохи", "Batch", "Разрешение", "Путь run"]
+        header = ["M", "Архитектура", "Датасет", "Эпохи", "Batch", "Разрешение"]
+        if show_comment:
+            header.append("Комментарий")
+        header.append("Путь run")
     else:
-        header = ["M", "Architecture", "Dataset", "Epochs", "Batch", "Input size", "Run path"]
+        header = ["M", "Architecture", "Dataset", "Epochs", "Batch", "Input size"]
+        if show_comment:
+            header.append("Comment")
+        header.append("Run path")
     lines.append("| " + " | ".join(header) + " |")
     lines.append("| " + " | ".join(["---"] * len(header)) + " |")
     for row in rows:
@@ -282,11 +289,11 @@ def _render_run_legend_table_lines(
             run_display = f"`{run_path}`"
         role = str(row.get("role") or "")
         m_cell = f"**{short_label}**" + (f" ({'базовый' if is_ru else 'baseline'})" if role == "baseline" else "")
-        lines.append(
-            "| "
-            + " | ".join([m_cell, architecture, dataset_label, epochs, batch, image_size, run_display])
-            + " |"
-        )
+        cells = [m_cell, architecture, dataset_label, epochs, batch, image_size]
+        if show_comment:
+            cells.append(str(row.get("comment") or "-"))
+        cells.append(run_display)
+        lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
     lines.extend(_center_close())
     return lines, table_no + 1
@@ -333,6 +340,12 @@ def _exec_runs_metrics_dataframe(df: pd.DataFrame, abbreviations: dict[str, str]
         work["input_imgsz"] = work[imgsz_col]
         keep.append("input_imgsz")
     keep.extend(metric_cols)
+    if "release_comment" in work.columns and work["release_comment"].astype(str).str.strip().any():
+        if run_col:
+            insert_at = keep.index(run_col) + 1
+            keep.insert(insert_at, "release_comment")
+        else:
+            keep.append("release_comment")
     if not keep:
         work = _select_table_columns("runs_summary.csv", work)
         return _abbrev_df(work, abbreviations)

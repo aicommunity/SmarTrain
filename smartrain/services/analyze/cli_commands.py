@@ -957,6 +957,7 @@ def _build_report_manifest_labels(baseline: str, others: list[str]) -> dict[str,
                 "run_name": row.run_name,
                 "run_dir": row.run_dir,
                 "role": row.role,
+                "comment": row.comment,
             }
             for row in legend_rows
         ],

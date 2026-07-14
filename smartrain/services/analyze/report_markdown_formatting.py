@@ -192,6 +192,7 @@ def _column_display_name(name: str, is_ru: bool) -> str:
         "train_best_metrics/mAP50-95(B)": "mAP50-95 (лучшая эпоха train)" if is_ru else "mAP50-95 (best train epoch)",
         "train_best_metrics/mAP50(B)": "mAP50 (лучшая эпоха train)" if is_ru else "mAP50 (best train epoch)",
         "input_imgsz": "Разрешение входа" if is_ru else "Input size",
+        "release_comment": "Комментарий" if is_ru else "Comment",
     }
     return common.get(name, name)
 
@@ -523,6 +524,7 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "run_name",
             "model",
             "dataset_name",
+            "release_comment",
             "train_best_epoch",
             "train_image_size",
             "val_imgsz",

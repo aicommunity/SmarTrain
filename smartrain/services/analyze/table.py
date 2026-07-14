@@ -25,16 +25,37 @@ def scan_runs(
     if not runs:
         print("(no runs or promoted models found)")
         return
-    print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'path'}")
-    print("-" * 100)
-    for i, run_dir in enumerate(runs, start=1):
+    rows: list[dict[str, Any]] = []
+    for run_dir in runs:
         try:
             flat = flat_row_for_run(run_dir)
+            rows.append({"run_dir": run_dir, **flat})
+        except Exception as exc:
+            rows.append({"run_dir": run_dir, "model": "?", "dataset_name": "?", "release_comment": "", "_error": exc})
+    show_comment = any(str(r.get("release_comment") or "").strip() for r in rows)
+    if show_comment:
+        print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'comment':<32}  {'path'}")
+        print("-" * 130)
+        for i, flat in enumerate(rows, start=1):
+            run_dir = flat["run_dir"]
+            if flat.get("_error"):
+                print(f"{i:4d}  {'?':<14}  {'?':<24}  {'':<32}  {run_dir}  [error: {flat['_error']}]")
+                continue
+            model = flat.get("model") or "?"
+            dataset = flat.get("dataset_name") or "?"
+            comment = str(flat.get("release_comment") or "")[:32]
+            print(f"{i:4d}  {str(model)[:14]:<14}  {str(dataset)[:24]:<24}  {comment:<32}  {run_dir}")
+    else:
+        print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'path'}")
+        print("-" * 100)
+        for i, flat in enumerate(rows, start=1):
+            run_dir = flat["run_dir"]
+            if flat.get("_error"):
+                print(f"{i:4d}  {'?':<14}  {'?':<24}  {run_dir}  [error: {flat['_error']}]")
+                continue
             model = flat.get("model") or "?"
             dataset = flat.get("dataset_name") or "?"
             print(f"{i:4d}  {str(model)[:14]:<14}  {str(dataset)[:24]:<24}  {run_dir}")
-        except Exception as exc:
-            print(f"{i:4d}  {'?':<14}  {'?':<24}  {run_dir}  [error: {exc}]")
 
 
 def export_runs_table(

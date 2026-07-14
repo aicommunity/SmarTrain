@@ -1051,6 +1051,30 @@ def cmd_model_release(ctx: typer.Context) -> None:
 
 
 @model_app.command(
+    "comment",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_model_comment(ctx: typer.Context) -> None:
+    """Set or update a one-line comment for a released workspace model.
+
+    Examples:
+      smartrain model comment --release models/my_ds/detect_yolov8n_20260115_120000/detect_yolov8n_20260115_120000.pt --comment "Production line 3"
+      smartrain model comment --release 1 --comment "Updated note"
+      smartrain model comment
+    """
+    from smartrain.workflows.models.model_comment_cli import build_model_comment_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.models.model_comment_cli",
+        build_parser=build_model_comment_arg_parser,
+        prog="smartrain model comment",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@model_app.command(
     "rename",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
@@ -1079,6 +1103,7 @@ def _model_group_callback(ctx: typer.Context) -> None:
         typer.echo(HELP_MODEL_GROUP)
         typer.echo("Run: smartrain model convert -- --help")
         typer.echo("Run: smartrain model release -- --help")
+        typer.echo("Run: smartrain model comment -- --help")
         typer.echo("Run: smartrain model rename -- --help")
         raise typer.Exit(0)
 

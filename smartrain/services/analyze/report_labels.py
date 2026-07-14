@@ -25,6 +25,7 @@ class RunLegendRow:
     run_name: str
     run_dir: str
     role: str
+    comment: str = ""
 
 
 def _format_imgsz_token(train_image_size: Any, val_imgsz: Any) -> str:
@@ -170,6 +171,9 @@ def build_run_legend_rows(
         run_dir_abs = os.path.abspath(run_dir.rstrip(os.sep))
         run_name = os.path.basename(run_dir_abs)
         fields = _read_run_training_fields(run_dir_abs, build_run_record_cb=build_run_record_cb)
+        from smartrain.services.models.release_models_manifest import release_comment_for_run_dir
+
+        release_comment = release_comment_for_run_dir(run_dir_abs)
         short_model = infer_short_model_name(run_dir_abs, model_hint=fields.get("model_hint") or None)
         short_models.append(short_model)
         dataset_name = str(fields.get("dataset_name") or "").strip()
@@ -188,6 +192,7 @@ def build_run_legend_rows(
                 "train_image_size": fields.get("train_image_size"),
                 "val_imgsz": fields.get("val_imgsz"),
                 "role": role,
+                "comment": release_comment,
             }
         )
     collision_models = {m for m in short_models if short_models.count(m) > 1}
@@ -233,6 +238,7 @@ def build_run_legend_rows(
                 run_name=str(meta["run_name"]),
                 run_dir=str(meta["run_dir_abs"]),
                 role=str(meta["role"]),
+                comment=str(meta.get("comment") or ""),
             )
         )
     return out

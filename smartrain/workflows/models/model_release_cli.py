@@ -15,7 +15,12 @@ from typing import Any
 import yaml
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.cli_entrypoints.support.cli_prompts import print_numbered_options, prompt_choice, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_prompts import (
+    print_numbered_options,
+    prompt_choice,
+    prompt_text,
+    prompt_yes_no,
+)
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.workflows.analyze.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
@@ -25,6 +30,10 @@ from smartrain.core.runtime.run_bundle_copy import copy_run_bundle
 from smartrain.services.models.release_model_naming import (
     normalize_release_task,
     sanitize_release_stem,
+)
+from smartrain.services.models.release_models_manifest import (
+    entry_key_for_pt,
+    upsert_entry,
 )
 
 
@@ -43,6 +52,12 @@ def build_model_release_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Run directory path or run index from discovered runs list",
+    )
+    p.add_argument(
+        "--comment",
+        type=str,
+        default=None,
+        help="One-line comment for the released model (optional; empty string allowed)",
     )
     return p
 
@@ -243,6 +258,8 @@ def _build_release_json(
     source_best: Path,
     source_sha: str,
     target_pt: Path,
+    release_dir: Path,
+    comment: str,
     layout: WorkspaceLayout,
 ) -> dict[str, Any]:
     ti = md.get("training_info") or {}
@@ -255,13 +272,15 @@ def _build_release_json(
         "train_results_last": _read_csv_last_row(train_csv),
         "test_metrics_last": _read_csv_last_row(Path(test_csv)) if test_csv else None,
     }
+    released_at = datetime.now(timezone.utc).isoformat()
     return {
+        "comment": str(comment or ""),
         "source": {
             "source_run": str(run_dir),
             "source_run_relative": run_rel,
             "source_weights": f"{run_dir.name}.pt",
             "source_sha256": source_sha,
-            "released_at": datetime.now(timezone.utc).isoformat(),
+            "released_at": released_at,
         },
         "training": {
             "training_info": ti,
@@ -279,24 +298,25 @@ def _build_release_json(
         "artifacts": {
             "model_path": str(target_pt),
             "json_path": str(target_pt.with_suffix(".json")),
-            "release_dir": str(target_pt.parent / target_pt.stem),
-            "train_copy_dir": str(target_pt.parent / target_pt.stem / "train"),
-            "test_copy_dir": str(target_pt.parent / target_pt.stem / "test"),
+            "release_dir": str(release_dir),
+            "train_copy_dir": str(release_dir / "train"),
+            "test_copy_dir": str(release_dir / "test"),
         },
     }
 
 
-def _target_paths(layout: WorkspaceLayout, run_dir: Path, md: dict[str, Any]) -> tuple[Path, Path]:
+def _target_paths(layout: WorkspaceLayout, run_dir: Path, md: dict[str, Any]) -> tuple[Path, Path, Path]:
     ti = md.get("training_info") or {}
     dataset_name = sanitize_release_stem(str((ti.get("dataset") or {}).get("name") or "dataset"))
     task = normalize_release_task(str(ti.get("task_type") or "detect"))
     model_name = sanitize_release_stem(str(ti.get("model") or "model"))
     model_name = re.sub(r"\.(pt|onnx|engine)$", "", model_name, flags=re.IGNORECASE)
     dt = _timestamp_for_name(md)
-    out_dir = Path(layout.models) / dataset_name
-    fname = f"{task}_{model_name}_{dt}.pt"
-    target_pt = (out_dir / fname).resolve()
-    return target_pt, target_pt.with_suffix(".json")
+    stem = f"{task}_{model_name}_{dt}"
+    release_dir = (Path(layout.models) / dataset_name / stem).resolve()
+    target_pt = (release_dir / f"{stem}.pt").resolve()
+    target_json = (release_dir / f"{stem}.json").resolve()
+    return release_dir, target_pt, target_json
 
 
 def _copy_run_results(run_dir: Path, release_dir: Path) -> None:
@@ -346,8 +366,10 @@ def main(argv: list[str] | None = None) -> None:
     interactive_allowed = is_interactive_allowed(argv)
     interactive_used = False
     run_dir: Path
+    release_comment = ""
     if interactive_allowed and len(argv) == 0 and sys.stdin.isatty():
         run_dir = _pick_run_interactive(layout)
+        release_comment = prompt_text("Comment (one line)", default="")
         interactive_used = True
     else:
         if not args.run:
@@ -355,6 +377,8 @@ def main(argv: list[str] | None = None) -> None:
                 "incomplete arguments: use --run (or run command without arguments for interactive mode)."
             )
         run_dir = _resolve_run_ref(layout, str(args.run))
+        if args.comment is not None:
+            release_comment = str(args.comment)
 
     if not run_dir.is_dir():
         print(f"[ERROR] Run directory does not exist: {run_dir}", file=sys.stderr)
@@ -379,12 +403,15 @@ def main(argv: list[str] | None = None) -> None:
 
     md = load_metadata(str(run_dir))
     run_rel = os.path.relpath(str(run_dir), layout.root)
-    target_pt, target_json = _target_paths(layout, run_dir, md)
+    release_dir, target_pt, target_json = _target_paths(layout, run_dir, md)
 
     if interactive_used:
         print(f"[INFO] Source: {source_best}")
+        print(f"[INFO] Target release dir: {release_dir}")
         print(f"[INFO] Target model: {target_pt}")
         print(f"[INFO] Target json: {target_json}")
+        if release_comment.strip():
+            print(f"[INFO] Comment: {release_comment}")
         if not prompt_yes_no("Proceed with release?", default=True):
             print("[INFO] Release cancelled by user.")
             raise SystemExit(0)
@@ -409,10 +436,9 @@ def main(argv: list[str] | None = None) -> None:
         )
         raise SystemExit(1)
 
-    target_pt.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(source_best), str(target_pt))
-    release_dir = target_pt.parent / target_pt.stem
+    release_dir.mkdir(parents=True, exist_ok=True)
     _copy_run_results(run_dir, release_dir)
+    shutil.copy2(str(source_best), str(target_pt))
     payload = _build_release_json(
         run_dir=run_dir,
         run_rel=run_rel,
@@ -420,14 +446,26 @@ def main(argv: list[str] | None = None) -> None:
         source_best=source_best,
         source_sha=source_sha,
         target_pt=target_pt,
+        release_dir=release_dir,
+        comment=release_comment,
         layout=layout,
     )
     target_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    released_at = str((payload.get("source") or {}).get("released_at") or "")
+    upsert_entry(
+        layout,
+        entry_key=entry_key_for_pt(target_pt),
+        model_path=target_pt,
+        comment=release_comment,
+        released_at=released_at or None,
+    )
 
     print(f"[OK] Released model: {target_pt}")
     print(f"[OK] Released metadata: {target_json}")
+    print(f"[OK] Release dir: {release_dir}")
     if interactive_used:
         args.run = str(run_dir)
+        args.comment = release_comment
         replay_cmd = build_non_interactive_command("model release", parser, args)
         print_replay_command("model release", replay_cmd)
 

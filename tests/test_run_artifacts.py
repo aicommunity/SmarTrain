@@ -42,6 +42,16 @@ def test_resolve_run_model_finds_sibling_pt_for_release_bundle(tmp_path: Path) -
     assert resolved == sibling
 
 
+def test_resolve_run_model_finds_nested_pt_for_release_bundle(tmp_path: Path) -> None:
+    release_dir = tmp_path / "models" / "ds1" / "detect_yolo_20260115"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    nested = release_dir / "detect_yolo_20260115.pt"
+    nested.write_bytes(b"released-nested")
+
+    resolved = resolve_run_model(str(release_dir), ".pt")
+    assert resolved == nested
+
+
 def test_resolve_run_model_prefers_canonical(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "ds1" / "run-1"
     (run_dir / "train-ultralytics" / "weights").mkdir(parents=True, exist_ok=True)

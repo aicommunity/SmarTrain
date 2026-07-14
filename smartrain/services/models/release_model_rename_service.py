@@ -15,6 +15,15 @@ from smartrain.services.models.release_model_naming import (
     sanitize_release_stem,
     task_type_from_release_stem_task,
 )
+from smartrain.services.models.release_models_manifest import (
+    dataset_name_for_pt,
+    entry_key_for_pt,
+    format_release_entry_label,
+    get_comment_for_pt,
+    is_nested_release_layout,
+    release_dir_for_pt,
+    rename_entry,
+)
 
 
 @dataclass(frozen=True)
@@ -22,8 +31,10 @@ class ReleaseModelEntry:
     pt_path: Path
     stem: str
     dataset_dir: Path
+    release_dir: Path
     rel_path: str
     release_json: Path
+    comment: str = ""
 
 
 @dataclass(frozen=True)
@@ -37,11 +48,14 @@ class RenamePlan:
     entry: ReleaseModelEntry
     old_stem: str
     new_stem: str
+    nested_layout: bool = False
     operations: list[RenameOperation] = field(default_factory=list)
     old_pt_path: Path = field(default_factory=Path)
     new_pt_path: Path = field(default_factory=Path)
     new_json_path: Path = field(default_factory=Path)
     new_release_dir: Path = field(default_factory=Path)
+    old_entry_key: str = ""
+    new_entry_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -73,13 +87,16 @@ def discover_release_models(layout: WorkspaceLayout) -> list[ReleaseModelEntry]:
         if not load_release_metadata(json_path):
             continue
         rel = str(pt_path.relative_to(root)) if pt_path.is_relative_to(root) else str(pt_path)
+        ds_dir = Path(layout.models) / dataset_name_for_pt(pt_path)
         found.append(
             ReleaseModelEntry(
                 pt_path=pt_path.resolve(),
                 stem=pt_path.stem,
-                dataset_dir=pt_path.parent.resolve(),
+                dataset_dir=ds_dir.resolve(),
+                release_dir=release_dir_for_pt(pt_path).resolve(),
                 rel_path=rel,
                 release_json=json_path.resolve(),
+                comment=get_comment_for_pt(layout, pt_path),
             )
         )
     return found
@@ -114,39 +131,71 @@ def build_rename_plan(entry: ReleaseModelEntry, new_stem: str) -> RenamePlan:
         raise ReleaseRenameError("new release name is empty or invalid")
 
     old_stem = entry.stem
+    nested = is_nested_release_layout(entry.pt_path)
+    old_key = entry_key_for_pt(entry.pt_path)
+    new_key = f"{dataset_name_for_pt(entry.pt_path)}/{sanitized}"
+
     if sanitized == old_stem:
-        plan = RenamePlan(entry=entry, old_stem=old_stem, new_stem=sanitized)
+        plan = RenamePlan(
+            entry=entry,
+            old_stem=old_stem,
+            new_stem=sanitized,
+            nested_layout=nested,
+            old_entry_key=old_key,
+            new_entry_key=new_key,
+        )
         plan.old_pt_path = entry.pt_path
         plan.new_pt_path = entry.pt_path
         plan.new_json_path = entry.release_json
-        plan.new_release_dir = entry.dataset_dir / sanitized
+        plan.new_release_dir = entry.release_dir
         return plan
 
-    siblings = collect_stem_siblings(entry.dataset_dir, old_stem)
-    if entry.pt_path.resolve() not in siblings:
-        siblings.append(entry.pt_path.resolve())
-
     operations: list[RenameOperation] = []
-    for src in siblings:
-        dst_name = _replace_stem_in_name(src.name, old_stem, sanitized)
-        dst = (entry.dataset_dir / dst_name).resolve()
-        if dst.exists() and dst != src:
-            raise ReleaseRenameError(f"target already exists: {dst}")
-        operations.append(RenameOperation(src=src, dst=dst))
+    if nested:
+        siblings = collect_stem_siblings(entry.release_dir, old_stem)
+        if entry.pt_path.resolve() not in siblings:
+            siblings.append(entry.pt_path.resolve())
+        for src in siblings:
+            dst_name = _replace_stem_in_name(src.name, old_stem, sanitized)
+            dst = (entry.release_dir / dst_name).resolve()
+            if dst.exists() and dst != src:
+                raise ReleaseRenameError(f"target already exists: {dst}")
+            operations.append(RenameOperation(src=src, dst=dst))
+        new_release_dir = (entry.dataset_dir / sanitized).resolve()
+        dir_dst = entry.dataset_dir / sanitized
+        if dir_dst.exists() and dir_dst.resolve() != entry.release_dir.resolve():
+            raise ReleaseRenameError(f"target already exists: {dir_dst}")
+        operations.append(RenameOperation(src=entry.release_dir, dst=dir_dst))
+        new_pt = (new_release_dir / f"{sanitized}.pt").resolve()
+        new_json = (new_release_dir / f"{sanitized}.json").resolve()
+    else:
+        siblings = collect_stem_siblings(entry.dataset_dir, old_stem)
+        if entry.pt_path.resolve() not in siblings:
+            siblings.append(entry.pt_path.resolve())
+        for src in siblings:
+            dst_name = _replace_stem_in_name(src.name, old_stem, sanitized)
+            dst = (entry.dataset_dir / dst_name).resolve()
+            if dst.exists() and dst != src:
+                raise ReleaseRenameError(f"target already exists: {dst}")
+            operations.append(RenameOperation(src=src, dst=dst))
+        new_pt = (entry.dataset_dir / f"{sanitized}.pt").resolve()
+        new_json = (entry.dataset_dir / f"{sanitized}.json").resolve()
+        new_release_dir = (entry.dataset_dir / sanitized).resolve()
 
-    operations.sort(key=lambda op: len(op.src.name), reverse=True)
+    operations.sort(key=lambda op: (1 if op.src.is_dir() else 0, -len(op.src.name)))
 
-    new_pt = entry.dataset_dir / f"{sanitized}.pt"
-    new_json = entry.dataset_dir / f"{sanitized}.json"
     plan = RenamePlan(
         entry=entry,
         old_stem=old_stem,
         new_stem=sanitized,
+        nested_layout=nested,
         operations=operations,
         old_pt_path=entry.pt_path,
-        new_pt_path=new_pt.resolve(),
-        new_json_path=new_json.resolve(),
-        new_release_dir=(entry.dataset_dir / sanitized).resolve(),
+        new_pt_path=new_pt,
+        new_json_path=new_json,
+        new_release_dir=new_release_dir,
+        old_entry_key=old_key,
+        new_entry_key=new_key,
     )
     return plan
 
@@ -244,7 +293,7 @@ def _patch_sidecar_meta(sidecar_path: Path, old_pt: Path, new_pt: Path) -> None:
     sidecar_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def apply_release_rename(plan: RenamePlan) -> RenameResult:
+def apply_release_rename(plan: RenamePlan, *, layout: WorkspaceLayout | None = None) -> RenameResult:
     if plan.old_stem == plan.new_stem:
         return RenameResult(
             old_stem=plan.old_stem,
@@ -255,12 +304,10 @@ def apply_release_rename(plan: RenamePlan) -> RenameResult:
         )
 
     renamed: list[Path] = []
-    op_by_dst: dict[Path, RenameOperation] = {}
 
     for op in plan.operations:
         op.src.rename(op.dst)
         renamed.append(op.dst)
-        op_by_dst[op.dst.resolve()] = op
 
     release_json_dst = plan.new_json_path
     if release_json_dst.is_file():
@@ -282,9 +329,29 @@ def apply_release_rename(plan: RenamePlan) -> RenameResult:
         if dst.name.endswith(".meta.json"):
             _patch_sidecar_meta(dst, old_pt, new_pt)
 
+    if layout is not None and plan.old_entry_key and plan.new_entry_key:
+        rename_entry(
+            layout,
+            plan.old_entry_key,
+            plan.new_entry_key,
+            model_path=new_pt,
+        )
+
     return RenameResult(
         old_stem=plan.old_stem,
         new_stem=plan.new_stem,
         renamed_paths=tuple(renamed),
         skipped=False,
     )
+
+
+__all__ = [
+    "ReleaseModelEntry",
+    "ReleaseRenameError",
+    "RenamePlan",
+    "RenameResult",
+    "apply_release_rename",
+    "build_rename_plan",
+    "discover_release_models",
+    "format_release_entry_label",
+]

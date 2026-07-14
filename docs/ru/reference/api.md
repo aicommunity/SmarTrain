@@ -44,7 +44,7 @@
 | `smartrain plot` | `smartrain/workflows/analyze/plot_creator.py` |
 | `smartrain queue` / `queue-run` | `smartrain/workflows/queue/training_queue_cli.py` / `smartrain/workflows/queue/training_queue.py` |
 | `smartrain registry` | `smartrain/workflows/registry/registry_cli.py` |
-| `smartrain model convert` / `model release` / `model rename` | `smartrain/workflows/models/model_convert_cli.py` / `model_release_cli.py` / `model_rename_cli.py` |
+| `smartrain model convert` / `model release` / `model comment` / `model rename` | `smartrain/workflows/models/model_convert_cli.py` / `model_release_cli.py` / `model_comment_cli.py` / `model_rename_cli.py` |
 | `smartrain providers` | `smartrain/providers/cli.py` |
 | `smartrain deps sync-torch` | `smartrain/external_providers/installer.py` |
 | `smartrain deploy` / `quickstart` / `info` / `sync` | `smartrain/cli.py` (+ `smartrain/services/workspace/workspace_sync_service.py` для `sync`) |

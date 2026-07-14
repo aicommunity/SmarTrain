@@ -62,13 +62,29 @@ def prepare_all_selection(
                     pass
             return ap
 
-        print(f"{'#':>4}  {'src':<7}  {'model':<14}  {'dataset':<24}  {'path (relative to workspace)'}")
-        print("-" * 130)
+        preview_rows: list[tuple[int, str, Any, str, str]] = []
         for i, (rd, rec) in enumerate(indexed, start=1):
-            print(
-                f"{i:4d}  {_source_label(rd):<7}  {str(rec.model or '?')[:14]:<14}  "
-                + f"{str(rec.dataset_name or '?')[:24]:<24}  {_display_target_dir(rd)}"
-            )
+            from smartrain.services.models.release_models_manifest import release_comment_for_run_dir
+
+            comment = release_comment_for_run_dir(rd) if _source_label(rd) == "models" else ""
+            preview_rows.append((i, rd, rec, _display_target_dir(rd), comment))
+        show_comment = any(str(c).strip() for *_rest, c in preview_rows)
+        if show_comment:
+            print(f"{'#':>4}  {'src':<7}  {'model':<14}  {'dataset':<24}  {'comment':<32}  {'path (relative to workspace)'}")
+            print("-" * 160)
+            for i, rd, rec, rel_path, comment in preview_rows:
+                print(
+                    f"{i:4d}  {_source_label(rd):<7}  {str(rec.model or '?')[:14]:<14}  "
+                    + f"{str(rec.dataset_name or '?')[:24]:<24}  {str(comment)[:32]:<32}  {rel_path}"
+                )
+        else:
+            print(f"{'#':>4}  {'src':<7}  {'model':<14}  {'dataset':<24}  {'path (relative to workspace)'}")
+            print("-" * 130)
+            for i, rd, rec, rel_path, _comment in preview_rows:
+                print(
+                    f"{i:4d}  {_source_label(rd):<7}  {str(rec.model or '?')[:14]:<14}  "
+                    + f"{str(rec.dataset_name or '?')[:24]:<24}  {rel_path}"
+                )
         if len(indexed) == 1:
             baseline = indexed[0][0]
             others = []
