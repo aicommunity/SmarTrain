@@ -13,7 +13,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
-- Models: `model convert`, `model release`, `model rename`
+- Models: `model convert`, `model release`, `model comment`, `model rename`
 - Dataset catalog: `dataset report`, `dataset rename`
 - Format tools: `dataset convert`, `sahi`, `heatmap`, `vis`
 - Migration: `migrate`, `migrate-models`
@@ -44,7 +44,7 @@ smartrain <group> <subcommand> -- --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model rename`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model comment`, `model rename`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -73,7 +73,7 @@ Model convert highlights:
 Inference highlights:
 
 - `smartrain inference` supports local model artifacts `pt`, `onnx`, `engine`, `trt` through unified backend routing, plus external provider references.
-- `smartrain inference` writes `inference/<model>/<timestamp>-<source>/inference_results.json`. By default it also exports a YOLO autolabel dataset under `<basename>_autolabeled/` (with `autolabel_manifest.json`) and optional `pred_overlays/`; use `--no-export-dataset` to skip. Empty exports (no labels after the confidence filter) do not create dataset or overlay folders. The `vis` command runs inference internally with export disabled.
+- `smartrain inference` writes `inference/<model>/<timestamp>-<source>/inference_results.json`. By default it also exports a YOLO autolabel dataset under `<basename>_autolabeled/` split into independent `part_XXX/` sub-datasets (with `autolabel_manifest.json`) and optional `pred_overlays/`; use `--no-export-dataset` or `--no-export-split-dirs` to change that. Empty exports (no labels after the confidence filter) do not create dataset or overlay folders. The `vis` command runs inference internally with export disabled.
 - Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
 - Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
 - Full inference JSON/artifact contract: [`inference.md`](inference.md).
@@ -81,13 +81,19 @@ Inference highlights:
 
 Model release highlights:
 
-- `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
-- A sidecar JSON with the same basename is created next to the model file and includes source/training/metrics/classes/io specification.
+- `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into a self-contained folder `models/<dataset>/<task>_<model>_<train_datetime>/` (weights, sidecar JSON, and copied train artifacts).
+- A global catalog `models/releases_manifest.json` stores one-line comments for all release models; the same comment is duplicated in each model's sidecar JSON.
+- Interactive mode prompts for an optional one-line comment (any language); non-interactive mode accepts `--comment`.
 - Re-running for the same run with the same source hash performs a no-op skip.
+
+Model comment highlights:
+
+- `smartrain model comment` sets or updates the one-line comment for a released model in `releases_manifest.json` and the sidecar JSON.
+- Interactive mode lists released models (with current comments) and pre-fills the comment field for editing.
 
 Model rename highlights:
 
-- `smartrain model rename` renames a released model in `models/<dataset>/` by changing the release stem (`.pt`, sidecar `.json`, release artifact directory, and converted ONNX/engine/trt files with matching prefix).
+- `smartrain model rename` renames a released model in `models/<dataset>/` by changing the release stem (`.pt`, sidecar `.json`, release folder, and converted ONNX/engine/trt files with matching prefix).
 - Registry-promoted bundles (`model_manifest.json`) and run models under `runs/` are not affected.
 - Interactive mode lists released models and pre-fills the current stem for editing.
 

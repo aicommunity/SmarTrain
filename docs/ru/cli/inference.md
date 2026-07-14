@@ -20,7 +20,26 @@
 
 По умолчанию включён (`--export-dataset`, отключение: `--no-export-dataset`).
 
-Структура каталога `<basename>_autolabeled/` (внутри каталога запуска inference):
+По умолчанию экспорт делит результат на **независимые YOLO-поддатасеты** (`--export-split-dirs`, отключение: `--no-export-split-dirs`). В каждом `part_XXX/` — до `--export-files-per-dir` **фактически экспортированных** кадров (после фильтра confidence меток; по умолчанию `500`).
+
+Разбиение (по умолчанию):
+
+```
+<basename>_autolabeled/
+  autolabel_manifest.json          # корневой index (layout=independent_parts)
+  part_000/
+    images/
+    labels/
+    data.yaml
+    autolabel_manifest.json
+  part_001/
+    ...
+pred_overlays/
+  part_000/
+  part_001/
+```
+
+Плоский layout (`--no-export-split-dirs`):
 
 ```
 <basename>_autolabeled/
@@ -42,9 +61,9 @@
 Архивы распаковываются в кэш workspace (`tmp/extracted_datasets/`) с инвалидацией по mtime/size. В отчёте `source.source_archive_*` сохраняет путь к исходному архиву, если он был использован.
 
 - В датасет попадают **только кадры с ≥1 детекцией/сегментом** после фильтра confidence.
-- **`autolabel_manifest.json`** — модель, параметры инференса/экспорта, статистика, `file_mapping`.
+- **`autolabel_manifest.json`** — модель, параметры инференса/экспорта, статистика, `file_mapping` (в part при split; в корне — index по parts).
 
-Флаги экспорта:
+Флаги экспорта / инференса:
 
 | Флаг | По умолчанию | Назначение |
 |------|--------------|------------|
@@ -52,10 +71,13 @@
 | `--export-label-conf-min` | `0.25` | Мин. confidence для записи метки |
 | `--export-label-conf-max` | `1.0` | Макс. confidence для записи метки |
 | `--export-visualize` / `--no-export-visualize` | вкл при export-dataset | Папка `pred_overlays/` с отрисовкой как в `vis` |
+| `--export-split-dirs` / `--no-export-split-dirs` | вкл | Независимые поддатасеты `part_XXX/` (+ зеркало overlays) |
+| `--export-files-per-dir` | `500` | Макс. экспортированных кадров на поддатасет |
+| `--batch-size` | `8` | Размер батча локального Ultralytics-инференса (для external не применяется) |
 
 `--conf` задаёт порог инференса; `--export-label-conf-*` дополнительно фильтрует метки при записи в датасет (из уже полученных предсказаний).
 
-Classification в YOLO не экспортируется (предупреждение, каталог датасета не создаётся). Если ни один кадр не проходит фильтр confidence при экспорте, каталоги `<basename>_autolabeled/` и `pred_overlays/` не создаются.
+Classification в YOLO не экспортируется (предупреждение, каталог датасета не создаётся). Если ни один кадр не проходит фильтр confidence при экспорте, каталоги `<basename>_autolabeled/` и `pred_overlays/` не создаются. При OOM уменьшите `--batch-size`.
 
 ## Поддерживаемые типы моделей
 

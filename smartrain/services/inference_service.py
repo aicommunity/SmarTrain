@@ -498,6 +498,7 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 "img_size": int(args.img_size),
                 "img_size_source": str(getattr(args, "img_size_source", "") or ""),
                 "device": args.device,
+                "batch_size": int(max(1, int(getattr(args, "batch_size", 8) or 8))),
                 "data_mode": args.data_mode,
             },
             "source": source_descriptor_from_resolved(args, resolved_source, layout),
@@ -612,10 +613,12 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
 
     image_rows: list[dict[str, Any]] = []
     skipped = 0
+    batch_size = int(max(1, int(getattr(args, "batch_size", 8) or 8)))
     perf = DualPerfProfiler(warmup_images=int(max(0, args.perf_warmup_images)))
     perf_methodology = {
         "profile_mode": "dual",
         "warmup_images": int(max(0, args.perf_warmup_images)),
+        "batch_size": batch_size,
         "end_to_end_includes": ["image_io", "roi_preprocess", "model_infer", "postprocess", "report_update"],
         "infer_only_includes": ["model_infer_call"],
         "backend": backend.name,
@@ -639,89 +642,113 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         source_archive=source_archive,
     )
     progress_desc = f"inference:{args.data_mode}"
-    for image_path in tqdm(images, desc=progress_desc, unit="img"):
-        loop_t0 = time.perf_counter_ns()
-        image_path_abs = os.path.abspath(image_path)
-        with Image.open(image_path_abs) as im:
-            im_rgb = im.convert("RGB")
-            iw, ih = im_rgb.size
-            roi_box: tuple[int, int, int, int] | None = None
-            src_for_predict: Any = image_path_abs
-            if roi_model is not None:
-                rb = predict_roi_crop(roi_model, image_path_abs, args)
-                if rb[0] < 0:
-                    skipped += 1
-                    _write_local_inference_report(
-                        report_path=report_path,
-                        args=args,
-                        layout=layout,
-                        model_source=model_source,
-                        model_name=model_name,
-                        model_path=model_path,
-                        source_abs=source_abs,
-                        source_short=source_short,
-                        out_root=out_root,
-                        images_input_count=len(images),
-                        image_rows=image_rows,
-                        skipped=skipped,
-                        performance_payload=perf.to_payload(methodology=perf_methodology),
-                        environment_artifact_path=env_path,
-                        source_archive=source_archive,
-                    )
-                    perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
-                    continue
-                roi_box = rb
-                crop = im_rgb.crop((roi_box[0], roi_box[1], roi_box[2], roi_box[3]))
-                src_for_predict = np.asarray(crop)
-            elif args.data_mode == "folder":
-                roi_box = (0, 0, iw, ih)
+    progress = tqdm(total=len(images), desc=progress_desc, unit="img")
+    try:
+        for batch_start in range(0, len(images), batch_size):
+            batch_paths = images[batch_start : batch_start + batch_size]
+            prepared: list[dict[str, Any]] = []
+            for image_path in batch_paths:
+                loop_t0 = time.perf_counter_ns()
+                image_path_abs = os.path.abspath(image_path)
+                with Image.open(image_path_abs) as im:
+                    im_rgb = im.convert("RGB")
+                    iw, ih = im_rgb.size
+                    roi_box: tuple[int, int, int, int] | None = None
+                    src_for_predict: Any = image_path_abs
+                    if roi_model is not None:
+                        rb = predict_roi_crop(roi_model, image_path_abs, args)
+                        if rb[0] < 0:
+                            skipped += 1
+                            perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
+                            continue
+                        roi_box = rb
+                        crop = im_rgb.crop((roi_box[0], roi_box[1], roi_box[2], roi_box[3]))
+                        src_for_predict = np.asarray(crop)
+                    elif args.data_mode == "folder":
+                        roi_box = (0, 0, iw, ih)
+                prepared.append(
+                    {
+                        "image_path_abs": image_path_abs,
+                        "iw": iw,
+                        "ih": ih,
+                        "roi_box": roi_box,
+                        "src_for_predict": src_for_predict,
+                        "loop_t0": loop_t0,
+                    }
+                )
 
-        pred_result = backend.predict(
-            src_for_predict,
-            conf=float(args.conf),
-            imgsz=int(args.img_size),
-            device=str(args.device),
-            half=bool(args.half),
-            task_type=task_type,
-        )
-        perf.record_infer_only(int(pred_result.infer_only_ns))
-        for stage, dt in pred_result.stage_ns.items():
-            perf.record_stage(stage, int(dt))
-        resolved_pred_task = task_to_metadata_task_type(getattr(pred_result, "task_type", task_type))
-        detections_payload, task_outputs_payload = _build_task_outputs_payload(
-            resolved_pred_task,
-            pred_result.outputs if isinstance(pred_result.outputs, dict) else {},
-            roi_box=roi_box,
-        )
-        image_rows.append(
-            {
-                "image_path_absolute": image_path_abs,
-                "image_path_relative": relativize_if_under(layout.root, image_path_abs) or image_path_abs,
-                "image_size": {"width": iw, "height": ih},
-                "roi_xyxy": list(roi_box) if roi_box is not None else None,
-                "task_type": resolved_pred_task,
-                "detections": detections_payload,
-                "task_outputs": task_outputs_payload,
-            }
-        )
-        perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
-        _write_local_inference_report(
-            report_path=report_path,
-            args=args,
-            layout=layout,
-            model_source=model_source,
-            model_name=model_name,
-            model_path=model_path,
-            source_abs=source_abs,
-            source_short=source_short,
-            out_root=out_root,
-            images_input_count=len(images),
-            image_rows=image_rows,
-            skipped=skipped,
-            performance_payload=perf.to_payload(methodology=perf_methodology),
-            environment_artifact_path=env_path,
-            source_archive=source_archive,
-        )
+            if prepared:
+                sources = [item["src_for_predict"] for item in prepared]
+                predict_many = getattr(backend, "predict_many", None)
+                if callable(predict_many) and len(sources) > 1:
+                    pred_results = predict_many(
+                        sources,
+                        conf=float(args.conf),
+                        imgsz=int(args.img_size),
+                        device=str(args.device),
+                        half=bool(args.half),
+                        task_type=task_type,
+                    )
+                else:
+                    pred_results = [
+                        backend.predict(
+                            src,
+                            conf=float(args.conf),
+                            imgsz=int(args.img_size),
+                            device=str(args.device),
+                            half=bool(args.half),
+                            task_type=task_type,
+                        )
+                        for src in sources
+                    ]
+                if len(pred_results) != len(prepared):
+                    raise RuntimeError(
+                        f"Inference backend returned {len(pred_results)} results for {len(prepared)} inputs"
+                    )
+                for item, pred_result in zip(prepared, pred_results):
+                    perf.record_infer_only(int(pred_result.infer_only_ns))
+                    for stage, dt in pred_result.stage_ns.items():
+                        perf.record_stage(stage, int(dt))
+                    resolved_pred_task = task_to_metadata_task_type(getattr(pred_result, "task_type", task_type))
+                    detections_payload, task_outputs_payload = _build_task_outputs_payload(
+                        resolved_pred_task,
+                        pred_result.outputs if isinstance(pred_result.outputs, dict) else {},
+                        roi_box=item["roi_box"],
+                    )
+                    image_rows.append(
+                        {
+                            "image_path_absolute": item["image_path_abs"],
+                            "image_path_relative": relativize_if_under(layout.root, item["image_path_abs"])
+                            or item["image_path_abs"],
+                            "image_size": {"width": item["iw"], "height": item["ih"]},
+                            "roi_xyxy": list(item["roi_box"]) if item["roi_box"] is not None else None,
+                            "task_type": resolved_pred_task,
+                            "detections": detections_payload,
+                            "task_outputs": task_outputs_payload,
+                        }
+                    )
+                    perf.record_end_to_end(int(time.perf_counter_ns() - int(item["loop_t0"])))
+
+            _write_local_inference_report(
+                report_path=report_path,
+                args=args,
+                layout=layout,
+                model_source=model_source,
+                model_name=model_name,
+                model_path=model_path,
+                source_abs=source_abs,
+                source_short=source_short,
+                out_root=out_root,
+                images_input_count=len(images),
+                image_rows=image_rows,
+                skipped=skipped,
+                performance_payload=perf.to_payload(methodology=perf_methodology),
+                environment_artifact_path=env_path,
+                source_archive=source_archive,
+            )
+            progress.update(len(batch_paths))
+    finally:
+        progress.close()
 
     print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")
     print(f"[OK] Report: {report_path}")

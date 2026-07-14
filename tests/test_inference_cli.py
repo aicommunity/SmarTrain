@@ -51,6 +51,9 @@ class _FakeYOLO:
 
     def predict(self, **_kwargs):
         _FakeYOLO.last_predict_kwargs = dict(_kwargs)
+        source = _kwargs.get("source")
+        if isinstance(source, (list, tuple)):
+            return [_FakeResult() for _ in source]
         return [_FakeResult()]
 
 
@@ -116,9 +119,11 @@ def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
     autolabel = out_dir / "raw_images_autolabeled"
     assert autolabel.is_dir()
     assert (autolabel / "autolabel_manifest.json").is_file()
-    assert (autolabel / "data.yaml").is_file()
-    assert len(list((autolabel / "images").glob("*"))) == 2
+    assert (autolabel / "part_000" / "data.yaml").is_file()
+    assert len(list((autolabel / "part_000" / "images").glob("*"))) == 2
     assert report["artifacts"]["autolabel_dataset"]["images_exported"] == 2
+    assert report["artifacts"]["autolabel_dataset"]["layout"] == "independent_parts"
+    assert report["parameters"]["batch_size"] == 8
 
 
 def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monkeypatch) -> None:
@@ -953,6 +958,9 @@ def test_inference_export_conf_filter(tmp_path: Path, monkeypatch) -> None:
             self.names = {0: "obj"}
 
         def predict(self, **_kwargs):
+            source = _kwargs.get("source")
+            if isinstance(source, (list, tuple)):
+                return [_FakeResultMulti() for _ in source]
             return [_FakeResultMulti()]
 
     fake_mod = __import__("types").ModuleType("ultralytics")
@@ -986,7 +994,7 @@ def test_inference_export_conf_filter(tmp_path: Path, monkeypatch) -> None:
             "--no-export-visualize",
         ]
     )
-    label_path = _latest_report_path(tmp_path).parent / "raw_images_autolabeled" / "labels" / "a.txt"
+    label_path = _latest_report_path(tmp_path).parent / "raw_images_autolabeled" / "part_000" / "labels" / "a.txt"
     text = label_path.read_text(encoding="utf-8").strip().splitlines()
     assert len(text) == 1
 
@@ -1022,7 +1030,7 @@ def test_inference_visualize_without_dataset(tmp_path: Path, monkeypatch) -> Non
         ]
     )
     out_dir = _latest_report_path(tmp_path).parent
-    overlays = list((out_dir / "pred_overlays").glob("*"))
+    overlays = list((out_dir / "pred_overlays" / "part_000").glob("*"))
     assert len(overlays) == 2
 
 

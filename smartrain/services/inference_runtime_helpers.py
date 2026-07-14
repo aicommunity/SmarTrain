@@ -490,6 +490,7 @@ def build_report(
             "img_size_source": str(getattr(args, "img_size_source", "") or ""),
             "device": args.device,
             "half": bool(args.half),
+            "batch_size": int(max(1, int(getattr(args, "batch_size", 8) or 8))),
             "limit": int(args.limit),
             "data_mode": args.data_mode,
             "roi_pre_detect": bool(args.roi_pre_detect),
@@ -507,6 +508,8 @@ def build_report(
                 if getattr(args, "export_visualize", None) is not None
                 else bool(getattr(args, "export_dataset", True))
             ),
+            "export_split_dirs": bool(getattr(args, "export_split_dirs", True)),
+            "export_files_per_dir": int(getattr(args, "export_files_per_dir", 500)),
         },
         "source": source_descriptor(
             args,

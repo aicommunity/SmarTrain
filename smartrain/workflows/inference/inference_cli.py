@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import math
 import os
 import sys
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
-from smartrain.cli_entrypoints.support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_prompts import (
+    print_numbered_options,
+    prompt_choice,
+    prompt_int,
+    prompt_text,
+    prompt_yes_no,
+)
 from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.run_discovery import find_run_directories
@@ -30,6 +37,7 @@ from smartrain.services.inference_runtime_helpers import (
     discover_model_entries,
     infer_img_size_with_source_safe,
     load_catalog,
+    resolve_inference_source,
     resolve_model,
 )
 from smartrain.workflows.models.model_context import DEFAULT_INFERENCE_IMGSZ, FALLBACK_IMGSZ_SOURCE
@@ -125,6 +133,14 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         args.source_dir = None
 
     args.limit = int(prompt_text("Images limit (0=all)", default=str(args.limit)).strip() or str(args.limit))
+    total_files = 0
+    try:
+        preview_images, _resolved = resolve_inference_source(args, layout)
+        total_files = len(preview_images)
+        print(f"[INFO] Files found: {total_files}")
+    except Exception as exc:
+        print(f"[WARN] Could not count source files yet: {exc}")
+
     if args.img_size is None:
         if inferred_imgsz is not None:
             print(f"[INFO] Resolved input size: {inferred_imgsz} (source: {inferred_imgsz_source})")
@@ -148,6 +164,15 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         default_device=str(args.device or default_device_value()),
     )
     args.half = prompt_yes_no("Use FP16 (--half)", default=bool(args.half))
+    args.batch_size = max(
+        1,
+        int(
+            prompt_int(
+                "Inference batch size (--batch-size; local Ultralytics only)",
+                default=int(getattr(args, "batch_size", 8) or 8),
+            )
+        ),
+    )
     args.export_dataset = prompt_yes_no("Export YOLO autolabel dataset", default=bool(getattr(args, "export_dataset", True)))
     if args.export_dataset:
         args.export_label_conf_min = float(
@@ -162,6 +187,36 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         "Save prediction overlays",
         default=bool(args.export_dataset),
     )
+    if args.export_dataset or args.export_visualize:
+        args.export_split_dirs = prompt_yes_no(
+            "Split export into independent sub-datasets (part_XXX/)",
+            default=bool(getattr(args, "export_split_dirs", True)),
+        )
+        if args.export_split_dirs:
+            print(
+                f"[INFO] Files found: {total_files}. "
+                "Chunk size N applies to actually exported images (after label conf filter)."
+            )
+            args.export_files_per_dir = max(
+                1,
+                int(
+                    prompt_int(
+                        "Exported images per sub-dataset (--export-files-per-dir)",
+                        default=int(getattr(args, "export_files_per_dir", 500) or 500),
+                    )
+                ),
+            )
+            n = int(args.export_files_per_dir)
+            if total_files > 0:
+                est = int(math.ceil(total_files / float(n)))
+                print(
+                    f"[INFO] Sub-datasets if all {total_files} files are exported: {est}. "
+                    f"Exact count = ceil(exported/{n})."
+                )
+            else:
+                print(f"[INFO] Exact sub-dataset count = ceil(exported/{n}).")
+        else:
+            args.export_files_per_dir = int(getattr(args, "export_files_per_dir", 500) or 500)
     return True
 
 
@@ -188,6 +243,8 @@ def _validate_non_interactive_args(parser: argparse.ArgumentParser, args: argpar
         args.split = "test"
     if not args.model_name and not args.run and not args.weights:
         parser.error("incomplete arguments: specify --model-name, --run or --weights.")
+    if int(getattr(args, "batch_size", 8) or 8) < 1:
+        parser.error("--batch-size must be >= 1.")
 
 
 def main(argv: list[str] | None = None) -> None:

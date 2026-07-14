@@ -20,7 +20,26 @@ Both primary JSON files are saved under:
 
 Enabled by default (`--export-dataset`, disable with `--no-export-dataset`).
 
-Directory layout `<basename>_autolabeled/` (inside the inference run folder):
+By default export is split into **independent YOLO sub-datasets** (`--export-split-dirs`, disable with `--no-export-split-dirs`). Each `part_XXX/` holds up to `--export-files-per-dir` **actually exported** images (after label confidence filter; default `500`).
+
+Split layout (default):
+
+```
+<basename>_autolabeled/
+  autolabel_manifest.json          # root index (layout=independent_parts)
+  part_000/
+    images/
+    labels/
+    data.yaml
+    autolabel_manifest.json
+  part_001/
+    ...
+pred_overlays/
+  part_000/
+  part_001/
+```
+
+Flat layout (`--no-export-split-dirs`):
 
 ```
 <basename>_autolabeled/
@@ -42,9 +61,9 @@ Directory layout `<basename>_autolabeled/` (inside the inference run folder):
 Archives are unpacked into the workspace cache (`tmp/extracted_datasets/`) with mtime/size invalidation. When an archive was used, `source.source_archive_*` in the report keeps the original archive path.
 
 - Only frames with **≥1 detection/segment** after the export confidence filter are included.
-- **`autolabel_manifest.json`** records model, inference/export parameters, summary stats, and `file_mapping`.
+- **`autolabel_manifest.json`** records model, inference/export parameters, summary stats, and `file_mapping` (per part when split; root index lists parts).
 
-Export flags:
+Export / inference flags:
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -52,11 +71,15 @@ Export flags:
 | `--export-label-conf-min` | `0.25` | Min confidence for label export |
 | `--export-label-conf-max` | `1.0` | Max confidence for label export |
 | `--export-visualize` / `--no-export-visualize` | on when export-dataset | `pred_overlays/` vis-style renders |
+| `--export-split-dirs` / `--no-export-split-dirs` | on | Independent `part_XXX/` sub-datasets (+ mirrored overlays) |
+| `--export-files-per-dir` | `500` | Max exported images per sub-dataset |
+| `--batch-size` | `8` | Local Ultralytics inference batch size (ignored for external providers) |
 
 `--conf` is the inference threshold; `--export-label-conf-*` further filters labels written to the dataset from predictions already returned by the model.
 
 - Classification is not exported to YOLO (warning, no dataset folder created).
 - If no images pass the export confidence filter, `<basename>_autolabeled/` and `pred_overlays/` are not created.
+- Large `--batch-size` with high `--img-size` may OOM; lower `--batch-size` if needed.
 
 ## External provider capability matrix (task × payload)
 

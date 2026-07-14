@@ -13,7 +13,7 @@
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
-- Модели: `model convert`, `model release`, `model rename`
+- Модели: `model convert`, `model release`, `model comment`, `model rename`
 - Каталог датасетов: `dataset report`, `dataset rename`
 - Инструменты форматов: `dataset convert`, `sahi`, `heatmap`, `vis`
 - Миграция: `migrate`, `migrate-models`
@@ -38,7 +38,7 @@ smartrain model convert --help
 
 - интерактив включается только при запуске команды без аргументов (TTY обязателен);
 - выбор датасета(ов): сразу нумерованный список; ввод по имени или по номеру (несколько датасетов — через CSV номеров или имён);
-- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model rename` пустой вызов запускает интерактивный режим;
+- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model comment`, `model rename` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
 
@@ -66,13 +66,19 @@ smartrain model convert --help
 
 Особенности `model release`:
 
-- `smartrain model release` публикует canonical run-модель `<run_dir_name>.pt` из выбранного run в `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
-- Рядом создаётся JSON с тем же basename (`.json`) c описанием источника, данных обучения, метрик, классов и `io_spec` модели.
+- `smartrain model release` публикует canonical run-модель `<run_dir_name>.pt` из выбранного run в самодостаточную папку `models/<dataset>/<task>_<model>_<train_datetime>/` (веса, sidecar JSON и копия артефактов train).
+- Общий каталог `models/releases_manifest.json` хранит однострочные комментарии ко всем release-моделям; тот же комментарий дублируется в sidecar JSON модели.
+- В интерактивном режиме запрашивается необязательный однострочный комментарий (на любом языке); в non-interactive — флаг `--comment`.
 - Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`).
+
+Особенности `model comment`:
+
+- `smartrain model comment` задаёт или обновляет однострочный комментарий release-модели в `releases_manifest.json` и sidecar JSON.
+- В интерактивном режиме показывается список release-моделей (с текущими комментариями), поле ввода предзаполнено текущим комментарием.
 
 Особенности `model rename`:
 
-- `smartrain model rename` переименовывает release-модель в `models/<dataset>/`: меняется stem (`.pt`, sidecar `.json`, каталог артефактов release и конвертированные ONNX/engine/trt с тем же префиксом).
+- `smartrain model rename` переименовывает release-модель в `models/<dataset>/`: меняется stem (`.pt`, sidecar `.json`, каталог release и конвертированные ONNX/engine/trt с тем же префиксом).
 - Registry-бандлы (`model_manifest.json`) и модели в `runs/` не затрагиваются.
 - В интерактивном режиме показывается список release-моделей, текущий stem подставляется в поле ввода для редактирования.
 
@@ -116,4 +122,4 @@ smartrain model convert --help
 - `smartrain prune classes` удаляет неиспользуемые классы из метаданных в `<dataset>_classes_pruned` (файлы не удаляются, `class_id` перенумеровывается).
 - `smartrain filter` удаляет edge-truncated bbox в `<dataset>_fltd` (baseline inset + пороги; аудит в `_filter_audit/`; `--stats-only`, `--drop-images`, интерактивный preview).
 - `smartrain scan --strip-unused-classes` очищает неиспользуемые классы у **новых** датасетов при scan (по умолчанию **вкл.**; `--no-strip-unused-classes` для отключения).
-- `smartrain inference` запускает инференс по двум режимам источника данных: `folder` (произвольная папка с изображениями) и `dataset-split` (`train|val|test` подвыборка из датасета по `datasets_info` + `data.yaml`). Результат сохраняется в `inference/<model>/<timestamp>-<source>/inference_results.json`; по умолчанию дополнительно создаётся YOLO-датасет `<basename>_autolabeled/` с `autolabel_manifest.json` и опционально `pred_overlays/`. Пустой экспорт (нет меток после фильтра confidence) не создаёт эти каталоги. Команда `vis` вызывает inference без экспорта датасета.
+- `smartrain inference` запускает инференс по двум режимам источника данных: `folder` (произвольная папка с изображениями) и `dataset-split` (`train|val|test` подвыборка из датасета по `datasets_info` + `data.yaml`). Результат сохраняется в `inference/<model>/<timestamp>-<source>/inference_results.json`; по умолчанию дополнительно создаётся YOLO-датасет `<basename>_autolabeled/` в виде независимых поддатасетов `part_XXX/` с `autolabel_manifest.json` и опционально `pred_overlays/`. Пустой экспорт (нет меток после фильтра confidence) не создаёт эти каталоги. Команда `vis` вызывает inference без экспорта датасета.

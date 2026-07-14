@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import sys
@@ -33,6 +34,8 @@ class ExportOptions:
     export_visualize: bool
     label_conf_min: float
     label_conf_max: float
+    export_split_dirs: bool = True
+    export_files_per_dir: int = 500
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,9 @@ class ExportSummary:
     images_skipped_empty: int
     overlay_paths: tuple[str, ...]
     overlay_dir: str | None
+    parts_count: int = 0
+    files_per_dir: int | None = None
+    layout: str = "flat"
 
 
 def resolve_export_options(args: argparse.Namespace) -> ExportOptions:
@@ -58,6 +64,8 @@ def resolve_export_options(args: argparse.Namespace) -> ExportOptions:
         export_visualize=export_visualize,
         label_conf_min=float(getattr(args, "export_label_conf_min", 0.25)),
         label_conf_max=float(getattr(args, "export_label_conf_max", 1.0)),
+        export_split_dirs=bool(getattr(args, "export_split_dirs", True)),
+        export_files_per_dir=int(getattr(args, "export_files_per_dir", 500)),
     )
 
 
@@ -73,11 +81,23 @@ def validate_export_options(options: ExportOptions, *, parser: argparse.Argument
         if parser is not None:
             parser.error(msg)
         raise ValueError(msg)
+    if options.export_split_dirs and int(options.export_files_per_dir) < 1:
+        msg = (
+            f"Invalid --export-files-per-dir={options.export_files_per_dir} "
+            "(expected >= 1 when --export-split-dirs is on)."
+        )
+        if parser is not None:
+            parser.error(msg)
+        raise ValueError(msg)
 
 
 def resolve_autolabel_dataset_dir(out_root: str | Path, source_short: str) -> Path:
     base = sanitize_segment(str(source_short))
     return Path(out_root) / f"{base}_autolabeled"
+
+
+def part_dirname(part_index: int) -> str:
+    return f"part_{int(part_index):03d}"
 
 
 def _image_size(row: dict[str, Any]) -> tuple[int, int]:
@@ -192,6 +212,7 @@ def _inference_parameters_block(report: dict[str, Any]) -> dict[str, Any]:
         "img_size": params.get("img_size"),
         "device": params.get("device"),
         "half": params.get("half"),
+        "batch_size": params.get("batch_size"),
         "task_type": report.get("task_type"),
         "data_mode": params.get("data_mode"),
         "limit": params.get("limit"),
@@ -224,95 +245,36 @@ def _det_for_render(det: dict[str, Any], img_w: int, img_h: int) -> dict[str, An
     return out
 
 
-def export_yolo_dataset(
-    report: dict[str, Any],
+def _empty_summary(*, images_skipped_empty: int = 0) -> ExportSummary:
+    return ExportSummary(
+        dataset_dir=None,
+        manifest_path=None,
+        images_exported=0,
+        labels_total=0,
+        images_skipped_empty=images_skipped_empty,
+        overlay_paths=(),
+        overlay_dir=None,
+        parts_count=0,
+        files_per_dir=None,
+        layout="flat",
+    )
+
+
+def _write_flat_dataset(
     *,
-    out_root: str | Path,
-    source_short: str,
+    dataset_dir: Path,
+    pending_exports: list[tuple[str, str, str, list]],
+    all_class_names: dict[int, str],
+    file_mapping: list[dict[str, Any]],
+    report: dict[str, Any],
     report_path: str | Path,
+    out_root: str | Path,
     options: ExportOptions,
-    layout: WorkspaceLayout,
-) -> tuple[ExportSummary, set[str]]:
-    task_type = task_to_metadata_task_type(report.get("task_type"))
-    if task_type == "classification":
-        print(
-            "[WARN] Autolabel YOLO export is not supported for classification; skipping dataset export.",
-            file=sys.stderr,
-        )
-        return (
-            ExportSummary(
-                dataset_dir=None,
-                manifest_path=None,
-                images_exported=0,
-                labels_total=0,
-                images_skipped_empty=0,
-                overlay_paths=(),
-                overlay_dir=None,
-            ),
-            set(),
-        )
-
-    dataset_dir = resolve_autolabel_dataset_dir(out_root, source_short)
-    images = report.get("images") if isinstance(report.get("images"), list) else []
-    used_stems: set[str] = set()
-    file_mapping: list[dict[str, Any]] = []
-    exported_paths: set[str] = set()
-    all_class_names: dict[int, str] = {}
-    labels_total = 0
-    images_exported = 0
-    images_skipped_empty = 0
-    pending_exports: list[tuple[str, str, str, list]] = []
-
-    for row in images:
-        if not isinstance(row, dict):
-            continue
-        src = str(row.get("image_path_absolute") or "")
-        if not src or not os.path.isfile(src):
-            continue
-        filtered = filter_task_outputs(row, task_type, options.label_conf_min, options.label_conf_max)
-        img_w, img_h = _image_size(row)
-        yolo_labels = task_outputs_to_yolo_labels(task_type, filtered, img_w, img_h)
-        if not yolo_labels:
-            images_skipped_empty += 1
-            continue
-
-        stem = Path(src).stem
-        export_stem = _allocate_unique_stem(stem, used_stems)
-        ext = Path(src).suffix.lower() or ".jpg"
-        export_image_name = f"{export_stem}{ext}"
-        export_label_name = f"{export_stem}.txt"
-        pending_exports.append((src, export_image_name, export_label_name, yolo_labels))
-        labels_total += len(yolo_labels)
-        images_exported += 1
-        exported_paths.add(os.path.abspath(src))
-        all_class_names.update(_class_names_from_outputs(filtered))
-        file_mapping.append(
-            {
-                "source_path_absolute": os.path.abspath(src),
-                "export_stem": export_stem,
-                "export_image": f"images/{export_image_name}",
-                "export_label": f"labels/{export_label_name}",
-            }
-        )
-
-    if images_exported == 0:
-        print(
-            "[INFO] Autolabel dataset export skipped: no images with labels after confidence filter.",
-            file=sys.stderr,
-        )
-        return (
-            ExportSummary(
-                dataset_dir=None,
-                manifest_path=None,
-                images_exported=0,
-                labels_total=0,
-                images_skipped_empty=images_skipped_empty,
-                overlay_paths=(),
-                overlay_dir=None,
-            ),
-            set(),
-        )
-
+    images_input: int,
+    images_exported: int,
+    images_skipped_empty: int,
+    labels_total: int,
+) -> Path:
     images_dir = dataset_dir / "images"
     labels_dir = dataset_dir / "labels"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -335,6 +297,8 @@ def export_yolo_dataset(
             "export_label_conf_min": options.label_conf_min,
             "export_label_conf_max": options.label_conf_max,
             "layout": "flat",
+            "export_split_dirs": False,
+            "export_files_per_dir": options.export_files_per_dir,
         },
         "provenance": {
             "inference_report_absolute": str(Path(report_path).resolve()),
@@ -342,7 +306,7 @@ def export_yolo_dataset(
             "producer": "smartrain.inference",
         },
         "summary": {
-            "images_input": len([r for r in images if isinstance(r, dict)]),
+            "images_input": images_input,
             "images_exported": images_exported,
             "images_skipped_empty": images_skipped_empty,
             "labels_total": labels_total,
@@ -350,7 +314,253 @@ def export_yolo_dataset(
         "file_mapping": file_mapping,
     }
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest_path
 
+
+def _write_independent_parts(
+    *,
+    dataset_dir: Path,
+    pending_exports: list[tuple[str, str, str, list, dict[int, str]]],
+    report: dict[str, Any],
+    report_path: str | Path,
+    out_root: str | Path,
+    options: ExportOptions,
+    images_input: int,
+    images_exported: int,
+    images_skipped_empty: int,
+    labels_total: int,
+) -> tuple[Path, int]:
+    files_per_dir = max(1, int(options.export_files_per_dir))
+    parts_meta: list[dict[str, Any]] = []
+    created_at = datetime.now(timezone.utc).isoformat()
+    model_block = _model_block(report)
+    infer_params = _inference_parameters_block(report)
+    source_block = report.get("source") if isinstance(report.get("source"), dict) else {}
+    provenance = {
+        "inference_report_absolute": str(Path(report_path).resolve()),
+        "inference_run_dir_absolute": str(Path(out_root).resolve()),
+        "producer": "smartrain.inference",
+    }
+
+    part_count = int(math.ceil(len(pending_exports) / float(files_per_dir))) if pending_exports else 0
+    for part_index in range(part_count):
+        start = part_index * files_per_dir
+        chunk = pending_exports[start : start + files_per_dir]
+        part_id = part_dirname(part_index)
+        part_dir = dataset_dir / part_id
+        images_dir = part_dir / "images"
+        labels_dir = part_dir / "labels"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        labels_dir.mkdir(parents=True, exist_ok=True)
+
+        part_class_names: dict[int, str] = {}
+        part_mapping: list[dict[str, Any]] = []
+        part_labels_total = 0
+        for src, export_image_name, export_label_name, yolo_labels, class_names in chunk:
+            shutil.copy2(src, images_dir / export_image_name)
+            write_yolo_labels(str(labels_dir / export_label_name), yolo_labels)
+            part_class_names.update(class_names)
+            part_labels_total += len(yolo_labels)
+            part_mapping.append(
+                {
+                    "source_path_absolute": os.path.abspath(src),
+                    "export_stem": Path(export_image_name).stem,
+                    "export_image": f"images/{export_image_name}",
+                    "export_label": f"labels/{export_label_name}",
+                }
+            )
+
+        _write_data_yaml(part_dir, part_class_names)
+        part_manifest = {
+            "schema_version": SCHEMA_VERSION,
+            "created_at": created_at,
+            "labeling_type": "autolabel",
+            "part_id": part_id,
+            "part_index": part_index,
+            "source": source_block,
+            "model": model_block,
+            "inference_parameters": infer_params,
+            "export_parameters": {
+                "export_label_conf_min": options.label_conf_min,
+                "export_label_conf_max": options.label_conf_max,
+                "layout": "flat",
+                "export_split_dirs": True,
+                "export_files_per_dir": files_per_dir,
+                "part_id": part_id,
+                "part_index": part_index,
+            },
+            "provenance": provenance,
+            "summary": {
+                "images_exported": len(chunk),
+                "labels_total": part_labels_total,
+            },
+            "file_mapping": part_mapping,
+        }
+        (part_dir / MANIFEST_FILENAME).write_text(
+            json.dumps(part_manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        parts_meta.append(
+            {
+                "id": part_id,
+                "path": part_id,
+                "images_exported": len(chunk),
+                "labels_total": part_labels_total,
+            }
+        )
+
+    root_manifest_path = dataset_dir / MANIFEST_FILENAME
+    root_manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "created_at": created_at,
+        "labeling_type": "autolabel",
+        "source": source_block,
+        "model": model_block,
+        "inference_parameters": infer_params,
+        "export_parameters": {
+            "export_label_conf_min": options.label_conf_min,
+            "export_label_conf_max": options.label_conf_max,
+            "layout": "independent_parts",
+            "export_split_dirs": True,
+            "export_files_per_dir": files_per_dir,
+            "parts": part_count,
+        },
+        "provenance": provenance,
+        "summary": {
+            "images_input": images_input,
+            "images_exported": images_exported,
+            "images_skipped_empty": images_skipped_empty,
+            "labels_total": labels_total,
+            "parts": part_count,
+        },
+        "parts": parts_meta,
+    }
+    root_manifest_path.write_text(json.dumps(root_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return root_manifest_path, part_count
+
+
+def export_yolo_dataset(
+    report: dict[str, Any],
+    *,
+    out_root: str | Path,
+    source_short: str,
+    report_path: str | Path,
+    options: ExportOptions,
+    layout: WorkspaceLayout,
+) -> tuple[ExportSummary, set[str]]:
+    _ = layout
+    task_type = task_to_metadata_task_type(report.get("task_type"))
+    if task_type == "classification":
+        print(
+            "[WARN] Autolabel YOLO export is not supported for classification; skipping dataset export.",
+            file=sys.stderr,
+        )
+        return _empty_summary(), set()
+
+    dataset_dir = resolve_autolabel_dataset_dir(out_root, source_short)
+    images = report.get("images") if isinstance(report.get("images"), list) else []
+    used_stems: set[str] = set()
+    exported_paths: set[str] = set()
+    all_class_names: dict[int, str] = {}
+    labels_total = 0
+    images_exported = 0
+    images_skipped_empty = 0
+    # (src, image_name, label_name, yolo_labels, class_names)
+    pending_exports: list[tuple[str, str, str, list, dict[int, str]]] = []
+
+    for row in images:
+        if not isinstance(row, dict):
+            continue
+        src = str(row.get("image_path_absolute") or "")
+        if not src or not os.path.isfile(src):
+            continue
+        filtered = filter_task_outputs(row, task_type, options.label_conf_min, options.label_conf_max)
+        img_w, img_h = _image_size(row)
+        yolo_labels = task_outputs_to_yolo_labels(task_type, filtered, img_w, img_h)
+        if not yolo_labels:
+            images_skipped_empty += 1
+            continue
+
+        stem = Path(src).stem
+        export_stem = _allocate_unique_stem(stem, used_stems)
+        ext = Path(src).suffix.lower() or ".jpg"
+        export_image_name = f"{export_stem}{ext}"
+        export_label_name = f"{export_stem}.txt"
+        class_names = _class_names_from_outputs(filtered)
+        pending_exports.append((src, export_image_name, export_label_name, yolo_labels, class_names))
+        labels_total += len(yolo_labels)
+        images_exported += 1
+        exported_paths.add(os.path.abspath(src))
+        all_class_names.update(class_names)
+
+    if images_exported == 0:
+        print(
+            "[INFO] Autolabel dataset export skipped: no images with labels after confidence filter.",
+            file=sys.stderr,
+        )
+        return _empty_summary(images_skipped_empty=images_skipped_empty), set()
+
+    images_input = len([r for r in images if isinstance(r, dict)])
+    split_dirs = bool(options.export_split_dirs)
+
+    if split_dirs:
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path, parts_count = _write_independent_parts(
+            dataset_dir=dataset_dir,
+            pending_exports=pending_exports,
+            report=report,
+            report_path=report_path,
+            out_root=out_root,
+            options=options,
+            images_input=images_input,
+            images_exported=images_exported,
+            images_skipped_empty=images_skipped_empty,
+            labels_total=labels_total,
+        )
+        print(
+            f"[OK] Autolabel split into {parts_count} independent sub-dataset(s) "
+            f"(files_per_dir={int(options.export_files_per_dir)}, exported={images_exported})",
+            file=sys.stderr,
+        )
+        return (
+            ExportSummary(
+                dataset_dir=str(dataset_dir.resolve()),
+                manifest_path=str(manifest_path.resolve()),
+                images_exported=images_exported,
+                labels_total=labels_total,
+                images_skipped_empty=images_skipped_empty,
+                overlay_paths=(),
+                overlay_dir=None,
+                parts_count=parts_count,
+                files_per_dir=int(options.export_files_per_dir),
+                layout="independent_parts",
+            ),
+            exported_paths,
+        )
+
+    flat_pending = [(s, i, l, y) for s, i, l, y, _c in pending_exports]
+    flat_mapping = [
+        {
+            "source_path_absolute": os.path.abspath(src),
+            "export_stem": Path(export_image_name).stem,
+            "export_image": f"images/{export_image_name}",
+            "export_label": f"labels/{export_label_name}",
+        }
+        for src, export_image_name, export_label_name, _yolo in flat_pending
+    ]
+    manifest_path = _write_flat_dataset(
+        dataset_dir=dataset_dir,
+        pending_exports=flat_pending,
+        all_class_names=all_class_names,
+        file_mapping=flat_mapping,
+        report=report,
+        report_path=report_path,
+        out_root=out_root,
+        options=options,
+        images_input=images_input,
+        images_exported=images_exported,
+        images_skipped_empty=images_skipped_empty,
+        labels_total=labels_total,
+    )
     return (
         ExportSummary(
             dataset_dir=str(dataset_dir.resolve()),
@@ -360,6 +570,9 @@ def export_yolo_dataset(
             images_skipped_empty=images_skipped_empty,
             overlay_paths=(),
             overlay_dir=None,
+            parts_count=1,
+            files_per_dir=None,
+            layout="flat",
         ),
         exported_paths,
     )
@@ -380,6 +593,9 @@ def export_prediction_overlays(
     color_registry = LabelColorRegistry(Path(layout.root))
     saved: list[str] = []
     class_names: dict[int, str] = {}
+    split_dirs = bool(options.export_split_dirs)
+    files_per_dir = max(1, int(options.export_files_per_dir))
+    rendered_index = 0
 
     for row in images:
         if not isinstance(row, dict):
@@ -414,13 +630,22 @@ def export_prediction_overlays(
             original_format = im.format
         palette = {name: color_registry.ensure(name) for name in class_names.values()}
         rendered = render_pred_overlay(canvas, render_rows, class_names, label_colors=palette)
+
+        if split_dirs:
+            target_dir = overlay_dir / part_dirname(rendered_index // files_per_dir)
+        else:
+            target_dir = overlay_dir
         if not saved:
-            overlay_dir.mkdir(parents=True, exist_ok=True)
-        out_path = overlay_dir / Path(src).name
+            target_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+        out_path = target_dir / Path(src).name
         if out_path.exists():
-            out_path = overlay_dir / f"{Path(src).stem}__{len(saved) + 1}{Path(src).suffix.lower() or '.jpg'}"
+            out_path = target_dir / f"{Path(src).stem}__{len(saved) + 1}{Path(src).suffix.lower() or '.jpg'}"
         save_rendered_image(rendered, out_path, original_format=original_format)
         saved.append(str(out_path.resolve()))
+        rendered_index += 1
     color_registry.save()
     if not saved:
         return [], None
@@ -445,6 +670,8 @@ def patch_inference_report_artifacts(
             "export_label_conf_min": options.label_conf_min,
             "export_label_conf_max": options.label_conf_max,
             "export_visualize": options.export_visualize,
+            "export_split_dirs": options.export_split_dirs,
+            "export_files_per_dir": options.export_files_per_dir,
         }
     )
     payload["parameters"] = params
@@ -459,6 +686,9 @@ def patch_inference_report_artifacts(
             ),
             "images_exported": summary.images_exported,
             "labels_total": summary.labels_total,
+            "layout": summary.layout,
+            "parts_count": summary.parts_count,
+            "files_per_dir": summary.files_per_dir,
         }
     if summary.overlay_dir:
         artifacts["pred_overlays"] = {
@@ -480,27 +710,11 @@ def run_inference_exports(
 ) -> ExportSummary:
     options = resolve_export_options(args)
     if not options.export_dataset and not options.export_visualize:
-        return ExportSummary(
-            dataset_dir=None,
-            manifest_path=None,
-            images_exported=0,
-            labels_total=0,
-            images_skipped_empty=0,
-            overlay_paths=(),
-            overlay_dir=None,
-        )
+        return _empty_summary()
 
     report = json.loads(Path(report_path).read_text(encoding="utf-8"))
     exported_paths: set[str] = set()
-    summary = ExportSummary(
-        dataset_dir=None,
-        manifest_path=None,
-        images_exported=0,
-        labels_total=0,
-        images_skipped_empty=0,
-        overlay_paths=(),
-        overlay_dir=None,
-    )
+    summary = _empty_summary()
 
     if options.export_dataset:
         summary, exported_paths = export_yolo_dataset(
@@ -512,9 +726,14 @@ def run_inference_exports(
             layout=layout,
         )
         if summary.dataset_dir:
+            parts_txt = (
+                f", parts={summary.parts_count}, files_per_dir={summary.files_per_dir}"
+                if summary.layout == "independent_parts"
+                else ""
+            )
             print(
                 f"[OK] Autolabel dataset: {summary.dataset_dir} "
-                f"(images={summary.images_exported}, labels={summary.labels_total})"
+                f"(images={summary.images_exported}, labels={summary.labels_total}{parts_txt})"
             )
 
     if options.export_visualize:
@@ -536,6 +755,9 @@ def run_inference_exports(
             images_skipped_empty=summary.images_skipped_empty,
             overlay_paths=tuple(overlay_paths),
             overlay_dir=overlay_dir,
+            parts_count=summary.parts_count,
+            files_per_dir=summary.files_per_dir,
+            layout=summary.layout,
         )
         if overlay_paths:
             print(f"[OK] Saved {len(overlay_paths)} prediction overlay image(s) to {overlay_dir}")

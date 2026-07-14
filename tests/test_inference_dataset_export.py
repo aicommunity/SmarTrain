@@ -98,7 +98,7 @@ def test_export_yolo_dataset_segmentation_writes_polygon_labels(tmp_path: Path) 
         out_root=out_root,
         source_short="seg_images",
         report_path=report_path,
-        options=ExportOptions(True, False, 0.25, 1.0),
+        options=ExportOptions(True, False, 0.25, 1.0, export_split_dirs=False),
         layout=_Layout(),  # type: ignore[arg-type]
     )
     label_path = out_root / "seg_images_autolabeled" / "labels" / "a.txt"
@@ -147,7 +147,7 @@ def test_export_yolo_dataset_does_not_create_dir_when_all_empty(tmp_path: Path) 
         out_root=out_root,
         source_short="raw_images",
         report_path=report_path,
-        options=ExportOptions(True, True, 0.25, 1.0),
+        options=ExportOptions(True, True, 0.25, 1.0, export_split_dirs=False),
         layout=_Layout(),  # type: ignore[arg-type]
     )
     assert summary.dataset_dir is None
@@ -254,7 +254,7 @@ def test_export_yolo_dataset_skips_empty_and_writes_manifest(tmp_path: Path) -> 
         out_root=out_root,
         source_short="raw_images",
         report_path=report_path,
-        options=ExportOptions(True, True, 0.25, 1.0),
+        options=ExportOptions(True, True, 0.25, 1.0, export_split_dirs=False),
         layout=_Layout(),  # type: ignore[arg-type]
     )
     dataset_dir = out_root / "raw_images_autolabeled"
@@ -308,10 +308,128 @@ def test_export_yolo_dataset_unique_stems_for_collision(tmp_path: Path) -> None:
         out_root=out_root,
         source_short="nested",
         report_path=report_path,
-        options=ExportOptions(True, False, 0.25, 1.0),
+        options=ExportOptions(True, False, 0.25, 1.0, export_split_dirs=False),
         layout=_Layout(),  # type: ignore[arg-type]
     )
     dataset_dir = out_root / "nested_autolabeled"
     assert summary.images_exported == 2
     assert (dataset_dir / "labels" / "same.txt").is_file()
     assert (dataset_dir / "labels" / "same__2.txt").is_file()
+
+
+def _det_row(img: Path, conf: float = 0.9) -> dict:
+    return {
+        "image_path_absolute": str(img),
+        "image_size": {"width": 50, "height": 50},
+        "task_outputs": {
+            "detections": [
+                {
+                    "bbox_original_xyxy": [5.0, 5.0, 20.0, 20.0],
+                    "class_index": 0,
+                    "class_name": "obj",
+                    "confidence": conf,
+                }
+            ]
+        },
+    }
+
+
+def test_export_yolo_independent_parts_and_skip_empty_slot(tmp_path: Path) -> None:
+    src = tmp_path / "raw"
+    src.mkdir()
+    imgs = []
+    for name in ("a.jpg", "b.jpg", "c.jpg", "empty.jpg"):
+        p = src / name
+        Image.new("RGB", (50, 50)).save(p)
+        imgs.append(p)
+
+    report = {
+        "task_type": "detection",
+        "source": {"mode": "folder", "path_absolute": str(src)},
+        "model": {
+            "source": "models",
+            "name": "demo",
+            "weights_absolute": "/w.pt",
+            "provider": {"type": "builtin", "id": "ultralytics"},
+        },
+        "parameters": {"conf": 0.25, "img_size": 640, "device": "cpu", "half": False},
+        "images": [
+            _det_row(imgs[0]),
+            {"image_path_absolute": str(imgs[3]), "image_size": {"width": 50, "height": 50}, "task_outputs": {"detections": []}},
+            _det_row(imgs[1]),
+            _det_row(imgs[2]),
+        ],
+    }
+    out_root = tmp_path / "run"
+    out_root.mkdir()
+    report_path = out_root / "inference_results.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    class _Layout:
+        root = str(tmp_path)
+
+    summary, exported = export_yolo_dataset(
+        report,
+        out_root=out_root,
+        source_short="raw",
+        report_path=report_path,
+        options=ExportOptions(True, False, 0.25, 1.0, export_split_dirs=True, export_files_per_dir=2),
+        layout=_Layout(),  # type: ignore[arg-type]
+    )
+    root = out_root / "raw_autolabeled"
+    assert summary.layout == "independent_parts"
+    assert summary.parts_count == 2
+    assert summary.images_exported == 3
+    assert summary.images_skipped_empty == 1
+    assert len(exported) == 3
+    assert (root / "part_000" / "data.yaml").is_file()
+    assert (root / "part_000" / "autolabel_manifest.json").is_file()
+    assert (root / "part_001" / "data.yaml").is_file()
+    assert len(list((root / "part_000" / "images").glob("*"))) == 2
+    assert len(list((root / "part_001" / "images").glob("*"))) == 1
+    root_manifest = json.loads((root / "autolabel_manifest.json").read_text(encoding="utf-8"))
+    assert root_manifest["export_parameters"]["layout"] == "independent_parts"
+    assert root_manifest["export_parameters"]["parts"] == 2
+    assert len(root_manifest["parts"]) == 2
+
+
+def test_export_prediction_overlays_mirror_parts(tmp_path: Path) -> None:
+    from smartrain.services.inference_dataset_export import export_prediction_overlays
+
+    src = tmp_path / "raw"
+    src.mkdir()
+    imgs = []
+    for name in ("a.jpg", "b.jpg", "c.jpg"):
+        p = src / name
+        Image.new("RGB", (50, 50)).save(p)
+        imgs.append(p)
+    report = {
+        "task_type": "detection",
+        "source": {"mode": "folder"},
+        "images": [_det_row(p) for p in imgs],
+    }
+
+    class _Layout:
+        root = str(tmp_path)
+
+    options = ExportOptions(True, True, 0.25, 1.0, export_split_dirs=True, export_files_per_dir=2)
+    exported = {str(p.resolve()) for p in imgs}
+    saved, overlay_dir = export_prediction_overlays(
+        report,
+        out_root=tmp_path / "run",
+        layout=_Layout(),  # type: ignore[arg-type]
+        exported_only=exported,
+        use_export_filter=True,
+        options=options,
+    )
+    assert overlay_dir is not None
+    assert len(saved) == 3
+    root = Path(overlay_dir)
+    assert (root / "part_000" / "a.jpg").is_file()
+    assert (root / "part_000" / "b.jpg").is_file()
+    assert (root / "part_001" / "c.jpg").is_file()
+
+
+def test_validate_export_options_rejects_bad_files_per_dir() -> None:
+    with pytest.raises(ValueError):
+        validate_export_options(ExportOptions(True, True, 0.25, 1.0, export_split_dirs=True, export_files_per_dir=0))
