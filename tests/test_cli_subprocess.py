@@ -88,6 +88,7 @@ HELP_MATRIX: list[list[str]] = [
     ["model", "--help"],
     ["model", "convert", "--", "--help"],
     ["model", "release", "--", "--help"],
+    ["model", "comment", "--", "--help"],
     ["model", "rename", "--", "--help"],
     ["rotate", "--", "--help"],
 ]

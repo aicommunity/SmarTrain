@@ -462,7 +462,10 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
     if args.img_size is None and isinstance(model_path, Path):
         apply_inference_imgsz_from_model(model_path, args)
     elif args.img_size is None:
-        from smartrain.workflows.models.model_context import DEFAULT_INFERENCE_IMGSZ, FALLBACK_IMGSZ_SOURCE
+        from smartrain.core.workflow_adapters.inference_runtime_api import (
+            DEFAULT_INFERENCE_IMGSZ,
+            FALLBACK_IMGSZ_SOURCE,
+        )
 
         args.img_size = DEFAULT_INFERENCE_IMGSZ
         args.img_size_source = FALLBACK_IMGSZ_SOURCE

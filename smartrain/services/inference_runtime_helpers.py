@@ -28,7 +28,10 @@ from smartrain.core.runtime.workspace_paths import (
 )
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.workflow_adapters.inference_runtime_api import (
+    FALLBACK_IMGSZ_SOURCE,
     find_yaml_file,
+    extract_batch_from_sidecar_payload,
+    extract_onnx_input_batch,
     infer_img_size_from_model_context,
     infer_img_size_with_source,
     resolve_inference_imgsz,
@@ -514,8 +517,6 @@ def infer_img_size_with_source_safe(model_path: Path) -> tuple[int | None, str]:
 
 def apply_inference_imgsz_from_model(model_path: Path, args: argparse.Namespace) -> tuple[int, str]:
     """Resolve args.img_size from model context unless explicitly set on CLI."""
-    from smartrain.workflows.models.model_context import FALLBACK_IMGSZ_SOURCE
-
     explicit = getattr(args, "img_size", None)
     imgsz, source = resolve_inference_imgsz(model_path, explicit=explicit)
     args.img_size = int(imgsz)
@@ -539,10 +540,6 @@ def resolve_onnx_batch_constraint(model_path: Path) -> tuple[int | None, bool | 
     Non-ONNX artifacts return ``(None, None, "n/a")``.
     """
     from smartrain.core.runtime.run_artifacts import read_model_sidecar_metadata
-    from smartrain.workflows.models.model_artifact_imgsz import (
-        extract_batch_from_sidecar_payload,
-        extract_onnx_input_batch,
-    )
 
     mp = Path(model_path).expanduser().resolve()
     if mp.suffix.lower() != ".onnx":

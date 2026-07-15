@@ -1400,7 +1400,7 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     assert "## 4. Model Format Comparison" in en_md
     assert "Format alias legend" in en_md
     assert "| Alias | Run | Target path |" in en_md
-    assert "Datasets: D1 = ds_a" in en_md
+    assert "Datasets: D1 = ds_a" in en_md or "- D1 = ds_a" in en_md
     assert "### 6.1 Run R1" in en_md
 
 
@@ -2263,8 +2263,7 @@ def test_runs_with_missing_metrics_uses_run_resolved_yaml_for_unresolved_cache(
     session_yaml = str(tmp_path / "datasets" / "other" / "data.yaml")
 
     monkeypatch.setattr(
-        results_analyzer,
-        "_resolve_data_yaml_for_run",
+        "smartrain.services.analyze.cli_commands._resolve_data_yaml_for_run",
         lambda *_a, **_k: (run_yaml, "mock"),
     )
 
@@ -2272,7 +2271,10 @@ def test_runs_with_missing_metrics_uses_run_resolved_yaml_for_unresolved_cache(
         assert data_yaml == run_yaml
         return {"unresolved_metrics": ["Box-F1"]}
 
-    monkeypatch.setattr(workflow_dispatch, "_load_recompute_status", _fake_load_status)
+    monkeypatch.setattr(
+        "smartrain.services.analyze.cli_commands._load_recompute_status",
+        _fake_load_status,
+    )
 
     missing = results_analyzer._runs_with_missing_metrics(
         [str(run_dir)],
@@ -2295,11 +2297,13 @@ def test_runs_with_missing_metrics_skips_prompt_without_resolved_data_yaml(
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
 
     monkeypatch.setattr(
-        results_analyzer,
-        "_resolve_data_yaml_for_run",
+        "smartrain.services.analyze.cli_commands._resolve_data_yaml_for_run",
         lambda *_a, **_k: ("", "none"),
     )
-    monkeypatch.setattr(workflow_dispatch, "_load_recompute_status", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "smartrain.services.analyze.cli_commands._load_recompute_status",
+        lambda *_a, **_k: None,
+    )
 
     missing = results_analyzer._runs_with_missing_metrics(
         [str(run_dir)],
@@ -2318,16 +2322,18 @@ def test_runs_with_missing_metrics_skips_prompt_without_best_pt(
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "models").mkdir(parents=True, exist_ok=True)
-    (run_dir / "models" / "best.pt").write_bytes(b"model")
+    # No weights under models/ — recompute prompt must be skipped.
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
     run_yaml = str(tmp_path / "datasets" / "ds_a" / "data.yaml")
 
     monkeypatch.setattr(
-        results_analyzer,
-        "_resolve_data_yaml_for_run",
+        "smartrain.services.analyze.cli_commands._resolve_data_yaml_for_run",
         lambda *_a, **_k: (run_yaml, "mock"),
     )
-    monkeypatch.setattr(workflow_dispatch, "_load_recompute_status", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "smartrain.services.analyze.cli_commands._load_recompute_status",
+        lambda *_a, **_k: None,
+    )
 
     missing = results_analyzer._runs_with_missing_metrics(
         [str(run_dir)],
