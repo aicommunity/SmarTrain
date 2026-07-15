@@ -78,18 +78,18 @@ HELP_MODEL_GROUP = """Model conversion tools.
 Quick examples:
   smartrain model convert
   smartrain model convert --input models/best.pt --format onnx
-  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00/2026-01-01_00-00-00.pt --format tensorrt-engine --precision fp16
+  smartrain model convert --input runs/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/models/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --format tensorrt-engine --precision fp16
   smartrain model convert --input models/my_model.onnx --format tensorrt-trt
-  smartrain model release --run runs/my_ds/2026-01-01_00-00-00
+  smartrain model release --run runs/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234
   smartrain model comment --release 1 --comment "Production line 3"
-  smartrain model rename --release models/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234.pt --new-name my_detector_v2
+  smartrain model rename --release models/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --new-name my_detector_v2
 
 Interactive convert:
   - choose source model type: pt or onnx
   - select a file (or enter a manual path)
   - select one or multiple target models (onnx/engine/trt depending on source; CSV by numbers or values is supported, e.g. 1,3 or onnx,trt)
   - set batch/imgsz and other export parameters
-  - run sources use canonical artifacts <run_dir>/<run_dir_name>.<ext>; legacy run layouts are canonized automatically
+  - run sources use canonical weight files under models/ (detect_* stem; legacy <run_dir_name>.pt still resolves)
 
 Artifacts:
   - public convert outputs use short names matching the weights stem: <stem>.onnx / <stem>.engine / <stem>.trt

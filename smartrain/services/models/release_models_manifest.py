@@ -57,7 +57,36 @@ def save_manifest(layout: WorkspaceLayout, payload: dict[str, Any]) -> None:
 
 
 def is_nested_release_layout(pt_path: Path) -> bool:
-    return pt_path.is_file() and pt_path.parent.name == pt_path.stem
+    if not pt_path.is_file() or pt_path.suffix.lower() != ".pt":
+        return False
+    meta = load_release_metadata(release_json_path_for_pt(pt_path))
+    if meta:
+        artifacts = meta.get("artifacts") or {}
+        release_dir = artifacts.get("release_dir")
+        if isinstance(release_dir, str) and release_dir.strip():
+            try:
+                return Path(release_dir).expanduser().resolve() == pt_path.parent.resolve()
+            except Exception:
+                pass
+    # Legacy layout: release folder name matched the weight stem.
+    return pt_path.parent.name == pt_path.stem
+
+
+def find_release_pt_in_dir(directory: Path) -> Path | None:
+    """Locate a released ``.pt`` inside a release/bundle directory."""
+    d = directory.expanduser().resolve()
+    if not d.is_dir():
+        return None
+    legacy = d / f"{d.name}.pt"
+    if legacy.is_file() and load_release_metadata(release_json_path_for_pt(legacy)):
+        return legacy
+    for pt in sorted(d.glob("*.pt")):
+        if pt.is_file() and load_release_metadata(release_json_path_for_pt(pt)):
+            return pt
+    if legacy.is_file():
+        return legacy
+    pts = sorted(p for p in d.glob("*.pt") if p.is_file())
+    return pts[0] if len(pts) == 1 else None
 
 
 def _path_has_ancestor_named(path: Path, name: str) -> bool:
@@ -83,8 +112,8 @@ def is_workspace_release_bundle(path: Path) -> bool:
     for cand in [start, *start.parents]:
         if _path_has_ancestor_named(cand, "runs"):
             continue
-        nested_pt = cand / f"{cand.name}.pt"
-        if nested_pt.is_file():
+        nested_pt = find_release_pt_in_dir(cand)
+        if nested_pt is not None:
             if load_release_metadata(release_json_path_for_pt(nested_pt)):
                 return True
             if (
@@ -119,8 +148,8 @@ def entry_key_for_pt(pt_path: Path) -> str:
 def resolve_entry_key_from_pt_or_dir(path: Path, *, layout: WorkspaceLayout | None = None) -> str | None:
     p = path.expanduser().resolve()
     if p.is_dir():
-        pt = p / f"{p.name}.pt"
-        if not pt.is_file():
+        pt = find_release_pt_in_dir(p)
+        if pt is None:
             sibling = p.parent / f"{p.name}.pt"
             if sibling.is_file():
                 pt = sibling
@@ -174,8 +203,8 @@ def get_comment_for_run_dir(layout: WorkspaceLayout, run_dir: str) -> str:
     p = Path(run_dir).expanduser().resolve()
     if not p.is_dir():
         return ""
-    pt = p / f"{p.name}.pt"
-    if pt.is_file():
+    pt = find_release_pt_in_dir(p)
+    if pt is not None:
         return get_comment_for_pt(layout, pt)
     sibling = p.parent / f"{p.name}.pt"
     if sibling.is_file():

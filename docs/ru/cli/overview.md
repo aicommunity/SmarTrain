@@ -61,13 +61,13 @@ smartrain model convert --help
 - ONNX-параметры настраиваются в `model convert` (`--opset`, `--simplify/--no-simplify`, `--half/--no-half`).
 - В интерактивном режиме команда автоматически находит `.pt/.onnx` в `models/` и `runs/` workspace и даёт выбор источника по номеру или ручной ввод пути.
 - Выходные модели выбираются отдельно (`onnx`, `engine`, `trt`) с мультивыбором (`1,2` или `onnx,trt`), недоступные варианты показываются с причиной.
-- Для run-источников интерактивный выбор использует канонические артефакты (`<run_dir>/<run_dir_name>.<ext>`). Legacy-раскладка run автоматически канонизируется при первом обращении.
-- Release-модели в `models/<dataset>/` используют имя папки исходного run как identity stem (`models/<dataset>/<run_name>/<run_name>.pt` + такой же `.json`); convert пишет короткие `{stem}.onnx`/`.engine`/`.trt` рядом с `.pt` и для runs, и для release.
+- Для run-источников интерактивный выбор использует канонические файлы весов в `models/` (detect_* stem при наличии; legacy `<run_dir_name>.pt` тоже находится). Legacy-раскладка run автоматически канонизируется при первом обращении.
+- Release-модели сохраняют имя папки исходного run (`models/<dataset>/<run_name>/`), а файлы весов — `detect_<model>_<YYYYMMDD_HHMMSS>_<imgsz>px_<epochs>epochs_b<batch>.pt` (+ такой же `.json`/convert). Convert пишет короткие `{stem}.onnx`/`.engine`/`.trt` рядом с `.pt` и для runs, и для release.
 - Dedicated `*_trtprep.onnx` — внутренний кэш только для `trtexec`: создаётся при запросе TensorRT-trt, сохраняется после успеха для training runs и удаляется для каталога/release. Чистый `--format onnx` не пишет `*_trtprep`.
 
 Особенности `model release`:
 
-- `smartrain model release` публикует canonical run-модель `<run_dir_name>.pt` из выбранного run в самодостаточную папку `models/<dataset>/<run_dir_name>/` (то же подробное имя, что у training run: веса, sidecar JSON и копия артефактов train).
+- `smartrain model release` публикует canonical run `.pt` в `models/<dataset>/<run_dir_name>/` (папка сохраняет имя training run; веса/sidecar — detect_* stem).
 - Общий каталог `models/releases_manifest.json` хранит однострочные комментарии ко всем release-моделям; тот же комментарий дублируется в sidecar JSON модели.
 - В интерактивном режиме запрашивается необязательный однострочный комментарий (на любом языке); в non-interactive — флаг `--comment`.
 - Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`).
@@ -79,7 +79,7 @@ smartrain model convert --help
 
 Особенности `model rename`:
 
-- `smartrain model rename` переименовывает release-модель в `models/<dataset>/`: меняется stem (`.pt`, sidecar `.json`, каталог release и конвертированные ONNX/engine/trt с тем же префиксом).
+- `smartrain model rename` переименовывает файлы release-модели (`.pt`, sidecar `.json`, convert с тем же stem); в nested layout имя папки release не меняется.
 - Registry-бандлы (`model_manifest.json`) и модели в `runs/` не затрагиваются.
 - В интерактивном режиме показывается список release-моделей, текущий stem подставляется в поле ввода для редактирования.
 

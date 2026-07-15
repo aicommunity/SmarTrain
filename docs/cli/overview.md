@@ -67,8 +67,8 @@ Model convert highlights:
 - ONNX export options are configured in `model convert` (`--opset`, `--simplify/--no-simplify`, `--half/--no-half`).
 - Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows source selection by number or manual path input.
 - Target selection is model-based (`onnx`, `engine`, `trt`) with multi-select input (`1,2` or `onnx,trt`), and unavailable targets are shown with reason.
-- For run sources, interactive discovery uses canonical run artifacts (`<run_dir>/<run_dir_name>.<ext>`). Legacy run layouts are canonized automatically on first access.
-- Released models under `models/<dataset>/` use the source run folder name as identity stem (`models/<dataset>/<run_name>/<run_name>.pt` + matching `.json`); convert writes short `{stem}.onnx`/`.engine`/`.trt` next to the `.pt` for both runs and releases.
+- For run sources, interactive discovery uses canonical run weight files under `models/` (detect_* stem when available; legacy `<run_dir_name>.pt` still resolves). Legacy run layouts are canonized automatically on first access.
+- Released models keep the source run folder name under `models/<dataset>/<run_name>/`, while weight files use `detect_<model>_<YYYYMMDD_HHMMSS>_<imgsz>px_<epochs>epochs_b<batch>.pt` (+ matching `.json`/convert). Convert writes short `{stem}.onnx`/`.engine`/`.trt` next to the `.pt` for both runs and releases.
 - Dedicated `*_trtprep.onnx` is an internal cache for `trtexec` only: created when TensorRT-trt is requested, kept for training runs after success, and cleaned up for catalog/release models. Pure `--format onnx` does not write `*_trtprep`.
 
 Inference highlights:
@@ -82,7 +82,7 @@ Inference highlights:
 
 Model release highlights:
 
-- `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into a self-contained folder `models/<dataset>/<run_dir_name>/` (same detailed name as the training run: weights, sidecar JSON, and copied train artifacts).
+- `smartrain model release` publishes the canonical run `.pt` into `models/<dataset>/<run_dir_name>/` (folder keeps the training run name; weight/sidecar files use the detect_* weights stem).
 - A global catalog `models/releases_manifest.json` stores one-line comments for all release models; the same comment is duplicated in each model's sidecar JSON.
 - Interactive mode prompts for an optional one-line comment (any language); non-interactive mode accepts `--comment`.
 - Re-running for the same run with the same source hash performs a no-op skip.
@@ -94,7 +94,7 @@ Model comment highlights:
 
 Model rename highlights:
 
-- `smartrain model rename` renames a released model in `models/<dataset>/` by changing the release stem (`.pt`, sidecar `.json`, release folder, and converted ONNX/engine/trt files with matching prefix).
+- `smartrain model rename` renames weight/sidecar/convert files for a released model (nested layout keeps the release folder name).
 - Registry-promoted bundles (`model_manifest.json`) and run models under `runs/` are not affected.
 - Interactive mode lists released models and pre-fills the current stem for editing.
 

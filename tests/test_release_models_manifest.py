@@ -64,7 +64,7 @@ def _write_nested_release_model(
     return pt_path
 
 
-def test_target_paths_use_nested_layout_with_run_basename(tmp_path: Path) -> None:
+def test_target_paths_keep_run_folder_and_use_weights_stem(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     layout = WorkspaceLayout(str(tmp_path))
     run_dir = (
@@ -78,15 +78,20 @@ def test_target_paths_use_nested_layout_with_run_basename(tmp_path: Path) -> Non
             "dataset": {"name": "my_ds"},
             "model": "yolo11s",
             "task_type": "detect",
+            "hyperparameters": {
+                "epochs": 400,
+                "batch_size": 16,
+                "image_size": 640,
+            },
         },
-        "timestamps": {"training": {"end": "2026-01-15T12:00:00+00:00"}},
+        "timestamps": {"training": {"start": "2026-07-06T03:02:58+00:00"}},
     }
     release_dir, target_pt, target_json = _target_paths(layout, run_dir, md)
     assert release_dir.name == run_dir.name
     assert target_pt.parent == release_dir
     assert target_json.parent == release_dir
-    assert target_pt.name == f"{run_dir.name}.pt"
-    assert target_json.name == f"{run_dir.name}.json"
+    assert target_pt.name == "detect_yolo11s_20260706_030258_640px_400epochs_b16.pt"
+    assert target_json.name == "detect_yolo11s_20260706_030258_640px_400epochs_b16.json"
 
 
 def test_manifest_upsert_and_get_comment(tmp_path: Path) -> None:
@@ -154,8 +159,10 @@ def test_rename_nested_release_updates_manifest(tmp_path: Path) -> None:
     plan = build_rename_plan(entry, new_stem)
     apply_release_rename(plan, layout=layout)
 
-    new_pt = tmp_path / "models" / "ds1" / new_stem / f"{new_stem}.pt"
+    # Nested rename keeps the release folder; only weight/sidecar files change.
+    new_pt = tmp_path / "models" / "ds1" / old_stem / f"{new_stem}.pt"
     assert new_pt.is_file()
+    assert (tmp_path / "models" / "ds1" / old_stem).is_dir()
     assert get_comment(layout, f"ds1/{new_stem}") == "Keep me"
     assert get_comment_for_pt(layout, new_pt) == "Keep me"
 

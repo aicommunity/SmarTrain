@@ -27,6 +27,7 @@ from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceL
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
 from smartrain.core.runtime.run_bundle_copy import copy_run_bundle
 from smartrain.services.models.release_model_naming import (
+    build_model_weights_stem_from_metadata,
     sanitize_release_stem,
 )
 from smartrain.services.models.release_models_manifest import (
@@ -263,7 +264,7 @@ def _build_release_json(
         "source": {
             "source_run": str(run_dir),
             "source_run_relative": run_rel,
-            "source_weights": f"{run_dir.name}.pt",
+            "source_weights": source_best.name,
             "source_sha256": source_sha,
             "released_at": released_at,
         },
@@ -293,9 +294,15 @@ def _build_release_json(
 def _target_paths(layout: WorkspaceLayout, run_dir: Path, md: dict[str, Any]) -> tuple[Path, Path, Path]:
     ti = md.get("training_info") or {}
     dataset_name = sanitize_release_stem(str((ti.get("dataset") or {}).get("name") or "dataset"))
-    # Identity stem matches the training run folder name (build_run_name / finalize).
-    stem = sanitize_release_stem(run_dir.name)
-    release_dir = (Path(layout.models) / dataset_name / stem).resolve()
+    # Release folder keeps the training run folder name; weight files use detect_* stem.
+    release_folder = sanitize_release_stem(run_dir.name)
+    stem = build_model_weights_stem_from_metadata(md)
+    if not stem:
+        # Fallback: keep previous behavior if metadata is incomplete.
+        stem = release_folder
+    else:
+        stem = sanitize_release_stem(stem)
+    release_dir = (Path(layout.models) / dataset_name / release_folder).resolve()
     target_pt = (release_dir / f"{stem}.pt").resolve()
     target_json = (release_dir / f"{stem}.json").resolve()
     return release_dir, target_pt, target_json
@@ -312,6 +319,7 @@ def _same_release(
     existing_json: Path,
     source_sha: str,
     run_rel: str,
+    source_weights_name: str,
 ) -> tuple[bool, str]:
     if not existing_pt.is_file():
         return False, "target model does not exist"
@@ -325,7 +333,7 @@ def _same_release(
     except Exception:
         return False, "target json metadata is unreadable"
     src = payload.get("source") or {}
-    expected_source_weights = f"{Path(run_rel).name}.pt"
+    expected_source_weights = str(source_weights_name or "").strip()
     same_source = (
         str(src.get("source_run_relative") or "").strip() == run_rel
         and str(src.get("source_weights") or "").strip() == expected_source_weights
@@ -404,6 +412,7 @@ def main(argv: list[str] | None = None) -> None:
         existing_json=target_json,
         source_sha=source_sha,
         run_rel=run_rel,
+        source_weights_name=source_best.name,
     )
     if same:
         print(f"[OK] Already released, nothing to do: {target_pt} ({reason})")

@@ -36,9 +36,14 @@ def test_read_effective_ultralytics_train_hyperparams(tmp_path: Path) -> None:
 
 
 def test_finalize_run_dir_naming_renames_dir_models_and_metadata(tmp_path: Path) -> None:
+    from smartrain.services.train_runtime_helpers import build_model_weights_stem
+
     fixed = datetime(2026, 7, 4, 10, 34)
     old_name = build_run_name("ultralytics", "yolo11m.pt", 200, 16, "c78211ca", img_size=640, timestamp=fixed)
     new_name = build_run_name("ultralytics", "yolo11m.pt", 200, 8, "c78211ca", img_size=640, timestamp=fixed)
+    weights_stem = build_model_weights_stem(
+        "detect", "yolo11m.pt", 200, 8, 640, timestamp=fixed
+    )
     assert old_name != new_name
 
     run_dir = tmp_path / "ds_a" / old_name
@@ -58,7 +63,9 @@ def test_finalize_run_dir_naming_renames_dir_models_and_metadata(tmp_path: Path)
             {
                 "paths": {"best_model": f"{old_name}.pt"},
                 "training_info": {
-                    "hyperparameters": {"epochs": 200, "batch_size": 16, "image_size": 640}
+                    "task_type": "detect",
+                    "model": "yolo11m",
+                    "hyperparameters": {"epochs": 200, "batch_size": 16, "image_size": 640},
                 },
             }
         ),
@@ -71,11 +78,13 @@ def test_finalize_run_dir_naming_renames_dir_models_and_metadata(tmp_path: Path)
         model_version="yolo11m.pt",
         dataset_hash="c78211ca",
         training_start_time=fixed,
+        task_type="detect",
     )
 
     assert effective["batch"] == 8
     assert Path(new_dir).name == new_name
-    assert (tmp_path / "ds_a" / new_name / "models" / f"{new_name}.pt").is_file()
+    assert (tmp_path / "ds_a" / new_name / "models" / f"{weights_stem}.pt").is_file()
+    assert not (tmp_path / "ds_a" / new_name / "models" / f"{new_name}.pt").exists()
     meta = json.loads((tmp_path / "ds_a" / new_name / "training_metadata.json").read_text(encoding="utf-8"))
-    assert meta["paths"]["best_model"] == f"{new_name}.pt"
+    assert meta["paths"]["best_model"] == f"{weights_stem}.pt"
     assert meta["training_info"]["hyperparameters"]["batch_size"] == 8

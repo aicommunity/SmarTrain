@@ -345,16 +345,73 @@ def preferred_run_model_path(run_dir: str, ext: str = ".pt") -> str:
     root = _normalize_run_root(run_dir)
     models, _tmp = ensure_run_layout(str(root))
     suffix = ext if str(ext).startswith(".") else f".{ext}"
-    return str(models / f"{root.name}{suffix}")
+    stem = resolve_run_weights_stem(str(root))
+    return str(models / f"{stem}{suffix}")
+
+
+def resolve_run_weights_stem(run_dir: str) -> str:
+    """Canonical weight basename stem for a run (independent of folder name when possible)."""
+    root = _normalize_run_root(run_dir)
+    meta_path = root / "training_metadata.json"
+    payload: dict[str, Any] | None = None
+    if meta_path.is_file():
+        try:
+            loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:
+            payload = None
+
+    if payload is not None:
+        paths = payload.get("paths")
+        if isinstance(paths, dict):
+            best = paths.get("best_model")
+            if isinstance(best, str) and best.strip():
+                raw = best.strip().replace("\\", "/")
+                # Ignore legacy relative paths (train/weights/best.pt); only trust top-level basenames.
+                if "/" not in raw and not _looks_like_legacy_model_reference(raw, ".pt"):
+                    name = Path(raw).name
+                    if name.lower().endswith(".pt"):
+                        return name[:-3]
+                    return Path(name).stem
+
+        from smartrain.services.models.release_model_naming import build_model_weights_stem_from_metadata
+
+        computed = build_model_weights_stem_from_metadata(payload)
+        if computed:
+            return computed
+
+    models = root / "models"
+    legacy = models / f"{root.name}.pt"
+    if legacy.is_file():
+        return root.name
+    if models.is_dir():
+        pts = sorted(p for p in models.glob("*.pt") if p.is_file())
+        if len(pts) == 1:
+            return pts[0].stem
+        detect_like = [
+            p
+            for p in pts
+            if p.stem.startswith(("detect_", "classify_")) or "_epochs_b" in p.stem
+        ]
+        if len(detect_like) == 1:
+            return detect_like[0].stem
+
+    # Legacy: weight basename matched the run folder name.
+    return root.name
 
 
 def resolve_run_model(run_dir: str, ext: str = ".pt") -> Path | None:
     """Resolve weights under canonical run layout (call ensure_run_layout first for migration)."""
-    canonical = Path(preferred_run_model_path(run_dir, ext))
+    root = _normalize_run_root(run_dir)
+    models, _tmp = ensure_run_layout(str(root))
+    suffix = ext if str(ext).startswith(".") else f".{ext}"
+    canonical = Path(preferred_run_model_path(str(root), ext))
     if canonical.is_file():
         return canonical
-    root = _normalize_run_root(run_dir)
-    suffix = ext if str(ext).startswith(".") else f".{ext}"
+    legacy = models / f"{root.name}{suffix}"
+    if legacy.is_file():
+        return legacy
     for rel in (
         f"train-ultralytics/weights/best{suffix}",
         f"train-ultralytics/best{suffix}",
@@ -369,6 +426,10 @@ def resolve_run_model(run_dir: str, ext: str = ".pt") -> Path | None:
     sibling = root.parent / f"{root.name}{suffix}"
     if sibling.is_file():
         return sibling
+    if models.is_dir():
+        candidates = sorted(p for p in models.glob(f"*{suffix}") if p.is_file())
+        if len(candidates) == 1:
+            return candidates[0]
     return None
 
 

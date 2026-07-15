@@ -282,6 +282,7 @@ def _run_external_provider_flow(
         dataset_hash=dataset_hash,
         training_start_time=training_start_time,
         workspace_root=workspace_root,
+        task_type=task_to_metadata_task_type(u_cfg.get("task")),
     )
     if effective.get("epochs") is not None:
         epochs = int(effective["epochs"])
@@ -478,6 +479,7 @@ def _run_builtin_train_and_eval_flow(
                 dataset_hash=dataset_hash,
                 training_start_time=training_start_time,
                 workspace_root=workspace_root,
+                task_type=meta_extras.get("task_type") or task_to_metadata_task_type(u_cfg.get("task")),
             )
             if effective.get("epochs") is not None:
                 epochs = int(effective["epochs"])

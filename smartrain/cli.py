@@ -1059,7 +1059,7 @@ def cmd_model_comment(ctx: typer.Context) -> None:
     """Set or update a one-line comment for a released workspace model.
 
     Examples:
-      smartrain model comment --release models/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234.pt --comment "Production line 3"
+      smartrain model comment --release models/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --comment "Production line 3"
       smartrain model comment --release 1 --comment "Updated note"
       smartrain model comment
     """
@@ -1083,7 +1083,7 @@ def cmd_model_rename(ctx: typer.Context) -> None:
     """Rename a released workspace model and related artifacts.
 
     Examples:
-      smartrain model rename --release models/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234.pt --new-name my_detector_v2
+      smartrain model rename --release models/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --new-name my_detector_v2
       smartrain model rename --release 1 --new-name my_detector_v2
       smartrain model rename
     """
