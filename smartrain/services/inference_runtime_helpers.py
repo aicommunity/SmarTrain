@@ -133,11 +133,16 @@ def _parse_roi_class_ids(raw: str | None) -> list[int] | None:
     return out or None
 
 
-def load_model_class_names(model_path: Path) -> dict[int, str]:
+def load_model_class_names(model_path: Path, *, task_type: str | None = None) -> dict[int, str]:
     """Read class id → name mapping from Ultralytics weights."""
     from ultralytics import YOLO
 
-    names_raw = getattr(YOLO(str(model_path)), "names", {}) or {}
+    from smartrain.external_providers.task_alias import ultralytics_task_alias
+
+    kwargs: dict[str, Any] = {}
+    if task_type is not None and str(task_type).strip():
+        kwargs["task"] = ultralytics_task_alias(task_to_metadata_task_type(task_type))
+    names_raw = getattr(YOLO(str(model_path), **kwargs), "names", {}) or {}
     if not isinstance(names_raw, dict):
         return {}
     out: dict[int, str] = {}
@@ -148,6 +153,166 @@ def load_model_class_names(model_path: Path) -> dict[int, str]:
             continue
         out[cls_id] = str(value)
     return out
+
+
+def _infer_task_from_weight_stem(stem: str) -> str | None:
+    name = str(stem or "").strip().lower()
+    if name.startswith(("segment_", "segmentation_")) or "-seg" in name or "_seg_" in name:
+        return "segmentation"
+    if name.startswith(("classify_", "classification_")) or "-cls" in name or "_cls_" in name:
+        return "classification"
+    if name.startswith(("detect_", "detection_")) or "-det" in name:
+        return "detection"
+    return None
+
+
+def _task_from_training_metadata(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    training_info = payload.get("training_info")
+    if not isinstance(training_info, dict):
+        return None
+    raw = training_info.get("task_type")
+    if not str(raw or "").strip():
+        utrain = training_info.get("ultralytics_train")
+        if isinstance(utrain, dict):
+            raw = utrain.get("task")
+    if not str(raw or "").strip():
+        return None
+    return task_to_metadata_task_type(str(raw))
+
+
+def _task_from_model_dir(model_dir: Path) -> str | None:
+    try:
+        from smartrain.run_model_contract.gateway import resolve_task_context
+
+        ctx = resolve_task_context(str(model_dir), source_kind="model")
+        if ctx.task_type:
+            return task_to_metadata_task_type(str(ctx.task_type))
+    except Exception:
+        pass
+    manifest = model_dir / MANIFEST_NAME
+    if manifest.is_file():
+        try:
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+        except Exception:
+            payload = None
+        if isinstance(payload, dict) and str(payload.get("task_type") or "").strip():
+            return task_to_metadata_task_type(str(payload.get("task_type")))
+    meta_task = _task_from_training_metadata(model_dir / "training_metadata.json")
+    if meta_task:
+        return meta_task
+    return None
+
+
+def _task_from_run_dir(run_dir: Path) -> str | None:
+    try:
+        from smartrain.run_model_contract.gateway import resolve_task_context
+
+        ctx = resolve_task_context(str(run_dir), source_kind="run")
+        if ctx.task_type:
+            return task_to_metadata_task_type(str(ctx.task_type))
+    except Exception:
+        pass
+    return _task_from_training_metadata(run_dir / "training_metadata.json")
+
+
+def _task_from_weights_path(weights: Path) -> str | None:
+    stem_task = _infer_task_from_weight_stem(weights.stem)
+    if stem_task:
+        return stem_task
+    # Sidecar / nearby metadata for release and run bundles.
+    for candidate in (
+        weights.parent / "training_metadata.json",
+        weights.parent.parent / "training_metadata.json",
+        weights.with_suffix(".json"),
+    ):
+        if candidate.name == "training_metadata.json":
+            meta_task = _task_from_training_metadata(candidate)
+            if meta_task:
+                return meta_task
+            continue
+        if not candidate.is_file():
+            continue
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        raw = payload.get("task_type")
+        if not str(raw or "").strip():
+            training = payload.get("training")
+            if isinstance(training, dict):
+                info = training.get("training_info") if isinstance(training.get("training_info"), dict) else training
+                if isinstance(info, dict):
+                    raw = info.get("task_type") or (
+                        (info.get("ultralytics_train") or {}).get("task")
+                        if isinstance(info.get("ultralytics_train"), dict)
+                        else None
+                    )
+        if str(raw or "").strip():
+            return task_to_metadata_task_type(str(raw))
+    parent_manifest = weights.parent / MANIFEST_NAME
+    if parent_manifest.is_file():
+        return _task_from_model_dir(weights.parent)
+    return None
+
+
+def resolve_inference_task_type(
+    args: argparse.Namespace,
+    layout: WorkspaceLayout,
+    *,
+    model_path: Path | None = None,
+    model_source: str | None = None,
+) -> str:
+    """Prefer explicit ``--task``, else manifests / weight stem, else detection."""
+    explicit = getattr(args, "task", None)
+    if explicit is not None and str(explicit).strip():
+        return task_to_metadata_task_type(str(explicit))
+
+    source = str(model_source or "").strip().lower()
+    if source == "models" and getattr(args, "model_name", None):
+        name = str(args.model_name).strip()
+        candidate = Path(name)
+        models_root = Path(layout.models).resolve()
+        if candidate.suffix.lower() in SUPPORTED_INFERENCE_EXTS:
+            file_path = candidate.resolve() if candidate.is_absolute() else (models_root / candidate).resolve()
+            task = _task_from_weights_path(file_path)
+            if task:
+                return task
+            # Try parent bundle dir(s).
+            for parent in (file_path.parent, file_path.parent.parent):
+                task = _task_from_model_dir(parent)
+                if task:
+                    return task
+        else:
+            task = _task_from_model_dir((models_root / name).resolve())
+            if task:
+                return task
+    if source == "runs" and getattr(args, "run", None):
+        try:
+            run_dir = _resolve_run_ref(layout, str(args.run))
+            task = _task_from_run_dir(run_dir)
+            if task:
+                return task
+        except Exception:
+            pass
+    if model_path is not None:
+        task = _task_from_weights_path(Path(model_path))
+        if task:
+            return task
+        for parent in (Path(model_path).parent, Path(model_path).parent.parent):
+            task = _task_from_model_dir(parent) or _task_from_run_dir(parent)
+            if task:
+                return task
+    return task_to_metadata_task_type(None)
 
 
 def format_model_class_option_labels(class_names: dict[int, str]) -> list[str]:
@@ -305,7 +470,10 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
         from smartrain.run_model_contract.gateway import load_target, resolve_task_context
 
         mdir = (models_root / name).resolve()
-        _ = resolve_task_context(str(mdir), source_kind="model")
+        try:
+            resolve_task_context(str(mdir), source_kind="model")
+        except Exception:
+            pass
         payload = load_target(str(mdir), source_kind="model")
         if not payload.models:
             raise FileNotFoundError(f"Canonical model payload has no models for: {mdir}")
@@ -363,6 +531,66 @@ def apply_inference_imgsz_from_model(model_path: Path, args: argparse.Namespace)
     return int(imgsz), source
 
 
+def resolve_onnx_batch_constraint(model_path: Path) -> tuple[int | None, bool | None, str]:
+    """Resolve ONNX batch constraint as ``(fixed_batch, dynamic, source)``.
+
+    When ``dynamic`` is True or unknown (``None``), inference should not clamp ``batch_size``.
+    When ``dynamic`` is False and ``fixed_batch`` is set, callers must not exceed that batch.
+    Non-ONNX artifacts return ``(None, None, "n/a")``.
+    """
+    from smartrain.core.runtime.run_artifacts import read_model_sidecar_metadata
+    from smartrain.workflows.models.model_artifact_imgsz import (
+        extract_batch_from_sidecar_payload,
+        extract_onnx_input_batch,
+    )
+
+    mp = Path(model_path).expanduser().resolve()
+    if mp.suffix.lower() != ".onnx":
+        return None, None, "n/a"
+
+    batch, dynamic = extract_onnx_input_batch(mp)
+    if dynamic is not None or batch is not None:
+        return batch, dynamic, "onnx_input_shape"
+
+    sidecar = read_model_sidecar_metadata(mp)
+    if isinstance(sidecar, dict):
+        batch, dynamic = extract_batch_from_sidecar_payload(sidecar)
+        if dynamic is not None or batch is not None:
+            return batch, dynamic, "sidecar_metadata"
+
+    return None, None, "unavailable"
+
+
+def default_inference_batch_for_model(model_path: Path, *, fallback: int = 8) -> int:
+    """Interactive/CLI default batch: fixed ONNX batch when static, else ``fallback``."""
+    fixed, dynamic, _source = resolve_onnx_batch_constraint(model_path)
+    if dynamic is False and fixed is not None and int(fixed) > 0:
+        return int(fixed)
+    return max(1, int(fallback))
+
+
+def apply_inference_batch_from_model(model_path: Path, args: argparse.Namespace) -> int:
+    """Clamp ``args.batch_size`` to static ONNX batch when required; leave dynamic/.pt alone."""
+    requested = int(max(1, int(getattr(args, "batch_size", 8) or 8)))
+    args.batch_size = requested
+
+    fixed, dynamic, source = resolve_onnx_batch_constraint(model_path)
+    if dynamic is True or dynamic is None or fixed is None or int(fixed) <= 0:
+        return requested
+
+    fixed_n = int(fixed)
+    if requested <= fixed_n:
+        return requested
+
+    print(
+        f"[WARN] Model has fixed ONNX batch={fixed_n} (source: {source}); "
+        f"clamping --batch-size from {requested} to {fixed_n}. "
+        "Re-export with --dynamic (or --batch N) for larger batches."
+    )
+    args.batch_size = fixed_n
+    return fixed_n
+
+
 def discover_model_entries(layout: WorkspaceLayout) -> list[tuple[str, str, str]]:
     """Return tuples: (display_label, model_name_arg_value, model_dir_name)."""
     root = Path(layout.models)
@@ -383,6 +611,54 @@ def discover_model_entries(layout: WorkspaceLayout) -> list[tuple[str, str, str]
         for fp in files:
             rel = fp.relative_to(root).as_posix()
             out.append((rel, rel, d.name))
+    return out
+
+
+def list_workspace_detector_weights(
+    workspace_root: str,
+    *,
+    include_root_pretrained: bool = True,
+    include_models_tree: bool = True,
+    exts: set[str] | None = None,
+) -> list[str]:
+    """List weight paths for interactive ROI/augment/test prompts.
+
+    Returns paths relative to ``workspace_root`` when under it, else absolute.
+    Includes nested ``models/`` releases (R1–R3) and optional root pretrained files.
+    """
+    allowed = {e.lower() if e.startswith(".") else f".{e.lower()}" for e in (exts or {".pt", ".onnx"})}
+    root = Path(workspace_root).expanduser().resolve()
+    if not root.is_dir():
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(path: Path) -> None:
+        if not path.is_file() or path.suffix.lower() not in allowed:
+            return
+        if is_internal_conversion_artifact(path):
+            return
+        try:
+            rel = path.resolve().relative_to(root).as_posix()
+        except Exception:
+            rel = str(path.resolve())
+        if rel not in seen:
+            seen.add(rel)
+            out.append(rel)
+
+    if include_root_pretrained:
+        for p in sorted(root.iterdir()):
+            if p.is_file():
+                _add(p)
+    if include_models_tree:
+        layout = WorkspaceLayout(str(root))
+        for _label, arg_value, _dir_name in discover_model_entries(layout):
+            if "/(no model files)" in str(_label):
+                continue
+            candidate = Path(arg_value)
+            if not candidate.is_absolute():
+                candidate = (Path(layout.models) / candidate).resolve()
+            _add(candidate)
     return out
 
 
@@ -588,6 +864,7 @@ def build_report(
             },
             "weights_absolute": str(model_path),
             "weights_relative": relativize_if_under(layout.root, str(model_path)) or str(model_path),
+            "weights_value": str(model_path),
         },
         "parameters": {
             "conf": args.conf,

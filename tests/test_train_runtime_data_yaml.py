@@ -115,6 +115,89 @@ def test_runtime_data_yaml_train_only_aug_dataset_falls_back_val_to_train(tmp_pa
     assert cfg["test"] == "train/images"
 
 
+def test_runtime_data_yaml_release_bundle_uses_tmp_without_tests(tmp_path: Path) -> None:
+    from smartrain.core.runtime.run_artifacts import (
+        ensure_runtime_layout_for_yaml,
+        ensure_runtime_tmp_dir,
+    )
+
+    ds = tmp_path / "datasets" / "ds"
+    _touch_jpg(ds / "train" / "images" / "a.jpg")
+    _touch_jpg(ds / "test" / "images" / "b.jpg")
+    (ds / "data.yaml").write_text(
+        "train: train/images\nval: train/images\ntest: test/images\nnc: 1\nnames: [obj]\n",
+        encoding="utf-8",
+    )
+    release_dir = tmp_path / "models" / "ds" / "2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    pt = release_dir / "detect_yolo11s_20260714_204230_640px_400epochs_b16.pt"
+    pt.write_bytes(b"pt")
+    (release_dir / f"{pt.stem}.json").write_text(
+        '{"artifacts": {"release_dir": "x", "model_path": "y"}, "source": {"source_run": "z"}}',
+        encoding="utf-8",
+    )
+
+    out = build_runtime_data_yaml(
+        str(ds),
+        str(release_dir),
+        stage="test",
+        ensure_run_layout_cb=ensure_runtime_layout_for_yaml,
+        run_tmp_dir_cb=ensure_runtime_tmp_dir,
+    )
+    assert Path(out).is_file()
+    assert Path(out).parent == release_dir / "tmp"
+    assert not (release_dir / "tests").exists()
+
+
+def test_resume_pt_test_runner_passes_runtime_yaml_callbacks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from smartrain.services.training import train_resume_pt_test_runner as mod
+
+    ds = tmp_path / "datasets" / "ds"
+    _touch_jpg(ds / "train" / "images" / "a.jpg")
+    _touch_jpg(ds / "test" / "images" / "b.jpg")
+    (ds / "data.yaml").write_text(
+        "train: train/images\nval: train/images\ntest: test/images\nnc: 1\nnames: [obj]\n",
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / "runs" / "r1"
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models" / "r1.pt").write_bytes(b"pt")
+    (run_dir / "training_metadata.json").write_text(
+        '{"training_info": {"task_type": "detection", "provider": {"id": "ultralytics"}}}',
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_build(dataset_path, model_dir, *, stage, ensure_run_layout_cb, run_tmp_dir_cb):
+        captured["stage"] = stage
+        captured["has_layout_cb"] = callable(ensure_run_layout_cb)
+        captured["has_tmp_cb"] = callable(run_tmp_dir_cb)
+        ensure_run_layout_cb(model_dir)
+        tmp = Path(run_tmp_dir_cb(model_dir))
+        out = tmp / f"_runtime_data_{stage}.yaml"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("path: .\n", encoding="utf-8")
+        return str(out)
+
+    class _Res:
+        success = True
+        error = None
+        inference = {}
+        test_start_time = None
+        test_end_time = None
+
+    monkeypatch.setattr(mod, "build_runtime_data_yaml", _fake_build)
+    monkeypatch.setattr(mod, "run_ultralytics_backend", lambda **_k: _Res())
+    monkeypatch.setattr(mod, "resolve_task_context", lambda *_a, **_k: type("C", (), {"task_type": "detection"})())
+    monkeypatch.setattr(mod, "ensure_matplotlib_training_runtime", lambda **_k: type("R", (), {"as_dict": lambda self: {}})())
+
+    mod.resume_ultralytics_pt_test_runner(str(run_dir), str(ds), non_interactive=True)
+    assert captured["stage"] == "test"
+    assert captured["has_layout_cb"] is True
+    assert captured["has_tmp_cb"] is True
+
+
 def test_train_yolo_builds_runtime_yaml_under_run_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ds = tmp_path / "datasets" / "ds"
     ds.mkdir(parents=True)
@@ -163,3 +246,28 @@ def test_train_yolo_builds_runtime_yaml_under_run_dir(monkeypatch: pytest.Monkey
     assert called["dataset_path"] == str(ds)
     assert called["run_dir"] == str(expected_run_dir)
     assert called["stage"] == "train"
+
+
+def test_runtime_data_yaml_accepts_data_yaml_file_path(tmp_path: Path) -> None:
+    ds = tmp_path / "datasets" / "d1"
+    _touch_jpg(ds / "train" / "images" / "a.jpg")
+    _touch_jpg(ds / "val" / "images" / "b.jpg")
+    yaml_path = ds / "data.yaml"
+    yaml_path.write_text(
+        "\n".join(["names: [a]", "nc: 1", "train: train/images", "val: val/images"]),
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / "runs" / "r1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    out = build_runtime_data_yaml(
+        str(yaml_path),
+        str(run_dir),
+        stage="test",
+        ensure_run_layout_cb=ensure_run_layout,
+        run_tmp_dir_cb=run_tmp_dir,
+    )
+    with open(out, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    assert cfg["path"] == str(ds)
+    assert cfg["train"] == "train/images"

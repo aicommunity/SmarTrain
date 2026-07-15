@@ -26,6 +26,7 @@ from smartrain.workflows.analyze.results_analyzer import find_run_directories, l
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
 from smartrain.core.runtime.run_bundle_copy import copy_run_bundle
+from smartrain.services.analyze.metrics_reader import results_csv_path, training_args_yaml_path
 from smartrain.services.models.release_model_naming import (
     build_model_weights_stem_from_metadata,
     sanitize_release_stem,
@@ -130,7 +131,7 @@ def _pick_run_interactive(layout: WorkspaceLayout) -> Path:
 
 
 def _resolve_data_yaml(run_dir: Path, md: dict[str, Any], layout: WorkspaceLayout) -> Path | None:
-    args_yaml = run_dir / "train" / "args.yaml"
+    args_yaml = Path(training_args_yaml_path(str(run_dir)))
     if args_yaml.is_file():
         try:
             payload = yaml.safe_load(args_yaml.read_text(encoding="utf-8")) or {}
@@ -253,7 +254,8 @@ def _build_release_json(
     class_names, idx_map = _extract_classes(run_dir, md, layout)
     io_spec, io_warnings = _extract_io_spec(source_best, hp.get("image_size"))
     test_csv = latest_test_metrics_path(str(run_dir))
-    train_csv = run_dir / "train" / "results.csv"
+    train_csv_path = results_csv_path(str(run_dir))
+    train_csv = Path(train_csv_path) if train_csv_path else run_dir / "train-ultralytics" / "results.csv"
     metrics: dict[str, Any] = {
         "train_results_last": _read_csv_last_row(train_csv),
         "test_metrics_last": _read_csv_last_row(Path(test_csv)) if test_csv else None,

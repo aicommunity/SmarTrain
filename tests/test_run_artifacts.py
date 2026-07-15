@@ -40,6 +40,9 @@ def test_resolve_run_model_finds_sibling_pt_for_release_bundle(tmp_path: Path) -
 
     resolved = resolve_run_model(str(release_dir), ".pt")
     assert resolved == sibling
+    # Must not create empty run-layout dirs on release bundles.
+    assert not (release_dir / "tmp").exists()
+    assert not (release_dir / "tests").exists()
 
 
 def test_resolve_run_model_finds_nested_pt_for_release_bundle(tmp_path: Path) -> None:
@@ -50,6 +53,57 @@ def test_resolve_run_model_finds_nested_pt_for_release_bundle(tmp_path: Path) ->
 
     resolved = resolve_run_model(str(release_dir), ".pt")
     assert resolved == nested
+
+
+def test_resolve_run_model_r1_nested_models_subdir(tmp_path: Path) -> None:
+    """Uralk-style R1: models/<ds>/<detect_stem>/models/<detect_stem>.pt"""
+    release_dir = tmp_path / "models" / "ds1" / "detect_yolo11m_20260708_194933"
+    nested = release_dir / "models" / "detect_yolo11m_20260708_194933.pt"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_bytes(b"r1")
+    (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    resolved = resolve_run_model(str(release_dir), ".pt")
+    assert resolved == nested
+    assert not (release_dir / "tmp").exists()
+
+
+def test_resolve_run_model_r3_run_folder_detect_stem_mismatch(tmp_path: Path) -> None:
+    """Uralk-style R3: models/<ds>/<run_id>/detect_*.pt (folder ≠ stem)."""
+    run_folder = "2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc"
+    release_dir = tmp_path / "models" / "merged3" / run_folder
+    release_dir.mkdir(parents=True, exist_ok=True)
+    pt = release_dir / "detect_yolo11s_20260714_204230_640px_400epochs_b16.pt"
+    pt.write_bytes(b"r3")
+    (release_dir / "detect_yolo11s_20260714_204230_640px_400epochs_b16.json").write_text(
+        json.dumps({"artifacts": {"release_dir": str(release_dir), "model_path": str(pt)}, "source": {"source_run": "x"}}),
+        encoding="utf-8",
+    )
+
+    resolved = resolve_run_model(str(release_dir), ".pt")
+    assert resolved == pt
+    assert not (release_dir / "tmp").exists()
+    assert not (release_dir / "tests").exists()
+
+
+def test_resolve_run_model_run_fallback_train_ultralytics_last(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-last-only"
+    weights = run_dir / "train-ultralytics" / "weights" / "last.pt"
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"last")
+
+    resolved = resolve_run_model(str(run_dir), ".pt")
+    assert resolved == weights
+
+
+def test_resolve_run_model_run_fallback_legacy_train_last(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-legacy-train"
+    weights = run_dir / "train" / "weights" / "last.pt"
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"legacy-last")
+
+    resolved = resolve_run_model(str(run_dir), ".pt")
+    assert resolved == weights
 
 
 def test_resolve_run_model_prefers_canonical(tmp_path: Path) -> None:

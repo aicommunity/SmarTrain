@@ -120,6 +120,51 @@ def test_release_comment_for_run_dir_nested(tmp_path: Path) -> None:
     assert release_comment_for_run_dir(str(release_dir)) == "Note"
 
 
+def test_release_comment_for_r3_folder_when_pt_only_nested(tmp_path: Path) -> None:
+    """R3: folder = run_id, weight stem = detect_*, .pt may live under nested models/."""
+    deploy_workspace(str(tmp_path))
+    layout = WorkspaceLayout(str(tmp_path))
+    ds = "2026-07-14_20-19-21-merged3_fltd"
+    run_id = "2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc"
+    weight_stem = "detect_yolo11s_20260714_204230_640px_400epochs_b16"
+    release_dir = tmp_path / "models" / ds / run_id
+    release_dir.mkdir(parents=True)
+    (release_dir / "models").mkdir()
+    # Canonical nested run-style weight (no sibling release sidecar).
+    (release_dir / "models" / f"{run_id}.pt").write_bytes(b"pt")
+    # Release sidecar + comment at folder root (as after model comment / release).
+    sidecar = {
+        "comment": "Расширенный датасет",
+        "source": {
+            "source_run": str(tmp_path / "runs" / "r"),
+            "source_run_relative": "runs/r",
+            "source_weights": "r.pt",
+            "source_sha256": "abc",
+            "released_at": "2026-07-14T20:42:00+00:00",
+        },
+        "training": {},
+        "artifacts": {
+            "model_path": str(release_dir / f"{weight_stem}.pt"),
+            "json_path": str(release_dir / f"{weight_stem}.json"),
+            "release_dir": str(release_dir),
+            "train_copy_dir": str(release_dir / "train"),
+            "test_copy_dir": str(release_dir / "test"),
+        },
+    }
+    (release_dir / f"{weight_stem}.json").write_text(
+        json.dumps(sidecar, ensure_ascii=False), encoding="utf-8"
+    )
+    # Manifest keyed by folder name (R3), not by weight stem.
+    upsert_entry(
+        layout,
+        entry_key=f"{ds}/{run_id}",
+        model_path=release_dir / "models" / f"{run_id}.pt",
+        comment="Расширенный датасет",
+    )
+
+    assert release_comment_for_run_dir(str(release_dir)) == "Расширенный датасет"
+
+
 def test_discover_release_models_includes_comment(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     layout = WorkspaceLayout(str(tmp_path))

@@ -7,7 +7,11 @@ from datetime import datetime
 from typing import Any
 
 from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
-from smartrain.core.runtime.run_artifacts import preferred_run_model_path
+from smartrain.core.runtime.run_artifacts import (
+    ensure_runtime_layout_for_yaml,
+    ensure_runtime_tmp_dir,
+    preferred_run_model_path,
+)
 from smartrain.run_model_contract.gateway import resolve_task_context
 from smartrain.services.testing.backends.format_runners import run_ultralytics_backend
 from smartrain.services.training.train_runtime_data_yaml_service import build_runtime_data_yaml
@@ -31,7 +35,13 @@ def resume_ultralytics_pt_test_runner(
     non_interactive: bool = False,
 ):
     mpl_rt = ensure_matplotlib_training_runtime(non_interactive=bool(non_interactive))
-    data_yaml = build_runtime_data_yaml(dataset_path, model_dir, stage="test")
+    data_yaml = build_runtime_data_yaml(
+        dataset_path,
+        model_dir,
+        stage="test",
+        ensure_run_layout_cb=ensure_runtime_layout_for_yaml,
+        run_tmp_dir_cb=ensure_runtime_tmp_dir,
+    )
     weights = preferred_run_model_path(model_dir, ".pt")
     if not os.path.isfile(weights):
         raise FileNotFoundError(f"canonical run model is missing: {weights}")

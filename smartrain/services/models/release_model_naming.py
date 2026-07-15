@@ -27,7 +27,13 @@ def normalize_release_task(task: str | None) -> str:
     mapping = {
         "detection": "detect",
         "det": "detect",
+        "detect": "detect",
         "classification": "classify",
+        "classify": "classify",
+        "cls": "classify",
+        "segmentation": "segment",
+        "segment": "segment",
+        "seg": "segment",
     }
     return mapping.get(raw, raw or "detect")
 

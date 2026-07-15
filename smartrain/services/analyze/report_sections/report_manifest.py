@@ -340,7 +340,7 @@ def _exec_runs_metrics_dataframe(df: pd.DataFrame, abbreviations: dict[str, str]
         work["input_imgsz"] = work[imgsz_col]
         keep.append("input_imgsz")
     keep.extend(metric_cols)
-    if "release_comment" in work.columns and work["release_comment"].astype(str).str.strip().any():
+    if "release_comment" in work.columns and work["release_comment"].fillna("").astype(str).str.strip().ne("").any():
         if run_col:
             insert_at = keep.index(run_col) + 1
             keep.insert(insert_at, "release_comment")

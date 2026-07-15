@@ -135,6 +135,32 @@ def resolve_model_target(layout: WorkspaceLayout, req: VisRequest) -> dict[str, 
             source_run = payload.get("source_run")
             if isinstance(source_run, str) and source_run.strip():
                 run_ref = source_run
+            if not run_ref:
+                rel = payload.get("source_run_relative")
+                if isinstance(rel, str) and rel.strip():
+                    run_ref = rel.strip()
+    if not run_ref:
+        # Release sidecar next to weights: <stem>.json with source.source_run.
+        sidecar = model_path.with_suffix(".json")
+        if not sidecar.is_file() and model_path.suffix.lower() != ".pt":
+            # e.g. .onnx next to detect_*.json
+            for cand in model_dir.glob(f"{model_path.stem.split('.')[0]}*.json"):
+                if cand.name.endswith(".meta.json"):
+                    continue
+                sidecar = cand
+                break
+        if sidecar.is_file():
+            try:
+                meta = json.loads(sidecar.read_text(encoding="utf-8"))
+            except Exception:
+                meta = None
+            if isinstance(meta, dict):
+                source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+                for key in ("source_run", "source_run_relative"):
+                    val = source.get(key) if isinstance(source, dict) else None
+                    if isinstance(val, str) and val.strip():
+                        run_ref = val.strip()
+                        break
     if not run_ref:
         runs = find_run_directories(layout.runs)
         if runs:

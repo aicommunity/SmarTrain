@@ -199,17 +199,53 @@ def get_comment_for_pt(layout: WorkspaceLayout, pt_path: Path) -> str:
     return _comment_from_sidecar(pt_path)
 
 
+def _comment_from_release_sidecars(directory: Path) -> str:
+    """Read ``comment`` from any release metadata ``*.json`` in the folder root."""
+    for jp in sorted(directory.glob("*.json")):
+        payload = load_release_metadata(jp)
+        if not payload:
+            continue
+        comment = payload.get("comment")
+        if comment is not None and str(comment).strip():
+            return str(comment).strip()
+    return ""
+
+
+def _manifest_comment_for_models_relative(layout: WorkspaceLayout, release_dir: Path) -> str:
+    """Lookup ``releases_manifest`` by ``<dataset>/<release_folder>`` (R3 folder ≠ weight stem)."""
+    try:
+        models_root = Path(layout.models).expanduser().resolve()
+        rel = release_dir.resolve().relative_to(models_root)
+    except Exception:
+        return ""
+    parts = rel.parts
+    if len(parts) < 2:
+        return ""
+    # models/<dataset>/<release_dir>/...
+    key = f"{parts[0]}/{parts[1]}"
+    return get_comment(layout, key)
+
+
 def get_comment_for_run_dir(layout: WorkspaceLayout, run_dir: str) -> str:
     p = Path(run_dir).expanduser().resolve()
     if not p.is_dir():
         return ""
     pt = find_release_pt_in_dir(p)
     if pt is not None:
-        return get_comment_for_pt(layout, pt)
+        comment = get_comment_for_pt(layout, pt)
+        if comment:
+            return comment
     sibling = p.parent / f"{p.name}.pt"
     if sibling.is_file():
-        return get_comment_for_pt(layout, sibling)
-    return ""
+        comment = get_comment_for_pt(layout, sibling)
+        if comment:
+            return comment
+    # R3 / polluted release dirs: weight may live only under nested models/<run_id>.pt
+    # while comment lives on detect_*.json sidecar or manifests keyed by folder name.
+    manifest_comment = _manifest_comment_for_models_relative(layout, p)
+    if manifest_comment:
+        return manifest_comment
+    return _comment_from_release_sidecars(p)
 
 
 def layout_for_run_dir(run_dir: str) -> WorkspaceLayout | None:

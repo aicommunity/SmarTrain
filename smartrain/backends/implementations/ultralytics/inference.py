@@ -47,11 +47,21 @@ class InferenceBackend:
 
 
 class UltralyticsBackend(InferenceBackend):
-    def __init__(self, weights_path: str, *, backend_name: str = "ultralytics") -> None:
+    def __init__(
+        self,
+        weights_path: str,
+        *,
+        backend_name: str = "ultralytics",
+        task_type: str | None = None,
+    ) -> None:
         from ultralytics import YOLO
 
+        from smartrain.external_providers.task_alias import ultralytics_task_alias
+
         self.name = backend_name
-        self._model = YOLO(str(weights_path))
+        self._task_type = task_to_metadata_task_type(task_type)
+        ultra_task = ultralytics_task_alias(self._task_type)
+        self._model = YOLO(str(weights_path), task=ultra_task)
         self._predict_project = ultralytics_sidecar_dir(
             tempfile.gettempdir(), "smartrain_ultralytics_inference"
         )
@@ -202,7 +212,11 @@ class InferenceBackendRegistry:
         caps = self._capabilities.resolve(task_type=resolved_task_type, model_format=fmt, require="infer")
         backend_id = str(caps.backend or "").strip().lower()
         if backend_id == "ultralytics":
-            return UltralyticsBackend(model_path, backend_name=f"ultralytics:{fmt}")
+            return UltralyticsBackend(
+                model_path,
+                backend_name=f"ultralytics:{fmt}",
+                task_type=resolved_task_type,
+            )
         raise ValueError(
             "Unsupported local inference backend capability "
             f"{caps.backend!r} for model format {model_format!r}"

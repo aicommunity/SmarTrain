@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from smartrain.services.analyze.all_selection import _display_model_column
+
 
 def run_interactive_workflow(
     *,
@@ -22,15 +24,16 @@ def run_interactive_workflow(
     auto_select_data_yaml: Callable[..., str | None],
     prompt_choice: Callable[..., str],
 ) -> None:
-    print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'mAP50-95':>9}  {'Box-F1':>9}  {'run_dir'}")
-    print("-" * 140)
+    model_w = 20
+    print(f"{'#':>4}  {'model':<{model_w}}  {'dataset':<24}  {'mAP50-95':>9}  {'Box-F1':>9}  {'run_dir'}")
+    print("-" * 150)
     for i, (run_dir, rec) in enumerate(indexed, start=1):
         q = rec.test_metrics.get("mAP50-95")
         f1 = rec.test_metrics.get("Box-F1")
         q_str = f"{float(q):.4f}" if q is not None and pd.notna(q) else "-"
         f1_str = f"{float(f1):.4f}" if f1 is not None and pd.notna(f1) else "-"
         print(
-            f"{i:4d}  {str(rec.model or '?')[:14]:<14}  {str(rec.dataset_name or '?')[:24]:<24}  "
+            f"{i:4d}  {_display_model_column(run_dir, rec, width=model_w):<{model_w}}  {str(rec.dataset_name or '?')[:24]:<24}  "
             f"{q_str:>9}  {f1_str:>9}  {run_dir}"
         )
     try:

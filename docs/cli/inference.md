@@ -81,6 +81,7 @@ Export / inference flags:
 - Classification is not exported to YOLO (warning, no dataset folder created).
 - If no images pass the export confidence filter, `<basename>_autolabeled/` and `pred_overlays/` are not created.
 - Large `--batch-size` with high `--img-size` may OOM; lower `--batch-size` if needed.
+- Static ONNX exports (default convert: fixed batch=1) clamp `--batch-size` automatically with a warning. For multi-image batches, re-export with `smartrain model convert --dynamic` (or a larger `--batch`).
 - Interactive mode lists model classes after model selection; empty selection exports all classes. `--export-classes` applies together with `--export-label-conf-*`: frames without selected classes are omitted from `inference_results.json`, autolabel export, and overlays.
 
 ## External provider capability matrix (task × payload)

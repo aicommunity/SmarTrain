@@ -35,6 +35,19 @@ def test_build_model_weights_stem_matches_expected_example() -> None:
     assert stem == "detect_yolo11s_20260706_030258_640px_400epochs_b16"
 
 
+def test_build_model_weights_stem_segmentation_uses_segment_prefix() -> None:
+    stem = build_model_weights_stem(
+        "segmentation",
+        "yolo11n-seg.pt",
+        100,
+        8,
+        640,
+        timestamp=datetime(2026, 7, 6, 3, 2, 58, tzinfo=timezone.utc),
+    )
+    assert stem.startswith("segment_yolo11n-seg_")
+    assert "segmentation_" not in stem
+
+
 def test_preferred_run_model_path_uses_weights_stem_from_metadata(tmp_path: Path) -> None:
     deploy_workspace(str(tmp_path))
     folder = "2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc"

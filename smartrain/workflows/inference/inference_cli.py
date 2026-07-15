@@ -35,10 +35,12 @@ from smartrain.services.inference_runtime_helpers import (
     DATA_MODES,
     ON_EMPTY_MODES,
     ROI_POLICIES,
+    default_inference_batch_for_model,
     discover_model_entries,
     infer_img_size_with_source_safe,
     load_catalog,
     resolve_inference_source,
+    resolve_inference_task_type,
     resolve_model,
     load_model_class_names,
     format_model_class_option_labels,
@@ -103,11 +105,18 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
 
     inferred_imgsz = None
     inferred_imgsz_source = FALLBACK_IMGSZ_SOURCE
+    resolved_model_path = None
     try:
         mpath, _mname, _msrc = resolve_model(args, layout)
+        resolved_model_path = mpath
+        if getattr(args, "task", None) is None or not str(getattr(args, "task", "") or "").strip():
+            args.task = resolve_inference_task_type(
+                args, layout, model_path=mpath, model_source=_msrc
+            )
+            print(f"[INFO] Resolved task from model context: {args.task}")
         inferred_imgsz, inferred_imgsz_source = infer_img_size_with_source_safe(mpath)
         try:
-            class_names = load_model_class_names(mpath)
+            class_names = load_model_class_names(mpath, task_type=getattr(args, "task", None))
         except Exception as exc:
             print(f"[WARN] Could not load model classes: {exc}")
             class_names = {}
@@ -183,12 +192,15 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         default_device=str(args.device or default_device_value()),
     )
     args.half = prompt_yes_no("Use FP16 (--half)", default=bool(args.half))
+    batch_default = int(getattr(args, "batch_size", 8) or 8)
+    if resolved_model_path is not None:
+        batch_default = default_inference_batch_for_model(resolved_model_path, fallback=batch_default)
     args.batch_size = max(
         1,
         int(
             prompt_int(
                 "Inference batch size (--batch-size; local Ultralytics only)",
-                default=int(getattr(args, "batch_size", 8) or 8),
+                default=batch_default,
             )
         ),
     )

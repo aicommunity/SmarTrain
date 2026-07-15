@@ -20,6 +20,7 @@ from smartrain.services.analyze.report_markdown_formatting import (
     _center_close,
     _center_open,
     _column_display_name,
+    _drop_all_nan_columns,
     _filter_generic_table_for_selection,
     _filter_runs_summary_for_selection,
     _justify_block,

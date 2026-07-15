@@ -64,7 +64,22 @@ def test_write_not_available_recommendations_creates_contract(tmp_path: Path) ->
     payload = json.loads(Path(out).read_text(encoding="utf-8"))
     assert payload["status"] == "not_available"
     assert payload["objectives"]["A"]["global"]["threshold"] == 0.25
+    # Permanent stub: structurally complete so ensure does not loop forever.
     assert recommendations_complete(payload) is True
+
+
+def test_not_available_compute_failed_is_incomplete(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds" / "run1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    out = write_not_available_recommendations(
+        model_dir=str(run_dir),
+        split="test",
+        reason="confidence_compute_failed: build_runtime_data_yaml() missing kwargs",
+    )
+    payload = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert payload["status"] == "not_available"
+    # Transient stub must be retried after fixes (analyze Phase-1 kwargs bug).
+    assert recommendations_complete(payload) is False
 
 
 def test_collect_confidence_recommendation_tables_exports_csv(tmp_path: Path) -> None:

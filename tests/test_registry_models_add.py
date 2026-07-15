@@ -91,6 +91,7 @@ def test_registry_models_add_copies_bundle_and_manifest(tmp_path: Path) -> None:
     man = json.loads((promo / "model_manifest.json").read_text(encoding="utf-8"))
     assert man["weights_file"] == "models/promo_run.pt"
     assert man.get("bundle_layout_version") == 2
+    assert man.get("task_type") == "detection"
     assert (promo / "models" / "promo_run.pt").read_bytes() == b"canonical-pt"
     assert (promo / "models" / "export.onnx").read_bytes() == b"onnx-bytes"
     # Source run may migrate ``train/`` → ``train-ultralytics/`` when canonical path is resolved.

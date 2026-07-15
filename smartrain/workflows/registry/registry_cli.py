@@ -180,6 +180,16 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
     promoted = datetime.now(timezone.utc).isoformat()
     ti = md["training_info"]
     ds = ti["dataset"]
+    from smartrain.core.training.train_profile import task_to_metadata_task_type
+
+    task_type = ""
+    raw_task = ti.get("task_type")
+    if not str(raw_task or "").strip():
+        utrain = ti.get("ultralytics_train")
+        if isinstance(utrain, dict) and utrain.get("task"):
+            raw_task = utrain.get("task")
+    if str(raw_task or "").strip():
+        task_type = task_to_metadata_task_type(str(raw_task))
     manifest = {
         "friendly_name": friendly,
         "weights_file": weights_rel,
@@ -193,6 +203,8 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
         "workspace_root": ctx.workspace_root,
         "bundle_layout_version": 2,
     }
+    if task_type:
+        manifest["task_type"] = task_type
     with open(os.path.join(dest_dir, MANIFEST_NAME), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
     print(f"[OK] Model: {dest_weights}")

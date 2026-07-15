@@ -859,21 +859,32 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         pd.DataFrame(pt_uni_rows).to_csv(out_csv, index=False, encoding="utf-8")
         out["pt_uni_csv"] = os.path.relpath(out_csv, session_root)
     eval_rows = test_eval_rows + val_eval_rows + pt_uni_eval_rows
-    alias_by_key = {
-        (str(r.get("run_name") or ""), str(r.get("split") or ""), str(r.get("format") or ""), str(r.get("target_path") or "")): str(
-            r.get("alias") or ""
+    # Prefer alias from metrics rows; join without target_path because eval_rows often
+    # keep an empty path while metrics rows already resolved the weights file.
+    alias_by_key: dict[tuple[str, str, str], str] = {}
+    for r in all_rows:
+        key = (
+            str(r.get("run_name") or ""),
+            str(r.get("split") or ""),
+            str(r.get("format") or ""),
         )
-        for r in all_rows
-    }
+        alias = str(r.get("alias") or "").strip()
+        if not alias:
+            continue
+        # Prefer shorter aliases that look like PT/ONNX tokens when multiple exist.
+        prev = alias_by_key.get(key, "")
+        if not prev or (alias.startswith(("PT", "ON", "EN", "TR")) and not prev.startswith(("PT", "ON", "EN", "TR"))):
+            alias_by_key[key] = alias
+        elif not prev:
+            alias_by_key[key] = alias
     for er in eval_rows:
         er["alias"] = alias_by_key.get(
             (
                 str(er.get("run_name") or ""),
                 str(er.get("split") or ""),
                 str(er.get("format") or ""),
-                str(er.get("target_path") or ""),
             ),
-            "",
+            str(er.get("alias") or ""),
         )
     if eval_rows:
         eval_csv = os.path.join(out_dir, "format_eval_settings.csv")

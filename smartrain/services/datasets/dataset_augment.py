@@ -1320,15 +1320,9 @@ def _update_datasets_sidecar(
 
 
 def _list_workspace_detector_models(workspace_root: str) -> list[str]:
-    exts = {".pt", ".onnx"}
-    root = Path(workspace_root)
-    if not root.is_dir():
-        return []
-    out: list[str] = []
-    for p in sorted(root.iterdir()):
-        if p.is_file() and p.suffix.lower() in exts:
-            out.append(p.name)
-    return out
+    from smartrain.services.inference_runtime_helpers import list_workspace_detector_weights
+
+    return list_workspace_detector_weights(workspace_root)
 
 
 def _augment_roi_prompt_label(*, enable_center_rotate: bool, enable_bbox_copy: bool) -> str:
@@ -1516,7 +1510,7 @@ def _interactive_fill(args, dataset_names: list[str], catalog: dict, workspace_r
         if roi_mode == "detector":
             models = _list_workspace_detector_models(workspace_root)
             if models:
-                print("[INFO] ROI detectors in the workspace root:")
+                print("[INFO] ROI detectors in workspace (root + models/):")
                 for m in models:
                     print(f"  - {m}")
             args.roi_model = prompt_text(

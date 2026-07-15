@@ -486,15 +486,9 @@ def _prompt_yes_no(label: str, default: bool = False) -> bool:
 
 
 def _list_workspace_detector_models(workspace_root: str) -> list[str]:
-    exts = {".pt", ".onnx"}
-    root = Path(workspace_root)
-    if not root.is_dir():
-        return []
-    out: list[str] = []
-    for p in sorted(root.iterdir()):
-        if p.is_file() and p.suffix.lower() in exts:
-            out.append(p.name)
-    return out
+    from smartrain.services.inference_runtime_helpers import list_workspace_detector_weights
+
+    return list_workspace_detector_weights(workspace_root)
 
 
 def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
@@ -562,7 +556,7 @@ def _run_interactive_roi_setup(args: argparse.Namespace) -> bool:
     args.on_empty = oe_val or "full_image"
     models = _list_workspace_detector_models(layout.root)
     if models:
-        print("[INFO] ROI detectors in the workspace root:")
+        print("[INFO] ROI detectors in workspace (root + models/):")
         for m in models:
             print(f"  - {m}")
     weights_completer = WordCompleter(models, ignore_case=True) if models else None

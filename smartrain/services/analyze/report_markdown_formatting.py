@@ -420,10 +420,32 @@ def _abbrev_value(v: Any, abbreviations: dict[str, str]) -> str:
 
 def _abbrev_df(df: pd.DataFrame, abbreviations: dict[str, str]) -> pd.DataFrame:
     out = df.copy()
-    out.columns = [_abbrev_value(c, abbreviations) for c in out.columns]
+    # Do not collapse path-like column names via basename alone: train_best/last metrics
+    # would become duplicate ``mAP50-95(B)`` columns and break dtype access.
+    new_cols: list[str] = []
+    seen: dict[str, int] = {}
     for c in out.columns:
-        if str(out[c].dtype) == "object":
-            out[c] = out[c].map(lambda x: _abbrev_value(x, abbreviations))
+        raw = str(c)
+        abbreviated = _abbrev_value(raw, abbreviations)
+        # Keep distinguishing prefix for hierarchical metric columns.
+        if "/" in raw and abbreviated == os.path.basename(raw.rstrip("/")):
+            parent = raw.rsplit("/", 1)[0]
+            parent_tail = os.path.basename(parent.rstrip("/")) if parent else ""
+            if parent_tail and not abbreviated.startswith(parent_tail):
+                abbreviated = f"{parent_tail}/{abbreviated}"
+        if abbreviated in seen:
+            seen[abbreviated] += 1
+            abbreviated = f"{abbreviated}_{seen[abbreviated]}"
+        else:
+            seen[abbreviated] = 1
+        new_cols.append(abbreviated)
+    out.columns = new_cols
+    for c in out.columns:
+        series = out[c]
+        if isinstance(series, pd.DataFrame):
+            continue
+        if str(series.dtype) == "object":
+            out[c] = series.map(lambda x: _abbrev_value(x, abbreviations))
     return out
 
 
@@ -726,6 +748,18 @@ def _filter_runs_summary_for_selection(df: pd.DataFrame, manifest: dict[str, Any
     filtered = work[keep].copy()
     if len(filtered) == 0:
         return work
+    # Prefer exact selected abs dirs; otherwise prefer models/ over runs/ duplicates.
+    if "run_dir" in filtered.columns and selected_dirs:
+        by_dir = filtered[filtered["run_dir"].astype(str).str.strip().isin(selected_dirs)]
+        if len(by_dir) > 0:
+            filtered = by_dir
+    if "run_name" in filtered.columns and "run_dir" in filtered.columns and filtered["run_name"].astype(str).duplicated().any():
+        ranked = filtered.copy()
+        ranked["_pref"] = ranked["run_dir"].astype(str).map(
+            lambda p: 0 if ("/models/" in p.replace("\\", "/") or p.replace("\\", "/").startswith("models/")) else 1
+        )
+        ranked = ranked.sort_values(["run_name", "_pref"])
+        filtered = ranked.drop_duplicates(subset=["run_name"], keep="first").drop(columns=["_pref"])
     return filtered
 
 

@@ -89,6 +89,21 @@ def resolve_runtime_split_dirs(dataset_path: str, raw: dict) -> tuple[str, str, 
     return train_rel, val_rel, test_rel
 
 
+def coerce_dataset_root(dataset_path: str) -> tuple[str, str]:
+    """Accept a dataset directory or a ``data.yaml`` path; return ``(root, yaml)``."""
+    raw = str(dataset_path or "").strip()
+    if not raw:
+        raise ValueError("dataset_path is empty")
+    abs_in = os.path.abspath(os.path.expanduser(raw))
+    base = os.path.basename(abs_in).lower()
+    if os.path.isfile(abs_in) and base.endswith((".yaml", ".yml")):
+        return os.path.dirname(abs_in), abs_in
+    if base in {"data.yaml", "data.yml"}:
+        # Path written as …/data.yaml even if the file is missing momentarily.
+        return os.path.dirname(abs_in), abs_in
+    return abs_in, os.path.join(abs_in, "data.yaml")
+
+
 def build_runtime_data_yaml(
     dataset_path: str,
     run_dir: str,
@@ -97,16 +112,16 @@ def build_runtime_data_yaml(
     ensure_run_layout_cb,
     run_tmp_dir_cb,
 ) -> str:
-    src_yaml = os.path.join(dataset_path, "data.yaml")
+    dataset_root, src_yaml = coerce_dataset_root(dataset_path)
     with open(src_yaml, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"Incorrect YAML format data.yaml: {src_yaml}")
 
-    train_rel, val_rel, test_rel = resolve_runtime_split_dirs(dataset_path, raw)
+    train_rel, val_rel, test_rel = resolve_runtime_split_dirs(dataset_root, raw)
 
     runtime_cfg: dict[str, Any] = dict(raw)
-    runtime_cfg["path"] = dataset_path
+    runtime_cfg["path"] = dataset_root
     runtime_cfg["train"] = train_rel
     runtime_cfg["val"] = val_rel
     runtime_cfg["test"] = test_rel

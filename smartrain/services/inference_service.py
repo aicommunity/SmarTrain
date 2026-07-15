@@ -39,9 +39,11 @@ from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 from smartrain.services.inference_runtime_helpers import (
     build_report,
+    apply_inference_batch_from_model,
     apply_inference_imgsz_from_model,
     predict_roi_crop,
     resolve_inference_source,
+    resolve_inference_task_type,
     resolve_model,
     resolve_output_root,
     resolve_export_class_ids_for_args,
@@ -423,7 +425,9 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         return external_ref_outcome
 
     ext_provider = str(getattr(args, "external_provider", "") or "").strip()
-    task_type = task_to_metadata_task_type(getattr(args, "task", None))
+    model_path: Path | str | None = None
+    model_name = ""
+    model_source = ""
     if ext_provider and args.weights:
         raw_weight = str(args.weights).strip()
         maybe_path = Path(raw_weight).expanduser()
@@ -441,6 +445,17 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         except Exception as e:
             print(f"[ERROR] Failed to resolve model: {e}", file=sys.stderr)
             return 1, False
+
+    task_type = resolve_inference_task_type(
+        args,
+        layout,
+        model_path=Path(model_path) if isinstance(model_path, Path) else None,
+        model_source=model_source,
+    )
+    # Keep args.task aligned so reports / replay reflect the resolved value.
+    if getattr(args, "task", None) is None or not str(getattr(args, "task", "") or "").strip():
+        args.task = task_type
+
     class_filter_outcome = _prepare_export_class_filter(args, Path(model_path))
     if class_filter_outcome is not None:
         return class_filter_outcome
@@ -457,6 +472,9 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         )
     else:
         args.img_size_source = "cli"
+
+    if isinstance(model_path, Path):
+        apply_inference_batch_from_model(model_path, args)
 
     if ext_provider:
         location = get_provider_location(ext_provider)
@@ -531,6 +549,12 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 "name": model_name,
                 "provider": {"type": "external", "id": ext_provider},
                 "weights_value": str(model_path),
+                "weights_absolute": str(model_path) if isinstance(model_path, Path) else str(model_path),
+                "weights_relative": (
+                    relativize_if_under(layout.root, str(model_path)) or str(model_path)
+                    if isinstance(model_path, Path)
+                    else str(model_path)
+                ),
             },
             "parameters": {
                 "conf": args.conf,
@@ -624,11 +648,13 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
     if args.roi_pre_detect:
         from ultralytics import YOLO
 
+        from smartrain.external_providers.task_alias import ultralytics_task_alias
+
         if args.data_mode != "folder":
             print("[ERROR] --roi-pre-detect is supported only for --data-mode folder.", file=sys.stderr)
             return 1, False
         roi_w = args.roi_weights or str(model_path)
-        roi_model = YOLO(str(roi_w))
+        roi_model = YOLO(str(roi_w), task=ultralytics_task_alias(task_type))
         args.roi_weights = roi_w
         args._ultralytics_roi_project = ultralytics_sidecar_dir(layout.root, ".cache", "ultralytics_roi_infer")
 

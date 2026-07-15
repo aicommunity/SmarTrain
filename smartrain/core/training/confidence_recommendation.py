@@ -335,7 +335,19 @@ def read_recommendation_file(path: str) -> dict[str, Any] | None:
 
 
 def recommendations_complete(payload: dict[str, Any] | None) -> bool:
+    """True when A/B/C global thresholds exist and the payload is not a retryable stub.
+
+    ``write_not_available_recommendations`` always fills fallback thresholds, so a
+    ``not_available`` file looks structurally complete. Transient compute failures
+    (``confidence_compute_failed: ...``) must remain incomplete so analyze/resume
+    retry after fixes; permanent reasons (``canonical_pt_missing``, etc.) stay
+    complete to avoid an infinite ensure loop.
+    """
     if not isinstance(payload, dict):
+        return False
+    status = str(payload.get("status") or "").strip().lower()
+    reason = str(payload.get("reason") or "")
+    if status == "not_available" and reason.startswith("confidence_compute_failed"):
         return False
     objectives = payload.get("objectives")
     if not isinstance(objectives, dict):
@@ -348,6 +360,10 @@ def recommendations_complete(payload: dict[str, Any] | None) -> bool:
         if not isinstance(g, dict):
             return False
         if g.get("threshold") is None:
+            return False
+        g_status = str(g.get("status") or "").strip().lower()
+        g_reason = str(g.get("reason") or reason)
+        if g_status == "not_available" and g_reason.startswith("confidence_compute_failed"):
             return False
     return True
 

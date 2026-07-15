@@ -62,3 +62,68 @@ def extract_onnx_input_imgsz(onnx_path: Path) -> int | None:
         return h
     except Exception:
         return None
+
+
+def extract_batch_from_sidecar_payload(payload: dict[str, Any]) -> tuple[int | None, bool | None]:
+    """Read ``(batch, dynamic)`` from convert sidecar payload when present."""
+    params = payload.get("params")
+    source: dict[str, Any] = params if isinstance(params, dict) else payload
+    batch_raw = source.get("batch")
+    dynamic_raw = source.get("dynamic")
+    batch: int | None = None
+    if isinstance(batch_raw, (int, float)) and int(batch_raw) > 0:
+        batch = int(batch_raw)
+    dynamic: bool | None = None
+    if isinstance(dynamic_raw, bool):
+        dynamic = dynamic_raw
+    elif isinstance(dynamic_raw, (int, float)):
+        dynamic = bool(dynamic_raw)
+    elif isinstance(dynamic_raw, str):
+        token = dynamic_raw.strip().lower()
+        if token in {"1", "true", "yes", "on", "dynamic"}:
+            dynamic = True
+        elif token in {"0", "false", "no", "off", "static"}:
+            dynamic = False
+    if batch is None and dynamic is None:
+        return None, None
+    return batch, dynamic
+
+
+def extract_onnx_input_batch(onnx_path: Path) -> tuple[int | None, bool | None]:
+    """Read ``(fixed_batch, is_dynamic)`` from ONNX graph input dim0 when available.
+
+    Returns ``(None, None)`` when the graph cannot be read. When dynamic, ``fixed_batch``
+    may still be set if a static dim_value is present; callers should treat ``dynamic=True``
+    as unconstrained for inference batch clamping.
+    """
+    try:
+        import onnx  # type: ignore
+    except Exception:
+        return None, None
+    try:
+        model = onnx.load(str(onnx_path))
+    except Exception:
+        return None, None
+    try:
+        if not model.graph.input:
+            return None, None
+        dims = model.graph.input[0].type.tensor_type.shape.dim
+        if len(dims) < 1:
+            return None, None
+        d0 = dims[0]
+        d2 = dims[2] if len(dims) > 2 else None
+        d3 = dims[3] if len(dims) > 3 else None
+        dyn = bool(getattr(d0, "dim_param", "") or "")
+        if d2 is not None:
+            dyn = dyn or bool(getattr(d2, "dim_param", "") or "")
+        if d3 is not None:
+            dyn = dyn or bool(getattr(d3, "dim_param", "") or "")
+        batch: int | None = None
+        dim_value = int(getattr(d0, "dim_value", 0) or 0)
+        if dim_value > 0:
+            batch = dim_value
+        if batch is None and not dyn:
+            return None, None
+        return batch, dyn
+    except Exception:
+        return None, None
