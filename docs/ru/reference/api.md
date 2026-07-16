@@ -14,7 +14,7 @@
 - `smartrain/workflows/queue/training_queue_cli.py` и `smartrain/workflows/queue/training_queue.py` — очередь (`queue` и `queue-run`).
 - `smartrain/workflows/registry/registry_cli.py` — `registry`.
 - `smartrain/workflows/analyze/analyze_entry.py` и `smartrain/workflows/analyze/plot_creator.py` — `analyze` и legacy `plot`.
-- `smartrain/workflows/models/model_convert_cli.py`, `model_release_cli.py`, `model_rename_cli.py` — группа `model`.
+- `smartrain/workflows/models/model_convert_cli.py`, `model_release_cli.py`, `model_comment_cli.py`, `model_rename_cli.py` — группа `model`.
 - `smartrain/providers/cli.py` — `providers`.
 
 ## Соответствие CLI -> модуль

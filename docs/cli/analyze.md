@@ -74,7 +74,10 @@ In baseline-only mode (`single_run_mode` in `session.json`):
   - `artifacts/compare|metrics|inference|pr|leaderboard|table|speed_quality`
   - `artifacts/table/system_profile_compare.csv` (hardware profile comparison by run)
 - Report structure updates:
-  - format alias legend and metric calculation settings are placed in section 1 (context/artifacts)
+  - format alias legend and metric calculation settings are placed in **section 2** (Comparison Context / artifacts)
+  - Dataset legend uses bullets `- D1 = <dataset_name>` (not a single `Datasets:` line)
+  - release comments appear in summary tables when present in `releases_manifest.json` / sidecar
+  - format performance cells show «н/п» / N/A when `perf_*.json` was not collected (`model test --collect-performance`); do not confuse with «нет данных» placeholders for empty cells
   - speed analysis is embedded into `4.2` as a nested subsection
   - leaderboard is rendered in the conclusion section
 - Table rendering updates:
@@ -150,11 +153,13 @@ Use `--strict-diagnostics` on `analyze all` only when missing PR/metric_sources 
 
 - Run is considered discoverable when directory contains at least one run artifact:
   - `training_metadata.json`, or
-  - `train/args.yaml`, or
-  - `train/results.csv`, or
-  - `train/weights/last.pt` / `<run_dir_name>.pt` in run root.
+  - `train/args.yaml` / `train-ultralytics/args.yaml`, or
+  - `train/results.csv` / `train-ultralytics/results.csv`, or
+  - legacy `train/weights/last.pt`, or canonical `models/<stem>.pt` (detect_* preferred), or legacy `<run_dir_name>.pt` in run root.
 - For summary/metrics extraction, `analyze` still requires readable metadata/metrics files depending on subcommand.
-- Run model artifacts are expected under `runs/<dataset>/<run>/models/` (legacy root paths are still read as fallback).
+- Canonical run weights are under `runs/<dataset>/<run>/models/` (prefer `detect_*` stem; legacy root / `train/weights/` paths are still resolved as fallback via `resolve_run_model`).
+- Release catalogs under workspace `models/` are also selectable (`--models-root` / interactive); R1–R3 layouts are supported (see overview / run-layout).
+- For `analyze all --profile full`: incomplete Ultralytics PT test artifacts are filled, then missing confidence recommendation JSON is computed (retry after transient `confidence_compute_failed` stubs).
 - `export-table` reads:
   - `training_metadata.json`
   - latest `test_metrics*.csv` (first row)

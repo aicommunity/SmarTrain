@@ -75,6 +75,7 @@ pred_overlays/
 | `--export-files-per-dir` | `500` | Макс. экспортированных кадров на поддатасет |
 | `--export-classes` | все | Оставлять в результатах только кадры с указанными классами (имена/id) |
 | `--batch-size` | `8` | Размер батча локального Ultralytics-инференса (для external не применяется) |
+| `--task` | auto | Маршрутизация задачи: `detect` / `segment` / `classify` (алиасы `detection`, `segmentation`, `classification`). Передаётся в Ultralytics `YOLO(..., task=)`; иначе берётся из контекста модели. |
 
 `--conf` задаёт порог инференса; `--export-label-conf-*` дополнительно фильтрует метки при записи в датасет (из уже полученных предсказаний).
 
@@ -99,17 +100,20 @@ Classification в YOLO не экспортируется (предупрежде
 
 ```bash
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
-smartrain inference --model-name my_model --data-mode folder --source raw_data/images.zip --device cpu
-smartrain inference --model-name my_model --data-mode folder --source-dir ./images --no-export-dataset
-smartrain inference --model-name my_model --data-mode folder --source-dir ./images --export-label-conf-min 0.4 --export-label-conf-max 0.9
-smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mode folder --source-dir ./images
+smartrain inference --run runs/ds/2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc --data-mode folder --source-dir ./images
+smartrain inference --weights ./runs/ds/my_run/models/detect_yolo11s_20260714_204230_640px_400epochs_b16.pt --data-mode folder --source-dir ./images
+smartrain inference --weights ./models/ds/my_run/detect_yolo11s_20260714_204230_640px_400epochs_b16.onnx --data-mode folder --source-dir ./images --batch-size 1
+smartrain inference --weights yolo11s-seg.pt --task segment --data-mode folder --source-dir ./images --save-overlay
 smartrain inference --weights dr-yolo:yolov8n --external-repo /opt/dr-yolo --data-mode folder --source-dir ./images
-smartrain inference --weights yolo11s-seg.pt --data-mode folder --source-dir ./images --save-overlay
 ```
 
 ### Instance segmentation overlay
 
-Для моделей `*-seg.pt` в JSON есть `segments` (полигоны). Флаг `--save-overlay` сохраняет RGB-превью с контурами полигонов рядом с отчётом.
+Для моделей `*-seg.pt` (или `--task segment`) в JSON есть `segments` (полигоны). Флаг `--save-overlay` сохраняет RGB-превью с контурами полигонов рядом с отчётом.
+
+```bash
+smartrain inference --weights runs/ds/run_seg/models/detect_yolo11s-seg_….pt --task segment --data-mode folder --source-dir ./images --save-overlay
+```
 
 ## Выбор устройства
 

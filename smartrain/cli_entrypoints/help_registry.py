@@ -107,6 +107,14 @@ COMMANDS: dict[str, CommandHelp] = {
             "reports before writing a pruned copy."
         ),
     ),
+    "filter": CommandHelp(
+        name="filter",
+        summary="Filter edge-contacting boxes into a derived dataset.",
+        description=(
+            "Create a filtered dataset copy with edge-touching boxes removed or adjusted, write an "
+            "audit folder, and support stats-only / dry preview modes."
+        ),
+    ),
     "hash": CommandHelp(
         name="hash",
         summary="Calculate or validate dataset content hash.",
@@ -311,6 +319,7 @@ COMMAND_GROUPS: list[tuple[str, list[str]]] = [
             "augment",
             "balance",
             "prune",
+            "filter",
             "hash",
             "stats",
             "orient",

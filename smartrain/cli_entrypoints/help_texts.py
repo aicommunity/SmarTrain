@@ -73,11 +73,11 @@ Quick examples:
   smartrain dataset rename
 """
 
-HELP_MODEL_GROUP = """Model conversion tools.
+HELP_MODEL_GROUP = """Model tools (convert, release, comment, rename).
 
 Quick examples:
   smartrain model convert
-  smartrain model convert --input models/best.pt --format onnx
+  smartrain model convert --input models/ds/run_id/detect_yolo11s_….pt --format onnx
   smartrain model convert --input runs/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/models/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --format tensorrt-engine --precision fp16
   smartrain model convert --input models/my_model.onnx --format tensorrt-trt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234
@@ -126,15 +126,15 @@ ARGPARSE_HELP_EXAMPLES: dict[str, str] = {
     ),
     "smartrain sahi": (
         "Examples:\n"
-        "  smartrain sahi --model models/best.pt --source images/\n"
-        "  smartrain sahi --model models/best.pt --source image.jpg --output sahi_out\n"
-        "  smartrain sahi --model models/best.pt --source images/ --slice-h 768 --slice-w 768\n"
+        "  smartrain sahi --model models/ds/run_id/detect_yolo11s_….pt --source images/\n"
+        "  smartrain sahi --model models/ds/run_id/detect_yolo11s_….pt --source image.jpg --output sahi_out\n"
+        "  smartrain sahi --model models/ds/run_id/detect_yolo11s_….pt --source images/ --slice-h 768 --slice-w 768\n"
     ),
     "smartrain heatmap": (
         "Examples:\n"
-        "  smartrain heatmap --model models/best.pt --source image.jpg\n"
-        "  smartrain heatmap --model models/best.pt --source image.jpg --output heatmap.png\n"
-        "  smartrain heatmap --model models/best.pt --source image.jpg --colormap 12\n"
+        "  smartrain heatmap --model models/ds/run_id/detect_yolo11s_….pt --source image.jpg\n"
+        "  smartrain heatmap --model models/ds/run_id/detect_yolo11s_….pt --source image.jpg --output heatmap.png\n"
+        "  smartrain heatmap --model models/ds/run_id/detect_yolo11s_….pt --source image.jpg --colormap 12\n"
     ),
     "smartrain filter": (
         "Examples:\n"

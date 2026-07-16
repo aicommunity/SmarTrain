@@ -68,7 +68,8 @@ smartrain model convert --help
 Особенности `model release`:
 
 - `smartrain model release` публикует canonical run `.pt` в `models/<dataset>/<run_dir_name>/` (папка сохраняет имя training run; веса/sidecar — detect_* stem).
-- Общий каталог `models/releases_manifest.json` хранит однострочные комментарии ко всем release-моделям; тот же комментарий дублируется в sidecar JSON модели.
+- Совместимые раскладки (их находят inference/analyze/ROI): **R3** текущая `…/<run_id>/detect_*.pt`; **R1** `…/<detect_stem>/models/<detect_stem>.pt`; **R2** sibling `…/<stem>.pt` рядом с `…/<stem>/`. Подробнее: [`../../refactor/run-layout.md`](../../refactor/run-layout.md).
+- Общий каталог `models/releases_manifest.json` хранит однострочные комментарии (ключи `<dataset>/<weight_stem>`, с fallback по имени папки для R3); тот же комментарий дублируется в sidecar JSON модели.
 - В интерактивном режиме запрашивается необязательный однострочный комментарий (на любом языке); в non-interactive — флаг `--comment`.
 - Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`).
 
@@ -87,8 +88,10 @@ smartrain model convert --help
 
 - `smartrain analyze` без подкоманды (TTY) запускает интерактивный `analyze all` (compare, метрики, опционально speed/PR, отчёт).
 - Блок quality использует метрики обучения; отдельный `smartrain test` для compare и графиков test-metrics не обязателен.
+- При `profile=full` сессия при необходимости дозапускает Ultralytics PT test и пересчитывает отсутствующие confidence recommendations (`tests/confidence_recommendations_*.json`). Временные stubs `confidence_compute_failed` пересчитываются; постоянные (нет PT) — нет.
 - При `profile=full` speed (inference benchmark) берёт кадры из split `test`, затем `val`, затем `train`; если изображений нет — speed/PR деградируют с предупреждениями, отчёт всё равно строится.
-- Пути в runtime `_runtime_data_*.yaml` разрешаются через поле `path:` в data.yaml (а не относительно файла в `run/tmp/`).
+- Пути в runtime `_runtime_data_*.yaml` разрешаются через поле `path:` в data.yaml (а не относительно файла в `run/tmp/`). Для release-каталогов создаётся только `tmp/` (без пустых `tests/`).
+- В отчёте §2 Dataset — маркеры `- D1 = <dataset>`; модели — сокращения M*; комментарии release — из manifest/sidecar при наличии.
 - `--strict-diagnostics` включайте только если отсутствие PR/metric_sources должно прерывать сессию.
 
 Особенности `dataset report`:

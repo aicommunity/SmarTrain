@@ -75,6 +75,7 @@ Export / inference flags:
 | `--export-files-per-dir` | `500` | Max exported images per sub-dataset |
 | `--export-classes` | all | Keep only frames with these class names/ids in saved results |
 | `--batch-size` | `8` | Local Ultralytics inference batch size (ignored for external providers) |
+| `--task` | auto | Task routing: `detect` / `segment` / `classify` (aliases `detection`, `segmentation`, `classification`). Passed through to Ultralytics `YOLO(..., task=)` when set; otherwise inferred from model context. |
 
 `--conf` is the inference threshold; `--export-label-conf-*` further filters labels written to the dataset from predictions already returned by the model.
 
@@ -115,20 +116,19 @@ Note: `pt_uni` is an internal metrics-comparison mode (PT vs PT-uni, test/val) a
 
 ```bash
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
-smartrain inference --model-name my_model --data-mode folder --source raw_data/images.zip --device cpu
-smartrain inference --model-name my_model --data-mode folder --source-dir ./images --no-export-dataset
-smartrain inference --model-name my_model --data-mode folder --source-dir ./images --export-label-conf-min 0.4 --export-label-conf-max 0.9
-smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mode folder --source-dir ./images
+smartrain inference --run runs/ds/2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc --data-mode folder --source-dir ./images
+smartrain inference --weights ./runs/ds/my_run/models/detect_yolo11s_20260714_204230_640px_400epochs_b16.pt --data-mode folder --source-dir ./images
+smartrain inference --weights ./models/ds/my_run/detect_yolo11s_20260714_204230_640px_400epochs_b16.onnx --data-mode folder --source-dir ./images --batch-size 1
+smartrain inference --weights yolo11s-seg.pt --task segment --data-mode folder --source-dir ./images --save-overlay
 smartrain inference --weights dr-yolo:yolov8n --external-repo /opt/dr-yolo --data-mode folder --source-dir ./images
-smartrain inference --weights yolo11s-seg.pt --data-mode folder --source-dir ./images --save-overlay
 ```
 
 ### Instance segmentation overlay
 
-For `*-seg.pt` models, inference JSON includes per-image `segments` (polygon vertices). Use `--save-overlay` to write RGB preview images with GT-style polygon outlines next to the JSON report (under the same `workspace/inference/...` output directory).
+For `*-seg.pt` models (or `--task segment`), inference JSON includes per-image `segments` (polygon vertices). Use `--save-overlay` to write RGB preview images with GT-style polygon outlines next to the JSON report (under the same `workspace/inference/...` output directory).
 
 ```bash
-smartrain inference --weights runs/ds/run_seg/models/best-seg.pt --data-mode folder --source-dir ./images --save-overlay
+smartrain inference --weights runs/ds/run_seg/models/detect_yolo11s-seg_….pt --task segment --data-mode folder --source-dir ./images --save-overlay
 ```
 
 ## Device selection

@@ -4,6 +4,13 @@
 
 Настройки pytest заданы в `pyproject.toml` (`[tool.pytest.ini_options]`): `testpaths = ["tests"]`, `pythonpath = ["."]` — команды выполнять из корня репозитория.
 
+Опционально локально (не enforced в CI):
+
+```bash
+pip install pytest-cov
+pytest --cov=smartrain.cli --cov=smartrain.cli_entrypoints --cov-report=term-missing -q
+```
+
 ## Запуск
 
 ```bash

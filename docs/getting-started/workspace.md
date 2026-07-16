@@ -16,7 +16,7 @@ You can optionally override the workspace root with a global flag:
 - `datasets/` — processed datasets and indexes (`datasets_info.json`, `class_names.json`);
 - `runs/` — training outputs;
 - `analytics/` — analytics artifacts (`analyze export-table`, etc.);
-- `models/` — promoted models (`registry models-add`);
+- `models/` — released weights (`model release` under `models/<dataset>/<run_id>/…`, plus `releases_manifest.json`) and registry bundles (`registry models-add`);
 - `tmp/` — system files, including `tmp/status.txt`.
 
 The default queue file is `queue.txt` in the workspace root.

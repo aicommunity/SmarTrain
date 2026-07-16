@@ -74,7 +74,10 @@ smartrain analyze all
   - `artifacts/compare|metrics|inference|pr|leaderboard|table|speed_quality`
   - `artifacts/table/system_profile_compare.csv` (сравнение hardware profile по run)
 - Обновлённая структура отчёта:
-  - легенда алиасов форматов и параметры расчёта метрик — в разделе 1 (контекст/артефакты)
+  - легенда алиасов форматов и параметры расчёта метрик — в **разделе 2** (Comparison Context / артефакты)
+  - легенда датасетов: маркеры `- D1 = <имя>` (не одна строка `Datasets:`)
+  - комментарии release — в сводных таблицах при наличии в `releases_manifest.json` / sidecar
+  - в performance-таблицах «н/п», если нет `perf_*.json` (`model test --collect-performance`); не путать с «нет данных»
   - анализ скорости встроен в `4.2` как вложенный подраздел
   - leaderboard выводится в разделе заключения
 - Обновлён рендер таблиц:
@@ -148,11 +151,13 @@ smartrain analyze all
 
 - Run считается обнаруживаемым, если в каталоге есть хотя бы один артефакт:
   - `training_metadata.json`, или
-  - `train/args.yaml`, или
-  - `train/results.csv`, или
-  - `train/weights/last.pt` / `<run_dir_name>.pt` в корне run.
+  - `train/args.yaml` / `train-ultralytics/args.yaml`, или
+  - `train/results.csv` / `train-ultralytics/results.csv`, или
+  - legacy `train/weights/last.pt`, или канон `models/<stem>.pt` (предпочтительно detect_*), или legacy `<run_dir_name>.pt` в корне run.
 - Для сводки/метрик `analyze` по-прежнему требует читаемые metadata/metrics в зависимости от подкоманды.
-- Модели run ожидаются в `runs/<dataset>/<run>/models/` (legacy-пути в корне run — fallback).
+- Канонические веса run — в `runs/<dataset>/<run>/models/` (detect_* stem; legacy в корне / `train/weights/` — через `resolve_run_model`).
+- Каталоги release под `models/` тоже выбираемы (`--models-root` / интерактив); layouts R1–R3 поддерживаются (см. overview / run-layout).
+- Для `analyze all --profile full`: при неполных Ultralytics PT-артефактах они достраиваются, затем пересчитываются отсутствующие confidence JSON (retry для stubs `confidence_compute_failed`).
 - `export-table` читает:
   - `training_metadata.json`
   - последний `test_metrics*.csv` (первая строка)

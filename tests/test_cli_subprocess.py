@@ -709,6 +709,7 @@ raise SystemExit(0)
         (["balance", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive balance mode"),
         (["orient", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive"),
         (["roi", "--", "--no-auto-scan", "--workspace", "."], "incomplete arguments", "interactive roi mode"),
+        (["train", "--", "--epochs", "1"], "specify --data", "interactive train mode"),
         (["inference", "--", "--workspace", ".", "--data-mode", "folder"], "incomplete arguments", "interactive inference mode"),
         (["stats", "compare", "--left", "foo"], "incomplete arguments", "interactive mode stats compare"),
     ],
@@ -928,3 +929,66 @@ def test_docs_cli_group_subcommand_parity_has_key_entries() -> None:
     ]
     missing = [entry for entry in expected_entries if entry not in combined]
     assert not missing, f"Missing docs subcommand entries: {missing}"
+
+
+@pytest.mark.parametrize(
+    "argv,ok_rcs,required_substrings,forbidden_substrings",
+    [
+        (
+            ["train", "--nit", "--", "--epochs", "1"],
+            {0, 1, 2},
+            ["specify --data"],
+            ["interactive train mode", "traceback"],
+        ),
+        (
+            ["test", "--nit"],
+            {1, 2},
+            ["non-interactive"],
+            ["interactive test mode requires a terminal", "traceback"],
+        ),
+        (
+            ["inference", "--nit", "--", "--data-mode", "folder"],
+            {1, 2},
+            ["incomplete arguments"],
+            ["interactive inference mode requires a terminal", "traceback"],
+        ),
+        (
+            ["analyze", "scan", "--nit"],
+            {0, 1, 2},
+            [],  # empty workspace may print "(no runs…)" or similar
+            ["traceback"],
+        ),
+        (
+            ["model", "comment", "--nit"],
+            {0, 1, 2},
+            ["comment"],
+            ["traceback"],
+        ),
+        (
+            ["test", "--nit", "--", "--unknown-flag-xyz"],
+            {1, 2},
+            ["unrecognized"],
+            ["--nit"],
+        ),
+    ],
+)
+def test_cli_behavior_nit_and_incomplete_args(
+    argv: list[str],
+    ok_rcs: set[int],
+    required_substrings: list[str],
+    forbidden_substrings: list[str],
+    subprocess_env: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    deploy_workspace(str(tmp_path))
+    env = dict(subprocess_env)
+    env[WORKSPACE_ENV_VAR] = str(tmp_path.resolve())
+    env["SMART_TRAIN_INTERACTIVE_ALLOWED"] = "0"
+    r = _run(argv, cwd=tmp_path, env=env)
+    out = (r.stdout or "") + (r.stderr or "")
+    low = out.lower()
+    assert r.returncode in ok_rcs, out
+    for needle in required_substrings:
+        assert needle.lower() in low, out
+    for bad in forbidden_substrings:
+        assert bad.lower() not in low, out

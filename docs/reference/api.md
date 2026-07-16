@@ -14,7 +14,7 @@
 - `smartrain/workflows/queue/training_queue_cli.py` and `smartrain/workflows/queue/training_queue.py` — queue (`queue` and `queue-run`).
 - `smartrain/workflows/registry/registry_cli.py` — `registry`.
 - `smartrain/workflows/analyze/analyze_entry.py` and `smartrain/workflows/analyze/plot_creator.py` — `analyze` and legacy `plot`.
-- `smartrain/workflows/models/model_convert_cli.py`, `model_release_cli.py`, `model_rename_cli.py` — `model` group.
+- `smartrain/workflows/models/model_convert_cli.py`, `model_release_cli.py`, `model_comment_cli.py`, `model_rename_cli.py` — `model` group.
 - `smartrain/providers/cli.py` — `providers`.
 
 ## CLI mapping -> module

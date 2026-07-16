@@ -44,7 +44,7 @@ smartrain <group> <subcommand> -- --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model comment`, `model rename`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `inference`, `model convert`, `model release`, `model comment`, `model rename`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -83,7 +83,8 @@ Inference highlights:
 Model release highlights:
 
 - `smartrain model release` publishes the canonical run `.pt` into `models/<dataset>/<run_dir_name>/` (folder keeps the training run name; weight/sidecar files use the detect_* weights stem).
-- A global catalog `models/releases_manifest.json` stores one-line comments for all release models; the same comment is duplicated in each model's sidecar JSON.
+- Compatible layouts (inference/analyze/ROI discover all of them): **R3** current `…/<run_id>/detect_*.pt`; **R1** `…/<detect_stem>/models/<detect_stem>.pt`; **R2** sibling `…/<stem>.pt` next to `…/<stem>/`. Details: [`../refactor/run-layout.md`](../refactor/run-layout.md).
+- A global catalog `models/releases_manifest.json` stores one-line comments (keys `<dataset>/<weight_stem>`, with folder-name fallback for R3); the same comment is duplicated in each model's sidecar JSON.
 - Interactive mode prompts for an optional one-line comment (any language); non-interactive mode accepts `--comment`.
 - Re-running for the same run with the same source hash performs a no-op skip.
 
@@ -102,8 +103,10 @@ Analyze highlights:
 
 - `smartrain analyze` (TTY, no subcommand) runs the interactive `analyze all` workflow (compare, metrics, optional speed/PR, report).
 - Quality artifacts use training-time metrics; a separate `smartrain test` run is not required for compare and test-metrics plots.
+- For `profile=full`, the session ensures Ultralytics PT test artifacts when incomplete, then recomputes missing confidence recommendations (`tests/confidence_recommendations_*.json`). Transient `confidence_compute_failed` stubs are retried; permanent stubs (e.g. missing PT) are not.
 - For `profile=full`, speed (inference benchmark) resolves frames from `test`, then `val`, then `train` split; if no split images exist, speed/PR stages degrade with warnings and the session report still completes.
-- Runtime `_runtime_data_*.yaml` paths are resolved via the `path:` field in data.yaml (not relative to the yaml file location in `run/tmp/`).
+- Runtime `_runtime_data_*.yaml` paths are resolved via the `path:` field in data.yaml (not relative to the yaml file location in `run/tmp/`). Release dirs get `tmp/` only (no empty `tests/` pollution).
+- Report §2 Dataset legend uses bullets `- D1 = <dataset>`; model labels use M* abbreviations; release comments appear when present in manifest/sidecar.
 - Use `--strict-diagnostics` only when missing PR/metric_sources artifacts must fail the session.
 
 Dataset report highlights:

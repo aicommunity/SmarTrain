@@ -16,7 +16,7 @@
 - `datasets/` — рабочие датасеты и индекс (`datasets_info.json`, `class_names.json`);
 - `runs/` — результаты обучения;
 - `analytics/` — артефакты аналитики (`analyze export-table` и др.);
-- `models/` — промоутированные модели (`registry models-add`);
+- `models/` — релизы (`model release` в `models/<dataset>/<run_id>/…`, плюс `releases_manifest.json`) и registry-бандлы (`registry models-add`);
 - `tmp/` — служебные файлы, включая `tmp/status.txt`.
 
 Файл очереди по умолчанию: `queue.txt` в корне рабочего каталога.

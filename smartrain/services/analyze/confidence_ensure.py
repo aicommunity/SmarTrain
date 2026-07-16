@@ -5,7 +5,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from smartrain.core.runtime.run_artifacts import preferred_run_model_path
+from pathlib import Path
+
+from smartrain.core.runtime.run_artifacts import (
+    materialize_preferred_run_model,
+    preferred_run_model_path,
+    resolve_run_model,
+)
 from smartrain.core.training.confidence_recommendation import (
     read_recommendation_file,
     recommendation_file_path,
@@ -15,6 +21,26 @@ from smartrain.core.training.confidence_recommendation import (
 from smartrain.core.workflow_adapters.training_runtime_api import resolve_dataset_path_for_resume
 from smartrain.services.training.train_resume_pt_test_runner import resume_ultralytics_pt_test_runner
 from smartrain.services.training.train_runtime_data_yaml_service import coerce_dataset_root
+
+
+def _resolve_pt_weights_for_confidence(run_dir: str) -> str | None:
+    """Return an existing PT path for confidence ensure (prefer canonical, then resolve/materialize)."""
+    preferred = preferred_run_model_path(run_dir, ".pt")
+    if os.path.isfile(preferred):
+        return preferred
+    root = Path(run_dir).expanduser()
+    if not root.is_dir():
+        # Fake / missing paths (unit tests): do not mkdir via ensure_run_layout.
+        return None
+    resolved = resolve_run_model(run_dir, ".pt")
+    if resolved is not None and resolved.is_file():
+        materialized = materialize_preferred_run_model(
+            run_dir, ext=".pt", move=False, normalize_metadata=False
+        )
+        if materialized is not None and os.path.isfile(str(materialized)):
+            return str(materialized)
+        return str(resolved)
+    return None
 
 
 def ensure_confidence_recommendations_for_analyze_runs(
@@ -32,8 +58,8 @@ def ensure_confidence_recommendations_for_analyze_runs(
         test_path = recommendation_file_path(rd, "test")
         if recommendations_complete(read_recommendation_file(test_path)):
             continue
-        weights = preferred_run_model_path(rd, ".pt")
-        if not os.path.isfile(weights):
+        weights = _resolve_pt_weights_for_confidence(rd)
+        if not weights:
             try:
                 write_not_available_recommendations(
                     model_dir=rd,
