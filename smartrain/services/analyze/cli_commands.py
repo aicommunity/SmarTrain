@@ -104,6 +104,9 @@ from smartrain.services.analyze.all_data_yaml import (
 from smartrain.services.analyze.all_baseline_artifacts import (
     run_all_baseline_artifacts as _svc_run_all_baseline_artifacts,
 )
+from smartrain.services.analyze.all_leaderboard_stage import (
+    run_all_leaderboard_stage as _svc_run_all_leaderboard_stage,
+)
 from smartrain.services.analyze.all_quality_stage import (
     run_all_quality_stage as _svc_run_all_quality_stage,
 )
@@ -776,6 +779,9 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
         compute_composite_score=compute_composite_score,
     )
     if not records:
+        if getattr(args, "soft_fail", False):
+            print("[WARN] No runs for leaderboard.", file=sys.stderr)
+            return
         print("[ERROR] No runs for leaderboard.", file=sys.stderr)
         sys.exit(1)
     out_csv = _default_relative_output(
@@ -783,6 +789,9 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
     )
     rc = write_leaderboard_csv(records=records, out_csv=out_csv)
     if rc != 0:
+        if getattr(args, "soft_fail", False):
+            print("[WARN] No runs with enough metrics for leaderboard.", file=sys.stderr)
+            return
         print("[ERROR] No runs with enough metrics for leaderboard.", file=sys.stderr)
         sys.exit(1)
 
@@ -1158,6 +1167,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         auto_select_data_yaml_cb=_auto_select_data_yaml,
         run_all_baseline_artifacts_cb=_svc_run_all_baseline_artifacts,
         run_all_quality_stage_cb=_svc_run_all_quality_stage,
+        run_all_leaderboard_stage_cb=_svc_run_all_leaderboard_stage,
         run_all_speed_stage_cb=_svc_run_all_speed_stage,
         run_all_pr_stage_cb=_svc_run_all_pr_stage,
         finalize_all_session_cb=_finalize_all_session_with_replay,

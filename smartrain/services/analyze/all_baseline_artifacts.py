@@ -9,7 +9,6 @@ def run_all_baseline_artifacts(
     *,
     baseline: str,
     others: list[str],
-    selected_run_dirs: list[str],
     session_root: str,
     workspace: str | None,
     analytics_session: str | None,
@@ -19,8 +18,7 @@ def run_all_baseline_artifacts(
     cmd_export_table_cb: Callable[[argparse.Namespace], None],
     write_system_profile_compare_csv_cb: Callable[[list[str], str], bool],
     write_test_system_profile_compare_csv_cb: Callable[[list[str], str], bool],
-    cmd_leaderboard_cb: Callable[[argparse.Namespace], None],
-) -> tuple[list[dict[str, str]], str]:
+) -> list[dict[str, str]]:
     artifacts: list[dict[str, str]] = []
 
     if others:
@@ -73,20 +71,5 @@ def run_all_baseline_artifacts(
             {"role": "test_system_profile_compare_csv", "path": os.path.relpath(test_sys_profile_csv, session_root)}
         )
 
-    lb_csv = os.path.join(session_root, "artifacts", "leaderboard", "leaderboard.csv")
-    lb_ns = argparse.Namespace(
-        out_csv=lb_csv,
-        selected_run_dirs=selected_run_dirs,
-        quality_metric="mAP50-95",
-        speed_metric="avg_inference_fps",
-        weight_quality=0.6,
-        weight_speed=0.25,
-        weight_stability=0.15,
-        workspace=workspace,
-        models_root=models_root,
-        analytics_session=analytics_session,
-    )
-    cmd_leaderboard_cb(lb_ns)
-    artifacts.append({"role": "leaderboard_csv", "path": os.path.relpath(lb_csv, session_root)})
-    return artifacts, lb_csv
+    return artifacts
 
