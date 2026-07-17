@@ -822,6 +822,79 @@ def cmd_deps_sync_torch() -> None:
     typer.echo(f"{prefix} {message}")
 
 
+@deps_app.command("doctor")
+def cmd_deps_doctor(
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", help="Print full detail strings for each dependency row."),
+    ] = False,
+) -> None:
+    """Check optional report-export dependencies (pandoc, weasyprint, fallbacks)."""
+    from smartrain.services.deps.optional_extras import check_export_deps, ubuntu_weasyprint_apt_hint
+
+    report = check_export_deps()
+    typer.echo("[INFO] Export dependencies doctor:")
+    for row in report.rows:
+        status = "ok" if row.ok else "missing"
+        if verbose or not row.ok:
+            typer.echo(f"  - {row.name}: {status} ({row.detail})")
+        else:
+            typer.echo(f"  - {row.name}: {status}")
+    if not report.export_ready:
+        typer.echo("[INFO] Run: smartrain deps install")
+    weasy_row = next((r for r in report.rows if r.name.startswith("weasyprint")), None)
+    if weasy_row is not None and not weasy_row.ok:
+        hint = ubuntu_weasyprint_apt_hint()
+        if hint:
+            typer.echo(f"[INFO] Ubuntu/Debian WeasyPrint system libraries: {hint}")
+    raise typer.Exit(0 if report.export_ready else 1)
+
+
+@deps_app.command("install")
+def cmd_deps_install(
+    extra: Annotated[
+        list[str],
+        typer.Option("--extra", help="Optional extra to install (repeatable). Default: export."),
+    ] = [],
+    all_extras: Annotated[
+        bool,
+        typer.Option("--all-extras", help="Install all known optional extras."),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Print pip command without running it."),
+    ] = False,
+) -> None:
+    """Install optional pip extras (default: export for PDF/ODT report export)."""
+    from smartrain.services.deps.optional_extras import (
+        check_export_deps,
+        install_optional_extras,
+        known_optional_extras,
+    )
+
+    if all_extras:
+        selected = list(known_optional_extras())
+    elif extra:
+        selected = list(extra)
+    else:
+        selected = ["export"]
+    try:
+        cmd = install_optional_extras(selected, dry_run=dry_run)
+    except ValueError as exc:
+        typer.echo(f"[ERROR] {exc}", err=True)
+        raise typer.Exit(2) from exc
+    if dry_run:
+        typer.echo(f"[INFO] Would run: {cmd}")
+        raise typer.Exit(0)
+    typer.echo(f"[OK] Installed extras: {', '.join(selected)}")
+    report = check_export_deps()
+    if report.export_ready:
+        typer.echo("[OK] pandoc is available for report export.")
+    else:
+        typer.echo("[WARN] pandoc still unavailable; run: smartrain deps doctor --verbose", err=True)
+        raise typer.Exit(1)
+
+
 def _deps_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         typer.echo("Usage: smartrain deps [OPTIONS] COMMAND [ARGS]...")

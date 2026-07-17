@@ -113,11 +113,10 @@ pytest
   - default target is CUDA 12.8 wheels (`cu128`)
   - if current environment already has `torch` with CUDA `13.x`, `smartrain` keeps it and does not downgrade
   - to apply policy in the current environment: `smartrain deps sync-torch`
-- Dependency extras:
-  - `pip install -e ".[dev]"` for development and testing
-  - `pip install -e ".[clearml]"` for ClearML
-  - `pip install -e ".[sahi]"` for SAHI
-  - `pip install -e ".[export]"` for PDF/ODT export helpers (`pypandoc-binary`, `weasyprint`)
+- Report PDF/ODT export:
+  - base install is enough for Markdown/PNG reports
+  - `smartrain deps install` or `pip install -e ".[export]"` for pandoc/weasyprint (`pypandoc-binary`, `weasyprint`)
+  - check readiness: `smartrain deps doctor`
 
 Completion setup:
   - automatic best-effort setup runs on first `smartrain` launch after install;

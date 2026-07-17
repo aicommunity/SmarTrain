@@ -17,7 +17,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Dataset catalog: `dataset report`, `dataset rename`
 - Format tools: `dataset convert`, `sahi`, `heatmap`, `vis`
 - Migration: `migrate`, `migrate-models`
-- Maintenance: `deps sync-torch`
+- Maintenance: `deps sync-torch`, `deps doctor`, `deps install`
 
 ## Reference
 

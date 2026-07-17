@@ -47,6 +47,7 @@
 | `smartrain model convert` / `model release` / `model comment` / `model rename` | `smartrain/workflows/models/model_convert_cli.py` / `model_release_cli.py` / `model_comment_cli.py` / `model_rename_cli.py` |
 | `smartrain providers` | `smartrain/providers/cli.py` |
 | `smartrain deps sync-torch` | `smartrain/external_providers/installer.py` |
+| `smartrain deps doctor` / `deps install` | `smartrain/services/deps/optional_extras.py` |
 | `smartrain deploy` / `quickstart` / `info` / `sync` | `smartrain/cli.py` (+ `smartrain/services/workspace/workspace_sync_service.py` for `sync`) |
 | `smartrain migrate` | `smartrain/workflows/migration/cli_migration.py` |
 | `smartrain migrate-models` | `smartrain/workflows/migration/migrate_models_to_smartrain.py` |

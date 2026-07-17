@@ -298,7 +298,8 @@ COMMANDS: dict[str, CommandHelp] = {
         name="deps",
         summary="Dependency management helpers.",
         description=(
-            "Sync PyTorch/CUDA packages to the recommended policy. Subcommand: sync-torch."
+            "Sync PyTorch/CUDA policy, check optional report-export dependencies, and install "
+            "pip extras (export, clearml, sahi, dev). Subcommands: sync-torch, doctor, install."
         ),
     ),
 }

@@ -101,6 +101,9 @@ HELP_DEPS_GROUP = """Dependency management helpers.
 
 Quick examples:
   smartrain deps sync-torch
+  smartrain deps doctor
+  smartrain deps install
+  smartrain deps install --extra clearml
 """
 
 ARGPARSE_HELP_EXAMPLES: dict[str, str] = {

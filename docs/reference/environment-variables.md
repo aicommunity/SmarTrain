@@ -39,7 +39,13 @@ Smart Train reads configuration from CLI flags and environment variables. CLI fl
 | `clearml` | `clearml` | ClearML experiment tracking |
 | `sahi` | `sahi` | SAHI tiled inference CLI |
 
-Install example: `pip install -e ".[dev,export]"`.
+Install example: `pip install -e ".[dev,export]"` or `smartrain deps install`.
+
+## Report export environment
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PANDOC` | unset | Full path to pandoc binary; overrides PATH and bundled pandoc from `pypandoc-binary`. |
 
 ## Notes
 

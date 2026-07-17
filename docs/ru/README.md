@@ -88,7 +88,8 @@ pytest
   - `pip install -e ".[dev]"` для разработки и тестов
   - `pip install -e ".[clearml]"` для ClearML
   - `pip install -e ".[sahi]"` для SAHI
-  - `pip install -e ".[export]"` для PDF/ODT отчётов (`pypandoc-binary`, `weasyprint`)
+  - `smartrain deps install` или `pip install -e ".[export]"` для PDF/ODT отчётов (`pypandoc-binary`, `weasyprint`)
+  - проверка: `smartrain deps doctor`
 
 Автодополнение:
   - best-effort автонастройка выполняется при первом запуске `smartrain` после установки;

@@ -75,6 +75,8 @@ HELP_MATRIX: list[list[str]] = [
     ["providers", "doctor", "--", "--help"],
     ["deps", "--help"],
     ["deps", "sync-torch", "--help"],
+    ["deps", "doctor", "--help"],
+    ["deps", "install", "--help"],
     ["analyze", "--help"],
     ["analyze", "all", "--", "--help"],
     ["analyze", "scan", "--", "--help"],

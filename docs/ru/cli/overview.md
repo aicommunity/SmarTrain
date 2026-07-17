@@ -17,7 +17,7 @@
 - Каталог датасетов: `dataset report`, `dataset rename`
 - Инструменты форматов: `dataset convert`, `sahi`, `heatmap`, `vis`
 - Миграция: `migrate`, `migrate-models`
-- Обслуживание: `deps sync-torch`
+- Обслуживание: `deps sync-torch`, `deps doctor`, `deps install`
 
 ## Справка
 
