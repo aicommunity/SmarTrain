@@ -114,8 +114,8 @@ pytest
   - if current environment already has `torch` with CUDA `13.x`, `smartrain` keeps it and does not downgrade
   - to apply policy in the current environment: `smartrain deps sync-torch`
 - Report PDF/ODT export:
-  - base install is enough for Markdown/PNG reports
-  - `smartrain deps install` or `pip install -e ".[export]"` for pandoc/weasyprint (`pypandoc-binary`, `weasyprint`)
+  - base install includes bundled pandoc (`pypandoc-binary`) and `fpdf2`/`odfpy` fallbacks
+  - `smartrain deps install` or `pip install -e ".[export]"` for optional WeasyPrint PDF engine
   - check readiness: `smartrain deps doctor`
 
 Completion setup:

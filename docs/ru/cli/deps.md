@@ -24,28 +24,30 @@ smartrain deps install --all-extras
 smartrain deps install --dry-run
 ```
 
-## Экспорт отчётов (extra `export`)
+## Экспорт отчётов
 
-`analyze all` и `dataset report` по умолчанию создают Markdown и PNG. PDF/ODT требуют:
+`analyze all` и `dataset report` по умолчанию создают Markdown и PNG.
 
-- `pypandoc-binary` (bundled pandoc)
-- `weasyprint` (PDF-движок при наличии)
+**Базовая установка** включает:
 
-Установка:
+- `pypandoc-binary` (bundled pandoc) для ODT и pandoc-PDF
+- `fpdf2` / `odfpy` как fallback
+
+**Optional extra `export`** добавляет `weasyprint` как дополнительный PDF-движок:
 
 ```bash
 smartrain deps install
 ```
 
-Проверка:
+Проверка pandoc и опционального WeasyPrint:
 
 ```bash
 smartrain deps doctor
 ```
 
-Код выхода `0`, если pandoc доступен; `1`, если зависимости экспорта отсутствуют.
+Код выхода `0`, если pandoc доступен; `1`, если pandoc отсутствует (переустановите `smartrain`).
 
-Эквивалент pip из исходников:
+Эквивалент pip только для WeasyPrint:
 
 ```bash
 pip install -e ".[export]"
@@ -67,7 +69,7 @@ sudo apt-get install -y libcairo2 libpango-1.0-0 libgdk-pixbuf2.0-0 libffi-dev s
 
 | Extra | Пакеты (кратко) | Назначение |
 |-------|-----------------|------------|
-| `export` | `pypandoc-binary`, `weasyprint` | PDF/ODT отчёты |
+| `export` | `weasyprint` | Опциональный WeasyPrint PDF-движок |
 | `dev` | `pytest`, `ruff`, `mypy` | Разработка |
 | `clearml` | `clearml` | Трекинг экспериментов |
 | `sahi` | `sahi` | SAHI inference |

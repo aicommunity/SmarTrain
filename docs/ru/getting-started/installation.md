@@ -24,15 +24,15 @@ pip install -e .
 | `dev` | `pip install -e ".[dev]"` | pytest, ruff, mypy |
 | `clearml` | `pip install -e ".[clearml]"` | интеграция ClearML |
 | `sahi` | `pip install -e ".[sahi]"` | SAHI tiled inference |
-| `export` | `pip install -e ".[export]"` или `smartrain deps install` | PDF/ODT отчёты (`pypandoc-binary`, `weasyprint`) |
+| `export` | `pip install -e ".[export]"` или `smartrain deps install` | WeasyPrint PDF-движок (опционально; pandoc/ODT из базовой установки) |
 
 Несколько extras: `pip install -e ".[dev,export]"`.
 
 ## Экспорт отчётов (PDF/ODT)
 
-**Базовой** установки достаточно для обучения, Markdown-отчётов `analyze` и PNG-примеров `dataset report`.
+**Базовая** установка включает `pypandoc-binary` (bundled `pandoc`) и fallback `fpdf2`/`odfpy` — достаточно для ODT и базового PDF в `smartrain analyze all` и `smartrain dataset report`.
 
-PDF и ODT для `smartrain analyze all` и `smartrain dataset report` требуют optional extra **`export`** (`pypandoc-binary` включает bundled `pandoc`; `weasyprint` — PDF-движок при наличии).
+Опциональный PDF-движок **WeasyPrint** (часто лучше на Linux) — extra `export`:
 
 ```bash
 smartrain deps install

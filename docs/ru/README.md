@@ -88,7 +88,8 @@ pytest
   - `pip install -e ".[dev]"` для разработки и тестов
   - `pip install -e ".[clearml]"` для ClearML
   - `pip install -e ".[sahi]"` для SAHI
-  - `smartrain deps install` или `pip install -e ".[export]"` для PDF/ODT отчётов (`pypandoc-binary`, `weasyprint`)
+  - базовая установка включает bundled pandoc (`pypandoc-binary`) и fallback `fpdf2`/`odfpy`
+  - `smartrain deps install` или `pip install -e ".[export]"` для опционального WeasyPrint PDF-движка
   - проверка: `smartrain deps doctor`
 
 Автодополнение:

@@ -841,9 +841,10 @@ def cmd_deps_doctor(
         else:
             typer.echo(f"  - {row.name}: {status}")
     if not report.export_ready:
-        typer.echo("[INFO] Run: smartrain deps install")
+        typer.echo("[INFO] Reinstall smartrain to restore bundled pandoc: pip install -e .")
     weasy_row = next((r for r in report.rows if r.name.startswith("weasyprint")), None)
     if weasy_row is not None and not weasy_row.ok:
+        typer.echo("[INFO] Optional WeasyPrint PDF engine: smartrain deps install")
         hint = ubuntu_weasyprint_apt_hint()
         if hint:
             typer.echo(f"[INFO] Ubuntu/Debian WeasyPrint system libraries: {hint}")
@@ -865,7 +866,7 @@ def cmd_deps_install(
         typer.Option("--dry-run", help="Print pip command without running it."),
     ] = False,
 ) -> None:
-    """Install optional pip extras (default: export for PDF/ODT report export)."""
+    """Install optional pip extras (default: export/weasyprint for enhanced PDF export)."""
     from smartrain.services.deps.optional_extras import (
         check_export_deps,
         install_optional_extras,

@@ -24,28 +24,30 @@ smartrain deps install --all-extras
 smartrain deps install --dry-run
 ```
 
-## Report export (`export` extra)
+## Report export
 
-`analyze all` and `dataset report` build Markdown and PNG by default. PDF/ODT need:
+`analyze all` and `dataset report` build Markdown and PNG by default.
 
-- `pypandoc-binary` (bundled pandoc)
-- `weasyprint` (PDF engine when available)
+**Base install** includes:
 
-Install:
+- `pypandoc-binary` (bundled pandoc) for ODT and pandoc-based PDF
+- `fpdf2` / `odfpy` as fallbacks
+
+**Optional `export` extra** adds `weasyprint` as an additional PDF engine:
 
 ```bash
 smartrain deps install
 ```
 
-Verify:
+Verify pandoc and optional WeasyPrint:
 
 ```bash
 smartrain deps doctor
 ```
 
-Exit code `0` when pandoc is available; `1` when export dependencies are missing.
+Exit code `0` when pandoc is available; `1` when pandoc is missing (reinstall `smartrain`).
 
-Manual pip equivalent from source:
+Manual pip equivalent for WeasyPrint only:
 
 ```bash
 pip install -e ".[export]"
@@ -67,7 +69,7 @@ Set `PANDOC=/full/path/to/pandoc` to use a system binary instead of bundled pand
 
 | Extra | Packages (high level) | Purpose |
 |-------|----------------------|---------|
-| `export` | `pypandoc-binary`, `weasyprint` | PDF/ODT reports |
+| `export` | `weasyprint` | Optional WeasyPrint PDF engine |
 | `dev` | `pytest`, `ruff`, `mypy` | Development |
 | `clearml` | `clearml` | Experiment tracking |
 | `sahi` | `sahi` | SAHI inference |

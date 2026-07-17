@@ -25,7 +25,7 @@ def test_deps_doctor_returns_nonzero_when_pandoc_missing(monkeypatch, capsys) ->
         "smartrain.services.deps.optional_extras.check_export_deps",
         lambda: ExportDepsReport(
             rows=(
-                DepCheckRow("pypandoc (export extra)", False, "not installed"),
+                DepCheckRow("pypandoc (base)", False, "not installed"),
                 DepCheckRow("pandoc", False, "not found"),
                 DepCheckRow("weasyprint (export extra)", False, "not installed"),
                 DepCheckRow("fpdf2 (base)", True, "import ok"),
@@ -41,7 +41,7 @@ def test_deps_doctor_returns_nonzero_when_pandoc_missing(monkeypatch, capsys) ->
     out = capsys.readouterr().out
     assert exc.value.exit_code == 1
     assert "Export dependencies doctor" in out
-    assert "Run: smartrain deps install" in out
+    assert "Reinstall smartrain" in out
 
 
 def test_deps_install_dry_run_uses_export_default(capsys) -> None:

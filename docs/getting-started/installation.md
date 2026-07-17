@@ -24,15 +24,15 @@ The `smartrain` command is registered via `pyproject.toml`.
 | `dev` | `pip install -e ".[dev]"` | pytest, ruff, mypy |
 | `clearml` | `pip install -e ".[clearml]"` | ClearML experiment tracking |
 | `sahi` | `pip install -e ".[sahi]"` | SAHI tiled inference |
-| `export` | `pip install -e ".[export]"` or `smartrain deps install` | PDF/ODT report export (`pypandoc-binary`, `weasyprint`) |
+| `export` | `pip install -e ".[export]"` or `smartrain deps install` | WeasyPrint PDF engine (optional; pandoc/ODT work from base install) |
 
 Or install multiple extras: `pip install -e ".[dev,export]"`.
 
 ## Report export (PDF/ODT)
 
-The **base** install is enough for training, analyze Markdown reports, and dataset sample PNG reports.
+The **base** install includes `pypandoc-binary` (bundled `pandoc`) plus `fpdf2`/`odfpy` fallbacks — enough for ODT and basic PDF export in `smartrain analyze all` and `smartrain dataset report`.
 
-PDF and ODT export for `smartrain analyze all` and `smartrain dataset report` require the optional **`export`** extra (`pypandoc-binary` ships a bundled `pandoc` binary; `weasyprint` is used as a PDF engine when available).
+For the optional **WeasyPrint** PDF engine (often better layout on Linux), install the `export` extra:
 
 ```bash
 smartrain deps install

@@ -119,7 +119,7 @@ def _resolve_pandoc_path(candidate: str) -> str | None:
 
 
 def resolve_pandoc_executable(*, quiet: bool = False) -> str | None:
-    """PANDOC env, then PATH, then bundled pandoc from optional ``pypandoc-binary``."""
+    """PANDOC env, then PATH, then bundled pandoc from ``pypandoc-binary`` (base dependency)."""
     raw = (os.environ.get("PANDOC") or "").strip()
     if raw:
         if os.path.isfile(raw):
@@ -162,7 +162,7 @@ def check_pandoc_ready(*, quiet: bool = True) -> tuple[bool, str]:
     exe = resolve_pandoc_executable(quiet=quiet)
     if exe:
         return True, exe
-    return False, "not found (install export extra: smartrain deps install)"
+    return False, "not found (reinstall smartrain or set PANDOC)"
 
 
 def _pandoc_resource_path(out_dir: str, lang: str) -> str:

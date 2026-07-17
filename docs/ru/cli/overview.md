@@ -96,7 +96,7 @@ smartrain model convert --help
 
 Особенности `dataset report`:
 
-- `smartrain dataset report` формирует многоязычный отчёт с примерами по классам (Markdown + PNG; по умолчанию `analytics/datasets-reports/<dataset>_<timestamp>/`). Для PDF/ODT зависимости `pypandoc-binary` и `weasyprint` ставятся через optional extra: `pip install -e ".[export]"`; `fpdf2` и `odfpy` остаются базовыми зависимостями. Для WeasyPrint на некоторых ОС могут понадобиться системные библиотеки (Cairo, Pango), если нет подходящего wheel.
+- `smartrain dataset report` формирует многоязычный отчёт с примерами по классам (Markdown + PNG; по умолчанию `analytics/datasets-reports/<dataset>_<timestamp>/`). Базовая установка включает `pypandoc-binary` (bundled pandoc) и `fpdf2`/`odfpy` для PDF/ODT; optional `pip install -e ".[export]"` или `smartrain deps install` добавляет WeasyPrint как PDF-движок. Для WeasyPrint на некоторых ОС могут понадобиться системные библиотеки (Cairo, Pango).
 
 Особенности `dataset rename`:
 

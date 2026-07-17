@@ -82,7 +82,7 @@ def check_export_deps() -> ExportDepsReport:
     odf_ok, odf_detail = _import_ok("odf")
 
     rows = (
-        DepCheckRow("pypandoc (export extra)", pypandoc_ok, pypandoc_detail),
+        DepCheckRow("pypandoc (base)", pypandoc_ok, pypandoc_detail),
         DepCheckRow("pandoc", pandoc_ok, pandoc_detail),
         DepCheckRow("weasyprint (export extra)", weasy_ok, weasy_detail),
         DepCheckRow("fpdf2 (base)", fpdf_ok, fpdf_detail),
