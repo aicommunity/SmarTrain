@@ -1149,6 +1149,30 @@ def cmd_model_comment(ctx: typer.Context) -> None:
 
 
 @model_app.command(
+    "unrelease",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_model_unrelease(ctx: typer.Context) -> None:
+    """Move a released model back into runs/ and remove it from the release catalog.
+
+    Examples:
+      smartrain model unrelease --release models/my_ds/run_id/models/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --yes
+      smartrain model unrelease --release 1 --yes
+      smartrain model unrelease
+    """
+    from smartrain.workflows.models.model_unrelease_cli import build_model_unrelease_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.models.model_unrelease_cli",
+        build_parser=build_model_unrelease_arg_parser,
+        prog="smartrain model unrelease",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@model_app.command(
     "rename",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
@@ -1177,6 +1201,7 @@ def _model_group_callback(ctx: typer.Context) -> None:
         typer.echo(HELP_MODEL_GROUP)
         typer.echo("Run: smartrain model convert -- --help")
         typer.echo("Run: smartrain model release -- --help")
+        typer.echo("Run: smartrain model unrelease -- --help")
         typer.echo("Run: smartrain model comment -- --help")
         typer.echo("Run: smartrain model rename -- --help")
         raise typer.Exit(0)

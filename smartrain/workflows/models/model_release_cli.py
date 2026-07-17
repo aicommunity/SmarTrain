@@ -25,7 +25,6 @@ from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.workflows.analyze.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
-from smartrain.core.runtime.run_bundle_copy import copy_run_bundle
 from smartrain.services.analyze.metrics_reader import results_csv_path, training_args_yaml_path
 from smartrain.services.models.release_model_naming import (
     build_model_weights_stem_from_metadata,
@@ -305,14 +304,27 @@ def _target_paths(layout: WorkspaceLayout, run_dir: Path, md: dict[str, Any]) ->
     else:
         stem = sanitize_release_stem(stem)
     release_dir = (Path(layout.models) / dataset_name / release_folder).resolve()
-    target_pt = (release_dir / f"{stem}.pt").resolve()
-    target_json = (release_dir / f"{stem}.json").resolve()
+    models_dir = (release_dir / "models").resolve()
+    target_pt = (models_dir / f"{stem}.pt").resolve()
+    target_json = (models_dir / f"{stem}.json").resolve()
     return release_dir, target_pt, target_json
 
 
-def _copy_run_results(run_dir: Path, release_dir: Path) -> None:
-    """Delegate to shared bundle copy (release keeps legacy scope: no ``tests/``, no ``models/``)."""
-    copy_run_bundle(run_dir, release_dir, include_tests=False, copy_run_models=False)
+def _run_still_in_workspace_runs(layout: WorkspaceLayout, run_dir: Path) -> bool:
+    try:
+        runs_root = Path(layout.runs).resolve()
+        return run_dir.resolve().is_relative_to(runs_root)
+    except Exception:
+        return False
+
+
+def _remove_duplicate_run(run_dir: Path) -> None:
+    shutil.rmtree(str(run_dir))
+
+
+def _rollback_release_move(release_dir: Path, original_run_dir: Path) -> None:
+    if release_dir.is_dir() and not original_run_dir.is_dir():
+        shutil.move(str(release_dir), str(original_run_dir))
 
 
 def _same_release(
@@ -402,6 +414,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[INFO] Target release dir: {release_dir}")
         print(f"[INFO] Target model: {target_pt}")
         print(f"[INFO] Target json: {target_json}")
+        print("[INFO] The run directory will be moved from runs/ into models/ (no duplicate left in runs/).")
         if release_comment.strip():
             print(f"[INFO] Comment: {release_comment}")
         if not prompt_yes_no("Proceed with release?", default=True):
@@ -417,41 +430,56 @@ def main(argv: list[str] | None = None) -> None:
         source_weights_name=source_best.name,
     )
     if same:
-        print(f"[OK] Already released, nothing to do: {target_pt} ({reason})")
+        if _run_still_in_workspace_runs(layout, run_dir):
+            _remove_duplicate_run(run_dir)
+            print(f"[OK] Already released; removed duplicate run from runs/: {run_dir}")
+        else:
+            print(f"[OK] Already released, nothing to do: {target_pt} ({reason})")
         if interactive_used:
             replay_cmd = build_non_interactive_command("model release", parser, args)
             print_replay_command("model release", replay_cmd)
         raise SystemExit(0)
-    if target_pt.exists():
+    if release_dir.exists():
         print(
-            f"[ERROR] Target model already exists but differs: {target_pt} ({reason}).",
+            f"[ERROR] Target release directory already exists but differs: {release_dir} ({reason}).",
             file=sys.stderr,
         )
         raise SystemExit(1)
 
-    release_dir.mkdir(parents=True, exist_ok=True)
-    _copy_run_results(run_dir, release_dir)
-    shutil.copy2(str(source_best), str(target_pt))
-    payload = _build_release_json(
-        run_dir=run_dir,
-        run_rel=run_rel,
-        md=md,
-        source_best=source_best,
-        source_sha=source_sha,
-        target_pt=target_pt,
-        release_dir=release_dir,
-        comment=release_comment,
-        layout=layout,
-    )
-    target_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    released_at = str((payload.get("source") or {}).get("released_at") or "")
-    upsert_entry(
-        layout,
-        entry_key=entry_key_for_pt(target_pt),
-        model_path=target_pt,
-        comment=release_comment,
-        released_at=released_at or None,
-    )
+    release_parent = release_dir.parent
+    release_parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.move(str(run_dir), str(release_dir))
+    except Exception as e:
+        print(f"[ERROR] Failed to move run into release catalog: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
+
+    try:
+        payload = _build_release_json(
+            run_dir=release_dir,
+            run_rel=run_rel,
+            md=md,
+            source_best=target_pt,
+            source_sha=source_sha,
+            target_pt=target_pt,
+            release_dir=release_dir,
+            comment=release_comment,
+            layout=layout,
+        )
+        target_json.parent.mkdir(parents=True, exist_ok=True)
+        target_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        released_at = str((payload.get("source") or {}).get("released_at") or "")
+        upsert_entry(
+            layout,
+            entry_key=entry_key_for_pt(target_pt),
+            model_path=target_pt,
+            comment=release_comment,
+            released_at=released_at or None,
+        )
+    except Exception as e:
+        _rollback_release_move(release_dir, run_dir)
+        print(f"[ERROR] Release failed after move; run restored to runs/: {e}", file=sys.stderr)
+        raise SystemExit(1) from e
 
     print(f"[OK] Released model: {target_pt}")
     print(f"[OK] Released metadata: {target_json}")

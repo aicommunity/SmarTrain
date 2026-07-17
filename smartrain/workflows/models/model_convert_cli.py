@@ -1127,8 +1127,17 @@ def _guess_run_root_for_path(path: Path) -> Path | None:
 
 
 def _keep_trtprep_cache_after_build(source_path: Path) -> bool:
-    """Keep dedicated *_trtprep.onnx only for real training runs (idempotent TRT rebuilds)."""
-    return _guess_run_root_for_path(source_path) is not None
+    """Keep dedicated *_trtprep.onnx for training runs and unified release bundles."""
+    if _guess_run_root_for_path(source_path) is not None:
+        return True
+    if source_path.suffix.lower() == ".pt":
+        from smartrain.services.models.release_models_manifest import (
+            is_unified_release_bundle,
+            release_dir_for_pt,
+        )
+
+        return is_unified_release_bundle(release_dir_for_pt(source_path))
+    return False
 
 
 def _guess_run_tmp_dir_for_path(path: Path) -> Path | None:

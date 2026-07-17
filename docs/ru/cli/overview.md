@@ -13,7 +13,7 @@
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
-- Модели: `model convert`, `model release`, `model comment`, `model rename`
+- Модели: `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`
 - Каталог датасетов: `dataset report`, `dataset rename`
 - Инструменты форматов: `dataset convert`, `sahi`, `heatmap`, `vis`
 - Миграция: `migrate`, `migrate-models`
@@ -38,7 +38,7 @@ smartrain model convert --help
 
 - интерактив включается только при запуске команды без аргументов (TTY обязателен);
 - выбор датасета(ов): сразу нумерованный список; ввод по имени или по номеру (несколько датасетов — через CSV номеров или имён);
-- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model comment`, `model rename` пустой вызов запускает интерактивный режим;
+- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model unrelease`, `model comment`, `model rename` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
 
@@ -62,16 +62,23 @@ smartrain model convert --help
 - В интерактивном режиме команда автоматически находит `.pt/.onnx` в `models/` и `runs/` workspace и даёт выбор источника по номеру или ручной ввод пути.
 - Выходные модели выбираются отдельно (`onnx`, `engine`, `trt`) с мультивыбором (`1,2` или `onnx,trt`), недоступные варианты показываются с причиной.
 - Для run-источников интерактивный выбор использует канонические файлы весов в `models/` (detect_* stem при наличии; legacy `<run_dir_name>.pt` тоже находится). Legacy-раскладка run автоматически канонизируется при первом обращении.
-- Release-модели сохраняют имя папки исходного run (`models/<dataset>/<run_name>/`), а файлы весов — `detect_<model>_<YYYYMMDD_HHMMSS>_<imgsz>px_<epochs>epochs_b<batch>.pt` (+ такой же `.json`/convert). Convert пишет короткие `{stem}.onnx`/`.engine`/`.trt` рядом с `.pt` и для runs, и для release.
-- Dedicated `*_trtprep.onnx` — внутренний кэш только для `trtexec`: создаётся при запросе TensorRT-trt, сохраняется после успеха для training runs и удаляется для каталога/release. Чистый `--format onnx` не пишет `*_trtprep`.
+- Release-модели сохраняют имя папки исходного run (`models/<dataset>/<run_name>/`); внутренняя структура совпадает с run (веса и convert в `models/<stem>.*`, sidecar `models/<stem>.json`). Convert пишет короткие `{stem}.onnx`/`.engine`/`.trt` рядом с `.pt` и для runs, и для release.
+- Dedicated `*_trtprep.onnx` — внутренний кэш только для `trtexec`: создаётся при запросе TensorRT-trt, сохраняется после успеха для training runs и unified release; удаляется только для legacy flat catalog release. Чистый `--format onnx` не пишет `*_trtprep`.
 
 Особенности `model release`:
 
-- `smartrain model release` публикует canonical run `.pt` в `models/<dataset>/<run_dir_name>/` (папка сохраняет имя training run; веса/sidecar — detect_* stem).
-- Совместимые раскладки (их находят inference/analyze/ROI): **R3** текущая `…/<run_id>/detect_*.pt`; **R1** `…/<detect_stem>/models/<detect_stem>.pt`; **R2** sibling `…/<stem>.pt` рядом с `…/<stem>/`. Подробнее: [`../../refactor/run-layout.md`](../../refactor/run-layout.md).
+- `smartrain model release` **перемещает** весь run из `runs/` в `models/<dataset>/<run_dir_name>/` (дубликат в `runs/` не остаётся). Веса и sidecar — `models/<detect_stem>.pt` + `models/<detect_stem>.json`.
+- Совместимые раскладки (их находят inference/analyze/ROI): **R3 unified** `…/<run_id>/models/detect_*.pt` (текущая); **R3 legacy** `…/<run_id>/detect_*.pt` в корне; **R1** `…/<detect_stem>/models/<detect_stem>.pt`; **R2** sibling `…/<stem>.pt` рядом с `…/<stem>/`. Подробнее: [`../../refactor/run-layout.md`](../../refactor/run-layout.md).
 - Общий каталог `models/releases_manifest.json` хранит однострочные комментарии (ключи `<dataset>/<weight_stem>`, с fallback по имени папки для R3); тот же комментарий дублируется в sidecar JSON модели.
 - В интерактивном режиме запрашивается необязательный однострочный комментарий (на любом языке); в non-interactive — флаг `--comment`.
-- Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`).
+- Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`); если дубль run ещё в `runs/` — безопасно удаляется.
+
+Особенности `model unrelease`:
+
+- `smartrain model unrelease` удаляет запись из `releases_manifest.json`, снимает release-sidecar и **перемещает** каталог обратно в `runs/<dataset>/<run_dir_name>/`.
+- Для legacy root-level release convert-артефакты переносятся в `models/` перед возвратом.
+- Если целевой `runs/...` уже существует — ошибка (типично для старых copy-дублей).
+- Non-interactive режим требует `--yes`.
 
 Особенности `model comment`:
 

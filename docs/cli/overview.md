@@ -13,7 +13,7 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
-- Models: `model convert`, `model release`, `model comment`, `model rename`
+- Models: `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`
 - Dataset catalog: `dataset report`, `dataset rename`
 - Format tools: `dataset convert`, `sahi`, `heatmap`, `vis`
 - Migration: `migrate`, `migrate-models`
@@ -44,7 +44,7 @@ smartrain <group> <subcommand> -- --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `inference`, `model convert`, `model release`, `model comment`, `model rename`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `inference`, `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -68,8 +68,8 @@ Model convert highlights:
 - Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows source selection by number or manual path input.
 - Target selection is model-based (`onnx`, `engine`, `trt`) with multi-select input (`1,2` or `onnx,trt`), and unavailable targets are shown with reason.
 - For run sources, interactive discovery uses canonical run weight files under `models/` (detect_* stem when available; legacy `<run_dir_name>.pt` still resolves). Legacy run layouts are canonized automatically on first access.
-- Released models keep the source run folder name under `models/<dataset>/<run_name>/`, while weight files use `detect_<model>_<YYYYMMDD_HHMMSS>_<imgsz>px_<epochs>epochs_b<batch>.pt` (+ matching `.json`/convert). Convert writes short `{stem}.onnx`/`.engine`/`.trt` next to the `.pt` for both runs and releases.
-- Dedicated `*_trtprep.onnx` is an internal cache for `trtexec` only: created when TensorRT-trt is requested, kept for training runs after success, and cleaned up for catalog/release models. Pure `--format onnx` does not write `*_trtprep`.
+- Released models keep the source run folder name under `models/<dataset>/<run_name>/`; internal layout matches runs (weights and convert under `models/<stem>.*`, sidecar `models/<stem>.json`). Convert writes short `{stem}.onnx`/`.engine`/`.trt` next to the `.pt` for both runs and releases.
+- Dedicated `*_trtprep.onnx` is an internal cache for `trtexec` only: created when TensorRT-trt is requested, kept after success for training runs and unified releases; removed only for legacy flat catalog releases. Pure `--format onnx` does not write `*_trtprep`.
 
 Inference highlights:
 
@@ -82,11 +82,18 @@ Inference highlights:
 
 Model release highlights:
 
-- `smartrain model release` publishes the canonical run `.pt` into `models/<dataset>/<run_dir_name>/` (folder keeps the training run name; weight/sidecar files use the detect_* weights stem).
-- Compatible layouts (inference/analyze/ROI discover all of them): **R3** current `…/<run_id>/detect_*.pt`; **R1** `…/<detect_stem>/models/<detect_stem>.pt`; **R2** sibling `…/<stem>.pt` next to `…/<stem>/`. Details: [`../refactor/run-layout.md`](../refactor/run-layout.md).
+- `smartrain model release` **moves** the full run from `runs/` into `models/<dataset>/<run_dir_name>/` (no duplicate left in `runs/`). Weights and sidecar live under `models/<detect_stem>.pt` + `models/<detect_stem>.json`.
+- Compatible layouts (inference/analyze/ROI discover all of them): **R3 unified** `…/<run_id>/models/detect_*.pt` (current); **R3 legacy** `…/<run_id>/detect_*.pt` at bundle root; **R1** `…/<detect_stem>/models/<detect_stem>.pt`; **R2** sibling `…/<stem>.pt` next to `…/<stem>/`. Details: [`../refactor/run-layout.md`](../refactor/run-layout.md).
 - A global catalog `models/releases_manifest.json` stores one-line comments (keys `<dataset>/<weight_stem>`, with folder-name fallback for R3); the same comment is duplicated in each model's sidecar JSON.
 - Interactive mode prompts for an optional one-line comment (any language); non-interactive mode accepts `--comment`.
-- Re-running for the same run with the same source hash performs a no-op skip.
+- Re-running for the same run with the same source hash performs a no-op skip; if a duplicate run still exists under `runs/`, it is removed safely.
+
+Model unrelease highlights:
+
+- `smartrain model unrelease` removes the manifest entry, deletes the release sidecar, and **moves** the bundle back to `runs/<dataset>/<run_dir_name>/`.
+- For legacy root-level releases, convert artifacts are relocated into `models/` before the move.
+- Fails if the target `runs/...` path already exists (typical for old copy-era duplicates).
+- Non-interactive mode requires `--yes`.
 
 Model comment highlights:
 

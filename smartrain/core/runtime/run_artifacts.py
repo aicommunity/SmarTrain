@@ -463,6 +463,16 @@ def _looks_like_release_bundle_dir(root: Path) -> bool:
         if any(root.glob(f"{prefix}*.pt")):
             return True
     models = root / "models"
+    if models.is_dir():
+        for pt in sorted(models.glob("*.pt")):
+            sidecar = models / f"{pt.stem}.json"
+            if sidecar.is_file():
+                try:
+                    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+                except Exception:
+                    payload = None
+                if isinstance(payload, dict) and payload.get("source") and payload.get("artifacts"):
+                    return True
     if models.is_dir() and root.name.startswith(("detect_", "segment_", "classify_")):
         nested = models / f"{root.name}.pt"
         if nested.is_file():

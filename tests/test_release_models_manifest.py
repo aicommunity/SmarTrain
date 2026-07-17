@@ -88,8 +88,8 @@ def test_target_paths_keep_run_folder_and_use_weights_stem(tmp_path: Path) -> No
     }
     release_dir, target_pt, target_json = _target_paths(layout, run_dir, md)
     assert release_dir.name == run_dir.name
-    assert target_pt.parent == release_dir
-    assert target_json.parent == release_dir
+    assert target_pt.parent == release_dir / "models"
+    assert target_json.parent == release_dir / "models"
     assert target_pt.name == "detect_yolo11s_20260706_030258_640px_400epochs_b16.pt"
     assert target_json.name == "detect_yolo11s_20260706_030258_640px_400epochs_b16.json"
 

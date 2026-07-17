@@ -73,16 +73,17 @@ Quick examples:
   smartrain dataset rename
 """
 
-HELP_MODEL_GROUP = """Model tools (convert, release, comment, rename).
+HELP_MODEL_GROUP = """Model tools (convert, release, unrelease, comment, rename).
 
 Quick examples:
   smartrain model convert
-  smartrain model convert --input models/ds/run_id/detect_yolo11s_….pt --format onnx
+  smartrain model convert --input models/ds/run_id/models/detect_yolo11s_….pt --format onnx
   smartrain model convert --input runs/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/models/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --format tensorrt-engine --precision fp16
   smartrain model convert --input models/my_model.onnx --format tensorrt-trt
   smartrain model release --run runs/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234
+  smartrain model unrelease --release 1 --yes
   smartrain model comment --release 1 --comment "Production line 3"
-  smartrain model rename --release models/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --new-name my_detector_v2
+  smartrain model rename --release models/my_ds/2026-01-01_00-00-00_ultralytics_yolo11s_640px_100epochs_b16-abcd1234/models/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --new-name my_detector_v2
 
 Interactive convert:
   - choose source model type: pt or onnx

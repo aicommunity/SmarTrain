@@ -215,10 +215,11 @@ COMMANDS: dict[str, CommandHelp] = {
     ),
     "model": CommandHelp(
         name="model",
-        summary="Convert, release, comment on, and rename workspace models.",
+        summary="Convert, release, unrelease, comment on, and rename workspace models.",
         description=(
-            "Export to ONNX/TensorRT, release run weights into models/, set one-line comments, "
-            "and rename released artifacts. Subcommands: convert, release, comment, rename."
+            "Export to ONNX/TensorRT, release run weights into models/, move releases back to runs/, "
+            "set one-line comments, and rename released artifacts. "
+            "Subcommands: convert, release, unrelease, comment, rename."
         ),
     ),
     "sahi": CommandHelp(

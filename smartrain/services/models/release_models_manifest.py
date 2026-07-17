@@ -56,20 +56,58 @@ def save_manifest(layout: WorkspaceLayout, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _artifact_release_dir(pt_path: Path) -> Path | None:
+    meta = load_release_metadata(release_json_path_for_pt(pt_path))
+    if not meta:
+        return None
+    artifacts = meta.get("artifacts") or {}
+    release_dir = artifacts.get("release_dir")
+    if not isinstance(release_dir, str) or not release_dir.strip():
+        return None
+    try:
+        return Path(release_dir).expanduser().resolve()
+    except Exception:
+        return None
+
+
+def release_dir_for_pt(pt_path: Path) -> Path:
+    artifact_dir = _artifact_release_dir(pt_path)
+    if artifact_dir is not None:
+        return artifact_dir
+    # Unified layout: weights under ``<bundle>/models/<stem>.pt``.
+    if pt_path.parent.name == "models":
+        parent = pt_path.parent.parent
+        if parent.is_dir() and _path_has_ancestor_named(parent, "models"):
+            return parent.resolve()
+    # Legacy R1: bundle folder name matched the weight stem.
+    if pt_path.parent.name == pt_path.stem:
+        return pt_path.parent.resolve()
+    # R2 / legacy flat sibling bundle dir.
+    return (pt_path.parent / pt_path.stem).resolve()
+
+
 def is_nested_release_layout(pt_path: Path) -> bool:
     if not pt_path.is_file() or pt_path.suffix.lower() != ".pt":
         return False
-    meta = load_release_metadata(release_json_path_for_pt(pt_path))
-    if meta:
-        artifacts = meta.get("artifacts") or {}
-        release_dir = artifacts.get("release_dir")
-        if isinstance(release_dir, str) and release_dir.strip():
-            try:
-                return Path(release_dir).expanduser().resolve() == pt_path.parent.resolve()
-            except Exception:
-                pass
-    # Legacy layout: release folder name matched the weight stem.
-    return pt_path.parent.name == pt_path.stem
+    bundle_root = release_dir_for_pt(pt_path)
+    parent = pt_path.parent.resolve()
+    if parent == bundle_root.resolve():
+        return True
+    return parent.name == "models" and parent.parent.resolve() == bundle_root.resolve()
+
+
+def is_unified_release_bundle(release_dir: Path) -> bool:
+    """True when release keeps run-like tree with canonical weights under ``models/``."""
+    d = release_dir.expanduser().resolve()
+    if not d.is_dir():
+        return False
+    models_sub = d / "models"
+    if not models_sub.is_dir():
+        return False
+    for pt in sorted(models_sub.glob("*.pt")):
+        if load_release_metadata(release_json_path_for_pt(pt)):
+            return True
+    return False
 
 
 def find_release_pt_in_dir(directory: Path) -> Path | None:
@@ -77,6 +115,11 @@ def find_release_pt_in_dir(directory: Path) -> Path | None:
     d = directory.expanduser().resolve()
     if not d.is_dir():
         return None
+    models_sub = d / "models"
+    if models_sub.is_dir():
+        for pt in sorted(models_sub.glob("*.pt")):
+            if pt.is_file() and load_release_metadata(release_json_path_for_pt(pt)):
+                return pt
     legacy = d / f"{d.name}.pt"
     if legacy.is_file() and load_release_metadata(release_json_path_for_pt(legacy)):
         return legacy
@@ -128,16 +171,8 @@ def is_workspace_release_bundle(path: Path) -> bool:
     return False
 
 
-def release_dir_for_pt(pt_path: Path) -> Path:
-    if is_nested_release_layout(pt_path):
-        return pt_path.parent.resolve()
-    return pt_path.parent / pt_path.stem
-
-
 def dataset_name_for_pt(pt_path: Path) -> str:
-    if is_nested_release_layout(pt_path):
-        return pt_path.parent.parent.name
-    return pt_path.parent.name
+    return release_dir_for_pt(pt_path).parent.name
 
 
 def entry_key_for_pt(pt_path: Path) -> str:
@@ -200,7 +235,16 @@ def get_comment_for_pt(layout: WorkspaceLayout, pt_path: Path) -> str:
 
 
 def _comment_from_release_sidecars(directory: Path) -> str:
-    """Read ``comment`` from any release metadata ``*.json`` in the folder root."""
+    """Read ``comment`` from any release metadata ``*.json`` in the bundle."""
+    models_sub = directory / "models"
+    if models_sub.is_dir():
+        for jp in sorted(models_sub.glob("*.json")):
+            payload = load_release_metadata(jp)
+            if not payload:
+                continue
+            comment = payload.get("comment")
+            if comment is not None and str(comment).strip():
+                return str(comment).strip()
     for jp in sorted(directory.glob("*.json")):
         payload = load_release_metadata(jp)
         if not payload:
@@ -314,6 +358,16 @@ def set_comment(layout: WorkspaceLayout, entry_key: str, comment: str) -> None:
     existing["comment_updated_at"] = _now_iso()
     entries[entry_key] = existing
     save_manifest(layout, manifest)
+
+
+def remove_entry(layout: WorkspaceLayout, entry_key: str) -> bool:
+    manifest = load_manifest(layout)
+    entries = manifest.get("entries")
+    if not isinstance(entries, dict) or entry_key not in entries:
+        return False
+    entries.pop(entry_key, None)
+    save_manifest(layout, manifest)
+    return True
 
 
 def rename_entry(
