@@ -6,6 +6,8 @@ import json
 import shutil
 from pathlib import Path
 
+import yaml
+
 from smartrain.core.runtime.run_artifacts import (
     ensure_run_layout,
     materialize_preferred_run_model,
@@ -13,7 +15,10 @@ from smartrain.core.runtime.run_artifacts import (
     preferred_run_model_path,
 )
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
-from smartrain.services.datasets.data_yaml_normalize import normalize_data_yaml_file
+from smartrain.services.datasets.data_yaml_normalize import (
+    normalize_data_yaml_file,
+    normalize_data_yaml_mapping,
+)
 from smartrain.services.models.release_model_naming import load_release_metadata, release_json_path_for_pt
 from smartrain.services.models.release_models_manifest import (
     entry_key_for_pt,
@@ -22,52 +27,140 @@ from smartrain.services.models.release_models_manifest import (
     save_manifest,
     upsert_entry,
 )
+from smartrain.services.update.path_norm import (
+    needs_path_rewrite,
+    normalize_stored_path,
+    to_posix_rel,
+    workspace_rel_posix,
+)
 from smartrain.services.update.plan import UpdateRisk, UpdateStatus, UpdateStep
 
 
 def _workspace_rel(layout: WorkspaceLayout, path: Path) -> str:
-    root = Path(layout.root).resolve()
-    p = path.resolve()
-    try:
-        return str(p.relative_to(root))
-    except ValueError:
-        return str(p)
+    return workspace_rel_posix(layout, path)
 
 
-def _rewrite_sidecar_paths(layout: WorkspaceLayout, json_path: Path) -> None:
+def _rewrite_sidecar_paths(layout: WorkspaceLayout, json_path: Path) -> tuple[bool, str]:
+    """
+    Rewrite abs / backslash paths in a release sidecar to workspace-relative POSIX.
+
+    Returns ``(ok, message)``. ``ok`` is False when a field still needs rewrite but
+    could not be remapped.
+    """
     payload = load_release_metadata(json_path)
     if not payload:
-        return
-    root = Path(layout.root).resolve()
-    changed = False
+        return False, "unreadable sidecar"
+    release_dir: Path | None = None
+    try:
+        # Sidecar lives at <release>/models/<stem>.json
+        if json_path.parent.name == "models":
+            release_dir = json_path.parent.parent
+        else:
+            release_dir = json_path.parent
+    except Exception:
+        release_dir = None
 
-    def _rel_or_keep(value: str) -> str:
+    changed = False
+    failed: list[str] = []
+
+    def _rel_or_fail(field: str, value: str) -> str:
         nonlocal changed
-        p = Path(value)
-        if not p.is_absolute() and not (len(value) > 2 and value[1] == ":"):
-            return value
-        try:
-            rp = p.resolve()
-            if rp.is_relative_to(root):
+        if not needs_path_rewrite(value) and "\\" not in value:
+            # Still canonicalize legacy train/test tails when possible
+            remapped = normalize_stored_path(layout, value, release_dir=release_dir)
+            if remapped is not None and remapped != to_posix_rel(value):
                 changed = True
-                return str(rp.relative_to(root))
-        except Exception:
-            pass
-        return value
+                return remapped
+            posix = to_posix_rel(value)
+            if posix != value:
+                changed = True
+            return posix
+        remapped = normalize_stored_path(layout, value, release_dir=release_dir)
+        if remapped is None:
+            failed.append(field)
+            return value
+        if remapped != value:
+            changed = True
+        return remapped
 
     artifacts = payload.get("artifacts")
     if isinstance(artifacts, dict):
         for key in ("model_path", "json_path", "release_dir", "train_copy_dir", "test_copy_dir"):
             val = artifacts.get(key)
             if isinstance(val, str) and val.strip():
-                artifacts[key] = _rel_or_keep(val)
+                artifacts[key] = _rel_or_fail(f"artifacts.{key}", val)
     source = payload.get("source")
     if isinstance(source, dict):
-        sr = source.get("source_run")
-        if isinstance(sr, str) and sr.strip():
-            source["source_run"] = _rel_or_keep(sr)
+        for key in ("source_run", "source_run_relative"):
+            sr = source.get(key)
+            if isinstance(sr, str) and sr.strip():
+                if key == "source_run_relative" and not needs_path_rewrite(sr):
+                    posix = to_posix_rel(sr)
+                    if posix != sr:
+                        changed = True
+                        source[key] = posix
+                else:
+                    source[key] = _rel_or_fail(f"source.{key}", sr)
+
     if changed:
         json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if failed:
+        return False, f"could not remap: {', '.join(failed)}"
+    return True, "sidecar paths rewritten" if changed else "already relative posix"
+
+
+def _normalize_runtime_data_yaml(layout: WorkspaceLayout, yaml_path: Path) -> tuple[bool, str]:
+    """Strip abs ``path:`` and force POSIX relative splits in a runtime data yaml."""
+    if not yaml_path.is_file():
+        return False, "missing"
+    try:
+        raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return False, f"read error: {e}"
+    if not isinstance(raw, dict):
+        return False, "not a mapping"
+
+    # Prefer dataset root from path: if remappable under workspace datasets/
+    path_val = raw.get("path")
+    dataset_root = yaml_path.parent
+    if isinstance(path_val, str) and path_val.strip():
+        remapped = normalize_stored_path(layout, path_val, must_exist=False)
+        if remapped and remapped.startswith("datasets/"):
+            dataset_root = Path(layout.root) / remapped
+        elif (yaml_path.parent.parent.name in {"runs", "models"} or True):
+            # Fall back: use remapped path only for normalize root when it exists
+            if remapped:
+                cand = Path(layout.root) / remapped
+                if cand.is_dir():
+                    dataset_root = cand
+
+    new_data = normalize_data_yaml_mapping(str(dataset_root), raw)
+    # Force posix on split strings
+    for k in ("train", "val", "test", "minival"):
+        v = new_data.get(k)
+        if isinstance(v, str):
+            new_data[k] = to_posix_rel(v)
+        elif isinstance(v, list):
+            new_data[k] = [to_posix_rel(str(x)) for x in v]
+
+    order_first = ("train", "val", "test", "minival")
+    ordered: dict = {}
+    for k in order_first:
+        if k in new_data:
+            ordered[k] = new_data[k]
+    for k, v in new_data.items():
+        if k not in ordered:
+            ordered[k] = v
+    new_dump = yaml.safe_dump(ordered, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    try:
+        old = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        unchanged = old == yaml.safe_load(new_dump)
+    except Exception:
+        unchanged = False
+    if unchanged:
+        return False, "already normalized"
+    yaml_path.write_text(new_dump, encoding="utf-8")
+    return True, "runtime yaml normalized"
 
 
 def _unify_root_release(layout: WorkspaceLayout, pt_path: Path) -> None:
@@ -88,7 +181,6 @@ def _unify_root_release(layout: WorkspaceLayout, pt_path: Path) -> None:
     new_json = models_sub / f"{stem}.json"
     if new_json.is_file():
         _rewrite_sidecar_paths(layout, new_json)
-        # Patch artifacts to nested locations
         payload = load_release_metadata(new_json)
         if payload:
             artifacts = payload.setdefault("artifacts", {})
@@ -103,7 +195,6 @@ def _unify_root_release(layout: WorkspaceLayout, pt_path: Path) -> None:
         manifest = load_manifest(layout)
         entries = manifest.get("entries") or {}
         if isinstance(entries, dict):
-            # Prefer existing stem key or folder key
             folder_key = f"{release_dir.parent.name}/{release_dir.name}"
             for cand in (key, folder_key):
                 ent = entries.get(cand)
@@ -122,8 +213,6 @@ def _unify_r2_release(layout: WorkspaceLayout, sibling_pt: Path, release_dir: Pa
     dest_pt = models_sub / sibling_pt.name
     if not dest_pt.exists():
         shutil.move(str(sibling_pt), str(dest_pt))
-    sibling_json = release_json_path_for_pt(sibling_pt if sibling_pt.exists() else dest_pt)
-    # json may still be next to old sibling location
     old_json = sibling_pt.parent / f"{stem}.json"
     dest_json = models_sub / f"{stem}.json"
     if old_json.is_file() and not dest_json.exists():
@@ -161,14 +250,11 @@ def apply_step(layout: WorkspaceLayout, step: UpdateStep, *, dry_run: bool) -> U
     try:
         action = step.action
         if action in {"migrate_train", "migrate_tests", "migrate_layout"}:
-            # Path detail is relative run root for most layout steps
             root = Path(layout.root) / step.detail if step.detail and not step.detail.startswith("/") else Path(step.detail or layout.root)
-            # Prefer first path's parent for root-file style ids
             if step.paths:
                 p0 = Path(step.paths[0])
                 if not p0.is_absolute():
                     p0 = Path(layout.root) / p0
-                # For train/test dirs, parent is run root; for files too
                 if p0.name in {"train", "test", "test-ultralytics"} or p0.name.startswith("test_"):
                     root = p0.parent
                 elif p0.is_file():
@@ -176,8 +262,18 @@ def apply_step(layout: WorkspaceLayout, step: UpdateStep, *, dry_run: bool) -> U
                 elif (p0 / "training_metadata.json").is_file() or (p0 / "train").is_dir():
                     root = p0
             ensure_run_layout(str(root))
+            # If root runtime yaml still present with identical tmp, ensure_run_layout removes it.
+            # Differing content is handled by drop_root_runtime_yaml ASK steps.
             step.status = UpdateStatus.APPLIED
             step.message = "layout migrated"
+        elif action == "drop_root_runtime_yaml":
+            src = Path(step.paths[0])
+            if not src.is_absolute():
+                src = Path(layout.root) / src
+            if src.is_file():
+                src.unlink()
+            step.status = UpdateStatus.APPLIED
+            step.message = "root runtime yaml removed (kept tmp/)"
         elif action == "materialize_weights":
             root = Path(layout.root)
             if len(step.paths) >= 2:
@@ -211,9 +307,13 @@ def apply_step(layout: WorkspaceLayout, step: UpdateStep, *, dry_run: bool) -> U
             jp = Path(step.paths[0])
             if not jp.is_absolute():
                 jp = Path(layout.root) / jp
-            _rewrite_sidecar_paths(layout, jp)
-            step.status = UpdateStatus.APPLIED
-            step.message = "sidecar paths rewritten"
+            ok, msg = _rewrite_sidecar_paths(layout, jp)
+            if ok:
+                step.status = UpdateStatus.APPLIED
+                step.message = msg
+            else:
+                step.status = UpdateStatus.FAILED
+                step.message = msg
         elif action == "rekey_manifest":
             old_key, new_key = step.paths[0], step.paths[1]
             manifest = load_manifest(layout)
@@ -231,14 +331,14 @@ def apply_step(layout: WorkspaceLayout, step: UpdateStep, *, dry_run: bool) -> U
             entries = manifest.get("entries") or {}
             if isinstance(entries, dict) and key in entries and isinstance(entries[key], dict):
                 mp = entries[key].get("model_path")
-                if isinstance(mp, str):
-                    p = Path(mp)
-                    if p.is_absolute():
-                        try:
-                            entries[key]["model_path"] = str(p.resolve().relative_to(Path(layout.root).resolve()))
-                            save_manifest(layout, manifest)
-                        except Exception:
-                            pass
+                if isinstance(mp, str) and mp.strip():
+                    remapped = normalize_stored_path(layout, mp)
+                    if remapped is None:
+                        step.status = UpdateStatus.FAILED
+                        step.message = f"could not remap model_path: {mp}"
+                        return step
+                    entries[key]["model_path"] = remapped
+                    save_manifest(layout, manifest)
             step.status = UpdateStatus.APPLIED
             step.message = "manifest path relativized"
         elif action == "drop_manifest_entry":
@@ -250,6 +350,13 @@ def apply_step(layout: WorkspaceLayout, step: UpdateStep, *, dry_run: bool) -> U
             if not yaml_path.is_absolute():
                 yaml_path = Path(layout.root) / yaml_path
             changed, msg = normalize_data_yaml_file(str(yaml_path.parent), dry_run=False)
+            step.status = UpdateStatus.APPLIED if changed else UpdateStatus.SKIPPED
+            step.message = msg
+        elif action == "normalize_runtime_yaml":
+            yaml_path = Path(step.paths[0])
+            if not yaml_path.is_absolute():
+                yaml_path = Path(layout.root) / yaml_path
+            changed, msg = _normalize_runtime_data_yaml(layout, yaml_path)
             step.status = UpdateStatus.APPLIED if changed else UpdateStatus.SKIPPED
             step.message = msg
         elif action == "normalize_metadata":

@@ -18,6 +18,7 @@ from smartrain.services.models.release_models_manifest import (
     is_unified_release_bundle,
     load_manifest,
 )
+from smartrain.services.update.path_norm import needs_path_rewrite, to_posix_rel, workspace_rel_posix
 from smartrain.services.update.plan import (
     UpdateCategory,
     UpdatePlan,
@@ -39,12 +40,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _rel(layout: WorkspaceLayout, path: Path) -> str:
-    root = Path(layout.root).resolve()
-    p = path.resolve()
-    try:
-        return str(p.relative_to(root))
-    except ValueError:
-        return str(p)
+    return workspace_rel_posix(layout, path)
 
 
 def _iter_run_like_dirs(layout: WorkspaceLayout) -> list[Path]:
@@ -54,7 +50,6 @@ def _iter_run_like_dirs(layout: WorkspaceLayout) -> list[Path]:
             continue
         for p in find_run_directories(str(base)):
             found.append(Path(p).resolve())
-    # Also pick dirs with training_metadata under models that find_run_directories may miss.
     models = Path(layout.models)
     if models.is_dir():
         for meta in models.rglob("training_metadata.json"):
@@ -139,7 +134,10 @@ def _scan_layout(layout: WorkspaceLayout, root: Path, steps: list[UpdateStep]) -
 
     for name in ("_runtime_data_train.yaml", "_runtime_data_test.yaml"):
         src = root / name
-        if src.is_file():
+        if not src.is_file():
+            continue
+        dst = root / "tmp" / name
+        if not dst.is_file():
             steps.append(
                 UpdateStep(
                     id=f"layout-runtime-yaml:{rel}:{name}",
@@ -151,6 +149,30 @@ def _scan_layout(layout: WorkspaceLayout, root: Path, steps: list[UpdateStep]) -
                     action="migrate_layout",
                 )
             )
+        elif _sha256_file(src) == _sha256_file(dst):
+            steps.append(
+                UpdateStep(
+                    id=f"layout-runtime-yaml-dup:{rel}:{name}",
+                    category=UpdateCategory.LAYOUT,
+                    risk=UpdateRisk.SAFE,
+                    title=f"Remove duplicate root {name} (identical tmp/)",
+                    detail=rel,
+                    paths=[_rel(layout, src)],
+                    action="migrate_layout",
+                )
+            )
+        else:
+            steps.append(
+                UpdateStep(
+                    id=f"layout-runtime-yaml-conflict:{rel}:{name}",
+                    category=UpdateCategory.LAYOUT,
+                    risk=UpdateRisk.ASK,
+                    title=f"Remove root {name} conflicting with tmp/ (keep tmp)",
+                    detail=rel,
+                    paths=[_rel(layout, src), _rel(layout, dst)],
+                    action="drop_root_runtime_yaml",
+                )
+            )
 
 
 def _scan_weights(layout: WorkspaceLayout, root: Path, steps: list[UpdateStep]) -> None:
@@ -159,7 +181,6 @@ def _scan_weights(layout: WorkspaceLayout, root: Path, steps: list[UpdateStep]) 
     preferred = Path(preferred_run_model_path(str(root), ".pt"))
     if preferred.is_file():
         return
-    # Non-mutating discovery of legacy weight locations (do not call resolve_run_model).
     candidates: list[Path] = []
     models = root / "models"
     if models.is_dir():
@@ -191,43 +212,38 @@ def _scan_weights(layout: WorkspaceLayout, root: Path, steps: list[UpdateStep]) 
     )
 
 
+def _sidecar_needs_rewrite(meta: dict) -> bool:
+    artifacts = meta.get("artifacts") or {}
+    if isinstance(artifacts, dict):
+        for key in ("model_path", "json_path", "release_dir", "train_copy_dir", "test_copy_dir"):
+            val = artifacts.get(key)
+            if isinstance(val, str) and needs_path_rewrite(val):
+                return True
+    source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+    if isinstance(source, dict):
+        for key in ("source_run", "source_run_relative"):
+            val = source.get(key)
+            if isinstance(val, str) and needs_path_rewrite(val):
+                return True
+    return False
+
+
 def _scan_release_bundle(layout: WorkspaceLayout, release_dir: Path, steps: list[UpdateStep]) -> None:
     if is_registry_bundle_path(release_dir):
         return
     if is_unified_release_bundle(release_dir):
-        # Still check absolute sidecar paths.
         models_sub = release_dir / "models"
         for jp in sorted(models_sub.glob("*.json")):
             meta = load_release_metadata(jp)
             if not meta:
                 continue
-            artifacts = meta.get("artifacts") or {}
-            for key in ("model_path", "json_path", "release_dir"):
-                val = artifacts.get(key)
-                if isinstance(val, str) and val.startswith("/") and Path(layout.root) not in Path(val).parents and not Path(val).resolve().is_relative_to(Path(layout.root).resolve()):
-                    # absolute but may still be under workspace after resolve
-                    pass
-            abs_hit = False
-            for key in ("model_path", "json_path", "release_dir", "train_copy_dir", "test_copy_dir"):
-                val = artifacts.get(key)
-                if isinstance(val, str) and (val.startswith("/") or (len(val) > 2 and val[1] == ":")):
-                    try:
-                        if Path(val).resolve().is_relative_to(Path(layout.root).resolve()):
-                            abs_hit = True
-                            break
-                    except Exception:
-                        abs_hit = True
-                        break
-            src = (meta.get("source") or {}).get("source_run")
-            if isinstance(src, str) and (src.startswith("/") or (len(src) > 2 and src[1] == ":")):
-                abs_hit = True
-            if abs_hit:
+            if _sidecar_needs_rewrite(meta):
                 steps.append(
                     UpdateStep(
                         id=f"manifest-relpaths:{_rel(layout, jp)}",
                         category=UpdateCategory.MANIFEST,
                         risk=UpdateRisk.SAFE,
-                        title="Rewrite absolute release sidecar paths to workspace-relative",
+                        title="Rewrite release sidecar paths to workspace-relative POSIX",
                         detail=_rel(layout, jp),
                         paths=[_rel(layout, jp)],
                         action="rewrite_sidecar_paths",
@@ -235,7 +251,6 @@ def _scan_release_bundle(layout: WorkspaceLayout, release_dir: Path, steps: list
                 )
         return
 
-    # Root-level R3: detect_*.pt + .json in release_dir root
     root_pts = sorted(p for p in release_dir.glob("*.pt") if p.is_file())
     for pt in root_pts:
         if not load_release_metadata(release_json_path_for_pt(pt)):
@@ -252,7 +267,6 @@ def _scan_release_bundle(layout: WorkspaceLayout, release_dir: Path, steps: list
             )
         )
 
-    # R2: sibling pt next to folder
     sibling = release_dir.parent / f"{release_dir.name}.pt"
     if sibling.is_file() and load_release_metadata(release_json_path_for_pt(sibling)):
         steps.append(
@@ -280,11 +294,14 @@ def _scan_manifest_keys(layout: WorkspaceLayout, steps: list[UpdateStep]) -> Non
         model_path = entry.get("model_path")
         if not isinstance(model_path, str) or not model_path.strip():
             continue
-        mp = Path(model_path)
-        if not mp.is_absolute():
-            mp = (Path(layout.root) / mp).resolve()
+        mp = Path(to_posix_rel(model_path))
+        if not mp.is_absolute() and not (len(model_path) > 2 and model_path[1] == ":"):
+            mp = (Path(layout.root) / to_posix_rel(model_path)).resolve()
         else:
-            mp = mp.resolve()
+            try:
+                mp = Path(model_path).resolve()
+            except Exception:
+                mp = Path(layout.root) / to_posix_rel(model_path)
         if not mp.is_file():
             steps.append(
                 UpdateStep(
@@ -303,7 +320,6 @@ def _scan_manifest_keys(layout: WorkspaceLayout, steps: list[UpdateStep]) -> Non
         except Exception:
             continue
         if expected != key:
-            # folder-key vs stem-key
             parts = key.split("/", 1)
             if len(parts) == 2 and parts[1] != mp.stem:
                 steps.append(
@@ -317,76 +333,118 @@ def _scan_manifest_keys(layout: WorkspaceLayout, steps: list[UpdateStep]) -> Non
                         action="rekey_manifest",
                     )
                 )
-        # Absolute model_path under workspace
-        if model_path.startswith("/") or (len(model_path) > 2 and model_path[1] == ":"):
+        if needs_path_rewrite(model_path):
             try:
-                if mp.is_relative_to(models_root) or mp.is_relative_to(Path(layout.root).resolve()):
-                    steps.append(
-                        UpdateStep(
-                            id=f"manifest-abspath:{key}",
-                            category=UpdateCategory.MANIFEST,
-                            risk=UpdateRisk.SAFE,
-                            title="Make releases_manifest model_path workspace-relative",
-                            detail=key,
-                            paths=[model_path],
-                            action="relativize_manifest_path",
-                        )
-                    )
+                under_ws = mp.is_relative_to(models_root) or mp.is_relative_to(Path(layout.root).resolve())
             except Exception:
-                pass
+                under_ws = True
+            if under_ws or "\\" in model_path:
+                steps.append(
+                    UpdateStep(
+                        id=f"manifest-abspath:{key}",
+                        category=UpdateCategory.MANIFEST,
+                        risk=UpdateRisk.SAFE,
+                        title="Make releases_manifest model_path workspace-relative POSIX",
+                        detail=key,
+                        paths=[model_path],
+                        action="relativize_manifest_path",
+                    )
+                )
+
+
+def _runtime_yaml_needs_norm(payload: dict) -> bool:
+    if "path" in payload:
+        return True
+    for k in ("train", "val", "test", "minival"):
+        v = payload.get(k)
+        if isinstance(v, str) and (needs_path_rewrite(v) or v.startswith("./")):
+            return True
+        if isinstance(v, list):
+            for item in v:
+                if isinstance(item, str) and (needs_path_rewrite(item) or item.startswith("./")):
+                    return True
+    return False
 
 
 def _scan_yaml(layout: WorkspaceLayout, steps: list[UpdateStep]) -> None:
     datasets = Path(layout.datasets)
-    if not datasets.is_dir():
-        return
-    for data_yaml in sorted(datasets.rglob("data.yaml")):
-        if data_yaml.parent.resolve() == datasets.resolve():
-            continue
-        try:
-            import yaml
+    if datasets.is_dir():
+        for data_yaml in sorted(datasets.rglob("data.yaml")):
+            if data_yaml.parent.resolve() == datasets.resolve():
+                continue
+            try:
+                import yaml
 
-            payload = yaml.safe_load(data_yaml.read_text(encoding="utf-8"))
-        except Exception:
-            steps.append(
-                UpdateStep(
-                    id=f"yaml-bad:{_rel(layout, data_yaml)}",
-                    category=UpdateCategory.YAML,
-                    risk=UpdateRisk.ASK,
-                    title="Unreadable data.yaml",
-                    detail=_rel(layout, data_yaml),
-                    paths=[_rel(layout, data_yaml)],
-                    action="normalize_yaml",
+                payload = yaml.safe_load(data_yaml.read_text(encoding="utf-8"))
+            except Exception:
+                steps.append(
+                    UpdateStep(
+                        id=f"yaml-bad:{_rel(layout, data_yaml)}",
+                        category=UpdateCategory.YAML,
+                        risk=UpdateRisk.ASK,
+                        title="Unreadable data.yaml",
+                        detail=_rel(layout, data_yaml),
+                        paths=[_rel(layout, data_yaml)],
+                        action="normalize_yaml",
+                    )
                 )
-            )
-            continue
-        if not isinstance(payload, dict):
-            continue
-        needs = "path" in payload
-        if not needs:
-            for k in ("train", "val", "test"):
-                v = payload.get(k)
-                if isinstance(v, str) and (v.startswith("/") or v.startswith("./") or "\\" in v):
-                    needs = True
-                    break
-        if needs:
-            steps.append(
-                UpdateStep(
-                    id=f"yaml-norm:{_rel(layout, data_yaml)}",
-                    category=UpdateCategory.YAML,
-                    risk=UpdateRisk.SAFE,
-                    title="Normalize data.yaml (drop path, relative splits)",
-                    detail=_rel(layout, data_yaml.parent),
-                    paths=[_rel(layout, data_yaml)],
-                    action="normalize_yaml",
+                continue
+            if not isinstance(payload, dict):
+                continue
+            needs = "path" in payload
+            if not needs:
+                for k in ("train", "val", "test"):
+                    v = payload.get(k)
+                    if isinstance(v, str) and (v.startswith("/") or v.startswith("./") or "\\" in v):
+                        needs = True
+                        break
+            if needs:
+                steps.append(
+                    UpdateStep(
+                        id=f"yaml-norm:{_rel(layout, data_yaml)}",
+                        category=UpdateCategory.YAML,
+                        risk=UpdateRisk.SAFE,
+                        title="Normalize data.yaml (drop path, relative splits)",
+                        detail=_rel(layout, data_yaml.parent),
+                        paths=[_rel(layout, data_yaml)],
+                        action="normalize_yaml",
+                    )
                 )
-            )
+
+    # Runtime data yaml under runs/ and models/
+    for base in (Path(layout.runs), Path(layout.models)):
+        if not base.is_dir():
+            continue
+        for name in ("_runtime_data_train.yaml", "_runtime_data_test.yaml"):
+            for yp in sorted(base.rglob(name)):
+                if not yp.is_file():
+                    continue
+                try:
+                    import yaml
+
+                    payload = yaml.safe_load(yp.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                if not _runtime_yaml_needs_norm(payload):
+                    continue
+                steps.append(
+                    UpdateStep(
+                        id=f"yaml-runtime:{_rel(layout, yp)}",
+                        category=UpdateCategory.YAML,
+                        risk=UpdateRisk.SAFE,
+                        title="Normalize runtime _runtime_data_*.yaml (drop path, POSIX splits)",
+                        detail=_rel(layout, yp),
+                        paths=[_rel(layout, yp)],
+                        action="normalize_runtime_yaml",
+                    )
+                )
 
 
 def _scan_metadata(layout: WorkspaceLayout, root: Path, steps: list[UpdateStep]) -> None:
     meta = root / "training_metadata.json"
     if not meta.is_file():
-        # Only under runs/
         try:
             if root.resolve().is_relative_to(Path(layout.runs).resolve()):
                 steps.append(
@@ -422,7 +480,7 @@ def _scan_metadata(layout: WorkspaceLayout, root: Path, steps: list[UpdateStep])
         return
     paths = payload.get("paths") if isinstance(payload.get("paths"), dict) else {}
     best = str(paths.get("best_model") or "")
-    if best and ("/" in best or best.endswith("best.pt") or "weights" in best):
+    if best and ("/" in best or "\\" in best or best.endswith("best.pt") or "weights" in best):
         steps.append(
             UpdateStep(
                 id=f"metadata-best:{_rel(layout, root)}",
@@ -442,7 +500,6 @@ def scan_workspace(layout: WorkspaceLayout) -> UpdatePlan:
         _scan_layout(layout, root, steps)
         _scan_weights(layout, root, steps)
         _scan_metadata(layout, root, steps)
-        # Release candidates under models/
         try:
             if root.resolve().is_relative_to(Path(layout.models).resolve()):
                 _scan_release_bundle(layout, root, steps)
@@ -452,7 +509,6 @@ def scan_workspace(layout: WorkspaceLayout) -> UpdatePlan:
     _scan_manifest_keys(layout, steps)
     _scan_yaml(layout, steps)
 
-    # De-dupe by id
     uniq: dict[str, UpdateStep] = {}
     for s in steps:
         uniq[s.id] = s
@@ -463,6 +519,5 @@ def residual_after(layout: WorkspaceLayout, categories: frozenset | None = None)
     plan = scan_workspace(layout)
     if categories is not None:
         plan = plan.filtered(categories)
-    # Residual = still pending findings (same as scan for check mode)
     plan.residual = list(plan.steps)
     return plan

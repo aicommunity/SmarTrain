@@ -65,9 +65,18 @@ def _artifact_release_dir(pt_path: Path) -> Path | None:
     if not isinstance(release_dir, str) or not release_dir.strip():
         return None
     try:
-        return Path(release_dir).expanduser().resolve()
+        from smartrain.services.update.path_norm import resolve_stored_path
+
+        layout = layout_for_run_dir(str(pt_path))
+        resolved = resolve_stored_path(layout, release_dir, anchor=pt_path)
+        if resolved is not None:
+            return resolved
+        p = Path(release_dir)
+        if p.is_absolute():
+            return p.expanduser().resolve()
     except Exception:
         return None
+    return None
 
 
 def release_dir_for_pt(pt_path: Path) -> Path:
@@ -329,11 +338,10 @@ def upsert_entry(
         entries = {}
         manifest["entries"] = entries
     root = Path(layout.root).resolve()
-    rel_model = (
-        str(model_path.resolve().relative_to(root))
-        if model_path.resolve().is_relative_to(root)
-        else str(model_path.resolve())
-    )
+    try:
+        rel_model = model_path.resolve().relative_to(root).as_posix()
+    except ValueError:
+        rel_model = model_path.resolve().as_posix()
     now = _now_iso()
     existing = entries.get(entry_key) if isinstance(entries.get(entry_key), dict) else {}
     entries[entry_key] = {

@@ -185,3 +185,118 @@ def test_normalize_yaml_via_update(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert exc.value.code in (0, None) or exc.value.code == 0
     text = (ds / "data.yaml").read_text(encoding="utf-8")
     assert "path:" not in text
+
+
+def test_update_removes_duplicate_root_runtime_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    deploy_workspace(str(tmp_path))
+    release_dir = tmp_path / "models" / "ds" / "run1"
+    (release_dir / "tmp").mkdir(parents=True)
+    (release_dir / "models").mkdir(parents=True)
+    (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    body = "train: train/images\nval: valid/images\nnames: [a]\n"
+    (release_dir / "_runtime_data_train.yaml").write_text(body, encoding="utf-8")
+    (release_dir / "tmp" / "_runtime_data_train.yaml").write_text(body, encoding="utf-8")
+    monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
+
+    with pytest.raises(SystemExit) as exc:
+        uc.main(["--workspace", str(tmp_path), "--yes", "--only", "layout"])
+    assert exc.value.code in (0, None) or exc.value.code == 0
+    assert not (release_dir / "_runtime_data_train.yaml").exists()
+    assert (release_dir / "tmp" / "_runtime_data_train.yaml").is_file()
+
+
+def test_update_rewrites_posix_abs_sidecar_to_relative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    deploy_workspace(str(tmp_path))
+    layout = WorkspaceLayout(str(tmp_path))
+    stem = "detect_yolo11n_20260101_000000_640px_1epochs_b1"
+    release_dir = tmp_path / "models" / "ds" / "run1"
+    models = release_dir / "models"
+    models.mkdir(parents=True)
+    (release_dir / "train-ultralytics").mkdir(parents=True)
+    (release_dir / "tests").mkdir(parents=True)
+    (tmp_path / "runs" / "ds" / "src_run").mkdir(parents=True)
+    pt = models / f"{stem}.pt"
+    pt.write_bytes(b"pt")
+    (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+    foreign_root = "/data/NextCloud/PROJECT/OtherHost/UralkSmarTrain"
+    sidecar = {
+        "comment": "",
+        "source": {
+            "source_run": f"{foreign_root}/runs/ds/src_run",
+            "source_run_relative": "runs\\ds\\src_run",
+            "source_weights": f"{stem}.pt",
+            "source_sha256": "abc",
+            "released_at": "2026-01-15T12:00:00+00:00",
+        },
+        "training": {},
+        "artifacts": {
+            "model_path": f"{foreign_root}/models/ds/run1/models/{stem}.pt",
+            "json_path": f"{foreign_root}/models/ds/run1/models/{stem}.json",
+            "release_dir": f"{foreign_root}/models/ds/run1",
+            "train_copy_dir": f"{foreign_root}/models/ds/run1/train",
+            "test_copy_dir": f"{foreign_root}/models/ds/run1/test",
+        },
+    }
+    (models / f"{stem}.json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+    upsert_entry(layout, entry_key=entry_key_for_pt(pt), model_path=pt, comment="")
+    # Force Windows-style separators into manifest (simulates pre-fix upsert)
+    manifest_path = tmp_path / "models" / "releases_manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    key = next(iter(payload["entries"]))
+    payload["entries"][key]["model_path"] = str(Path("models") / "ds" / "run1" / "models" / f"{stem}.pt")
+    assert "\\" in payload["entries"][key]["model_path"] or payload["entries"][key]["model_path"].startswith("models")
+    # Ensure backslash form on Windows
+    payload["entries"][key]["model_path"] = f"models\\ds\\run1\\models\\{stem}.pt"
+    manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
+
+    plan = scan_workspace(layout)
+    assert any(s.action == "rewrite_sidecar_paths" for s in plan.steps)
+    assert any(s.action == "relativize_manifest_path" for s in plan.steps)
+
+    with pytest.raises(SystemExit) as exc:
+        uc.main(["--workspace", str(tmp_path), "--yes", "--apply-all", "--only", "manifest"])
+    assert exc.value.code in (0, None) or exc.value.code == 0
+
+    rewritten = json.loads((models / f"{stem}.json").read_text(encoding="utf-8"))
+    art = rewritten["artifacts"]
+    assert art["model_path"] == f"models/ds/run1/models/{stem}.pt"
+    assert art["json_path"] == f"models/ds/run1/models/{stem}.json"
+    assert art["release_dir"] == "models/ds/run1"
+    assert art["train_copy_dir"] == "models/ds/run1/train-ultralytics"
+    assert art["test_copy_dir"] == "models/ds/run1/tests"
+    assert rewritten["source"]["source_run"] == "runs/ds/src_run"
+    assert "\\" not in art["model_path"]
+    assert not art["model_path"].startswith("/")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    mp = manifest["entries"][key]["model_path"]
+    assert mp == f"models/ds/run1/models/{stem}.pt"
+    assert "\\" not in mp
+
+    with pytest.raises(SystemExit) as exc2:
+        uc.main(["--workspace", str(tmp_path), "--check", "--only", "manifest"])
+    assert exc2.value.code in (0, None) or exc2.value.code == 0
+
+
+def test_update_normalizes_runtime_yaml_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    deploy_workspace(str(tmp_path))
+    run = tmp_path / "runs" / "ds" / "run1"
+    (run / "tmp").mkdir(parents=True)
+    (run / "training_metadata.json").write_text("{}", encoding="utf-8")
+    (run / "tmp" / "_runtime_data_train.yaml").write_text(
+        "path: /data/NextCloud/PROJECT/Other/UralkSmarTrain/datasets/ds\n"
+        "train: train/images\n"
+        "val: valid/images\n"
+        "names: [a]\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "datasets" / "ds" / "train" / "images").mkdir(parents=True)
+    monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
+
+    with pytest.raises(SystemExit) as exc:
+        uc.main(["--workspace", str(tmp_path), "--yes", "--only", "yaml"])
+    assert exc.value.code in (0, None) or exc.value.code == 0
+    text = (run / "tmp" / "_runtime_data_train.yaml").read_text(encoding="utf-8")
+    assert "path:" not in text
+    assert "\\" not in text

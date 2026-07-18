@@ -358,11 +358,18 @@ def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:
     for runtime_name in ("_runtime_data_train.yaml", "_runtime_data_test.yaml"):
         src = root / runtime_name
         dst = tmp / runtime_name
-        if src.is_file() and not dst.exists():
-            try:
+        if not src.is_file():
+            continue
+        try:
+            if not dst.exists():
                 src.replace(dst)
-            except Exception:
-                pass
+            elif src.resolve() == dst.resolve():
+                continue
+            elif src.read_bytes() == dst.read_bytes():
+                src.unlink(missing_ok=True)
+            # Differing content: leave both; ``smartrain update`` ASK-step removes root.
+        except Exception:
+            pass
     return models, tmp
 
 

@@ -208,12 +208,31 @@ def test_ensure_run_layout_merges_parallel_test_ultralytics_dir(tmp_path: Path) 
     assert not parallel.exists()
 
 
-def test_ensure_run_layout_no_empty_train_dir_without_legacy(tmp_path: Path) -> None:
-    run_dir = tmp_path / "runs" / "ds1" / "run-fresh"
-    run_dir.mkdir(parents=True)
+def test_ensure_run_layout_removes_identical_root_runtime_yaml(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-runtime-dup"
+    tmp = run_dir / "tmp"
+    tmp.mkdir(parents=True)
+    body = "train: train/images\nnames: [a]\n"
+    (run_dir / "_runtime_data_train.yaml").write_text(body, encoding="utf-8")
+    (tmp / "_runtime_data_train.yaml").write_text(body, encoding="utf-8")
+
     ensure_run_layout(str(run_dir))
-    train_root = run_train_backend_dir(str(run_dir), "ultralytics")
-    assert not train_root.exists() or not any(train_root.iterdir())
+
+    assert not (run_dir / "_runtime_data_train.yaml").exists()
+    assert (tmp / "_runtime_data_train.yaml").read_text(encoding="utf-8") == body
+
+
+def test_ensure_run_layout_keeps_conflicting_root_runtime_yaml(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-runtime-conflict"
+    tmp = run_dir / "tmp"
+    tmp.mkdir(parents=True)
+    (run_dir / "_runtime_data_train.yaml").write_text("train: a\n", encoding="utf-8")
+    (tmp / "_runtime_data_train.yaml").write_text("train: b\n", encoding="utf-8")
+
+    ensure_run_layout(str(run_dir))
+
+    assert (run_dir / "_runtime_data_train.yaml").is_file()
+    assert (tmp / "_runtime_data_train.yaml").read_text(encoding="utf-8") == "train: b\n"
 
 
 def test_consolidate_train_merges_suffix(tmp_path: Path) -> None:
