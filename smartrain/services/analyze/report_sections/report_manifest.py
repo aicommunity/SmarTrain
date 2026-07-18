@@ -33,6 +33,12 @@ from smartrain.services.analyze.report_markdown_formatting import (
     _table_preamble_lines,
     _table_takeaway_lines,
 )
+from smartrain.core.runtime.path_portable import (
+    is_abs_like,
+    posix_relpath,
+    store_path_under_workspace,
+    to_posix,
+)
 from smartrain.core.runtime.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -43,19 +49,25 @@ def _build_run_model_abbreviations(manifest: dict[str, Any], abbreviations: dict
 
 
 def _path_for_report(path: str, workspace_root: str) -> str:
-    p = str(path or "")
-    root = str(workspace_root or "")
+    """Normalize a path for report display: prefer workspace-relative POSIX."""
+    p = str(path or "").strip()
+    root = str(workspace_root or "").strip()
     if not p:
         return p
-    if root:
-        try:
-            if os.path.abspath(p) == os.path.abspath(root):
-                return "."
-            return os.path.relpath(p, root)
-        except Exception as exc:
-            logger.debug("Failed to resolve report path %s: %s", p, exc)
-            return p
-    return p
+    if not root:
+        return to_posix(p) if not is_abs_like(p) else p
+    try:
+        if not is_abs_like(p):
+            return to_posix(p)
+        stored = store_path_under_workspace(root, p)
+        if stored != p:
+            return stored
+        if os.path.abspath(p) == os.path.abspath(root):
+            return "."
+        return posix_relpath(p, root)
+    except Exception as exc:
+        logger.debug("Failed to resolve report path %s: %s", p, exc)
+        return to_posix(p) if not is_abs_like(p) else p
 
 
 def _ordered_abbreviations(manifest: dict[str, Any], abbreviations: dict[str, str], is_ru: bool) -> list[tuple[str, str, str]]:
@@ -243,38 +255,71 @@ def _insights_from_manifest(
     return _executive_insights_from_manifest(manifest, lang, abbreviations)
 
 
+def _format_model_files_cell(model_files: tuple[str, ...] | list[str]) -> str:
+    names = [str(n).strip() for n in (model_files or []) if str(n).strip()]
+    if not names:
+        return "-"
+    return ", ".join(f"`{name}`" for name in names)
+
+
+def _format_class_list_text(class_pairs: list[tuple[int, str]], *, is_ru: bool) -> str:
+    if not class_pairs:
+        return "н/д" if is_ru else "n/a"
+    return "; ".join(f"{cls_id}: {name}" for cls_id, name in class_pairs)
+
+
 def _render_run_legend_table_lines(
     manifest: dict[str, Any],
     *,
     is_ru: bool,
     workspace_root: str,
     table_no: int,
+    tpl: dict[str, str] | None = None,
 ) -> tuple[list[str], int]:
+    from smartrain.services.analyze.report_labels import resolve_run_class_names, resolve_run_model_identity
+
     rows = manifest.get("run_legend") or []
     if not isinstance(rows, list) or not rows:
         return [], table_no
+    tpl = tpl or {}
+    run_data_yaml_map = manifest.get("run_data_yaml_map") if isinstance(manifest.get("run_data_yaml_map"), dict) else {}
     show_comment = any(str(row.get("comment") or "").strip() for row in rows if isinstance(row, dict))
+    identity_rows: list[tuple[dict[str, Any], tuple[str, ...], list[tuple[int, str]]]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        run_dir = str(row.get("run_dir") or row.get("run_name") or "").strip()
+        identity = resolve_run_model_identity(run_dir) if run_dir else resolve_run_model_identity("")
+        class_pairs = resolve_run_class_names(
+            run_dir,
+            run_data_yaml_map=run_data_yaml_map,
+            workspace_root=workspace_root or None,
+        )
+        identity_rows.append((row, identity.model_files, class_pairs))
+
     lines: list[str] = []
+    intro = str(tpl.get("SUB_EXEC_MODEL_IDENTITY") or "").strip()
+    if intro:
+        lines.extend(_justify_block(intro))
+        lines.append("")
     lines.extend(_center_open())
     lines.append("")
     title = "Легенда запусков" if is_ru else "Run legend"
     lines.append(f"**{'Таблица' if is_ru else 'Table'} {table_no}. {title}**")
     lines.append("")
     if is_ru:
-        header = ["M", "Архитектура", "Датасет", "Эпохи", "Batch", "Разрешение"]
+        header = ["M", "Архитектура", "Датасет", "Эпохи", "Batch", "Разрешение", "Файлы модели"]
         if show_comment:
             header.append("Комментарий")
         header.append("Путь run")
     else:
-        header = ["M", "Architecture", "Dataset", "Epochs", "Batch", "Input size"]
+        header = ["M", "Architecture", "Dataset", "Epochs", "Batch", "Input size", "Model files"]
         if show_comment:
             header.append("Comment")
         header.append("Run path")
     lines.append("| " + " | ".join(header) + " |")
     lines.append("| " + " | ".join(["---"] * len(header)) + " |")
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
+    for row, model_files, _class_pairs in identity_rows:
         short_label = str(row.get("short_label") or f"M{row.get('index', '?')}")
         architecture = str(row.get("architecture") or "-")
         dataset_label = str(row.get("dataset_label") or row.get("dataset_name") or "-")
@@ -289,14 +334,34 @@ def _render_run_legend_table_lines(
             run_display = f"`{run_path}`"
         role = str(row.get("role") or "")
         m_cell = f"**{short_label}**" + (f" ({'базовый' if is_ru else 'baseline'})" if role == "baseline" else "")
-        cells = [m_cell, architecture, dataset_label, epochs, batch, image_size]
+        cells = [
+            m_cell,
+            architecture,
+            dataset_label,
+            epochs,
+            batch,
+            image_size,
+            _format_model_files_cell(model_files),
+        ]
         if show_comment:
             cells.append(str(row.get("comment") or "-"))
         cells.append(run_display)
         lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
     lines.extend(_center_close())
-    return lines, table_no + 1
+    table_no += 1
+
+    lines.append("")
+    lines.append(
+        ("**Классы по моделям (индекс выхода → имя):**" if is_ru else "**Classes by model (output index → name):**")
+    )
+    lines.append("")
+    for row, _model_files, class_pairs in identity_rows:
+        short_label = str(row.get("short_label") or f"M{row.get('index', '?')}")
+        class_txt = _format_class_list_text(class_pairs, is_ru=is_ru)
+        lines.append(f"- **{short_label}**: {class_txt}")
+    lines.append("")
+    return lines, table_no
 
 
 def _load_artifact_csv(report_root: str, rel: str) -> pd.DataFrame | None:

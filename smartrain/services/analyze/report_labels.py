@@ -3,12 +3,131 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from smartrain.services.analyze.metrics_reader import (
     _infer_model_from_args_yaml,
     _infer_model_from_run_dir_name,
 )
+
+_MODEL_FILE_EXT_PRIORITY = (".pt", ".onnx", ".engine", ".torchscript", ".openvino")
+
+
+@dataclass(frozen=True, slots=True)
+class RunModelIdentity:
+    weight_stem: str
+    model_files: tuple[str, ...]
+
+
+def resolve_run_model_identity(run_dir: str) -> RunModelIdentity:
+    """Resolve release weight stem and sibling export filenames under ``models/``."""
+    from smartrain.core.runtime.run_artifacts import preferred_run_model_path, resolve_run_weights_stem
+
+    root = str(run_dir or "").strip()
+    if not root:
+        return RunModelIdentity(weight_stem="", model_files=())
+    try:
+        stem = str(resolve_run_weights_stem(root) or "").strip()
+    except Exception:
+        stem = ""
+    if not stem:
+        try:
+            preferred = Path(preferred_run_model_path(root, ".pt"))
+            stem = preferred.stem
+        except Exception:
+            stem = ""
+    if not stem:
+        return RunModelIdentity(weight_stem="", model_files=())
+
+    models_dir = Path(root).expanduser() / "models"
+    found: dict[str, str] = {}
+    if models_dir.is_dir():
+        for path in sorted(models_dir.iterdir()):
+            if not path.is_file():
+                continue
+            if path.stem != stem:
+                continue
+            found[path.suffix.lower()] = path.name
+    if ".pt" not in found:
+        found[".pt"] = f"{stem}.pt"
+
+    ordered: list[str] = []
+    for ext in _MODEL_FILE_EXT_PRIORITY:
+        name = found.pop(ext, None)
+        if name:
+            ordered.append(name)
+    for ext in sorted(found):
+        ordered.append(found[ext])
+    return RunModelIdentity(weight_stem=stem, model_files=tuple(ordered))
+
+
+def load_dataset_class_names(data_yaml: str) -> dict[int, str]:
+    """Load class id → name mapping from a YOLO ``data.yaml``."""
+    path = str(data_yaml or "").strip()
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        import yaml
+
+        with open(path, "r", encoding="utf-8") as f:
+            payload = yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    names = payload.get("names")
+    if isinstance(names, dict):
+        out: dict[int, str] = {}
+        for k, v in names.items():
+            try:
+                out[int(k)] = str(v)
+            except Exception:
+                continue
+        return out
+    if isinstance(names, list):
+        return {i: str(v) for i, v in enumerate(names)}
+    return {}
+
+
+def resolve_run_class_names(
+    run_dir: str,
+    data_yaml: str | None = None,
+    *,
+    run_data_yaml_map: dict[str, str] | None = None,
+    workspace_root: str | None = None,
+) -> list[tuple[int, str]]:
+    """Return class names ordered by output index for a run."""
+    yaml_path = str(data_yaml or "").strip()
+    if not yaml_path and run_data_yaml_map:
+        yaml_path = _lookup_run_data_yaml(run_dir, run_data_yaml_map)
+    if yaml_path and workspace_root and not os.path.isabs(yaml_path) and not os.path.isfile(yaml_path):
+        candidate = os.path.join(workspace_root, yaml_path)
+        if os.path.isfile(candidate):
+            yaml_path = candidate
+    names = load_dataset_class_names(yaml_path)
+    return [(cls_id, names[cls_id]) for cls_id in sorted(names)]
+
+
+def _lookup_run_data_yaml(run_dir: str, run_data_yaml_map: dict[str, str]) -> str:
+    if not isinstance(run_data_yaml_map, dict) or not run_data_yaml_map:
+        return ""
+    raw = str(run_dir or "").strip()
+    if not raw:
+        return ""
+    candidates = [raw, os.path.normpath(raw), os.path.abspath(raw) if os.path.exists(raw) else ""]
+    basename = os.path.basename(raw.rstrip("/\\"))
+    if basename:
+        candidates.append(basename)
+    for key, value in run_data_yaml_map.items():
+        key_s = str(key or "").strip()
+        if not key_s:
+            continue
+        if key_s in candidates or os.path.normpath(key_s) in candidates:
+            return str(value or "").strip()
+        if basename and os.path.basename(key_s.rstrip("/\\")) == basename:
+            return str(value or "").strip()
+    return str(run_data_yaml_map.get(raw) or "").strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,14 +281,19 @@ def build_run_legend_rows(
     baseline: str = "",
     dataset_labels: dict[str, str] | None = None,
     build_run_record_cb: Callable[[str], Any] | None = None,
+    workspace_root: str | None = None,
 ) -> list[RunLegendRow]:
+    from smartrain.core.runtime.path_portable import resolve_workspace_or_abs_path
+
     dataset_labels = dataset_labels or {}
-    baseline_abs = os.path.abspath(baseline.rstrip(os.sep)) if baseline else ""
+    baseline_abs = (
+        resolve_workspace_or_abs_path(workspace_root, baseline.rstrip("/\\")) if baseline else ""
+    )
     short_models: list[str] = []
     rows_meta: list[dict[str, Any]] = []
     for idx, run_dir in enumerate(run_dirs, start=1):
-        run_dir_abs = os.path.abspath(run_dir.rstrip(os.sep))
-        run_name = os.path.basename(run_dir_abs)
+        run_dir_abs = resolve_workspace_or_abs_path(workspace_root, run_dir.rstrip("/\\"))
+        run_name = os.path.basename(run_dir_abs.rstrip("/\\"))
         fields = _read_run_training_fields(run_dir_abs, build_run_record_cb=build_run_record_cb)
         from smartrain.services.models.release_models_manifest import release_comment_for_run_dir
 
@@ -250,6 +374,7 @@ def build_run_display_labels(
     build_run_record_cb: Callable[[str], Any] | None = None,
     dataset_labels: dict[str, str] | None = None,
     baseline: str = "",
+    workspace_root: str | None = None,
 ) -> dict[str, str]:
     """Map run_dir, basename, and long model names to display labels."""
     legend = build_run_legend_rows(
@@ -257,6 +382,7 @@ def build_run_display_labels(
         baseline=baseline,
         dataset_labels=dataset_labels,
         build_run_record_cb=build_run_record_cb,
+        workspace_root=workspace_root,
     )
     out: dict[str, str] = {}
     for row in legend:
@@ -281,12 +407,16 @@ def build_report_labels_context(
     *,
     baseline: str = "",
     build_run_record_cb: Callable[[str], Any] | None = None,
+    workspace_root: str | None = None,
 ) -> tuple[dict[str, str], list[RunLegendRow], dict[str, str]]:
+    from smartrain.core.runtime.path_portable import resolve_workspace_or_abs_path
+
     dataset_to_idx: dict[str, int] = {}
     dataset_counter = 1
     dataset_labels: dict[str, str] = {}
     for rd in run_dirs:
-        fields = _read_run_training_fields(rd, build_run_record_cb=build_run_record_cb)
+        resolved = resolve_workspace_or_abs_path(workspace_root, rd)
+        fields = _read_run_training_fields(resolved, build_run_record_cb=build_run_record_cb)
         dataset_name = str(fields.get("dataset_name") or "").strip()
         if not dataset_name:
             continue
@@ -299,12 +429,14 @@ def build_report_labels_context(
         baseline=baseline,
         dataset_labels=dataset_labels,
         build_run_record_cb=build_run_record_cb,
+        workspace_root=workspace_root,
     )
     abbreviations = build_run_display_labels(
         run_dirs,
         build_run_record_cb=build_run_record_cb,
         dataset_labels=dataset_labels,
         baseline=baseline,
+        workspace_root=workspace_root,
     )
     for name, label in dataset_labels.items():
         abbreviations.setdefault(name, label)

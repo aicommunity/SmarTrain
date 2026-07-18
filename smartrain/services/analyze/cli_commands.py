@@ -447,23 +447,9 @@ def _recompute_run_test_metrics(
 
 
 def _load_dataset_class_names(data_yaml: str) -> dict[int, str]:
-    try:
-        with open(data_yaml, "r", encoding="utf-8") as f:
-            payload = yaml.safe_load(f) or {}
-    except Exception:
-        return {}
-    names = payload.get("names")
-    if isinstance(names, dict):
-        out: dict[int, str] = {}
-        for k, v in names.items():
-            try:
-                out[int(k)] = str(v)
-            except Exception:
-                continue
-        return out
-    if isinstance(names, list):
-        return {i: str(v) for i, v in enumerate(names)}
-    return {}
+    from smartrain.services.analyze.report_labels import load_dataset_class_names
+
+    return load_dataset_class_names(data_yaml)
 
 
 
