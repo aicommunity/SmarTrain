@@ -527,7 +527,35 @@ def test_resolve_dataset_path_for_resume_uses_workspace_relative_metadata_path(t
     )
 
     resolved = tr.resolve_dataset_path_for_resume(str(run_dir), str(tmp_path))
-    assert resolved == str(dataset_dir)
+    assert resolved == str(dataset_dir.resolve())
+
+
+def test_load_dataset_from_runtime_yaml_relative_path(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "foo"
+    dataset_dir.mkdir(parents=True)
+    run_dir = tmp_path / "runs" / "ds" / "r1"
+    (run_dir / "tmp").mkdir(parents=True)
+    (run_dir / "tmp" / "_runtime_data_train.yaml").write_text(
+        "path: datasets/foo\ntrain: train/images\n",
+        encoding="utf-8",
+    )
+    got = tr._load_dataset_from_runtime_yaml(str(run_dir), str(tmp_path))
+    assert got == str(dataset_dir.resolve())
+
+
+def test_load_dataset_from_runtime_yaml_legacy_abs_path(tmp_path: Path) -> None:
+    deploy_workspace(str(tmp_path))
+    dataset_dir = tmp_path / "datasets" / "legacy"
+    dataset_dir.mkdir(parents=True)
+    run_dir = tmp_path / "runs" / "ds" / "r2"
+    (run_dir / "tmp").mkdir(parents=True)
+    (run_dir / "tmp" / "_runtime_data_train.yaml").write_text(
+        f"path: {dataset_dir.resolve().as_posix()}\ntrain: train/images\n",
+        encoding="utf-8",
+    )
+    got = tr._load_dataset_from_runtime_yaml(str(run_dir), str(tmp_path))
+    assert Path(got).resolve() == dataset_dir.resolve()
 
 
 def test_update_resume_metadata_hydrates_training_info_when_missing(tmp_path: Path) -> None:

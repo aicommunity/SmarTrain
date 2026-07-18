@@ -16,7 +16,7 @@ from smartrain.cli_entrypoints.support.typer_non_interactive import (
     env_forces_non_interactive_cli,
     strip_typer_meta_non_interactive_flags,
 )
-from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
+from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV, stdin_is_tty
 from smartrain.core.runtime.workspace_coordination import (
     WorkspaceLockBusy,
     WorkspaceSession,
@@ -183,7 +183,7 @@ def _forward_argparse_command(
     elif len(filtered) == 0 and empty_args_mode in ("invoke", "invoke_if_tty_else_help"):
         interactive_allowed = True
     else:
-        interactive_allowed = bool(sys.stdin.isatty())
+        interactive_allowed = stdin_is_tty()
 
     def _enhance_parser_help(parser_obj: object) -> None:
         if prog is None:
@@ -207,7 +207,7 @@ def _forward_argparse_command(
             )
             return
         if empty_args_mode == "invoke_if_tty_else_help":
-            if sys.stdin.isatty():
+            if stdin_is_tty():
                 _run_with_coordination(
                     module,
                     filtered,

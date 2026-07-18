@@ -38,10 +38,10 @@ def _job_polyline_cvat_dataset(root: Path, name: str) -> None:
     )
 
 
-def test_load_cvat11_label_names_job_export() -> None:
+def test_load_cvat11_label_names_job_export(tmp_path: Path) -> None:
     xml = """<?xml version="1.0"?><annotations><meta><job><labels>
     <label><name>belt_side</name></label></labels></job></meta></annotations>"""
-    path = Path("/tmp/cvat_test_labels.xml")
+    path = tmp_path / "cvat_test_labels.xml"
     path.write_text(xml, encoding="utf-8")
     assert _load_cvat11_label_names(str(path)) == ["belt_side"]
     assert load_cvat11_label_names_from_xml(path) == ["belt_side"]

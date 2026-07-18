@@ -180,6 +180,7 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
     promoted = datetime.now(timezone.utc).isoformat()
     ti = md["training_info"]
     ds = ti["dataset"]
+    from smartrain.core.runtime.path_portable import store_path_under_workspace
     from smartrain.core.training.train_profile import task_to_metadata_task_type
 
     task_type = ""
@@ -190,17 +191,18 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
             raw_task = utrain.get("task")
     if str(raw_task or "").strip():
         task_type = task_to_metadata_task_type(str(raw_task))
+    source_run_rel = store_path_under_workspace(ctx.workspace_root, run_path)
     manifest = {
         "friendly_name": friendly,
         "weights_file": weights_rel,
-        "source_run": run_path,
-        "source_run_relative": os.path.relpath(run_path, ctx.workspace_root),
+        "source_run": source_run_rel,
+        "source_run_relative": source_run_rel,
         "training_end": md["timestamps"]["training"]["end"],
         "model": ti["model"],
         "dataset_name": ds["name"],
         "dataset_hash": ds["hash"],
         "promoted_at": promoted,
-        "workspace_root": ctx.workspace_root,
+        "workspace_root": ".",
         "bundle_layout_version": 2,
     }
     if task_type:

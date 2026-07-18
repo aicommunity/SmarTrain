@@ -670,22 +670,55 @@ def write_model_sidecar_metadata(
     params: dict[str, Any] | None = None,
     status: str = "ok",
     error: str | None = None,
+    workspace_root: str | None = None,
 ) -> Path:
+    from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
+
     p = Path(model_path).expanduser().resolve()
     sidecar = model_sidecar_metadata_path(p)
+    run_root = Path(run_dir).expanduser().resolve() if run_dir else None
+    if run_root is not None:
+        try:
+            path_stored = posix_relpath(str(p), str(run_root))
+        except Exception:
+            path_stored = p.name
+    elif workspace_root:
+        path_stored = store_path_under_workspace(workspace_root, str(p))
+    else:
+        path_stored = p.name
+
+    source_stored: str | None = None
+    if isinstance(source_path, str) and source_path.strip():
+        if run_root is not None:
+            try:
+                source_stored = posix_relpath(source_path, str(run_root))
+            except Exception:
+                source_stored = Path(source_path).name
+        elif workspace_root:
+            source_stored = store_path_under_workspace(workspace_root, source_path)
+        else:
+            source_stored = Path(source_path).name
+
+    run_path_stored: str | None = None
+    if run_root is not None:
+        if workspace_root:
+            run_path_stored = store_path_under_workspace(workspace_root, str(run_root))
+        else:
+            run_path_stored = run_root.as_posix()
+
     payload: dict[str, Any] = {
         "format": str(format_name),
-        "path": str(p),
+        "path": path_stored,
         "filename": p.name,
         "created_at": datetime.now().isoformat(timespec="seconds"),
-        "source_path": source_path,
+        "source_path": source_stored,
         "tool": tool,
         "params": params or {},
         "status": status,
         "error": error,
         "fingerprint_sha256": _fingerprint_file(p) if p.is_file() else None,
         "size_bytes": p.stat().st_size if p.is_file() else None,
-        "run_path": str(Path(run_dir).expanduser().resolve()) if run_dir else None,
+        "run_path": run_path_stored,
     }
     tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -704,6 +737,43 @@ def read_model_sidecar_metadata(model_path: str | Path) -> dict[str, Any] | None
     return payload if isinstance(payload, dict) else None
 
 
+def resolve_sidecar_stored_path(
+    stored: str | None,
+    *,
+    model_path: str | Path | None = None,
+    run_dir: str | Path | None = None,
+    workspace_root: str | None = None,
+) -> str | None:
+    """Dual-read sidecar path/source_path/run_path fields to an absolute filesystem path."""
+    from smartrain.core.runtime.path_portable import is_abs_like, resolve_stored_path_under_workspace, to_posix
+
+    if stored is None:
+        return None
+    s = to_posix(str(stored).strip())
+    if not s:
+        return None
+    if is_abs_like(s):
+        return str(Path(s).expanduser().resolve())
+    anchors: list[Path] = []
+    if run_dir:
+        anchors.append(Path(run_dir).expanduser().resolve())
+    if model_path:
+        mp = Path(model_path).expanduser().resolve()
+        anchors.append(mp.parent)
+        # models/ sibling of run root
+        if mp.parent.name == "models":
+            anchors.append(mp.parent.parent)
+    for anchor in anchors:
+        cand = anchor.joinpath(*s.split("/"))
+        if cand.exists():
+            return str(cand.resolve())
+    if workspace_root:
+        return resolve_stored_path_under_workspace(workspace_root, s)
+    if anchors:
+        return str(anchors[0].joinpath(*s.split("/")).resolve())
+    return s
+
+
 def scan_run_models(run_dir: str) -> list[dict[str, Any]]:
     root = _normalize_run_root(run_dir)
     models, _tmp = ensure_run_layout(str(root))
@@ -718,12 +788,19 @@ def scan_run_models(run_dir: str) -> list[dict[str, Any]]:
             fmt = "engine"
         if fmt == "tensorrt-trt":
             fmt = "trt"
+        # Keep filesystem path absolute for runtime; also attach resolved sidecar path if relative.
+        resolved_meta_path = resolve_sidecar_stored_path(
+            meta.get("path") if isinstance(meta.get("path"), str) else None,
+            model_path=p,
+            run_dir=root,
+        )
         out.append(
             {
                 "format": fmt,
                 "path": str(p),
                 "name": p.name,
                 "metadata": meta,
+                "sidecar_path_resolved": resolved_meta_path,
             }
         )
     return out

@@ -79,5 +79,5 @@ def test_dry_run_respects_runs_root_scope(tmp_path: Path) -> None:
         continue_on_error=False,
     )
     assert report["stats"]["planned"] == 1
-    assert report["items"][0]["ref"].endswith("custom_runs/ds_scope/run_scope")
+    assert Path(report["items"][0]["ref"]).as_posix().endswith("custom_runs/ds_scope/run_scope")
 

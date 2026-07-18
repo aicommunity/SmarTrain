@@ -41,6 +41,7 @@ from smartrain.services.inference_runtime_helpers import (
     build_report,
     apply_inference_batch_from_model,
     apply_inference_imgsz_from_model,
+    _portable_path_pair,
     predict_roi_crop,
     resolve_inference_source,
     resolve_inference_task_type,
@@ -785,9 +786,12 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                     )
                     image_rows.append(
                         {
-                            "image_path_absolute": item["image_path_abs"],
-                            "image_path_relative": relativize_if_under(layout.root, item["image_path_abs"])
-                            or item["image_path_abs"],
+                            **_portable_path_pair(
+                                layout.root,
+                                item["image_path_abs"],
+                                absolute_key="image_path_absolute",
+                                relative_key="image_path_relative",
+                            ),
                             "image_size": {"width": item["iw"], "height": item["ih"]},
                             "roi_xyxy": list(item["roi_box"]) if item["roi_box"] is not None else None,
                             "task_type": resolved_pred_task,

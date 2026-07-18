@@ -940,7 +940,7 @@ def test_collect_ultralytics_test_artifacts_prefers_new_layout(tmp_path: Path) -
         {"run_new_layout": "R1"},
     )
     assert rows and rows[0]["exists"] is True
-    assert str(rows[0]["test_dir"]).endswith("tests/test-ultralytics")
+    assert Path(str(rows[0]["test_dir"])).as_posix().endswith("tests/test-ultralytics")
 
 
 def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(

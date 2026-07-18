@@ -4,21 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from smartrain.core.runtime.path_portable import is_abs_like, to_posix
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
 _WORKSPACE_MARKERS = ("models/", "runs/", "datasets/")
-
-
-def is_abs_like(value: str) -> bool:
-    v = (value or "").strip()
-    if not v:
-        return False
-    if v.startswith("/"):
-        return True
-    if len(v) >= 3 and v[1] == ":" and v[2] in "/\\":
-        return True
-    return False
-
 
 def needs_path_rewrite(value: str) -> bool:
     """True when a stored path is absolute-like or uses Windows separators."""
@@ -33,7 +22,7 @@ def needs_path_rewrite(value: str) -> bool:
 
 
 def to_posix_rel(value: str) -> str:
-    return (value or "").strip().replace("\\", "/")
+    return to_posix(value)
 
 
 def workspace_rel_posix(layout: WorkspaceLayout, path: Path) -> str:

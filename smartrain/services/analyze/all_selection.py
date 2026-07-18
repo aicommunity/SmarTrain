@@ -4,6 +4,7 @@ import os
 import sys
 from typing import Any, Callable
 
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.core.runtime.workspace_paths import resolve_workspace_root
 
 
@@ -78,7 +79,7 @@ def prepare_all_selection(
             ap = os.path.abspath(path)
             if workspace_root:
                 try:
-                    rel = os.path.relpath(ap, workspace_root)
+                    rel = posix_relpath(ap, workspace_root)
                     if not rel.startswith(".."):
                         return rel
                 except Exception:

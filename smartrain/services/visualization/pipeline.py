@@ -7,6 +7,7 @@ from typing import Any
 
 from tqdm import tqdm
 
+from smartrain.core.runtime.path_portable import store_path_under_workspace
 from smartrain.services.inference_runtime_helpers import IMAGE_EXTS
 from smartrain.services.visualization.annotation_loader import load_gt_labels
 from smartrain.services.visualization.color_registry import LabelColorRegistry
@@ -14,6 +15,20 @@ from smartrain.services.visualization.contracts import FrameRecord, VisFrameStat
 from smartrain.services.visualization.infer_adapter import run_inference_for_split
 from smartrain.services.visualization.output_writer import append_index_row, write_config, write_summary
 from smartrain.services.visualization.rendering import render_combined_overlay, save_rendered_image
+
+
+def _portable_target_paths(layout_root: str, target: dict[str, Any]) -> dict[str, str | None]:
+    def _one(key: str) -> str | None:
+        val = target.get(key)
+        if not val:
+            return None
+        return store_path_under_workspace(layout_root, str(val))
+
+    return {
+        "dataset_root": _one("dataset_root"),
+        "run_dir": _one("run_dir"),
+        "model_path": _one("model_path"),
+    }
 
 
 def _iter_images(split_dir: Path) -> list[Path]:
@@ -177,15 +192,12 @@ def _render_loop(
                 ),
             )
     finished = datetime.now(timezone.utc).isoformat()
+    layout_root = str(target["layout"].root)
     write_summary(
         summary_path,
         VisSummary(
             mode=mode,
-            target={
-                "dataset_root": str(target.get("dataset_root")) if target.get("dataset_root") else None,
-                "run_dir": str(target.get("run_dir")) if target.get("run_dir") else None,
-                "model_path": str(target.get("model_path")) if target.get("model_path") else None,
-            },
+            target=_portable_target_paths(layout_root, target),
             total_frames=total,
             ok_frames=ok,
             skipped_frames=skipped,

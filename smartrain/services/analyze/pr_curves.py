@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from smartrain.core.runtime.path_portable import posix_relpath
+
 
 def resolve_pr_output_png(
     workspace_cli: str | None,
@@ -170,7 +172,7 @@ def run_pr_curves(
             pd.DataFrame({"recall": recall, "precision": precision}).to_csv(cache_agg, index=False, encoding="utf-8")
             append_cache_entry_cb(
                 run_dir,
-                {"artifact": "pr.aggregate", "fingerprint": fp, "path": os.path.relpath(cache_agg, run_dir)},
+                {"artifact": "pr.aggregate", "fingerprint": fp, "path": posix_relpath(cache_agg, run_dir)},
             )
             cache_stats.append({"run_dir": run_dir, "artifact": "pr.aggregate", "status": "miss"})
             if per_class_enabled:
@@ -197,7 +199,7 @@ def run_pr_curves(
                     per_class_df.to_csv(cache_pc, index=False, encoding="utf-8")
                     append_cache_entry_cb(
                         run_dir,
-                        {"artifact": "pr.per_class", "fingerprint": fp, "path": os.path.relpath(cache_pc, run_dir)},
+                        {"artifact": "pr.per_class", "fingerprint": fp, "path": posix_relpath(cache_pc, run_dir)},
                     )
                     cache_stats.append({"run_dir": run_dir, "artifact": "pr.per_class", "status": "miss"})
             clear_gpu_memory_cb()

@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from smartrain.core.analyze.run_metrics_discovery import recomputed_metrics_write_path
+from smartrain.core.runtime.path_portable import posix_relpath
 
 
 def _default_metrics_for_run_dirs(
@@ -216,7 +217,7 @@ def run_test_metrics_plot(
                         {
                             "artifact": "metrics.recomputed",
                             "fingerprint": fp_metrics,
-                            "path": os.path.relpath(cache_metrics_csv, run_dir),
+                            "path": posix_relpath(cache_metrics_csv, run_dir),
                             "status": "miss",
                         },
                     )

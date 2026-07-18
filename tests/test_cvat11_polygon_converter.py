@@ -21,11 +21,14 @@ def test_cvat_polygon_to_yolo_line() -> None:
 
 
 def read_yolo_labels_from_line(line: str) -> list:
+    import tempfile
+
     from smartrain.services.datasets.yolo_labels import read_yolo_labels
 
-    p = Path("/tmp/line.txt")
-    p.write_text(line + "\n", encoding="utf-8")
-    return read_yolo_labels(str(p))
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "line.txt"
+        p.write_text(line + "\n", encoding="utf-8")
+        return read_yolo_labels(str(p))
 
 
 def test_build_cvat_xml_with_polygon() -> None:

@@ -134,6 +134,7 @@ def _run(
         [sys.executable, "-m", "smartrain", *args],
         cwd=str(cwd),
         env=cmd_env,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=120,

@@ -17,6 +17,7 @@ from smartrain.services.analyze.report_markdown_formatting import (
     _speed_quality_takeaways,
 )
 from smartrain.core.runtime.logging_config import get_logger
+from smartrain.core.runtime.path_portable import posix_relpath
 
 logger = get_logger(__name__)
 
@@ -573,7 +574,7 @@ def _discover_missing_pr_images(report_root: str, manifest_images: list[str]) ->
             if not name.lower().endswith(".png"):
                 continue
             abs_path = os.path.join(root, name)
-            rel = os.path.relpath(abs_path, report_root)
+            rel = posix_relpath(abs_path, report_root)
             if rel in known:
                 continue
             if "per_class" in rel or "pr_all_classes" in name:

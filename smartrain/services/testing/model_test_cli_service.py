@@ -424,9 +424,14 @@ def _resolve_data_yaml_for_target(
     manifest_path = os.path.join(root_dir, "model_manifest.json")
     if os.path.isfile(manifest_path):
         payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-        source_run = payload.get("source_run")
+        source_run = payload.get("source_run_relative") or payload.get("source_run")
         if isinstance(source_run, str) and source_run.strip():
-            dataset_dir = resolve_dataset_path_for_resume(source_run, layout.root)
+            from smartrain.core.runtime.path_portable import is_abs_like, resolve_stored_path_under_workspace, to_posix
+
+            run_ref = to_posix(source_run.strip())
+            if not is_abs_like(run_ref):
+                run_ref = resolve_stored_path_under_workspace(layout.root, run_ref)
+            dataset_dir = resolve_dataset_path_for_resume(run_ref, layout.root)
             if dataset_dir:
                 return _normalize_data_to_yaml(dataset_dir)
     raise RuntimeError("Dataset path is required for models/weights targets. Pass --data.")
@@ -775,6 +780,17 @@ def _check_onnx_format_preflight(policy: str) -> tuple[bool, str | None]:
     return False, f"No usable ONNX providers. available={available}"
 
 
+def _ensure_interactive_tty_or_exit() -> None:
+    if sys.stdin.isatty():
+        return
+    print(
+        "[ERROR] Interactive test mode requires a terminal (TTY). "
+        "Run with explicit --run/--model-name/--weights in non-interactive environments.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = build_model_test_arg_parser()
     args = parser.parse_args(argv)
@@ -798,6 +814,7 @@ def main(argv: list[str] | None = None) -> None:
     if not any((args.run, args.model_name, args.weights)):
         if not interactive:
             parser.error("Specify one of --run, --model-name or --weights in non-interactive mode.")
+        _ensure_interactive_tty_or_exit()
         root_dir, primary_path, target_kind, target_label = surf._pick_interactive_target(layout)
         formats = _parse_formats("pt,onnx,engine,trt")
         default_data_yaml: str | None = None

@@ -6,8 +6,66 @@ import zipfile
 from pathlib import Path
 
 from smartrain.services.datasets.dataset_passport import write_dataset_passport
-from smartrain.core.runtime.path_portable import relativize_abs_paths_in_obj, relativize_if_under, resolve_stored_path_under_workspace
+from smartrain.core.runtime.path_portable import (
+    is_abs_like,
+    posix_relpath,
+    relativize_abs_paths_in_obj,
+    relativize_if_under,
+    resolve_stored_path_under_workspace,
+    store_path_under_workspace,
+    to_posix,
+)
 from smartrain.core.runtime.workspace_paths import extract_dataset_zip_to_cache
+
+
+def test_is_abs_like_posix_and_drive() -> None:
+    assert is_abs_like("/data/x") is True
+    assert is_abs_like("C:\\x") is True
+    assert is_abs_like("C:/x") is True
+    assert is_abs_like("datasets/a") is False
+    assert is_abs_like("") is False
+
+
+def test_posix_relpath_uses_forward_slash(tmp_path: Path) -> None:
+    a = tmp_path / "datasets" / "a"
+    a.mkdir(parents=True)
+    rel = posix_relpath(str(a), str(tmp_path))
+    assert "\\" not in rel
+    assert rel == "datasets/a"
+
+
+def test_to_posix() -> None:
+    assert to_posix(r"models\ds\run") == "models/ds/run"
+
+
+def test_store_path_under_workspace_inside(tmp_path: Path) -> None:
+    ws = str(tmp_path.resolve())
+    sub = tmp_path / "datasets" / "a"
+    sub.mkdir(parents=True)
+    assert store_path_under_workspace(ws, str(sub.resolve())) == "datasets/a"
+
+
+def test_store_path_under_workspace_outside(tmp_path: Path) -> None:
+    ws = str(tmp_path.resolve())
+    other = tmp_path.parent / "outside_ws_only"
+    other.mkdir(exist_ok=True)
+    stored = store_path_under_workspace(ws, str(other.resolve()))
+    assert stored == str(other.resolve()) or os.path.isabs(stored)
+
+
+def test_resolve_stored_accepts_backslash_legacy(tmp_path: Path) -> None:
+    ws = str(tmp_path.resolve())
+    (tmp_path / "datasets" / "a").mkdir(parents=True)
+    got = resolve_stored_path_under_workspace(ws, r"datasets\a")
+    assert Path(got).resolve() == (tmp_path / "datasets" / "a").resolve()
+
+
+def test_resolve_roundtrip_posix(tmp_path: Path) -> None:
+    ws = str(tmp_path.resolve())
+    sub = tmp_path / "datasets" / "x"
+    sub.mkdir(parents=True)
+    rel = store_path_under_workspace(ws, str(sub.resolve()))
+    assert resolve_stored_path_under_workspace(ws, rel) == str(sub.resolve())
 
 
 def test_relativize_if_under_inside(tmp_path: Path) -> None:
@@ -74,6 +132,7 @@ def test_extract_zip_cache_meta_uses_relative_zip_path(tmp_path: Path) -> None:
     assert len(cache_dirs) == 1
     meta = json.loads((cache_dirs[0] / "__meta__.json").read_text(encoding="utf-8"))
     assert meta["zip_path"] == "raw_data/blob.zip"
+    assert "\\" not in str(meta.get("dataset_root_rel") or "")
     root2 = extract_dataset_zip_to_cache(str(ws), str(zpath))
     assert Path(root1).resolve() == Path(root2).resolve()
 

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path
+from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.services.models.release_model_naming import (
     is_registry_bundle_path,
@@ -25,7 +26,6 @@ from smartrain.services.update.plan import (
     UpdateRisk,
     UpdateStep,
 )
-from smartrain.workflows.analyze.results_analyzer import find_run_directories
 
 
 def _sha256_file(path: Path) -> str:

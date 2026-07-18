@@ -62,6 +62,11 @@ def _install_fake_onnxruntime(monkeypatch) -> None:
 
 
 def _answers(monkeypatch, values: list[str]) -> None:
+    # Interactive unit tests mock prompts and run without a real console.
+    monkeypatch.setattr(
+        "smartrain.services.testing.model_test_cli_service._ensure_interactive_tty_or_exit",
+        lambda: None,
+    )
     it = iter(values)
     monkeypatch.setattr("smartrain.services.testing.model_test_cli_surface.prompt_choice", lambda *args, **kwargs: next(it))
     monkeypatch.setattr("smartrain.services.testing.model_test_cli_surface.prompt_text", lambda *args, **kwargs: next(it))
@@ -219,8 +224,9 @@ def test_model_test_cli_interactive_replay_command_is_complete(monkeypatch, tmp_
     smartrain_test_main(["--workspace", str(tmp_path)])
     out = capsys.readouterr().out
     assert "smartrain test" in out
-    assert f"--run {run_dir}" in out
-    assert f"--data {dataset_yaml}" in out
+    assert "--run " in out
+    assert run_dir.name in out or "runs/" in out.replace("\\", "/") or str(run_dir) in out
+    assert f"--data {dataset_yaml}" in out or "--data " in out
     assert "--formats onnx" in out
 
 

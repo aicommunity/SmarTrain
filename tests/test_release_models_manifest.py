@@ -124,14 +124,15 @@ def test_release_comment_for_r3_folder_when_pt_only_nested(tmp_path: Path) -> No
     """R3: folder = run_id, weight stem = detect_*, .pt may live under nested models/."""
     deploy_workspace(str(tmp_path))
     layout = WorkspaceLayout(str(tmp_path))
-    ds = "2026-07-14_20-19-21-merged3_fltd"
-    run_id = "2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc"
-    weight_stem = "detect_yolo11s_20260714_204230_640px_400epochs_b16"
+    # Keep path segments short: Windows MAX_PATH (~260) breaks long nested fixtures.
+    ds = "merged3_fltd"
+    run_id = "yolo11s_640_b16-b1ef93cc"
+    weight_stem = "detect_yolo11s_20260714_204230"
     release_dir = tmp_path / "models" / ds / run_id
-    release_dir.mkdir(parents=True)
-    (release_dir / "models").mkdir()
+    nested_models = release_dir / "models"
+    nested_models.mkdir(parents=True, exist_ok=True)
     # Canonical nested run-style weight (no sibling release sidecar).
-    (release_dir / "models" / f"{run_id}.pt").write_bytes(b"pt")
+    (nested_models / f"{run_id}.pt").write_bytes(b"pt")
     # Release sidecar + comment at folder root (as after model comment / release).
     sidecar = {
         "comment": "Расширенный датасет",

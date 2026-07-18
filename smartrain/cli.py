@@ -20,7 +20,7 @@ from smartrain.cli_entrypoints.support.typer_non_interactive import (
     strip_typer_meta_non_interactive_flags,
 )
 from smartrain.core.runtime.completion_autoinstall import ensure_completion_auto_setup
-from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
+from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV, ensure_stdin_isatty_truthful
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 app = plain_typer(
@@ -1538,6 +1538,7 @@ def cmd_rotate(ctx: typer.Context) -> None:
 
 
 def main() -> None:
+    ensure_stdin_isatty_truthful()
     app()
 
 

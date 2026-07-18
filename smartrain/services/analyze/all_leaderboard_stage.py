@@ -4,6 +4,8 @@ import argparse
 import os
 from typing import Callable
 
+from smartrain.core.runtime.path_portable import posix_relpath
+
 
 def run_all_leaderboard_stage(
     *,
@@ -33,7 +35,7 @@ def run_all_leaderboard_stage(
     )
     cmd_leaderboard_cb(lb_ns)
     if os.path.isfile(lb_csv):
-        artifacts.append({"role": "leaderboard_csv", "path": os.path.relpath(lb_csv, session_root)})
+        artifacts.append({"role": "leaderboard_csv", "path": posix_relpath(lb_csv, session_root)})
     elif record_failure_cb is not None:
         record_failure_cb(
             stage="leaderboard",

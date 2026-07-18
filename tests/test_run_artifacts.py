@@ -318,3 +318,38 @@ def test_prune_empty_sidecar_dirs(tmp_path: Path) -> None:
     assert not (run_dir / ".ultralytics_scratch").exists()
     assert not (run_dir / ".ultralytics_predict_scratch").exists()
 
+
+def test_write_model_sidecar_metadata_portable_paths(tmp_path: Path) -> None:
+    from smartrain.core.runtime.run_artifacts import write_model_sidecar_metadata
+
+    run_dir = tmp_path / "runs" / "ds1" / "run-side"
+    models = run_dir / "models"
+    models.mkdir(parents=True)
+    onnx = models / "a.onnx"
+    onnx.write_bytes(b"onnx")
+    side = write_model_sidecar_metadata(
+        onnx,
+        format_name="onnx",
+        run_dir=str(run_dir),
+        source_path=str(models / "a.pt"),
+        workspace_root=str(tmp_path),
+    )
+    data = json.loads(side.read_text(encoding="utf-8"))
+    assert data["path"] == "models/a.onnx"
+    assert data["run_path"] == "runs/ds1/run-side"
+    assert "\\" not in data["path"]
+    assert "\\" not in data["run_path"]
+    assert not Path(data["path"]).is_absolute()
+
+
+def test_resolve_sidecar_stored_path_relative_to_run(tmp_path: Path) -> None:
+    from smartrain.core.runtime.run_artifacts import resolve_sidecar_stored_path
+
+    run_dir = tmp_path / "runs" / "ds" / "r1"
+    models = run_dir / "models"
+    models.mkdir(parents=True)
+    onnx = models / "a.onnx"
+    onnx.write_bytes(b"x")
+    got = resolve_sidecar_stored_path("models/a.onnx", model_path=onnx, run_dir=run_dir)
+    assert Path(got).resolve() == onnx.resolve()
+

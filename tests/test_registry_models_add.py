@@ -92,6 +92,12 @@ def test_registry_models_add_copies_bundle_and_manifest(tmp_path: Path) -> None:
     assert man["weights_file"] == "models/promo_run.pt"
     assert man.get("bundle_layout_version") == 2
     assert man.get("task_type") == "detection"
+    assert man.get("workspace_root") == "."
+    assert man.get("source_run_relative") == man.get("source_run")
+    assert man.get("source_run") == "runs/promo_run"
+    assert "\\" not in str(man.get("source_run") or "")
+    assert not str(man.get("source_run") or "").startswith("/")
+    assert ":" not in str(man.get("source_run") or "")
     assert (promo / "models" / "promo_run.pt").read_bytes() == b"canonical-pt"
     assert (promo / "models" / "export.onnx").read_bytes() == b"onnx-bytes"
     # Source run may migrate ``train/`` → ``train-ultralytics/`` when canonical path is resolved.

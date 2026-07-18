@@ -4,6 +4,8 @@ import argparse
 import os
 from typing import Any, Callable
 
+from smartrain.core.runtime.path_portable import posix_relpath
+
 
 def run_all_baseline_artifacts(
     *,
@@ -39,9 +41,9 @@ def run_all_baseline_artifacts(
         cmd_compare_cb(cmp_ns)
         artifacts.extend(
             [
-                {"role": "compare_csv", "path": os.path.relpath(compare_csv, session_root)},
-                {"role": "compare_png", "path": os.path.relpath(compare_png, session_root)},
-                {"role": "compare_insights", "path": os.path.relpath(compare_insights, session_root)},
+                {"role": "compare_csv", "path": posix_relpath(compare_csv, session_root)},
+                {"role": "compare_png", "path": posix_relpath(compare_png, session_root)},
+                {"role": "compare_insights", "path": posix_relpath(compare_insights, session_root)},
             ]
         )
     else:
@@ -55,20 +57,20 @@ def run_all_baseline_artifacts(
         analytics_session=None,
     )
     cmd_export_table_cb(exp_ns)
-    artifacts.append({"role": "summary_csv", "path": os.path.relpath(exp_csv, session_root)})
+    artifacts.append({"role": "summary_csv", "path": posix_relpath(exp_csv, session_root)})
 
     sys_profile_csv = os.path.join(session_root, "artifacts", "table", "system_profile_compare.csv")
     written_sys_profile = write_system_profile_compare_csv_cb([baseline] + others, sys_profile_csv)
     if written_sys_profile:
         artifacts.append(
-            {"role": "system_profile_compare_csv", "path": os.path.relpath(sys_profile_csv, session_root)}
+            {"role": "system_profile_compare_csv", "path": posix_relpath(sys_profile_csv, session_root)}
         )
 
     test_sys_profile_csv = os.path.join(session_root, "artifacts", "table", "test_system_profile_compare.csv")
     written_test_sys_profile = write_test_system_profile_compare_csv_cb([baseline] + others, test_sys_profile_csv)
     if written_test_sys_profile:
         artifacts.append(
-            {"role": "test_system_profile_compare_csv", "path": os.path.relpath(test_sys_profile_csv, session_root)}
+            {"role": "test_system_profile_compare_csv", "path": posix_relpath(test_sys_profile_csv, session_root)}
         )
 
     return artifacts

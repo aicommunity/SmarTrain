@@ -435,6 +435,8 @@ def resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, s
 
 
 def _resolve_run_ref(layout: WorkspaceLayout, ref: str) -> Path:
+    from smartrain.core.runtime.path_portable import is_abs_like, to_posix
+
     s = str(ref).strip()
     if not s:
         raise ValueError("empty run reference")
@@ -444,12 +446,16 @@ def _resolve_run_ref(layout: WorkspaceLayout, ref: str) -> Path:
         if idx < 1 or idx > len(runs):
             raise ValueError(f"run index {idx} is out of range 1..{len(runs)}")
         return Path(runs[idx - 1]).resolve()
-    return Path(s).expanduser().resolve()
+    if is_abs_like(s):
+        return Path(s).expanduser().resolve()
+    return (Path(layout.root) / to_posix(s)).resolve()
 
 
 def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Path, str, str]:
-    def _resolve_and_validate_canonical_weights(model: Any) -> Path:
-        p = Path(str(model.weights_path)).expanduser().resolve()
+    def _resolve_and_validate_canonical_weights(model: Any, *, anchor: Path) -> Path:
+        from smartrain.run_model_contract.io.read.normalizers import normalize_path
+
+        p = Path(normalize_path(str(model.weights_path), anchor=anchor))
         if not p.is_file():
             raise FileNotFoundError(f"Canonical weights not found: {p}")
         if p.suffix.lower() not in SUPPORTED_INFERENCE_EXTS:
@@ -481,7 +487,7 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
         if not payload.models:
             raise FileNotFoundError(f"Canonical model payload has no models for: {mdir}")
         model = payload.models[0]
-        p = _resolve_and_validate_canonical_weights(model)
+        p = _resolve_and_validate_canonical_weights(model, anchor=mdir)
         return p, str(model.model_id or mdir.name), "models"
     if args.run:
         run_dir = _resolve_run_ref(layout, str(args.run))
@@ -492,7 +498,7 @@ def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Pa
         if not payload.models:
             raise FileNotFoundError(f"Canonical run payload has no models for: {run_dir}")
         model = payload.models[0]
-        p = _resolve_and_validate_canonical_weights(model)
+        p = _resolve_and_validate_canonical_weights(model, anchor=run_dir)
         source_id = str(ctx.run_id or (payload.runs[0].run_id if payload.runs else run_dir.name))
         return p, source_id, "runs"
     if args.weights:
@@ -772,6 +778,26 @@ def resolve_output_root(layout: WorkspaceLayout, model_name: str, source_short: 
     return out
 
 
+def _portable_path_pair(
+    workspace_root: str,
+    path: str | None,
+    *,
+    absolute_key: str,
+    relative_key: str,
+) -> dict[str, Any]:
+    """Prefer workspace-relative fields; keep ``*_absolute`` only outside the workspace."""
+    if path is None:
+        return {absolute_key: None, relative_key: None}
+    abs_path = str(path)
+    rel = relativize_if_under(workspace_root, abs_path)
+    if rel is not None and rel != abs_path:
+        return {relative_key: rel}
+    out: dict[str, Any] = {absolute_key: abs_path}
+    if rel is not None:
+        out[relative_key] = rel
+    return out
+
+
 def source_descriptor(
     args: argparse.Namespace,
     source_abs: str,
@@ -783,12 +809,22 @@ def source_descriptor(
     source: dict[str, Any] = {
         "mode": args.data_mode,
         "name": source_short,
-        "path_absolute": source_abs,
-        "path_relative": relativize_if_under(layout.root, source_abs) or source_abs,
+        **_portable_path_pair(
+            layout.root,
+            source_abs,
+            absolute_key="path_absolute",
+            relative_key="path_relative",
+        ),
     }
     if source_archive:
-        source["source_archive_absolute"] = source_archive
-        source["source_archive_relative"] = relativize_if_under(layout.root, source_archive) or source_archive
+        source.update(
+            _portable_path_pair(
+                layout.root,
+                source_archive,
+                absolute_key="source_archive_absolute",
+                relative_key="source_archive_relative",
+            )
+        )
     if args.data_mode == "dataset-split":
         source["dataset"] = args.dataset
         source["split"] = args.split
@@ -845,24 +881,48 @@ def build_report(
         dets = task_outputs.get("detections")
         if isinstance(dets, list):
             task_outputs_total += len(dets)
+    model_fields = {
+        "source": model_source,
+        "name": model_name,
+        "provider": {
+            "type": "external" if str(getattr(args, "external_provider", "") or "").strip() else "builtin",
+            "id": str(getattr(args, "external_provider", "") or "").strip() or "ultralytics",
+        },
+        "weights_value": str(model_path),
+        **_portable_path_pair(
+            layout.root,
+            str(model_path),
+            absolute_key="weights_absolute",
+            relative_key="weights_relative",
+        ),
+    }
+    output_fields = {
+        **_portable_path_pair(
+            layout.root,
+            out_root,
+            absolute_key="dir_absolute",
+            relative_key="dir_relative",
+        ),
+        **_portable_path_pair(
+            layout.root,
+            report_path,
+            absolute_key="json_absolute",
+            relative_key="json_relative",
+        ),
+    }
+    env_profile = _portable_path_pair(
+        layout.root,
+        environment_artifact_path,
+        absolute_key="path_absolute",
+        relative_key="path_relative",
+    )
     return {
         "created_at": datetime.utcnow().isoformat() + "Z",
         "task_type": task_type,
         "workspace": {
-            "root_absolute": layout.root,
-            "root_relative": relativize_if_under(layout.root, layout.root) or ".",
+            "root_relative": ".",
         },
-        "model": {
-            "source": model_source,
-            "name": model_name,
-            "provider": {
-                "type": "external" if str(getattr(args, "external_provider", "") or "").strip() else "builtin",
-                "id": str(getattr(args, "external_provider", "") or "").strip() or "ultralytics",
-            },
-            "weights_absolute": str(model_path),
-            "weights_relative": relativize_if_under(layout.root, str(model_path)) or str(model_path),
-            "weights_value": str(model_path),
-        },
+        "model": model_fields,
         "parameters": {
             "conf": args.conf,
             "img_size": int(args.img_size),
@@ -903,12 +963,7 @@ def build_report(
             layout,
             source_archive=source_archive,
         ),
-        "output": {
-            "dir_absolute": out_root,
-            "dir_relative": relativize_if_under(layout.root, out_root) or out_root,
-            "json_absolute": report_path,
-            "json_relative": relativize_if_under(layout.root, report_path) or report_path,
-        },
+        "output": output_fields,
         "summary": {
             "images_input": images_input_count,
             "images_processed": len(image_rows),
@@ -918,12 +973,7 @@ def build_report(
         },
         "performance": performance if isinstance(performance, dict) else None,
         "artifacts": {
-            "environment_profile": {
-                "path_absolute": environment_artifact_path,
-                "path_relative": (
-                    relativize_if_under(layout.root, environment_artifact_path) if environment_artifact_path else None
-                ),
-            }
+            "environment_profile": env_profile,
         },
         "images": image_rows,
     }

@@ -392,11 +392,10 @@ def rename_entry(
         manifest["entries"] = entries
     old_entry = entries.pop(old_key, None)
     root = Path(layout.root).resolve()
-    rel_model = (
-        str(model_path.resolve().relative_to(root))
-        if model_path.resolve().is_relative_to(root)
-        else str(model_path.resolve())
-    )
+    try:
+        rel_model = model_path.resolve().relative_to(root).as_posix()
+    except ValueError:
+        rel_model = model_path.resolve().as_posix()
     now = _now_iso()
     if isinstance(old_entry, dict):
         new_entry = dict(old_entry)

@@ -15,11 +15,11 @@ from typing import Any
 
 from PIL import Image
 
-from smartrain.core.runtime.path_portable import relativize_if_under
+from smartrain.core.runtime.path_portable import resolve_stored_path_under_workspace
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.services.datasets.yolo_labels import task_outputs_to_yolo_labels, write_yolo_labels
-from smartrain.services.inference_runtime_helpers import sanitize_segment, write_report
+from smartrain.services.inference_runtime_helpers import _portable_path_pair, sanitize_segment, write_report
 from smartrain.services.visualization.color_registry import LabelColorRegistry
 from smartrain.services.visualization.rendering import render_pred_overlay, save_rendered_image
 
@@ -116,11 +116,50 @@ def _image_size(row: dict[str, Any]) -> tuple[int, int]:
         w, h = 0, 0
     if w > 0 and h > 0:
         return w, h
-    src = str(row.get("image_path_absolute") or "")
+    src = _resolve_row_image_path(row)
     if src and os.path.isfile(src):
         with Image.open(src) as im:
             return im.size
     return 0, 0
+
+
+def _resolve_row_image_path(row: dict[str, Any], layout: WorkspaceLayout | None = None) -> str:
+    abs_p = str(row.get("image_path_absolute") or "").strip()
+    if abs_p and os.path.isfile(abs_p):
+        return abs_p
+    rel = str(row.get("image_path_relative") or "").strip()
+    if rel and layout is not None:
+        candidate = resolve_stored_path_under_workspace(layout.root, rel)
+        if os.path.isfile(candidate):
+            return candidate
+    if abs_p:
+        return abs_p
+    return ""
+
+
+def _portable_source_mapping(layout_root: str, src: str) -> dict[str, str]:
+    return _portable_path_pair(
+        layout_root,
+        os.path.abspath(src),
+        absolute_key="source_path_absolute",
+        relative_key="source_path_relative",
+    )
+
+
+def _portable_provenance(layout_root: str, report_path: str | Path, out_root: str | Path) -> dict[str, Any]:
+    report_fields = _portable_path_pair(
+        layout_root,
+        str(Path(report_path).resolve()),
+        absolute_key="inference_report_absolute",
+        relative_key="inference_report_relative",
+    )
+    run_fields = _portable_path_pair(
+        layout_root,
+        str(Path(out_root).resolve()),
+        absolute_key="inference_run_dir_absolute",
+        relative_key="inference_run_dir_relative",
+    )
+    return {**report_fields, **run_fields, "producer": "smartrain.inference"}
 
 
 def _confidence_value(item: dict[str, Any]) -> float | None:
@@ -430,6 +469,7 @@ def _write_flat_dataset(
     images_exported: int,
     images_skipped_empty: int,
     labels_total: int,
+    workspace_root: str,
 ) -> Path:
     images_dir = dataset_dir / "images"
     labels_dir = dataset_dir / "labels"
@@ -457,11 +497,7 @@ def _write_flat_dataset(
             "export_files_per_dir": options.export_files_per_dir,
             "export_class_ids": sorted(options.export_class_ids) if options.export_class_ids else None,
         },
-        "provenance": {
-            "inference_report_absolute": str(Path(report_path).resolve()),
-            "inference_run_dir_absolute": str(Path(out_root).resolve()),
-            "producer": "smartrain.inference",
-        },
+        "provenance": _portable_provenance(workspace_root, report_path, out_root),
         "summary": {
             "images_input": images_input,
             "images_exported": images_exported,
@@ -486,6 +522,7 @@ def _write_independent_parts(
     images_exported: int,
     images_skipped_empty: int,
     labels_total: int,
+    workspace_root: str,
 ) -> tuple[Path, int]:
     files_per_dir = max(1, int(options.export_files_per_dir))
     parts_meta: list[dict[str, Any]] = []
@@ -493,11 +530,7 @@ def _write_independent_parts(
     model_block = _model_block(report)
     infer_params = _inference_parameters_block(report)
     source_block = report.get("source") if isinstance(report.get("source"), dict) else {}
-    provenance = {
-        "inference_report_absolute": str(Path(report_path).resolve()),
-        "inference_run_dir_absolute": str(Path(out_root).resolve()),
-        "producer": "smartrain.inference",
-    }
+    provenance = _portable_provenance(workspace_root, report_path, out_root)
 
     part_count = int(math.ceil(len(pending_exports) / float(files_per_dir))) if pending_exports else 0
     for part_index in range(part_count):
@@ -520,7 +553,7 @@ def _write_independent_parts(
             part_labels_total += len(yolo_labels)
             part_mapping.append(
                 {
-                    "source_path_absolute": os.path.abspath(src),
+                    **_portable_source_mapping(workspace_root, src),
                     "export_stem": Path(export_image_name).stem,
                     "export_image": f"images/{export_image_name}",
                     "export_label": f"labels/{export_label_name}",
@@ -606,7 +639,6 @@ def export_yolo_dataset(
     options: ExportOptions,
     layout: WorkspaceLayout,
 ) -> tuple[ExportSummary, set[str]]:
-    _ = layout
     task_type = task_to_metadata_task_type(report.get("task_type"))
     if task_type == "classification":
         print(
@@ -630,7 +662,7 @@ def export_yolo_dataset(
     for row in images:
         if not isinstance(row, dict):
             continue
-        src = str(row.get("image_path_absolute") or "")
+        src = _resolve_row_image_path(row, layout)
         if not src or not os.path.isfile(src):
             continue
         conf_filtered = filter_task_outputs(row, task_type, options.label_conf_min, options.label_conf_max)
@@ -688,6 +720,7 @@ def export_yolo_dataset(
             images_exported=images_exported,
             images_skipped_empty=images_skipped_empty,
             labels_total=labels_total,
+            workspace_root=layout.root,
         )
         print(
             f"[OK] Autolabel split into {parts_count} independent sub-dataset(s) "
@@ -714,7 +747,7 @@ def export_yolo_dataset(
     flat_pending = [(s, i, l, y) for s, i, l, y, _c in pending_exports]
     flat_mapping = [
         {
-            "source_path_absolute": os.path.abspath(src),
+            **_portable_source_mapping(layout.root, src),
             "export_stem": Path(export_image_name).stem,
             "export_image": f"images/{export_image_name}",
             "export_label": f"labels/{export_label_name}",
@@ -734,6 +767,7 @@ def export_yolo_dataset(
         images_exported=images_exported,
         images_skipped_empty=images_skipped_empty,
         labels_total=labels_total,
+        workspace_root=layout.root,
     )
     return (
         ExportSummary(
@@ -775,7 +809,7 @@ def export_prediction_overlays(
     for row in images:
         if not isinstance(row, dict):
             continue
-        src = str(row.get("image_path_absolute") or "")
+        src = _resolve_row_image_path(row, layout)
         if not src or not os.path.isfile(src):
             continue
         src_abs = os.path.abspath(src)
@@ -860,11 +894,21 @@ def patch_inference_report_artifacts(
     artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
     if summary.dataset_dir:
         artifacts["autolabel_dataset"] = {
-            "path_absolute": summary.dataset_dir,
-            "path_relative": relativize_if_under(layout.root, summary.dataset_dir) or summary.dataset_dir,
-            "manifest_absolute": summary.manifest_path,
-            "manifest_relative": (
-                relativize_if_under(layout.root, summary.manifest_path) if summary.manifest_path else None
+            **_portable_path_pair(
+                layout.root,
+                summary.dataset_dir,
+                absolute_key="path_absolute",
+                relative_key="path_relative",
+            ),
+            **(
+                _portable_path_pair(
+                    layout.root,
+                    summary.manifest_path,
+                    absolute_key="manifest_absolute",
+                    relative_key="manifest_relative",
+                )
+                if summary.manifest_path
+                else {}
             ),
             "images_exported": summary.images_exported,
             "labels_total": summary.labels_total,
@@ -874,8 +918,12 @@ def patch_inference_report_artifacts(
         }
     if summary.overlay_dir:
         artifacts["pred_overlays"] = {
-            "path_absolute": summary.overlay_dir,
-            "path_relative": relativize_if_under(layout.root, summary.overlay_dir) or summary.overlay_dir,
+            **_portable_path_pair(
+                layout.root,
+                summary.overlay_dir,
+                absolute_key="path_absolute",
+                relative_key="path_relative",
+            ),
             "images_rendered": len(summary.overlay_paths),
         }
     payload["artifacts"] = artifacts
