@@ -45,7 +45,7 @@ Training runs live under `runs/`. Published weights live under workspace `models
 | **R2 (compat)** | `models/<dataset>/<stem>.pt` next to `models/<dataset>/<stem>/` | Flat sibling weight. |
 | **Registry bundle** | `models/<friendly_name>/` + `model_manifest.json` | From `registry models-add`; not the same as `model release`. |
 
-`model release` moves the run directory from `runs/` to `models/<dataset>/<run_id>/` without leaving a duplicate. `model unrelease` moves it back and removes the manifest entry.
+`model release` moves the run directory from `runs/` to `models/<dataset>/<run_id>/` without leaving a duplicate. `model unrelease` moves it back and removes the manifest entry. Workspace migration of legacy shapes: `smartrain update` ([`legacy-compat-inventory.md`](./legacy-compat-inventory.md)).
 
 Comments: `models/releases_manifest.json` keys as `<dataset>/<weight_stem>`; lookup also accepts `<dataset>/<folder>` for R3 when the PT is only under nested `models/`.
 

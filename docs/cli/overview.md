@@ -9,14 +9,14 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `dataset report`, `dataset rename`
 - Training: `train`, `clearml-upload`
 - Providers: `providers`
-- Workspace: `deploy`, `quickstart`, `info`, `sync`
+- Workspace: `deploy`, `quickstart`, `info`, `sync`, `update`
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
 - Models: `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`
 - Dataset catalog: `dataset report`, `dataset rename`
 - Format tools: `dataset convert`, `sahi`, `heatmap`, `vis`
-- Migration: `migrate`, `migrate-models`
+- Migration: `migrate`, `migrate-models` (companions of `update` for snapshots / missing metadata)
 - Maintenance: `deps sync-torch`, `deps doctor`, `deps install`
 
 ## Reference
@@ -44,7 +44,7 @@ smartrain <group> <subcommand> -- --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `inference`, `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `inference`, `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`, `update`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -59,6 +59,12 @@ Completion:
 
 - Prints `Supported train models` section for copy-paste use in `smartrain train --model ...`.
 - Includes default backend aliases plus provider-scoped aliases for installed external providers.
+
+Workspace update highlights:
+
+- `smartrain update` scans the workspace for legacy on-disk shapes (run layout, root-level release weights, manifests, `data.yaml`) and migrates toward the canonical layout.
+- `--dry-run` prints the plan; `--yes` applies safe steps; `--apply-all` (with `--yes`) also applies ask/unsafe steps; `--check` exits non-zero if residual legacy remains.
+- Reports land under `analytics/update-reports/<timestamp>/`. Inventory: [`../refactor/legacy-compat-inventory.md`](../refactor/legacy-compat-inventory.md).
 
 Model convert highlights:
 

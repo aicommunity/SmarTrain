@@ -233,6 +233,33 @@ def cmd_sync(ctx: typer.Context) -> None:
 
 
 @app.command(
+    "update",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_update(ctx: typer.Context) -> None:
+    """Scan workspace for legacy on-disk shapes and migrate toward the canonical layout.
+
+    Examples:
+      smartrain update --dry-run
+      smartrain update --yes
+      smartrain update --yes --apply-all
+      smartrain update --check
+      smartrain update --only layout,releases,yaml
+      smartrain update
+    """
+    from smartrain.workflows.update.update_cli import build_update_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.update.update_cli",
+        build_parser=build_update_arg_parser,
+        prog="smartrain update",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@app.command(
     "normalize-data-yaml",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,

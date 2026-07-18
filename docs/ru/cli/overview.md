@@ -9,14 +9,14 @@
 - Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `dataset report`, `dataset rename`
 - Обучение: `train`, `clearml-upload`
 - Провайдеры: `providers`
-- Workspace: `deploy`, `quickstart`, `info`, `sync`
+- Workspace: `deploy`, `quickstart`, `info`, `sync`, `update`
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
 - Модели: `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`
 - Каталог датасетов: `dataset report`, `dataset rename`
 - Инструменты форматов: `dataset convert`, `sahi`, `heatmap`, `vis`
-- Миграция: `migrate`, `migrate-models`
+- Миграция: `migrate`, `migrate-models` (компаньоны `update` для snapshot / отсутствующих metadata)
 - Обслуживание: `deps sync-torch`, `deps doctor`, `deps install`
 
 ## Справка
@@ -38,7 +38,7 @@ smartrain model convert --help
 
 - интерактив включается только при запуске команды без аргументов (TTY обязателен);
 - выбор датасета(ов): сразу нумерованный список; ввод по имени или по номеру (несколько датасетов — через CSV номеров или имён);
-- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model unrelease`, `model comment`, `model rename` пустой вызов запускает интерактивный режим;
+- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`, `update` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
 
@@ -53,6 +53,12 @@ smartrain model convert --help
 
 - Печатает секцию `Supported train models` с алиасами, которые можно копировать напрямую в `smartrain train --model ...`.
 - Включает алиасы backend по умолчанию и провайдер-специфичные алиасы установленных внешних провайдеров.
+
+Особенности `smartrain update`:
+
+- Сканирует workspace на legacy on-disk формы (layout run, root-level release, манифесты, `data.yaml`) и приводит к канону.
+- `--dry-run` — план; `--yes` — safe-шаги; `--apply-all` (с `--yes`) — также ask-шаги; `--check` — ненулевой exit при residual.
+- Отчёты: `analytics/update-reports/<timestamp>/`. Карта: [`../../refactor/legacy-compat-inventory.md`](../../refactor/legacy-compat-inventory.md).
 
 Особенности `model convert`:
 

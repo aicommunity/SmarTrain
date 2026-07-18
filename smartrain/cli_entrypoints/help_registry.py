@@ -53,6 +53,14 @@ COMMANDS: dict[str, CommandHelp] = {
             "repair portable paths, and run final scan in target workspace."
         ),
     ),
+    "update": CommandHelp(
+        name="update",
+        summary="Migrate workspace on-disk legacy layouts to the canonical shape.",
+        description=(
+            "Scan runs/, models/, datasets/ for legacy paths and manifests; apply safe migrations "
+            "and prompt for unsafe ones. Supports --dry-run, --yes, --apply-all, --check, --only."
+        ),
+    ),
     "normalize-data-yaml": CommandHelp(
         name="normalize-data-yaml",
         summary="Rewrite datasets/*/data.yaml to portable Ultralytics layout.",
@@ -308,7 +316,7 @@ COMMANDS: dict[str, CommandHelp] = {
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Workspace",
-        ["deploy", "info", "quickstart", "sync"],
+        ["deploy", "info", "quickstart", "sync", "update"],
     ),
     (
         "Dataset catalog and preparation",

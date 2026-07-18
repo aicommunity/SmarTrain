@@ -48,7 +48,7 @@
 | `smartrain providers` | `smartrain/providers/cli.py` |
 | `smartrain deps sync-torch` | `smartrain/external_providers/installer.py` |
 | `smartrain deps doctor` / `deps install` | `smartrain/services/deps/optional_extras.py` |
-| `smartrain deploy` / `quickstart` / `info` / `sync` | `smartrain/cli.py` (+ `smartrain/services/workspace/workspace_sync_service.py` для `sync`) |
+| `smartrain deploy` / `quickstart` / `info` / `sync` / `update` | `smartrain/cli.py` (+ `workspace_sync_service.py` для `sync`; `workflows/update/update_cli.py` для `update`) |
 | `smartrain migrate` | `smartrain/workflows/migration/cli_migration.py` |
 | `smartrain migrate-models` | `smartrain/workflows/migration/migrate_models_to_smartrain.py` |
 | `smartrain clearml-upload` | `smartrain/workflows/analyze/clearml_upload.py` |

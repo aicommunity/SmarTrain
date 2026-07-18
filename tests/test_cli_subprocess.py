@@ -23,6 +23,7 @@ HELP_MATRIX: list[list[str]] = [
     ["scan", "--", "--help"],
     ["normalize-data-yaml", "--", "--help"],
     ["sync", "--", "--help"],
+    ["update", "--", "--help"],
     ["workspace", "--help"],
     ["workspace", "peers", "--", "--help"],
     ["merge", "--", "--help"],
