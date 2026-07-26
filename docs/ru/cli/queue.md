@@ -24,3 +24,15 @@ smartrain queue-run --no-gui
 - `Running`
 - `Done`
 - `Error`
+- `Waiting retry N/M` — после retryable-сбоя (попытка N из max M)
+
+## Повторы
+
+```bash
+smartrain queue run --no-gui --max-retries 2 --retry-backoff-sec 30 --retry-exit-codes 1
+smartrain queue-run --no-gui --max-retries 2
+```
+
+- `--max-retries` по умолчанию `0` (как раньше: сразу `Error`)
+- Backoff: `min(600, backoff * 2^(attempt-1))`
+- Ошибки разбора / отсутствующей команды — non-retryable → сразу `Error`

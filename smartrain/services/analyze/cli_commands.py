@@ -1270,6 +1270,22 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
     )
     p_all.add_argument("--val-batch", type=int, default=1, help="Validation batch size for GPU memory-safe val()")
     p_all.add_argument("--val-imgsz", type=int, default=640, help="Validation image size for GPU memory-safe val()")
+    p_all.add_argument(
+        "--compute-lrp",
+        dest="compute_lrp",
+        action="store_true",
+        default=False,
+        help=(
+            "Opt-in Optimal LRP JSON (tests/lrp_recommendations_*.json) after confidence stage. "
+            "Does not change A/B/C confidence_recommendations."
+        ),
+    )
+    p_all.add_argument(
+        "--no-compute-lrp",
+        dest="compute_lrp",
+        action="store_false",
+        help="Disable Optimal LRP recommendation (default).",
+    )
     p_all.add_argument("--val-half", dest="val_half", action="store_true", default=True, help="Use FP16 for validation on GPU")
     p_all.add_argument("--no-val-half", dest="val_half", action="store_false", help="Disable FP16 for validation")
     p_all.add_argument("--gpu-only-val", dest="gpu_only_val", action="store_true", default=True, help="Do not fallback to CPU in val()")

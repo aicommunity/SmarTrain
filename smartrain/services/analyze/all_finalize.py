@@ -110,6 +110,7 @@ def finalize_all_session(
         workspace_root=workspace_root,
         val_batch=int(getattr(args, "val_batch", 1) or 1),
         val_imgsz=int(getattr(args, "val_imgsz", 640) or 640),
+        compute_lrp=bool(getattr(args, "compute_lrp", False)),
     )
 
     conf_tables = collect_confidence_recommendation_tables_cb(

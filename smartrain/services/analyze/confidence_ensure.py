@@ -50,13 +50,18 @@ def ensure_confidence_recommendations_for_analyze_runs(
     workspace_root: str,
     val_batch: int = 1,
     val_imgsz: int = 640,
+    compute_lrp: bool = False,
 ) -> None:
+    from smartrain.core.training.lrp_recommendation import maybe_write_lrp_recommendations
+
     run_data_yaml_map = run_data_yaml_map or {}
     for run_dir in run_dirs:
         rd = os.path.abspath(run_dir.rstrip(os.sep))
         label = os.path.basename(rd)
         test_path = recommendation_file_path(rd, "test")
         if recommendations_complete(read_recommendation_file(test_path)):
+            if compute_lrp:
+                maybe_write_lrp_recommendations(model_dir=rd, split="test", compute_lrp=True)
             continue
         weights = _resolve_pt_weights_for_confidence(rd)
         if not weights:
@@ -70,6 +75,8 @@ def ensure_confidence_recommendations_for_analyze_runs(
                 print(f"[WARN] {label}: confidence skipped — PT model not found ({exc})")
             else:
                 print(f"[WARN] {label}: confidence skipped — PT model not found.")
+            if compute_lrp:
+                maybe_write_lrp_recommendations(model_dir=rd, split="test", compute_lrp=True)
             continue
         # run_data_yaml_map stores paths to data.yaml files; the PT runner expects a dataset root.
         dataset_path = str(run_data_yaml_map.get(rd) or run_data_yaml_map.get(run_dir) or "").strip()
@@ -91,6 +98,8 @@ def ensure_confidence_recommendations_for_analyze_runs(
                 print(f"[WARN] {label}: confidence skipped — dataset path unresolved ({exc})")
             else:
                 print(f"[WARN] {label}: confidence skipped — dataset path unresolved.")
+            if compute_lrp:
+                maybe_write_lrp_recommendations(model_dir=rd, split="test", compute_lrp=True)
             continue
         print(f"[INFO] {label}: computing missing confidence recommendations (test/val)...")
         try:
@@ -111,3 +120,5 @@ def ensure_confidence_recommendations_for_analyze_runs(
             except OSError:
                 pass
             print(f"[WARN] {label}: confidence compute failed: {exc}")
+        if compute_lrp:
+            maybe_write_lrp_recommendations(model_dir=rd, split="test", compute_lrp=True)

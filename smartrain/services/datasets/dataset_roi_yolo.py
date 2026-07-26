@@ -28,6 +28,11 @@ from smartrain.services.datasets.datasets_json_scan_core_service import (
     IMAGE_EXTS_FLAT,
     load_yaml,
 )
+from smartrain.services.datasets.roi_geometry import (
+    clamp_crop as _clamp_crop,
+    full_image_crop as _full_image_crop,
+    select_roi_boxes as _select_roi_boxes,
+)
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
@@ -74,24 +79,6 @@ def _intersect_bbox(
     if x2 <= x1 or y2 <= y1:
         return None
     return (x1, y1, x2, y2)
-
-
-def _clamp_crop(
-    x1: float, y1: float, x2: float, y2: float, pad: int, iw: int, ih: int
-) -> Tuple[int, int, int, int]:
-    x1 -= pad
-    y1 -= pad
-    x2 += pad
-    y2 += pad
-    x1c = max(0, int(round(x1)))
-    y1c = max(0, int(round(y1)))
-    x2c = min(iw, int(round(x2)))
-    y2c = min(ih, int(round(y2)))
-    if x2c <= x1c:
-        x2c = min(iw, x1c + 1)
-    if y2c <= y1c:
-        y2c = min(ih, y1c + 1)
-    return x1c, y1c, x2c, y2c
 
 
 def _bbox_to_yolo_line(
@@ -196,61 +183,6 @@ def _write_label_lines(path: str, lines: List[str]) -> None:
         os.makedirs(d, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(lines)
-
-
-def _select_roi_boxes(
-    xyxy: Any,
-    cls: Any,
-    confs: Any,
-    class_ids: Optional[Sequence[int]],
-    policy: str,
-    iw: int,
-    ih: int,
-) -> List[Tuple[float, float, float, float]]:
-    if xyxy is None or len(xyxy) == 0:
-        return []
-    xyxy = np.asarray(xyxy, dtype=np.float64)
-    cls = np.asarray(cls, dtype=np.int64).reshape(-1)
-    confs = np.asarray(confs, dtype=np.float64).reshape(-1)
-    boxes: List[Tuple[float, float, float, float, int, float]] = []
-    for i in range(xyxy.shape[0]):
-        c = int(cls[i])
-        if class_ids is not None and c not in class_ids:
-            continue
-        x1, y1, x2, y2 = xyxy[i]
-        x1 = max(0, min(iw, x1))
-        x2 = max(0, min(iw, x2))
-        y1 = max(0, min(ih, y1))
-        y2 = max(0, min(ih, y2))
-        if x2 <= x1 or y2 <= y1:
-            continue
-        boxes.append((float(x1), float(y1), float(x2), float(y2), c, float(confs[i])))
-
-    if not boxes:
-        return []
-
-    if policy == "per_box":
-        boxes.sort(key=lambda t: -t[5])
-        return [(b[0], b[1], b[2], b[3]) for b in boxes]
-
-    if policy == "largest":
-        one = max(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
-        return [(one[0], one[1], one[2], one[3])]
-
-    if policy == "best_conf":
-        one = max(boxes, key=lambda b: b[5])
-        return [(one[0], one[1], one[2], one[3])]
-
-    # union
-    x1 = min(b[0] for b in boxes)
-    y1 = min(b[1] for b in boxes)
-    x2 = max(b[2] for b in boxes)
-    y2 = max(b[3] for b in boxes)
-    return [(x1, y1, x2, y2)]
-
-
-def _full_image_crop(iw: int, ih: int) -> Tuple[float, float, float, float]:
-    return 0.0, 0.0, float(iw), float(ih)
 
 
 def _copy_and_patch_yaml(dataset_root: str, output_root: str) -> None:

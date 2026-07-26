@@ -24,6 +24,14 @@ BALANCE_PRESETS: dict[str, dict[str, object]] = {
         "target": 1.5,
         "max_repeat_per_image": 6,
     },
+    # Instance-aware RFS: frequency from bbox counts; image factor is weighted mean.
+    "irfs-default": {
+        "strategy": "irfs",
+        "rfs_thresh": 0.001,
+        "rfs_power": 0.5,
+        "target": 1.3,
+        "max_repeat_per_image": 5,
+    },
     # Recommended default: moderate RFS + weighted sampling.
     "hybrid-default": {
         "strategy": "hybrid",

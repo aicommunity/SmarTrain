@@ -33,7 +33,7 @@ See also: [development/architecture.md](../development/architecture.md), [refact
 | SAHI sliced inference | Aligned defaults | [arXiv:2202.06934](https://arxiv.org/abs/2202.06934) |
 | Leaderboard composite score | Ops heuristic (not a published metric) | — |
 
-Gaps (backlog P2): object-level/IRFS resampling, Optimal LRP, micro-averaged F-β policy, SAHI fine-tune recipe.
+Gaps (closed in P2 wave): object-level/IRFS resampling, Optimal LRP, micro-averaged F-β policy, SAHI fine-tune recipe.
 
 ## Code quality snapshot
 
@@ -65,7 +65,7 @@ Gaps (backlog P2): object-level/IRFS resampling, Optimal LRP, micro-averaged F-�
 6. Logging baseline + coverage/ruff/mypy on `core` / `run_model_contract` / `backends`
 7. Algorithm paper citations in code and CLI docs
 
-### P2 (execution=0) — backlog
+### P2 (execution=1) — closed
 
 1. IRFS / object-aware RFS
 2. Optimal LRP operating point

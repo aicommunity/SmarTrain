@@ -7,6 +7,7 @@
 ## 1) Начало работы
 
 - [Установка](getting-started/installation.md)
+- [Docker (CUDA 12.8)](getting-started/docker.md)
 - [Рабочий каталог и каталоги проекта](getting-started/workspace.md)
 - [Быстрый сценарий `scan -> fusion -> train`](getting-started/quickstart.md)
 

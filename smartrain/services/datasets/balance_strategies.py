@@ -240,3 +240,50 @@ def _rfs_expand_pool(
     return out
 
 
+def _irfs_expand_pool(
+    pool: list[tuple[str, str, str, list[str]]],
+    instance_count: dict[str, int],
+    *,
+    rfs_thresh: float,
+    rfs_power: float,
+    max_repeat_per_image: int,
+    rng: random.Random,
+    selected_classes: set[str] | None = None,
+) -> list[tuple[str, str, str, list[str]]]:
+    """Instance-aware Repeat Factor Sampling (IRFS-style offline expansion).
+
+    Category frequency ``f_c`` uses **instance** (bbox) share, not image presence.
+    Image repeat is the instance-weighted mean of ``r_c`` over classes on the
+    frame: ``r_i = sum_c n_{i,c} r_c / sum_c n_{i,c}``. Inspired by
+    instance-aware RFS (arXiv:2305.08069) / object-level resampling
+    (arXiv:2104.05702); reduces head inflation vs image-level max-RFS when
+    rare and frequent classes co-occur.
+    """
+    total_instances = max(1, sum(max(0, int(n)) for n in instance_count.values()))
+    class_repeat: dict[str, float] = {}
+    for c, n_raw in instance_count.items():
+        f_c = max(1e-12, float(max(0, int(n_raw))) / float(total_instances))
+        class_repeat[c] = max(1.0, (float(rfs_thresh) / f_c) ** float(rfs_power))
+
+    out: list[tuple[str, str, str, list[str]]] = []
+    for item in pool:
+        cls_names = item[3]
+        counts: dict[str, int] = defaultdict(int)
+        for c in cls_names:
+            if selected_classes and c not in selected_classes:
+                continue
+            counts[c] += 1
+        if not counts:
+            repeats = 1
+        else:
+            denom = float(sum(counts.values()))
+            r_i = sum(float(counts[c]) * float(class_repeat.get(c, 1.0)) for c in counts) / denom
+            base = int(math.floor(r_i))
+            frac = r_i - base
+            repeats = base + (1 if rng.random() < frac else 0)
+            repeats = min(max(1, repeats), max(1, int(max_repeat_per_image)))
+        for _ in range(repeats):
+            out.append(item)
+    return out
+
+

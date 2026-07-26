@@ -37,9 +37,9 @@ from smartrain.core.workflow_adapters.inference_runtime_api import (
     infer_img_size_with_source,
     resolve_inference_imgsz,
     resolve_dataset_root_for_entry,
-    _clamp_crop,
-    _full_image_crop,
-    _select_roi_boxes,
+    clamp_crop,
+    full_image_crop,
+    select_roi_boxes,
 )
 from smartrain.services.datasets.dataset_roi_yolo import ON_EMPTY_MODES, ROI_POLICIES
 
@@ -743,27 +743,27 @@ def predict_roi_crop(roi_model: Any, image_path: str, args: argparse.Namespace) 
             raise RuntimeError(f"No ROI detections for: {image_path}")
         if args.roi_on_empty == "skip":
             return -1, -1, -1, -1
-        return tuple(int(v) for v in _full_image_crop(iw, ih))
+        return tuple(int(v) for v in full_image_crop(iw, ih))
     r = roi_pred[0]
     if r.boxes is None or len(r.boxes) == 0:
         if args.roi_on_empty == "fail":
             raise RuntimeError(f"No ROI detections for: {image_path}")
         if args.roi_on_empty == "skip":
             return -1, -1, -1, -1
-        return tuple(int(v) for v in _full_image_crop(iw, ih))
+        return tuple(int(v) for v in full_image_crop(iw, ih))
     xyxy = r.boxes.xyxy.cpu().numpy()
     cls = r.boxes.cls.cpu().numpy()
     confs = r.boxes.conf.cpu().numpy()
     class_ids = _parse_roi_class_ids(args.roi_class_ids)
-    roi_list = _select_roi_boxes(xyxy, cls, confs, class_ids, args.roi_policy, iw, ih)
+    roi_list = select_roi_boxes(xyxy, cls, confs, class_ids, args.roi_policy, iw, ih)
     if not roi_list:
         if args.roi_on_empty == "fail":
             raise RuntimeError(f"No ROI detections for: {image_path}")
         if args.roi_on_empty == "skip":
             return -1, -1, -1, -1
-        return tuple(int(v) for v in _full_image_crop(iw, ih))
+        return tuple(int(v) for v in full_image_crop(iw, ih))
     x1, y1, x2, y2 = roi_list[0]
-    return _clamp_crop(x1, y1, x2, y2, int(args.roi_pad_px), iw, ih)
+    return clamp_crop(x1, y1, x2, y2, int(args.roi_pad_px), iw, ih)
 
 
 def resolve_output_root(layout: WorkspaceLayout, model_name: str, source_short: str) -> str:

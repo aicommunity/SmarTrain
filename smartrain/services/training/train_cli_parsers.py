@@ -202,6 +202,23 @@ def build_train_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable confidence threshold recommendation computation.",
     )
+    parser.add_argument(
+        "--compute-lrp",
+        dest="compute_lrp",
+        action="store_true",
+        default=False,
+        help=(
+            "Opt-in Optimal LRP confidence JSON (tests/lrp_recommendations_{split}.json). "
+            "Requires prediction–GT matches; otherwise writes status=skipped. "
+            "Does not alter A/B/C confidence_recommendations JSON."
+        ),
+    )
+    parser.add_argument(
+        "--no-compute-lrp",
+        dest="compute_lrp",
+        action="store_false",
+        help="Disable Optimal LRP recommendation (default).",
+    )
 
     parser.add_argument(
         "--weighted-sampling",

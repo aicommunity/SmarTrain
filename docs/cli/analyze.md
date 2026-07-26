@@ -160,6 +160,8 @@ Use `--strict-diagnostics` on `analyze all` only when missing PR/metric_sources 
 - Canonical run weights are under `runs/<dataset>/<run>/models/` (prefer `detect_*` stem; legacy root / `train/weights/` paths are still resolved as fallback via `resolve_run_model`).
 - Release catalogs under workspace `models/` are also selectable (`--models-root` / interactive); R1–R3 layouts are supported (see overview / run-layout).
 - For `analyze all --profile full`: incomplete Ultralytics PT test artifacts are filled, then missing confidence recommendation JSON is computed (retry after transient `confidence_compute_failed` stubs).
+- Opt-in **`--compute-lrp`** (train / `analyze all`): writes `tests/lrp_recommendations_{split}.json` (Optimal LRP / arXiv:1807.01696). Requires prediction–GT matches; otherwise `status=skipped`. Does **not** change A/B/C `confidence_recommendations_*.json`. Report shows section **D: Optimal LRP** only when the file exists.
+- **Production confidence:** default inference threshold is **0.25**. Recommendation JSON uses objective **A** (F1) with **macro** class aggregation as the primary `global` value; `aggregations.micro` is filled when per-class support is available (else fallback macro + reason). Inference opt-in: `--confidence-objective A|B|C` + `--confidence-recommendations <json>` (optional `--confidence-aggregation macro|micro`).
 - `export-table` reads:
   - `training_metadata.json`
   - latest `test_metrics*.csv` (first row)

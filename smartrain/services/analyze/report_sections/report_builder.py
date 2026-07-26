@@ -1447,6 +1447,55 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 table_no += 1
         except Exception as e:
             lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
+    # D: Optimal LRP (opt-in artifact; only when file exists)
+    try:
+        from smartrain.core.training.lrp_recommendation import (
+            lrp_recommendation_file_path,
+            read_lrp_recommendation_file,
+        )
+
+        lrp_runs: list[str] = []
+        base_run = str(manifest.get("baseline") or "").strip()
+        if base_run:
+            lrp_runs.append(base_run)
+        others_runs = manifest.get("others") if isinstance(manifest.get("others"), list) else []
+        for o in others_runs:
+            if isinstance(o, str) and o.strip():
+                lrp_runs.append(o.strip())
+        lrp_lines: list[str] = []
+        for run_dir in lrp_runs:
+            for split in ("test", "val"):
+                path = lrp_recommendation_file_path(run_dir, split)
+                payload = read_lrp_recommendation_file(path)
+                if not payload:
+                    continue
+                g = payload.get("global") if isinstance(payload.get("global"), dict) else {}
+                thr = g.get("threshold")
+                lrp_val = g.get("lrp")
+                status = str(payload.get("status") or g.get("status") or "")
+                run_name = os.path.basename(run_dir.rstrip(os.sep))
+                lrp_lines.append(
+                    f"- `{run_name}` / {split}: threshold={thr}, LRP={lrp_val}, status={status}"
+                )
+        if lrp_lines:
+            lines.append("")
+            lines.append("#### " + ("D: Optimal LRP" if not is_ru else "D: Optimal LRP"))
+            lines.append("")
+            if is_ru:
+                lines.append(
+                    "Порог по минимуму LRP Error (arXiv:1807.01696). Файл отдельный от A/B/C: "
+                    "`tests/lrp_recommendations_{split}.json`."
+                )
+            else:
+                lines.append(
+                    "Threshold from argmin LRP Error (arXiv:1807.01696). Separate from A/B/C: "
+                    "`tests/lrp_recommendations_{split}.json`."
+                )
+            lines.append("")
+            lines.extend(lrp_lines)
+            lines.append("")
+    except Exception as e:
+        lines.append(f"- {('Ошибка чтения LRP' if is_ru else 'LRP read error')}: {e}")
     for rel in images:
         if isinstance(rel, str) and ("artifacts/pr/" in rel and rel.endswith("pr_all_classes.png")):
             lines.extend(_figure_preamble_lines(rel, is_ru, tpl))

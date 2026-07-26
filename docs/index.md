@@ -7,6 +7,7 @@ This section reflects the current codebase and is organized by scenarios: gettin
 ## 1) Getting started
 
 - [Installation](getting-started/installation.md)
+- [Docker (CUDA 12.8)](getting-started/docker.md)
 - [Workspace and project directories](getting-started/workspace.md)
 - [Quick workflow `scan -> merge -> train`](getting-started/quickstart.md)
 

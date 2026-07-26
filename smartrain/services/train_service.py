@@ -37,17 +37,18 @@ from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_su
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 
 
-def _confidence_recommendation_params(args: argparse.Namespace) -> tuple[bool, float, float, float]:
+def _confidence_recommendation_params(args: argparse.Namespace) -> tuple[bool, float, float, float, bool]:
     return (
         bool(getattr(args, "conf_rec_disable", False)),
         float(getattr(args, "conf_rec_beta_recall", 2.0)),
         float(getattr(args, "conf_rec_beta_precision", 0.5)),
         float(getattr(args, "conf_rec_fallback", 0.25)),
+        bool(getattr(args, "compute_lrp", False)),
     )
 
 
 def _confidence_recommendation_config(args: argparse.Namespace) -> dict[str, Any]:
-    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback = (
+    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback, compute_lrp = (
         _confidence_recommendation_params(args)
     )
     return {
@@ -55,6 +56,7 @@ def _confidence_recommendation_config(args: argparse.Namespace) -> dict[str, Any
         "beta_recall": conf_rec_beta_recall,
         "beta_precision": conf_rec_beta_precision,
         "fallback_confidence": conf_rec_fallback,
+        "compute_lrp": compute_lrp,
     }
 
 
@@ -90,7 +92,7 @@ def _run_external_provider_flow(
     batch: int,
     img_size: int,
 ) -> int:
-    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback = (
+    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback, compute_lrp = (
         _confidence_recommendation_params(args)
     )
     external_provider = str(getattr(args, "external_provider", "") or "").strip()
@@ -183,6 +185,7 @@ def _run_external_provider_flow(
                 conf_rec_beta_recall=conf_rec_beta_recall,
                 conf_rec_beta_precision=conf_rec_beta_precision,
                 conf_rec_fallback=conf_rec_fallback,
+                compute_lrp=compute_lrp,
                 non_interactive=args.non_interactive,
             )
             test_success = True
@@ -356,7 +359,7 @@ def _run_builtin_train_and_eval_flow(
     task_type: str,
 ) -> None:
     from smartrain.backends.train_test_registry import resolve_train_backend
-    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback = (
+    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback, compute_lrp = (
         _confidence_recommendation_params(args)
     )
 
@@ -455,6 +458,7 @@ def _run_builtin_train_and_eval_flow(
                 conf_rec_beta_recall=conf_rec_beta_recall,
                 conf_rec_beta_precision=conf_rec_beta_precision,
                 conf_rec_fallback=conf_rec_fallback,
+                compute_lrp=compute_lrp,
                 non_interactive=args.non_interactive,
             )
         except Exception as e:
@@ -531,7 +535,7 @@ def _run_test_only_flow(
     task_type: str,
 ) -> None:
     from smartrain.backends.train_test_registry import resolve_train_backend
-    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback = (
+    conf_rec_disable, conf_rec_beta_recall, conf_rec_beta_precision, conf_rec_fallback, compute_lrp = (
         _confidence_recommendation_params(args)
     )
 
@@ -562,6 +566,7 @@ def _run_test_only_flow(
             conf_rec_beta_recall=conf_rec_beta_recall,
             conf_rec_beta_precision=conf_rec_beta_precision,
             conf_rec_fallback=conf_rec_fallback,
+            compute_lrp=compute_lrp,
             non_interactive=args.non_interactive,
         )
     except Exception as e:

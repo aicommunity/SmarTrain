@@ -1,6 +1,6 @@
 # Duplication Matrix
 
-Updated: 2026-07-26 (post–project audit P0+P1 wave).
+Updated: 2026-07-26 (post–project audit P0+P1+P2 wave).
 
 | Area | Files | Status | Notes / next |
 |---|---|---|---|
@@ -14,11 +14,10 @@ Updated: 2026-07-26 (post–project audit P0+P1 wave).
 | God `dataset_balance` | monolith | **Partial (P1.3)** | `balance_{strategies,eval_coverage,presets}.py` extracted |
 | God `dataset_augment` | monolith | **Partial (P1.2)** | `augment_{cli_parser,budget}.py` extracted; orchestrator still large |
 | Replay builders | train/test/inference/dataset | Partial | Prefer `cli_replay.py` |
-| P2 science/MLOps | IRFS/LRP/SAHI-FT/queue/Docker | **Backlog (execution=0)** | [09-tech-debt.md](./09-tech-debt.md), [audit](../audit/2026-07-26-project-audit.md) |
+| P2 science/MLOps | IRFS/LRP/SAHI-FT/queue/Docker/harness/core↔services | **Done (execution=1)** | [09-tech-debt.md](./09-tech-debt.md), [audit](../audit/2026-07-26-project-audit.md) |
 
 ## Priority (remaining follow-ups)
 
 1. Further thin `dataset_augment` / analyze gods if needed
 2. Full prompt API consolidation (train `prompt_input` completer path)
 3. Raise coverage floor; expand mypy on `run_model_contract` without ignore_errors
-4. Execute P2 items individually when prioritized

@@ -22,6 +22,7 @@ The `smartrain` command is registered via `pyproject.toml`.
 - For development: `pip install -e ".[dev]"`
 - For ClearML: `pip install -e ".[clearml]"`
 - For SAHI: `pip install -e ".[sahi]"`
+- For Docker / CUDA 12.8 image: see [docker.md](./docker.md)
 
 ## Checking
 

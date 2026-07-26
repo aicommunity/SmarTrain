@@ -158,6 +158,8 @@ smartrain analyze all
 - Канонические веса run — в `runs/<dataset>/<run>/models/` (detect_* stem; legacy в корне / `train/weights/` — через `resolve_run_model`).
 - Каталоги release под `models/` тоже выбираемы (`--models-root` / интерактив); layouts R1–R3 поддерживаются (см. overview / run-layout).
 - Для `analyze all --profile full`: при неполных Ultralytics PT-артефактах они достраиваются, затем пересчитываются отсутствующие confidence JSON (retry для stubs `confidence_compute_failed`).
+- Опционально **`--compute-lrp`** (train / `analyze all`): пишет `tests/lrp_recommendations_{split}.json` (Optimal LRP / arXiv:1807.01696). Нужны prediction–GT matches; иначе `status=skipped`. **Не** меняет A/B/C `confidence_recommendations_*.json`. В отчёте секция **D: Optimal LRP** только если файл есть.
+- **Prod confidence:** порог inference по умолчанию **0.25**. В JSON primary — objective **A** (F1), aggregation **macro**; `aggregations.micro` — при наличии support по классам (иначе fallback macro + reason). Inference opt-in: `--confidence-objective A|B|C` + `--confidence-recommendations <json>` (опционально `--confidence-aggregation macro|micro`).
 - `export-table` читает:
   - `training_metadata.json`
   - последний `test_metrics*.csv` (первая строка)

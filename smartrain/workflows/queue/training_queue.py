@@ -155,15 +155,30 @@ def save_statuses(tasks, statuses, status_file=None):
                 f.write(f"{t} | {st}\n")
 
 
-def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
+def run_queue(
+    no_terminal=False,
+    cwd=None,
+    queue_path=None,
+    status_file=None,
+    *,
+    max_retries: int = 0,
+    retry_backoff_sec: float = 30.0,
+    retry_exit_codes: set[int] | None = None,
+):
     """
     Sequentially executes tasks from the queue.
     no_terminal: Don't open gnome-terminal.
     cwd: working directory for subprocess (current directory by default).
+    max_retries: extra attempts after a retryable non-zero exit (default 0 = legacy).
+    retry_backoff_sec: base backoff; sleep = min(600, backoff * 2^(attempt-1)).
+    retry_exit_codes: exit codes eligible for retry (default {1}).
     """
     qpath = queue_path or QUEUE_TXT
     st_file = status_file or STATUS_FILE
     work_cwd = cwd if cwd is not None else os.getcwd()
+    max_retries = max(0, int(max_retries))
+    retry_backoff_sec = max(0.0, float(retry_backoff_sec))
+    retryable = set(retry_exit_codes) if retry_exit_codes is not None else {1}
 
     st_dir = os.path.dirname(st_file)
     if st_dir:
@@ -185,7 +200,12 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
                 statuses[task.strip()] = st.strip()
         return statuses
 
+    def _is_waiting(status: str) -> bool:
+        s = (status or "").strip()
+        return s == "Waiting to be completed" or s.startswith("Waiting retry ")
+
     statuses = _load()
+    attempts: dict[str, int] = {}
 
     try:
         while True:
@@ -195,7 +215,7 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
 
             next_task = None
             for t in tasks:
-                if statuses.get(t) == "Waiting to be completed":
+                if _is_waiting(statuses.get(t, "")):
                     next_task = t
                     break
 
@@ -208,12 +228,35 @@ def run_queue(no_terminal=False, cwd=None, queue_path=None, status_file=None):
 
             cmd_args = process_line(next_task)
             if cmd_args is None:
+                # non-retryable parse / missing cmd
                 statuses[next_task] = "Error"
                 save_statuses(tasks, statuses, status_file=st_file)
                 continue
 
+            attempt = int(attempts.get(next_task, 0)) + 1
+            attempts[next_task] = attempt
             result = start_new_process(cmd_args, cwd=work_cwd)
-            statuses[next_task] = "Done" if result == 0 else "Error"
+            if result == 0:
+                statuses[next_task] = "Done"
+                save_statuses(tasks, statuses, status_file=st_file)
+                continue
+
+            # Failed
+            if (
+                max_retries > 0
+                and attempt <= max_retries
+                and int(result) in retryable
+            ):
+                # attempt is 1-based count of runs so far; N/M where M=max_retries
+                # Status: Waiting retry N/M (N attempt that just failed, M max)
+                statuses[next_task] = f"Waiting retry {attempt}/{max_retries}"
+                save_statuses(tasks, statuses, status_file=st_file)
+                sleep_s = min(600.0, float(retry_backoff_sec) * (2.0 ** max(0, attempt - 1)))
+                if sleep_s > 0:
+                    time.sleep(sleep_s)
+                continue
+
+            statuses[next_task] = "Error"
             save_statuses(tasks, statuses, status_file=st_file)
     finally:
         if os.path.exists(st_file):
@@ -253,7 +296,35 @@ def build_queue_run_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Explicit path to status.txt of the artist",
     )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=0,
+        help="Extra retries after a retryable non-zero exit (default 0 = legacy immediate Error).",
+    )
+    parser.add_argument(
+        "--retry-backoff-sec",
+        type=float,
+        default=30.0,
+        help="Base backoff seconds; sleep = min(600, backoff * 2^(attempt-1)).",
+    )
+    parser.add_argument(
+        "--retry-exit-codes",
+        type=str,
+        default="1",
+        help="CSV of exit codes eligible for retry (default: 1).",
+    )
     return parser
+
+
+def _parse_retry_exit_codes(raw: str) -> set[int]:
+    out: set[int] = set()
+    for part in str(raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        out.add(int(part))
+    return out or {1}
 
 
 def main(argv=None):
@@ -269,6 +340,9 @@ def main(argv=None):
         cwd=args.cwd,
         queue_path=qpath,
         status_file=stpath,
+        max_retries=int(getattr(args, "max_retries", 0) or 0),
+        retry_backoff_sec=float(getattr(args, "retry_backoff_sec", 30.0) or 0.0),
+        retry_exit_codes=_parse_retry_exit_codes(getattr(args, "retry_exit_codes", "1")),
     )
 
 

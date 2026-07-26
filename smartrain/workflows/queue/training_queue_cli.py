@@ -179,6 +179,9 @@ def cmd_run(args):
         cwd=args.cwd,
         queue_path=qpath,
         status_file=stpath,
+        max_retries=int(getattr(args, "max_retries", 0) or 0),
+        retry_backoff_sec=float(getattr(args, "retry_backoff_sec", 30.0) or 0.0),
+        retry_exit_codes=tq._parse_retry_exit_codes(getattr(args, "retry_exit_codes", "1")),
     )
 
 
@@ -226,6 +229,9 @@ def build_queue_cli_arg_parser() -> argparse.ArgumentParser:
     p_run = sub.add_parser("run", parents=[common], help="Start queue executor")
     p_run.add_argument("--no-gui", action="store_true", help="No gnome-terminal")
     p_run.add_argument("--cwd", type=str, default=None, help="Working directory for subprocess")
+    p_run.add_argument("--max-retries", type=int, default=0, help="Extra retries (default 0).")
+    p_run.add_argument("--retry-backoff-sec", type=float, default=30.0, help="Base backoff seconds.")
+    p_run.add_argument("--retry-exit-codes", type=str, default="1", help="CSV of retryable exit codes.")
     p_run.set_defaults(func=cmd_run)
 
     return parser

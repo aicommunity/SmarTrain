@@ -401,7 +401,7 @@ def resolve_run_weights_stem(run_dir: str) -> str:
                         return name[:-3]
                     return Path(name).stem
 
-        from smartrain.services.models.release_model_naming import build_model_weights_stem_from_metadata
+        from smartrain.core.models.release_model_naming import build_model_weights_stem_from_metadata
 
         computed = build_model_weights_stem_from_metadata(payload)
         if computed:

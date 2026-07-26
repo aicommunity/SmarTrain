@@ -32,6 +32,31 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--split", choices=("train", "val", "test"), default=None, help="Dataset split for dataset-split mode.")
     p.add_argument("--limit", type=int, default=0, help="Max images to process (0 = all).")
     p.add_argument("--conf", type=float, default=0.25, help="Confidence threshold for inference model.")
+    p.add_argument(
+        "--confidence-objective",
+        type=str,
+        choices=("A", "B", "C"),
+        default=None,
+        help=(
+            "Opt-in: read recommended conf from confidence_recommendations JSON "
+            "(objective A=F1, B=recall-priority F-β, C=precision-priority). "
+            "Requires --confidence-recommendations or a run with recommendations. "
+            "Default inference conf stays 0.25 when this flag is omitted."
+        ),
+    )
+    p.add_argument(
+        "--confidence-aggregation",
+        type=str,
+        choices=("macro", "micro"),
+        default="macro",
+        help="Aggregation for --confidence-objective (default: macro).",
+    )
+    p.add_argument(
+        "--confidence-recommendations",
+        type=str,
+        default=None,
+        help="Path to confidence_recommendations_{split}.json for --confidence-objective.",
+    )
     p.add_argument("--img-size", type=int, default=None, help="Inference input resolution (imgsz).")
     p.add_argument("--device", type=str, default=None, help="Ultralytics device (cpu, 0, etc). Default: GPU 0 if available, otherwise cpu.")
     p.add_argument("--half", action="store_true", help="Enable FP16 where supported.")

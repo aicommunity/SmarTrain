@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from smartrain.services.training.train_system_profile_service import (
+from smartrain.core.runtime.system_profile_impl import (
     bytes_to_gb,
     collect_system_profile,
     linux_cpu_model_name,

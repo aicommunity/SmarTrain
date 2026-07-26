@@ -50,6 +50,7 @@ from smartrain.services.datasets.balance_strategies import (
     _auto_head_cap_multipliers,
     _class_weights,
     _image_weights,
+    _irfs_expand_pool,
     _parse_class_weight_multiplier,
     _rfs_expand_pool,
     _weighted_sample_items,
@@ -78,7 +79,17 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--strategy",
-        choices=("copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid", "hybrid-aug"),
+        choices=(
+            "copy",
+            "oversample",
+            "undersample",
+            "class-aware",
+            "weights",
+            "rfs",
+            "irfs",
+            "hybrid",
+            "hybrid-aug",
+        ),
         default="oversample",
     )
     p.add_argument("--target", type=float, default=1.0, help="Train size multiplier after balancing")
@@ -297,7 +308,17 @@ def _interactive_fill(args, dataset_names: list[str], catalog: dict) -> None:
     class_names = sorted_class_names_for_dataset(catalog, str(args.dataset))
     args.strategy = prompt_choice(
         "Strategy",
-        ["copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid", "hybrid-aug"],
+        [
+            "copy",
+            "oversample",
+            "undersample",
+            "class-aware",
+            "weights",
+            "rfs",
+            "irfs",
+            "hybrid",
+            "hybrid-aug",
+        ],
         default=args.strategy,
     )
     if args.strategy == "hybrid-aug":
@@ -806,16 +827,27 @@ def main(argv=None):
     else:
         rng = random.Random(args.seed)
         bbox_count, image_presence, img_to_classes = _build_balancing_stats(selected_pool, selected_classes)
-        if args.strategy == "rfs":
-            expanded = _rfs_expand_pool(
-                selected_pool,
-                img_to_classes,
-                image_presence,
-                rfs_thresh=args.rfs_thresh,
-                rfs_power=args.rfs_power,
-                max_repeat_per_image=args.max_repeat_per_image,
-                rng=rng,
-            )
+        if args.strategy in ("rfs", "irfs"):
+            if args.strategy == "irfs":
+                expanded = _irfs_expand_pool(
+                    selected_pool,
+                    bbox_count,
+                    rfs_thresh=args.rfs_thresh,
+                    rfs_power=args.rfs_power,
+                    max_repeat_per_image=args.max_repeat_per_image,
+                    rng=rng,
+                    selected_classes=selected_classes or None,
+                )
+            else:
+                expanded = _rfs_expand_pool(
+                    selected_pool,
+                    img_to_classes,
+                    image_presence,
+                    rfs_thresh=args.rfs_thresh,
+                    rfs_power=args.rfs_power,
+                    max_repeat_per_image=args.max_repeat_per_image,
+                    rng=rng,
+                )
             target_n = max(1, int(len(selected_pool) * max(0.1, args.target)))
             if target_n <= len(expanded):
                 balanced_train = expanded[:target_n]

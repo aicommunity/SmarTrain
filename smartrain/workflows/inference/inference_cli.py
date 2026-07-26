@@ -285,6 +285,35 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     args.device = resolve_device_request(args.device or default_device_value())
 
+    # Opt-in production threshold from recommendation JSON (default conf stays 0.25).
+    if getattr(args, "confidence_objective", None) or getattr(args, "confidence_recommendations", None):
+        from smartrain.core.training.confidence_policy import (
+            DEFAULT_OBJECTIVE,
+            resolve_inference_confidence,
+        )
+        from smartrain.core.training.confidence_recommendation import read_recommendation_file
+
+        rec_path = str(getattr(args, "confidence_recommendations", None) or "").strip()
+        payload = read_recommendation_file(rec_path) if rec_path else None
+        if payload is None and not rec_path:
+            print(
+                "[WARN] --confidence-objective set without --confidence-recommendations; "
+                f"keeping conf={args.conf}",
+                file=sys.stderr,
+            )
+        else:
+            args.conf = resolve_inference_confidence(
+                payload,
+                objective=str(getattr(args, "confidence_objective", None) or DEFAULT_OBJECTIVE),
+                aggregation=str(getattr(args, "confidence_aggregation", None) or "macro"),
+                fallback=float(args.conf),
+            )
+            print(
+                f"[INFO] Inference conf from recommendations "
+                f"(objective={getattr(args, 'confidence_objective', None) or DEFAULT_OBJECTIVE}, "
+                f"aggregation={getattr(args, 'confidence_aggregation', None) or 'macro'}): {args.conf}"
+            )
+
     try:
         workspace_root = resolve_workspace_root(args.workspace)
     except ValueError as e:

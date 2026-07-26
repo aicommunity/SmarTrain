@@ -127,13 +127,28 @@ def ensure_confidence_recommendations(
     beta_recall: float,
     beta_precision: float,
     fallback_confidence: float,
+    compute_lrp: bool = False,
+    lrp_detections: Any = None,
+    lrp_gt_count: Any = None,
 ) -> None:
+    from smartrain.core.training.lrp_recommendation import maybe_write_lrp_recommendations
+
     test_path = recommendation_file_path(model_dir, "test")
     val_path = recommendation_file_path(model_dir, "val")
     has_test = recommendations_complete(read_recommendation_file(test_path))
     has_val = recommendations_complete(read_recommendation_file(val_path))
     if has_test and has_val:
         print("[INFO] Confidence recommendations already exist (val/test), skipping recompute.")
+        if compute_lrp:
+            maybe_write_lrp_recommendations(
+                model_dir=model_dir,
+                split="test",
+                compute_lrp=True,
+                detections=lrp_detections,
+                gt_count=lrp_gt_count,
+                iou_thr=float(val_iou) if val_iou is not None else 0.5,
+                fallback_confidence=float(fallback_confidence),
+            )
         return
 
     if not has_test:
@@ -146,6 +161,16 @@ def ensure_confidence_recommendations(
         )
         write_recommendation_file(test_path, test_payload)
         print(f"[OK] Confidence recommendations (test): {test_path}")
+        if compute_lrp:
+            maybe_write_lrp_recommendations(
+                model_dir=model_dir,
+                split="test",
+                compute_lrp=True,
+                detections=lrp_detections,
+                gt_count=lrp_gt_count,
+                iou_thr=float(val_iou) if val_iou is not None else 0.5,
+                fallback_confidence=float(fallback_confidence),
+            )
 
     if has_val:
         return
@@ -184,6 +209,16 @@ def ensure_confidence_recommendations(
         )
         write_recommendation_file(val_path, val_payload)
         print(f"[OK] Confidence recommendations (val): {val_path}")
+        if compute_lrp:
+            maybe_write_lrp_recommendations(
+                model_dir=model_dir,
+                split="val",
+                compute_lrp=True,
+                detections=lrp_detections,
+                gt_count=lrp_gt_count,
+                iou_thr=float(val_iou) if val_iou is not None else 0.5,
+                fallback_confidence=float(fallback_confidence),
+            )
     except Exception as exc:
         write_not_available_recommendations(
             model_dir=model_dir,
@@ -416,6 +451,7 @@ def test_yolo(
     conf_rec_beta_recall: float = 2.0,
     conf_rec_beta_precision: float = 0.5,
     conf_rec_fallback: float = 0.25,
+    compute_lrp: bool = False,
     *,
     non_interactive: bool = False,
 ):
@@ -489,6 +525,7 @@ def test_yolo(
                 beta_recall=conf_rec_beta_recall,
                 beta_precision=conf_rec_beta_precision,
                 fallback_confidence=conf_rec_fallback,
+                compute_lrp=bool(compute_lrp),
             )
 
         test_end_time = datetime.now()

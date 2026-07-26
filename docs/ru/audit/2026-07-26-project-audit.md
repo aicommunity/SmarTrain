@@ -6,7 +6,7 @@
 
 ## Вердикт
 
-SmarTrain — зрелый workspace-first YOLO/MLOps CLI со слоистой архитектурой (`cli → workflows → services → backends/tasks/run_model_contract`), файловыми контрактами и сильной регрессией. Основной долг: oversized-модули, дубли interactive/MFEL, узкий lint/coverage, опциональные научные/MLOps усиления (P2).
+SmarTrain — зрелый workspace-first YOLO/MLOps CLI со слоистой архитектурой (`cli → workflows → services → backends/tasks/run_model_contract`), файловыми контрактами и сильной регрессией. P0–P2 по аудиту закрыты; остаточный долг — oversized-модули и дальнейшее усиление lint/coverage.
 
 ## Архитектура
 
@@ -18,7 +18,7 @@ SmarTrain — зрелый workspace-first YOLO/MLOps CLI со слоистой 
 | Unified run/model contract | Сильно |
 | Dual Typer/argparse | Прагматичный компромисс |
 
-Риски: god-модули, логический цикл через adapters, инверсия `core → services`, очередь без auto-retry, нет container image.
+Риски (исторические; P2 закрыл retry/Docker/`core→services`): god-модули, логический цикл через adapters.
 
 См. также: [development/architecture.md](../development/architecture.md), [refactor/13-project-current-state.md](../../refactor/13-project-current-state.md).
 
@@ -39,6 +39,6 @@ SmarTrain — зрелый workspace-first YOLO/MLOps CLI со слоистой 
 
 - **P0 (execution=1):** registry gateway-first; удаление мёртвых augment shims; interactive helper; MFEL shim; обновление duplication matrix
 - **P1 (execution=1):** распил convert/augment/balance; prompts; `resolve_run_ref`; logging + coverage/ruff/mypy; цитаты arXiv
-- **P2 (execution=0):** IRFS, LRP, micro-Fβ, SAHI-FT, queue retry, Docker, balance harness, `core→services`
+- **P2 (execution=1, closed):** IRFS, LRP, micro-Fβ, SAHI-FT, queue retry, Docker, balance harness, `core→services`
 
 Трекер: [refactor/09-tech-debt.md](../../refactor/09-tech-debt.md).
