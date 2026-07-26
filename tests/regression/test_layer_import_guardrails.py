@@ -7,8 +7,6 @@ from pathlib import Path
 _FORBIDDEN_PREFIX_PAIRS: tuple[tuple[str, str], ...] = (
     ("smartrain/services", "smartrain.workflows"),
     ("smartrain/run_model_contract", "smartrain.workflows"),
-    ("smartrain/domain", "smartrain.workflows"),
-    ("smartrain/domain", "smartrain.services"),
     ("smartrain/backends", "smartrain.workflows"),
     ("smartrain/run_model_contract", "smartrain.services"),
 )

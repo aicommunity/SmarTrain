@@ -43,6 +43,7 @@ This section reflects the current codebase and is organized by scenarios: gettin
 - [Testing](development/testing.md)
 - [Project extensibility](development/extension-guide.md)
 - [Developing new external providers](development/provider-development.md)
+- [Project audit 2026-07-26](audit/2026-07-26-project-audit.md)
 
 ## 5) Migration
 

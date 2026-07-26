@@ -761,7 +761,9 @@ def _write_filter_manifest(out_dir: str, *, parameters: dict[str, Any], forecast
 
 def _interactive_fill(args: argparse.Namespace, dataset_names: list[str], catalog: dict[str, Any]) -> None:
     print("[INFO] Interactive filter mode")
-    args.dataset = prompt_choice("Dataset", dataset_names, default=(args.dataset or dataset_names[0]))
+    from smartrain.cli_entrypoints.support.cli_interactive import ensure_dataset_arg
+
+    ensure_dataset_arg(args, dataset_names)
     class_names = sorted_class_names_for_dataset(catalog, str(args.dataset))
     if class_names:
         picked = prompt_multi_choice_csv("Classes (--classes; empty=all)", class_names, default_values=[])

@@ -477,12 +477,9 @@ def _prompt_input(label: str, default: str = "", completer=None, show_default_hi
 
 
 def _prompt_yes_no(label: str, default: bool = False) -> bool:
-    suffix = "Y/n" if default else "y/N"
-    default_text = "y" if default else "n"
-    raw = _prompt_input(f"{label} [{suffix}]: ", default=default_text, show_default_hint=False).strip().lower()
-    if not raw:
-        return default
-    return raw in ("y", "yes", "1", "true", "yes", "d")
+    from smartrain.cli_entrypoints.support.cli_prompts import prompt_yes_no
+
+    return prompt_yes_no(label, default=default)
 
 
 def _list_workspace_detector_models(workspace_root: str) -> list[str]:

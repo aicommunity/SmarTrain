@@ -40,6 +40,10 @@ def compute_composite_score(
     quality_metric: str,
     speed_metric: str,
 ) -> float | None:
+    """Heuristic ops ranking score (not a published scientific metric).
+
+    Weighted blend of quality / speed / stability for leaderboard UX only.
+    """
     def _safe_float(v: Any) -> float | None:
         try:
             if v is None or (isinstance(v, float) and pd.isna(v)):

@@ -5,6 +5,7 @@ import types
 from pathlib import Path
 
 import smartrain.workflows.models.model_convert_cli as mcc
+import smartrain.services.models.model_convert_service as mcs
 
 
 def test_discover_models_lists_only_pt(tmp_path: Path):
@@ -218,8 +219,8 @@ def test_convert_onnx_only_nested_release_short_name(monkeypatch, tmp_path: Path
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(mcc, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (640, "cli"))
-    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
+    monkeypatch.setattr(mcs, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (640, "cli"))
+    monkeypatch.setattr(mcs, "_validate_onnx_export", lambda _p: (True, "ok"))
 
     class _FakeYOLO:
         def __init__(self, _path: str):
@@ -275,19 +276,19 @@ def test_convert_pt_to_trt_reuses_existing_onnx(monkeypatch, tmp_path: Path):
     onnx.write_text("onnx", encoding="utf-8")
 
     used_onnx: list[Path] = []
-    monkeypatch.setattr(mcc, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (640, "cli"))
-    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_gpu_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_runtime_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_extract_onnx_signature", lambda _p: {"opset": 17, "batch": 1, "h": 640, "w": 640, "dynamic": False, "half": False, "simplify": True, "nms": False})
-    monkeypatch.setattr(mcc, "_export_named_onnx_from_pt", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not build dedicated onnx")))
+    monkeypatch.setattr(mcs, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (640, "cli"))
+    monkeypatch.setattr(mcs, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_gpu_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_runtime_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_extract_onnx_signature", lambda _p: {"opset": 17, "batch": 1, "h": 640, "w": 640, "dynamic": False, "half": False, "simplify": True, "nms": False})
+    monkeypatch.setattr(mcs, "_export_named_onnx_from_pt", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not build dedicated onnx")))
 
     def _fake_trtexec(onnx_path, engine_target, _args, _imgsz):
         used_onnx.append(Path(onnx_path))
         engine_target.write_text("engine", encoding="utf-8")
         return True, "ok"
 
-    monkeypatch.setattr(mcc, "_trtexec_export_from_onnx", _fake_trtexec)
+    monkeypatch.setattr(mcs, "_trtexec_export_from_onnx", _fake_trtexec)
 
     ok_any, failed_any, _skipped_any, artifacts_ok, artifacts_failed, _artifacts_skipped = mcc._convert_one(pt, _base_args())
     assert ok_any is True
@@ -305,11 +306,11 @@ def test_convert_pt_to_trt_builds_dedicated_onnx_on_mismatch(monkeypatch, tmp_pa
     pt.write_text("pt", encoding="utf-8")
     onnx.write_text("onnx", encoding="utf-8")
 
-    monkeypatch.setattr(mcc, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (1280, "cli"))
-    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_gpu_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_runtime_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_extract_onnx_signature", lambda _p: {"opset": 17, "batch": 1, "h": 640, "w": 640, "dynamic": False, "half": False, "simplify": True, "nms": False})
+    monkeypatch.setattr(mcs, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (1280, "cli"))
+    monkeypatch.setattr(mcs, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_gpu_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_runtime_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_extract_onnx_signature", lambda _p: {"opset": 17, "batch": 1, "h": 640, "w": 640, "dynamic": False, "half": False, "simplify": True, "nms": False})
 
     class _FakeYOLO:
         def __init__(self, _path: str):
@@ -330,8 +331,8 @@ def test_convert_pt_to_trt_builds_dedicated_onnx_on_mismatch(monkeypatch, tmp_pa
         engine_target.write_text("engine", encoding="utf-8")
         return True, "ok"
 
-    monkeypatch.setattr(mcc, "_trtexec_export_from_onnx", _fake_trtexec)
-    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
+    monkeypatch.setattr(mcs, "_trtexec_export_from_onnx", _fake_trtexec)
+    monkeypatch.setattr(mcs, "_validate_onnx_export", lambda _p: (True, "ok"))
 
     ok_any, failed_any, _skipped_any, artifacts_ok, artifacts_failed, _artifacts_skipped = mcc._convert_one(pt, _base_args())
     assert ok_any is True
@@ -373,12 +374,12 @@ def test_convert_trt_only_materializes_public_and_cache_onnx_for_run(monkeypatch
     pt = models_dir / "run-1.pt"
     pt.write_text("pt", encoding="utf-8")
 
-    monkeypatch.setattr(mcc, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (1280, "cli"))
-    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_gpu_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_runtime_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_extract_onnx_signature", lambda _p: None)
-    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
+    monkeypatch.setattr(mcs, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (1280, "cli"))
+    monkeypatch.setattr(mcs, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_gpu_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_runtime_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_extract_onnx_signature", lambda _p: None)
+    monkeypatch.setattr(mcs, "_validate_onnx_export", lambda _p: (True, "ok"))
 
     class _FakeYOLO:
         def __init__(self, _path: str):
@@ -392,9 +393,7 @@ def test_convert_trt_only_materializes_public_and_cache_onnx_for_run(monkeypatch
     import ultralytics
 
     monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
-    monkeypatch.setattr(
-        mcc,
-        "_trtexec_export_from_onnx",
+    monkeypatch.setattr(mcs, "_trtexec_export_from_onnx",
         lambda _onnx, engine_target, _args, _imgsz: (engine_target.write_text("trt", encoding="utf-8") or True, "ok"),
     )
 
@@ -423,8 +422,8 @@ def test_convert_onnx_only_writes_public_without_trtprep_for_run(monkeypatch, tm
     pt = models_dir / "run-1.pt"
     pt.write_text("pt", encoding="utf-8")
 
-    monkeypatch.setattr(mcc, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (1280, "cli"))
-    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
+    monkeypatch.setattr(mcs, "_resolve_imgsz_from_args_and_model", lambda _a, _p: (1280, "cli"))
+    monkeypatch.setattr(mcs, "_validate_onnx_export", lambda _p: (True, "ok"))
 
     class _FakeYOLO:
         def __init__(self, _path: str):
@@ -499,14 +498,12 @@ def test_interactive_onnx_plus_trt_exports_onnx_once(monkeypatch, tmp_path: Path
     import ultralytics
 
     monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
-    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
-    monkeypatch.setattr(
-        mcc,
-        "_trtexec_export_from_onnx",
+    monkeypatch.setattr(mcs, "_validate_onnx_export", lambda _p: (True, "ok"))
+    monkeypatch.setattr(mcs, "_trtexec_export_from_onnx",
         lambda _onnx, trt_target, _args, _imgsz: (trt_target.write_text("trt", encoding="utf-8") or True, "ok"),
     )
 
-    ctx = mcc.InteractiveContext(
+    ctx = mcs.InteractiveContext(
         source_kind="pt",
         source_path=source_pt,
         target_onnx=True,
@@ -533,7 +530,7 @@ def test_interactive_onnx_plus_trt_exports_onnx_once(monkeypatch, tmp_path: Path
         half=False,
         nms=False,
     )
-    result = mcc._run_interactive_pipeline(ctx)
+    result = mcs._run_interactive_pipeline(ctx)
     assert result.stats.failed == 0
     assert export_calls["onnx"] == 1
     assert (tmp_path / "m.onnx").exists()
@@ -566,14 +563,12 @@ def test_interactive_onnx_engine_trt_exports_onnx_once(monkeypatch, tmp_path: Pa
     import ultralytics
 
     monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
-    monkeypatch.setattr(mcc, "_validate_onnx_export", lambda _p: (True, "ok"))
-    monkeypatch.setattr(
-        mcc,
-        "_trtexec_export_from_onnx",
+    monkeypatch.setattr(mcs, "_validate_onnx_export", lambda _p: (True, "ok"))
+    monkeypatch.setattr(mcs, "_trtexec_export_from_onnx",
         lambda _onnx, trt_target, _args, _imgsz: (trt_target.write_text("trt", encoding="utf-8") or True, "ok"),
     )
 
-    ctx = mcc.InteractiveContext(
+    ctx = mcs.InteractiveContext(
         source_kind="pt",
         source_path=source_pt,
         target_onnx=True,
@@ -600,7 +595,7 @@ def test_interactive_onnx_engine_trt_exports_onnx_once(monkeypatch, tmp_path: Pa
         half=False,
         nms=False,
     )
-    result = mcc._run_interactive_pipeline(ctx)
+    result = mcs._run_interactive_pipeline(ctx)
     assert result.stats.failed == 0
     assert export_calls["onnx"] == 1
     assert export_calls["engine"] == 1
@@ -617,9 +612,7 @@ def test_interactive_onnx_skip_syncs_trtprep_for_trt(monkeypatch, tmp_path: Path
     public.write_text("public-onnx", encoding="utf-8")
 
     used_onnx: list[Path] = []
-    monkeypatch.setattr(
-        mcc,
-        "_extract_onnx_signature",
+    monkeypatch.setattr(mcs, "_extract_onnx_signature",
         lambda _p: {"opset": 17, "batch": 1, "h": 640, "w": 640, "dynamic": False, "half": False, "simplify": True, "nms": False},
     )
 
@@ -639,9 +632,9 @@ def test_interactive_onnx_skip_syncs_trtprep_for_trt(monkeypatch, tmp_path: Path
         engine_target.write_text("trt", encoding="utf-8")
         return True, "ok"
 
-    monkeypatch.setattr(mcc, "_trtexec_export_from_onnx", _fake_trtexec)
+    monkeypatch.setattr(mcs, "_trtexec_export_from_onnx", _fake_trtexec)
 
-    ctx = mcc.InteractiveContext(
+    ctx = mcs.InteractiveContext(
         source_kind="pt",
         source_path=source_pt,
         target_onnx=True,
@@ -668,7 +661,7 @@ def test_interactive_onnx_skip_syncs_trtprep_for_trt(monkeypatch, tmp_path: Path
         half=False,
         nms=False,
     )
-    result = mcc._run_interactive_pipeline(ctx)
+    result = mcs._run_interactive_pipeline(ctx)
     assert result.stats.failed == 0
     assert len(used_onnx) == 1
     assert used_onnx[0].name.endswith("_trtprep.onnx")
@@ -695,7 +688,7 @@ def test_interactive_onnx_decline_overwrite_skips_export(monkeypatch, tmp_path: 
 
     monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
 
-    ctx = mcc.InteractiveContext(
+    ctx = mcs.InteractiveContext(
         source_kind="pt",
         source_path=source_pt,
         target_onnx=True,
@@ -722,7 +715,7 @@ def test_interactive_onnx_decline_overwrite_skips_export(monkeypatch, tmp_path: 
         half=False,
         nms=False,
     )
-    result = mcc._run_interactive_pipeline(ctx)
+    result = mcs._run_interactive_pipeline(ctx)
     assert result.stats.failed == 0
     assert result.stats.artifacts_skipped == 1
     assert dedicated.read_text(encoding="utf-8") == "cache"
@@ -745,7 +738,7 @@ def test_interactive_trt_targets_existing_skip_without_onnx_export(monkeypatch, 
 
     monkeypatch.setattr(ultralytics, "YOLO", _FakeYOLO)
 
-    ctx = mcc.InteractiveContext(
+    ctx = mcs.InteractiveContext(
         source_kind="pt",
         source_path=source_pt,
         target_onnx=False,
@@ -772,7 +765,7 @@ def test_interactive_trt_targets_existing_skip_without_onnx_export(monkeypatch, 
         half=False,
         nms=False,
     )
-    result = mcc._run_interactive_pipeline(ctx)
+    result = mcs._run_interactive_pipeline(ctx)
     assert result.stats.failed == 0
     assert result.stats.skipped == 2
 
@@ -787,33 +780,33 @@ def test_parser_rejects_legacy_tensorrt_value():
 
 
 def test_get_export_format_availability_marks_trt_unavailable(monkeypatch):
-    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_dependencies", lambda: (False, "missing deps"))
-    monkeypatch.setattr(mcc, "_check_trtexec_gpu_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_runtime_ready", lambda: (True, ""))
-    availability = mcc._get_export_format_availability()
+    monkeypatch.setattr(mcs, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_dependencies", lambda: (False, "missing deps"))
+    monkeypatch.setattr(mcs, "_check_trtexec_gpu_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_runtime_ready", lambda: (True, ""))
+    availability = mcs._get_export_format_availability()
     assert availability["onnx"][0] is True
     assert availability["tensorrt-engine"][0] is True
     assert availability["tensorrt-trt"] == (False, "missing deps")
 
 
 def test_get_export_format_availability_marks_trt_unavailable_on_gpu_probe(monkeypatch):
-    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_dependencies", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_gpu_ready", lambda: (False, "gpu missing"))
-    monkeypatch.setattr(mcc, "_check_trtexec_runtime_ready", lambda: (True, ""))
-    availability = mcc._get_export_format_availability()
+    monkeypatch.setattr(mcs, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_dependencies", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_gpu_ready", lambda: (False, "gpu missing"))
+    monkeypatch.setattr(mcs, "_check_trtexec_runtime_ready", lambda: (True, ""))
+    availability = mcs._get_export_format_availability()
     assert availability["onnx"][0] is True
     assert availability["tensorrt-engine"][0] is True
     assert availability["tensorrt-trt"] == (False, "gpu missing")
 
 
 def test_get_export_format_availability_marks_trt_unavailable_on_runtime_probe(monkeypatch):
-    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_dependencies", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_gpu_ready", lambda: (True, ""))
-    monkeypatch.setattr(mcc, "_check_trtexec_runtime_ready", lambda: (False, "runtime fail"))
-    availability = mcc._get_export_format_availability()
+    monkeypatch.setattr(mcs, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_dependencies", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_gpu_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_check_trtexec_runtime_ready", lambda: (False, "runtime fail"))
+    availability = mcs._get_export_format_availability()
     assert availability["onnx"][0] is True
     assert availability["tensorrt-engine"][0] is True
     assert availability["tensorrt-trt"][0] is False
@@ -830,7 +823,7 @@ def test_detect_trtexec_capabilities_prefers_mempoolsize(monkeypatch):
             stderr="",
         )
 
-    monkeypatch.setattr(mcc.subprocess, "run", _fake_run)
+    monkeypatch.setattr(mcs.subprocess, "run", _fake_run)
     caps = mcc._detect_trtexec_capabilities("/usr/bin/trtexec")
     assert caps.supports_build_only is True
     assert caps.workspace_mode == "memPoolSize"
@@ -867,17 +860,15 @@ def test_runtime_probe_fallback_without_buildonly(monkeypatch, tmp_path: Path):
         save=lambda _model, path: Path(path).write_text("onnx", encoding="utf-8"),
     )
     monkeypatch.setitem(sys.modules, "onnx", fake_onnx)
-    monkeypatch.setattr(mcc, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
-    monkeypatch.setattr(
-        mcc,
-        "_get_trtexec_capabilities",
-        lambda _bin: mcc.TrtexecCapabilities(
+    monkeypatch.setattr(mcs, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
+    monkeypatch.setattr(mcs, "_get_trtexec_capabilities",
+        lambda _bin: mcs.TrtexecCapabilities(
             supports_build_only=True,
             supports_explicit_batch=True,
             workspace_mode="workspace",
         ),
     )
-    monkeypatch.setattr(mcc.trt_checks.tempfile, "mkdtemp", lambda prefix: str(tmp_path / "probe_dir"))
+    monkeypatch.setattr(mcs.trt_checks.tempfile, "mkdtemp", lambda prefix: str(tmp_path / "probe_dir"))
     (tmp_path / "probe_dir").mkdir(parents=True, exist_ok=True)
 
     calls: list[list[str]] = []
@@ -891,9 +882,9 @@ def test_runtime_probe_fallback_without_buildonly(monkeypatch, tmp_path: Path):
         engine_path.write_text("ok", encoding="utf-8")
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(mcc.subprocess, "run", _fake_run)
-    monkeypatch.setattr(mcc.shutil, "rmtree", lambda *_a, **_k: None)
-    monkeypatch.setattr(mcc, "_TRTEXEC_RUNTIME_CACHE", None)
+    monkeypatch.setattr(mcs.subprocess, "run", _fake_run)
+    monkeypatch.setattr(mcs.shutil, "rmtree", lambda *_a, **_k: None)
+    monkeypatch.setattr(mcs, "_TRTEXEC_RUNTIME_CACHE", None)
 
     ok, reason = mcc._check_trtexec_runtime_ready()
     assert ok is True
@@ -908,12 +899,10 @@ def test_trtexec_export_skips_explicit_batch_when_unsupported(monkeypatch, tmp_p
     engine_target = tmp_path / "m.trt"
     args = _base_args(workspace_gib=1.0, batch=1, dynamic=False, precision="fp32")
 
-    monkeypatch.setattr(mcc, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
-    monkeypatch.setattr(mcc, "_guess_onnx_input_name", lambda _p: "images")
-    monkeypatch.setattr(
-        mcc,
-        "_get_trtexec_capabilities",
-        lambda _bin: mcc.TrtexecCapabilities(
+    monkeypatch.setattr(mcs, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
+    monkeypatch.setattr(mcs, "_guess_onnx_input_name", lambda _p: "images")
+    monkeypatch.setattr(mcs, "_get_trtexec_capabilities",
+        lambda _bin: mcs.TrtexecCapabilities(
             supports_build_only=True,
             supports_explicit_batch=False,
             workspace_mode="memPoolSize",
@@ -943,11 +932,11 @@ def test_trtexec_export_skips_explicit_batch_when_unsupported(monkeypatch, tmp_p
         p.write_text("", encoding="utf-8")
         return (123, str(p))
 
-    monkeypatch.setattr(mcc.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr(mcs.subprocess, "Popen", _FakePopen)
     monkeypatch.setattr(mcc.time, "sleep", _fake_sleep)
-    monkeypatch.setattr(mcc.tempfile, "mkstemp", _fake_mkstemp)
+    monkeypatch.setattr(mcs.tempfile, "mkstemp", _fake_mkstemp)
 
-    ok, reason = mcc._trtexec_export_from_onnx(onnx_path, engine_target, args, 640)
+    ok, reason = mcs._trtexec_export_from_onnx(onnx_path, engine_target, args, 640)
     assert ok is True
     assert reason == "ok"
     assert seen_cmds
@@ -962,12 +951,10 @@ def test_trtexec_export_failure_reports_log_tail(monkeypatch, tmp_path: Path):
     engine_target = tmp_path / "m.trt"
     args = _base_args(workspace_gib=None, batch=1, dynamic=False, precision="fp32")
 
-    monkeypatch.setattr(mcc, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
-    monkeypatch.setattr(mcc, "_guess_onnx_input_name", lambda _p: "images")
-    monkeypatch.setattr(
-        mcc,
-        "_get_trtexec_capabilities",
-        lambda _bin: mcc.TrtexecCapabilities(
+    monkeypatch.setattr(mcs, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
+    monkeypatch.setattr(mcs, "_guess_onnx_input_name", lambda _p: "images")
+    monkeypatch.setattr(mcs, "_get_trtexec_capabilities",
+        lambda _bin: mcs.TrtexecCapabilities(
             supports_build_only=True,
             supports_explicit_batch=False,
             workspace_mode="workspace",
@@ -990,10 +977,10 @@ def test_trtexec_export_failure_reports_log_tail(monkeypatch, tmp_path: Path):
         p.write_text("", encoding="utf-8")
         return (123, str(p))
 
-    monkeypatch.setattr(mcc.subprocess, "Popen", _FailPopen)
-    monkeypatch.setattr(mcc.tempfile, "mkstemp", _fake_mkstemp)
+    monkeypatch.setattr(mcs.subprocess, "Popen", _FailPopen)
+    monkeypatch.setattr(mcs.tempfile, "mkstemp", _fake_mkstemp)
 
-    ok, reason = mcc._trtexec_export_from_onnx(onnx_path, engine_target, args, 640)
+    ok, reason = mcs._trtexec_export_from_onnx(onnx_path, engine_target, args, 640)
     assert ok is False
     assert "fatal error" in reason
     assert "full log:" in reason
@@ -1002,13 +989,11 @@ def test_trtexec_export_failure_reports_log_tail(monkeypatch, tmp_path: Path):
 def test_validate_args_rejects_unavailable_format(monkeypatch):
     parser = mcc.build_model_convert_arg_parser()
     args = _base_args(format="tensorrt-trt", input="x.pt")
-    monkeypatch.setattr(
-        mcc,
-        "_get_export_format_availability",
+    monkeypatch.setattr(mcs, "_get_export_format_availability",
         lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (False, "missing deps")},
     )
     try:
-        mcc._validate_args(args, interactive_allowed=False, parser=parser, argv=["--input", "x.pt", "--format", "tensorrt-trt"])
+        mcs._validate_args(args, interactive_allowed=False, parser=parser, argv=["--input", "x.pt", "--format", "tensorrt-trt"])
         assert False, "unavailable format must be rejected"
     except SystemExit as exc:
         assert int(exc.code) != 0
@@ -1017,13 +1002,11 @@ def test_validate_args_rejects_unavailable_format(monkeypatch):
 def test_validate_args_rejects_onnx_to_engine(monkeypatch):
     parser = mcc.build_model_convert_arg_parser()
     args = _base_args(format="tensorrt-engine", input="x.onnx")
-    monkeypatch.setattr(
-        mcc,
-        "_get_export_format_availability",
+    monkeypatch.setattr(mcs, "_get_export_format_availability",
         lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (True, "")},
     )
     try:
-        mcc._validate_args(args, interactive_allowed=False, parser=parser, argv=["--input", "x.onnx", "--format", "tensorrt-engine"])
+        mcs._validate_args(args, interactive_allowed=False, parser=parser, argv=["--input", "x.onnx", "--format", "tensorrt-engine"])
         assert False, "onnx to engine must be rejected"
     except SystemExit as exc:
         assert int(exc.code) != 0
@@ -1052,16 +1035,12 @@ def test_interactive_pt_wizard_reprompts_unavailable_target_model(monkeypatch, t
         force=False,
         continue_on_error=False,
     )
-    monkeypatch.setattr(
-        mcc,
-        "_discover_models",
+    monkeypatch.setattr(mcs, "_discover_models",
         lambda _root, *, allowed_suffixes: [("models", tmp_path / ("m.pt" if allowed_suffixes == (".pt",) else "m.onnx"))],
     )
-    monkeypatch.setattr(mcc, "_collect_input_models", lambda _p: [tmp_path / "m.pt"])
-    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
-    monkeypatch.setattr(
-        mcc,
-        "_get_export_format_availability",
+    monkeypatch.setattr(mcs, "_collect_input_models", lambda _p: [tmp_path / "m.pt"])
+    monkeypatch.setattr(mcs, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_get_export_format_availability",
         lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (False, "runtime fail")},
     )
     choices = iter(["pt", "models: m.pt", "auto", "static"])
@@ -1072,18 +1051,18 @@ def test_interactive_pt_wizard_reprompts_unavailable_target_model(monkeypatch, t
         seen_prompts.append(prompt)
         return next(choices)
 
-    monkeypatch.setattr(mcc, "prompt_choice", _fake_prompt_choice)
+    monkeypatch.setattr(mcs, "prompt_choice", _fake_prompt_choice)
     monkeypatch.setattr(
-        mcc,
+        mcs,
         "prompt_multi_choice_csv",
         lambda prompt, *_a, **_k: (seen_prompts.append(prompt) or next(target_lists)),
     )
     ints = iter([1, 17])
-    monkeypatch.setattr(mcc, "prompt_int", lambda *a, **k: next(ints))
-    monkeypatch.setattr(mcc, "prompt_text", lambda *a, **k: "")
-    monkeypatch.setattr(mcc, "prompt_yes_no", lambda *a, **k: False)
+    monkeypatch.setattr(mcs, "prompt_int", lambda *a, **k: next(ints))
+    monkeypatch.setattr(mcs, "prompt_text", lambda *a, **k: "")
+    monkeypatch.setattr(mcs, "prompt_yes_no", lambda *a, **k: False)
 
-    mcc._interactive_fill(args, tmp_path)
+    mcs._interactive_fill(args, tmp_path)
     assert getattr(args, "_source_kind") == "pt"
     assert getattr(args, "_target_onnx") is True
     assert getattr(args, "_target_engine") is False
@@ -1120,25 +1099,21 @@ def test_interactive_onnx_wizard_exits_when_no_targets_available(monkeypatch, tm
         force=False,
         continue_on_error=False,
     )
-    monkeypatch.setattr(
-        mcc,
-        "_discover_models",
+    monkeypatch.setattr(mcs, "_discover_models",
         lambda _root, *, allowed_suffixes: [("models", tmp_path / ("m.onnx" if allowed_suffixes == (".onnx",) else "m.pt"))],
     )
-    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
-    monkeypatch.setattr(
-        mcc,
-        "_get_export_format_availability",
+    monkeypatch.setattr(mcs, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_get_export_format_availability",
         lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (False, "runtime fail")},
     )
     choices = iter(["onnx", "models: m.onnx"])
-    monkeypatch.setattr(mcc, "prompt_choice", lambda *a, **k: next(choices))
-    monkeypatch.setattr(mcc, "prompt_int", lambda *a, **k: 1)
-    monkeypatch.setattr(mcc, "prompt_text", lambda *a, **k: "")
-    monkeypatch.setattr(mcc, "prompt_yes_no", lambda *a, **k: False)
+    monkeypatch.setattr(mcs, "prompt_choice", lambda *a, **k: next(choices))
+    monkeypatch.setattr(mcs, "prompt_int", lambda *a, **k: 1)
+    monkeypatch.setattr(mcs, "prompt_text", lambda *a, **k: "")
+    monkeypatch.setattr(mcs, "prompt_yes_no", lambda *a, **k: False)
 
     try:
-        mcc._interactive_fill(args, tmp_path)
+        mcs._interactive_fill(args, tmp_path)
         assert False, "interactive flow must stop when no targets are available"
     except SystemExit as exc:
         assert "No target models are available for onnx source" in str(exc)
@@ -1167,15 +1142,11 @@ def test_interactive_onnx_wizard_offers_only_trt(monkeypatch, tmp_path: Path):
         force=False,
         continue_on_error=False,
     )
-    monkeypatch.setattr(
-        mcc,
-        "_discover_models",
+    monkeypatch.setattr(mcs, "_discover_models",
         lambda _root, *, allowed_suffixes: [("models", tmp_path / "m.onnx")],
     )
-    monkeypatch.setattr(mcc, "_check_tensorrt_ready", lambda: (True, ""))
-    monkeypatch.setattr(
-        mcc,
-        "_get_export_format_availability",
+    monkeypatch.setattr(mcs, "_check_tensorrt_ready", lambda: (True, ""))
+    monkeypatch.setattr(mcs, "_get_export_format_availability",
         lambda: {"onnx": (True, ""), "tensorrt-engine": (True, ""), "tensorrt-trt": (True, "")},
     )
 
@@ -1187,17 +1158,17 @@ def test_interactive_onnx_wizard_offers_only_trt(monkeypatch, tmp_path: Path):
         calls.append((prompt, list(options)))
         return next(choices)
 
-    monkeypatch.setattr(mcc, "prompt_choice", _fake_prompt_choice)
+    monkeypatch.setattr(mcs, "prompt_choice", _fake_prompt_choice)
     monkeypatch.setattr(
-        mcc,
+        mcs,
         "prompt_multi_choice_csv",
         lambda prompt, options, *a, **k: (calls.append((prompt, list(options))) or next(multi_choices)),
     )
-    monkeypatch.setattr(mcc, "prompt_int", lambda *a, **k: 1)
-    monkeypatch.setattr(mcc, "prompt_text", lambda *a, **k: "")
-    monkeypatch.setattr(mcc, "prompt_yes_no", lambda *a, **k: False)
+    monkeypatch.setattr(mcs, "prompt_int", lambda *a, **k: 1)
+    monkeypatch.setattr(mcs, "prompt_text", lambda *a, **k: "")
+    monkeypatch.setattr(mcs, "prompt_yes_no", lambda *a, **k: False)
 
-    mcc._interactive_fill(args, tmp_path)
+    mcs._interactive_fill(args, tmp_path)
     target_prompt = [opts for prompt, opts in calls if prompt == "Targets"][0]
     assert target_prompt == ["trt"]
 
@@ -1226,10 +1197,10 @@ def test_interactive_pipeline_engine_uses_pt_source_not_session_onnx(monkeypatch
         target_path.write_text("onnx", encoding="utf-8")
         return True, "ok"
 
-    monkeypatch.setattr(mcc, "_export_named_onnx_from_pt", _fake_export_named_onnx_from_pt)
-    monkeypatch.setattr(mcc, "_maybe_move_output", lambda *_a, **_k: (True, "ok"))
+    monkeypatch.setattr(mcs, "_export_named_onnx_from_pt", _fake_export_named_onnx_from_pt)
+    monkeypatch.setattr(mcs, "_maybe_move_output", lambda *_a, **_k: (True, "ok"))
 
-    ctx = mcc.InteractiveContext(
+    ctx = mcs.InteractiveContext(
         source_kind="pt",
         source_path=source_pt,
         target_onnx=True,
@@ -1256,7 +1227,7 @@ def test_interactive_pipeline_engine_uses_pt_source_not_session_onnx(monkeypatch
         half=False,
         nms=False,
     )
-    result = mcc._run_interactive_pipeline(ctx)
+    result = mcs._run_interactive_pipeline(ctx)
     assert result.stats.failed == 0
     assert yolo_inits
     assert all(p.suffix == ".pt" for p in yolo_inits)

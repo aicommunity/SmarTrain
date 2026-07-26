@@ -6,11 +6,11 @@ from smartrain.workflows.inference.inference_perf import DualPerfProfiler
 from smartrain.services.datasets.dataset_access import resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_roi_yolo import _clamp_crop, _full_image_crop, _select_roi_boxes
 from smartrain.services.datasets.dataset_scan import find_yaml_file
-from smartrain.workflows.models.model_artifact_imgsz import (
+from smartrain.core.models.model_artifact_imgsz import (
     extract_batch_from_sidecar_payload,
     extract_onnx_input_batch,
 )
-from smartrain.workflows.models.model_context import (
+from smartrain.core.models.model_context import (
     FALLBACK_IMGSZ_SOURCE,
     DEFAULT_INFERENCE_IMGSZ,
     infer_img_size_from_model_context,

@@ -86,7 +86,7 @@ def test_infer_from_onnx_input_shape(tmp_path: Path, monkeypatch: pytest.MonkeyP
     weights.write_text("onnx", encoding="utf-8")
 
     monkeypatch.setattr(
-        "smartrain.workflows.models.model_context.extract_onnx_input_imgsz",
+        "smartrain.core.models.model_context.extract_onnx_input_imgsz",
         lambda _path: 800,
     )
 

@@ -22,6 +22,7 @@ from smartrain.services.datasets.dataset_scan import (
     load_obj_data,
     load_obj_names,
 )
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -30,6 +31,9 @@ from smartrain.core.runtime.workspace_paths import (
     DATASETS_INFO_FILE,
     CLASS_NAMES_FILE,
 )
+
+_LOG = get_logger("smartrain.datasets.scan")
+
 from smartrain.providers.core.global_index import reconcile_stale_provider_paths
 from smartrain.services.datasets.datasets_json_normalize_service import _normalize_path_for_data_path
 from smartrain.services.datasets.datasets_json_report_io import (
@@ -432,6 +436,7 @@ def _append_explicit_dataset(
         _copy_source_to_training(source_for_copy, dst)
     else:
         print(f"[INFO] Skipping {logical_name!r}: source has not changed.")
+        _LOG.info("Skipping %r: source has not changed.", logical_name)
     folder_roots.append(
         (
             logical_name,
@@ -602,6 +607,7 @@ def main(argv=None):
             prev_sig = prev_entry.get(SOURCE_SIGNATURE_KEY) if isinstance(prev_entry, dict) else None
             if prev_sig == source_signature and _dir_has_content(dst_dir):
                 print(f"[INFO] Skipping {logical_name!r}: source has not changed.")
+                _LOG.info("Skipping %r: source has not changed.", logical_name)
                 # Even with skip we maintain compatibility: we configure the training-ready layout.
                 normalized_on_skip = _ensure_training_ready_after_copy(dst_dir)
             else:

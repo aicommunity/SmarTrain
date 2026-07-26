@@ -17,6 +17,7 @@ from PIL import Image
 from smartrain.run_model_contract.refs import unified_target_from_model_dir
 from smartrain.run_model_contract.schema import wrap_inference_report_v2
 from smartrain.core.runtime.path_portable import relativize_if_under
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.runtime.run_artifacts import is_internal_conversion_artifact
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
@@ -41,6 +42,8 @@ from smartrain.core.workflow_adapters.inference_runtime_api import (
     _select_roi_boxes,
 )
 from smartrain.services.datasets.dataset_roi_yolo import ON_EMPTY_MODES, ROI_POLICIES
+
+_LOG = get_logger("smartrain.inference.runtime")
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 MANIFEST_NAME = "model_manifest.json"
@@ -435,16 +438,15 @@ def resolve_model_from_name(layout: WorkspaceLayout, name: str) -> tuple[Path, s
 
 
 def _resolve_run_ref(layout: WorkspaceLayout, ref: str) -> Path:
+    from smartrain.core.runtime.run_refs import resolve_run_ref_path
+
     s = str(ref).strip()
     if not s:
         raise ValueError("empty run reference")
-    if s.isdigit():
-        runs = find_run_directories(layout.runs)
-        idx = int(s)
-        if idx < 1 or idx > len(runs):
-            raise ValueError(f"run index {idx} is out of range 1..{len(runs)}")
-        return Path(runs[idx - 1]).resolve()
-    return Path(s).expanduser().resolve()
+    try:
+        return resolve_run_ref_path(layout.runs, s, exit_on_error=False).resolve()
+    except IndexError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def resolve_model(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[Path, str, str]:

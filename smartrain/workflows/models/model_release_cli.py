@@ -85,16 +85,15 @@ def _read_csv_last_row(csv_path: Path) -> dict[str, Any] | None:
 
 
 def _resolve_run_ref(layout: WorkspaceLayout, ref: str) -> Path:
+    from smartrain.core.runtime.run_refs import resolve_run_ref_path
+
     s = (ref or "").strip()
     if not s:
         raise ValueError("run reference is empty")
-    if s.isdigit():
-        runs = find_run_directories(layout.runs)
-        idx = int(s)
-        if idx < 1 or idx > len(runs):
-            raise ValueError(f"run index {idx} is out of range 1..{len(runs)}")
-        return Path(runs[idx - 1]).resolve()
-    return Path(s).expanduser().resolve()
+    try:
+        return resolve_run_ref_path(layout.runs, s, exit_on_error=False).resolve()
+    except IndexError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _discover_runs(layout: WorkspaceLayout) -> list[Path]:

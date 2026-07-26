@@ -71,7 +71,9 @@ def _interactive_fill(args: argparse.Namespace, dataset_names: list[str]) -> Non
     print("[INFO] Interactive split mode")
     from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice
 
-    args.dataset = prompt_choice("Dataset", dataset_names, default=(args.dataset or dataset_names[0]))
+    from smartrain.cli_entrypoints.support.cli_interactive import ensure_dataset_arg
+
+    ensure_dataset_arg(args, dataset_names)
     output_default = str(args.output_name or "").strip()
     if output_default:
         args.output_name = prompt_prefilled_text("Output dataset name", output_default).strip() or None

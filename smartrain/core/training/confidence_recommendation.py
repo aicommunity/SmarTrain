@@ -123,6 +123,11 @@ def _safe_name_map(metrics_obj: Any) -> dict[int, str]:
 
 
 def _compute_fbeta(precision: np.ndarray, recall: np.ndarray, beta: float) -> np.ndarray:
+    """F-beta score along a confidence sweep (Van Rijsbergen).
+
+    Used to pick operating thresholds (objectives A/B/C). See also
+    threshold selection practice in arXiv:2210.10221.
+    """
     beta2 = float(beta) * float(beta)
     den = (beta2 * precision) + recall
     with np.errstate(divide="ignore", invalid="ignore"):

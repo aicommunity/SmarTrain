@@ -17,8 +17,10 @@ from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
 from smartrain.core.runtime.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.core.analyze.run_metrics_discovery import latest_test_metrics_path
 from smartrain.core.runtime.run_discovery import find_run_directories
-from smartrain.services.analyze.metrics_reader import latest_test_metrics_path, load_metadata
+from smartrain.core.runtime.run_refs import resolve_run_ref
+from smartrain.services.registry.run_fields import load_run_list_fields, load_run_training_metadata
 
 
 MANIFEST_NAME = "model_manifest.json"
@@ -39,18 +41,7 @@ def _ordered_run_dirs(ctx: RegistryCliContext) -> list[str]:
 
 
 def _resolve_run_ref(ctx: RegistryCliContext, ref: str) -> str:
-    s = ref.strip()
-    if s.isdigit():
-        runs = _ordered_run_dirs(ctx)
-        i = int(s)
-        if i < 1 or i > len(runs):
-            print(
-                f"[ERROR] There is no run with number {i} (in the list {len(runs)}).",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        return runs[i - 1]
-    return os.path.abspath(os.path.expanduser(ref))
+    return resolve_run_ref(ctx.runs_dir, ref)
 
 
 def _cmd_runs_list(ctx: RegistryCliContext) -> None:
@@ -62,18 +53,17 @@ def _cmd_runs_list(ctx: RegistryCliContext) -> None:
     print("-" * 100)
     for i, rd in enumerate(runs, start=1):
         try:
-            md = load_metadata(rd)
-            ti = md["training_info"]
-            m = ti["model"]
-            ds = ti["dataset"]["name"]
+            fields = load_run_list_fields(rd)
+            m = fields["model"]
+            ds = fields["dataset"]
             print(f"{i:4d}  {str(m)[:14]:<14}  {str(ds)[:24]:<24}  {rd}")
-        except (OSError, KeyError, TypeError) as e:
+        except (OSError, KeyError, TypeError, ValueError) as e:
             print(f"{i:4d} {'?':<14} {'?':<24} {rd} [error: {e}]")
 
 
 def _cmd_runs_info(ctx: RegistryCliContext, run_path: str) -> None:
     run_path = _resolve_run_ref(ctx, run_path)
-    md = load_metadata(run_path)
+    md = load_run_training_metadata(run_path)
     ti = md["training_info"]
     print(json.dumps({"run_dir": run_path, "training_info": ti, "timestamps": md["timestamps"]}, ensure_ascii=False, indent=2))
     best = preferred_run_model_path(run_path, ".pt")
@@ -154,7 +144,7 @@ def _cmd_models_add(ctx: RegistryCliContext, run_path: str) -> None:
     if not os.path.isfile(best):
         print(f"[ERROR] No run model: {best}", file=sys.stderr)
         sys.exit(1)
-    md = load_metadata(run_path)
+    md = load_run_training_metadata(run_path)
     base = _friendly_name_base(md)
     dest_dir = _unique_model_dir(ctx.models_dir, base)
     friendly = os.path.basename(dest_dir)
