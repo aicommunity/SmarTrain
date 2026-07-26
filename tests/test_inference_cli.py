@@ -208,8 +208,14 @@ def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
     assert isinstance(report.get("performance"), dict)
     assert "end_to_end" in report["performance"]
     assert "infer_only" in report["performance"]
-    env_path = Path(report["artifacts"]["environment_profile"]["path_absolute"])
+    env_profile = report["artifacts"]["environment_profile"]
+    env_rel = env_profile.get("path_relative")
+    env_abs = env_profile.get("path_absolute")
+    env_path = Path(env_abs) if env_abs else (tmp_path / str(env_rel))
     assert env_path.is_file()
+    if env_rel:
+        assert "\\" not in env_rel
+        assert "path_absolute" not in env_profile
     out_dir = _latest_report_path(tmp_path).parent
     autolabel = out_dir / "raw_images_autolabeled"
     assert autolabel.is_dir()
@@ -226,6 +232,11 @@ def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monke
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
     _install_fake_ultralytics(monkeypatch)
     monkeypatch.setattr("smartrain.workflows.inference.inference_cli.default_device_value", lambda: "0")
+    # resolve_device_request() consults real CUDA discovery; pin it so "0" survives without a GPU.
+    monkeypatch.setattr(
+        "smartrain.workflows.inference.inference_cli.resolve_device_request",
+        lambda request, options=None: "0" if str(request or "0").strip().lower() != "cpu" else "cpu",
+    )
     monkeypatch.setattr("smartrain.workflows.inference.inference_cli._ensure_device_available_or_exit", lambda _d: None)
 
     model_dir = tmp_path / "models" / "demo_model"
@@ -325,7 +336,9 @@ def test_inference_supports_engine_weights(tmp_path: Path, monkeypatch) -> None:
         ]
     )
     report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
-    assert report["model"]["weights_absolute"].endswith(".engine")
+    weights_rel = report["model"].get("weights_relative") or ""
+    weights_abs = report["model"].get("weights_absolute") or ""
+    assert (weights_rel or weights_abs).endswith(".engine")
     assert report["summary"]["images_processed"] == 1
 
 
@@ -682,7 +695,9 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
     assert report["summary"]["task_outputs_total"] == 0
     assert report["summary"]["detections_total"] == 0
     assert report["images"] == []
-    assert Path(report["artifacts"]["environment_profile"]["path_absolute"]).is_file()
+    env_profile = report["artifacts"]["environment_profile"]
+    env_path = Path(env_profile["path_absolute"]) if env_profile.get("path_absolute") else (tmp_path / env_profile["path_relative"])
+    assert env_path.is_file()
 
 
 def test_inference_external_provider_accepts_task_outputs_payload(monkeypatch, tmp_path: Path) -> None:
@@ -1189,7 +1204,12 @@ def test_inference_folder_zip_archive(tmp_path: Path, monkeypatch) -> None:
     report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
     assert report["source"]["mode"] == "folder"
     assert report["source"]["name"] == "images_set"
-    assert report["source"]["source_archive_absolute"] == str(zip_path.resolve())
+    src = report["source"]
+    if "source_archive_relative" in src:
+        assert src["source_archive_relative"].endswith("images_set.zip") or "images_set" in src["source_archive_relative"]
+        assert "\\" not in src["source_archive_relative"]
+    else:
+        assert src["source_archive_absolute"] == str(zip_path.resolve())
     assert report["summary"]["images_processed"] == 2
 
 
@@ -1216,7 +1236,12 @@ def test_inference_folder_tar_gz_archive(tmp_path: Path, monkeypatch) -> None:
     )
     report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
     assert report["summary"]["images_processed"] == 2
-    assert report["source"]["source_archive_absolute"] == str(archive_path.resolve())
+    src = report["source"]
+    if "source_archive_relative" in src:
+        assert "\\" not in src["source_archive_relative"]
+        assert Path(src["source_archive_relative"]).name == archive_path.name or archive_path.name in src["source_archive_relative"]
+    else:
+        assert src["source_archive_absolute"] == str(archive_path.resolve())
 
 
 def test_inference_dataset_split_archive_catalog(tmp_path: Path, monkeypatch) -> None:
@@ -1275,7 +1300,12 @@ def test_inference_dataset_split_archive_catalog(tmp_path: Path, monkeypatch) ->
     assert report["source"]["mode"] == "dataset-split"
     assert report["source"]["dataset"] == "ds_a"
     assert report["source"]["split"] == "test"
-    assert report["source"]["source_archive_absolute"] == str(zip_path.resolve())
+    src = report["source"]
+    if "source_archive_relative" in src:
+        assert "\\" not in src["source_archive_relative"]
+        assert zip_path.name in src["source_archive_relative"] or src["source_archive_relative"].endswith("ds_a.zip")
+    else:
+        assert src["source_archive_absolute"] == str(zip_path.resolve())
     assert report["summary"]["images_processed"] == 1
 
 

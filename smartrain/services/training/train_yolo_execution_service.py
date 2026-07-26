@@ -47,7 +47,10 @@ from smartrain.services.training.train_model_resolution_service import (
     extract_model_family_scale,
     normalize_model_spec,
 )
-from smartrain.services.training.train_runtime_data_yaml_service import build_runtime_data_yaml
+from smartrain.services.training.train_runtime_data_yaml_service import (
+    build_runtime_data_yaml,
+    materialize_ultralytics_data_yaml,
+)
 
 DEFAULT_MODEL_VERSION = "yolov8n"
 DEFAULT_EPOCHS = 50
@@ -301,12 +304,18 @@ def train_yolo(
     else:
         os.makedirs(model_dir, exist_ok=True)
 
-    data_yaml = build_runtime_data_yaml(
+    portable_yaml = build_runtime_data_yaml(
         dataset_path,
         model_dir,
         stage="train",
         ensure_run_layout_cb=ensure_run_layout,
         run_tmp_dir_cb=run_tmp_dir,
+        workspace_root=workspace_root,
+    )
+    data_yaml = (
+        materialize_ultralytics_data_yaml(portable_yaml, workspace_root)
+        if workspace_root
+        else portable_yaml
     )
     train_kw = finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
     if non_interactive or mpl_rt.force_ultralytics_plots_false:
@@ -459,12 +468,22 @@ def test_yolo(
     mpl_rt = ensure_matplotlib_training_runtime(non_interactive=non_interactive)
     test_start_time = datetime.now()
 
-    data_yaml = build_runtime_data_yaml(
+    from smartrain.services.models.release_models_manifest import layout_for_run_dir
+
+    ws_layout = layout_for_run_dir(model_dir)
+    workspace_root = str(ws_layout.root) if ws_layout is not None else None
+    portable_yaml = build_runtime_data_yaml(
         dataset_path,
         model_dir,
         stage="test",
         ensure_run_layout_cb=ensure_run_layout,
         run_tmp_dir_cb=run_tmp_dir,
+        workspace_root=workspace_root,
+    )
+    data_yaml = (
+        materialize_ultralytics_data_yaml(portable_yaml, workspace_root)
+        if workspace_root
+        else portable_yaml
     )
     imgsz = val_imgsz if val_imgsz is not None else train_img_size
 

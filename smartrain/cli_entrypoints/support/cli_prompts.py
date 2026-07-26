@@ -10,8 +10,11 @@ YES_TOKENS = {"y", "yes", "1", "true", "yes", "d"}
 NO_TOKENS = {"n", "no", "0", "false", "No", "n"}
 
 
+from smartrain.core.runtime.interactive_contract import stdin_is_tty
+
+
 def is_interactive_tty() -> bool:
-    return bool(sys.stdin.isatty())
+    return stdin_is_tty()
 
 
 def _prompt_label(label: str, default: str | None = None) -> str:

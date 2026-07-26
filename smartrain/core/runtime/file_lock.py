@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -20,14 +21,32 @@ def use_smb_safe_locks() -> bool:
 
 
 @contextmanager
-def smb_safe_locked_file(path: str | Path) -> Iterator[None]:
-    """Exclusive lock via atomic ``<path>.lock`` creation (SMB-safe)."""
+def smb_safe_locked_file(
+    path: str | Path,
+    *,
+    timeout_sec: float = 30.0,
+    poll_sec: float = 0.05,
+) -> Iterator[None]:
+    """Exclusive lock via atomic ``<path>.lock`` creation (SMB-safe).
+
+    Contenders spin until the lock file can be created exclusively, then
+    release by unlinking it. Suitable for local NTFS and SMB shares where
+    ``fcntl`` is unavailable.
+    """
     target = Path(path)
     lock_path = target.with_suffix(target.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd: int | None = None
+    deadline = time.monotonic() + max(0.0, timeout_sec)
     try:
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                break
+            except FileExistsError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Timed out waiting for lock: {lock_path}") from None
+                time.sleep(poll_sec)
         yield
     finally:
         if fd is not None:

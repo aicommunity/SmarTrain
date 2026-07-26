@@ -68,6 +68,38 @@ def test_build_run_display_labels_format(tmp_path: Path) -> None:
     assert labels[os.path.basename(str(run_b))] == "M2 yolov8n"
 
 
+def test_resolve_run_model_identity_lists_sibling_formats(tmp_path: Path) -> None:
+    from smartrain.services.analyze.report_labels import resolve_run_model_identity
+
+    run_dir = tmp_path / "release_run"
+    models = run_dir / "models"
+    models.mkdir(parents=True)
+    stem = "detect_yolo11m_20260716_100611_640px_400epochs_b16"
+    (models / f"{stem}.pt").write_bytes(b"pt")
+    (models / f"{stem}.onnx").write_bytes(b"onnx")
+    (run_dir / "training_metadata.json").write_text(
+        '{"paths": {"best_model": "%s.pt"}, "hyperparameters": {"epochs": 1}}' % stem,
+        encoding="utf-8",
+    )
+    identity = resolve_run_model_identity(str(run_dir))
+    assert identity.weight_stem == stem
+    assert identity.model_files == (f"{stem}.pt", f"{stem}.onnx")
+
+
+def test_resolve_run_class_names_ordered_from_data_yaml(tmp_path: Path) -> None:
+    from smartrain.services.analyze.report_labels import resolve_run_class_names
+
+    run_dir = tmp_path / "run_a"
+    run_dir.mkdir()
+    data_yaml = tmp_path / "data.yaml"
+    yaml.safe_dump({"names": {2: "joint", 0: "construct", 1: "digits"}}, data_yaml.open("w", encoding="utf-8"))
+    pairs = resolve_run_class_names(
+        str(run_dir),
+        run_data_yaml_map={str(run_dir): str(data_yaml)},
+    )
+    assert pairs == [(0, "construct"), (1, "digits"), (2, "joint")]
+
+
 def test_write_speed_quality_includes_promoted_run_with_tests_recomputed(tmp_path: Path) -> None:
     promoted = tmp_path / "models" / "detect_yolo11n_20260704_183140"
     tests = promoted / "tests"

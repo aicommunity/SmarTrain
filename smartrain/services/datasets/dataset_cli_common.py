@@ -6,6 +6,7 @@ import tempfile
 import threading
 from typing import Any
 
+from smartrain.core.runtime.path_portable import store_path_under_workspace
 from smartrain.core.runtime.workspace_coordination import catalog_write_lock, get_active_session
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
@@ -78,7 +79,7 @@ def update_datasets_sidecar(
     structure: str = "split",
 ) -> None:
     os.makedirs(layout.datasets, exist_ok=True)
-    rel = os.path.relpath(os.path.abspath(target_dir), layout.root)
+    rel = store_path_under_workspace(layout.root, os.path.abspath(target_dir))
     entry = {
         "classes": {str(k): int(v) for k, v in sorted(class_map.items(), key=lambda kv: int(kv[1]))},
         "structure": str(structure),
@@ -99,7 +100,7 @@ def update_datasets_sidecar_from_entry(
     output_hash: str,
 ) -> None:
     os.makedirs(layout.datasets, exist_ok=True)
-    rel = os.path.relpath(os.path.abspath(target_dir), layout.root)
+    rel = store_path_under_workspace(layout.root, os.path.abspath(target_dir))
     new_entry = dict(entry) if isinstance(entry, dict) else {}
     new_entry["data_path"] = rel
     new_entry["dataset_hash"] = output_hash

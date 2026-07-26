@@ -7,6 +7,7 @@ import sys
 from typing import Callable
 
 from smartrain.services.analyze.schema_contracts import ensure_analyze_session_manifest
+from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
 
 
 def resolve_compare_artifact_path(path: str, session_dir: str) -> str:
@@ -82,15 +83,20 @@ def finalize_compare_analytics_session(
         try:
             if os.path.abspath(src) != os.path.abspath(dst):
                 shutil.copy2(src, dst)
-            artifacts.append({"role": role, "path": os.path.join(rel_dir, os.path.basename(src))})
+            artifacts.append(
+                {
+                    "role": role,
+                    "path": posix_relpath(dst, dest_root),
+                }
+            )
         except Exception:
             pass
     manifest = ensure_analyze_session_manifest(
         {
             "session_name": session_name,
             "type": "compare",
-            "baseline": baseline,
-            "others": others,
+            "baseline": store_path_under_workspace(ws, baseline),
+            "others": [store_path_under_workspace(ws, o) for o in others],
             "artifacts": artifacts,
         },
         session_type="compare",

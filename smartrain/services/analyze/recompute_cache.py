@@ -11,6 +11,7 @@ from smartrain.core.analyze.run_metrics_discovery import (
     recomputed_metrics_write_path,
     resolve_recomputed_metrics_csv,
 )
+from smartrain.core.runtime.path_portable import posix_relpath
 
 
 def recompute_status_path(
@@ -96,7 +97,7 @@ def save_recompute_status(
         {
             "artifact": "metrics.recompute_status",
             "fingerprint": fp,
-            "path": os.path.relpath(path, run_dir),
+            "path": posix_relpath(path, run_dir),
             "status": status,
         },
     )

@@ -118,8 +118,8 @@ def _resolve_pandoc_path(candidate: str) -> str | None:
     return None
 
 
-def _pandoc_executable() -> str | None:
-    """PANDOC env, then PATH, then bundled pandoc from optional ``pypandoc-binary``."""
+def resolve_pandoc_executable(*, quiet: bool = False) -> str | None:
+    """PANDOC env, then PATH, then bundled pandoc from ``pypandoc-binary`` (base dependency)."""
     raw = (os.environ.get("PANDOC") or "").strip()
     if raw:
         if os.path.isfile(raw):
@@ -139,11 +139,30 @@ def _pandoc_executable() -> str | None:
         p = pypandoc.get_pandoc_path()
         resolved = _resolve_pandoc_path(p) if p else None
         if resolved:
-            _log(f"[INFO] Using bundled pandoc: {resolved}")
+            if not quiet:
+                _log(f"[INFO] Using bundled pandoc: {resolved}")
             return resolved
     except Exception as e:
-        _log(f"[INFO] pypandoc/bundled pandoc unavailable ({e}); reinstall smartrain or set PANDOC.")
+        if not quiet:
+            _log(f"[INFO] pypandoc/bundled pandoc unavailable ({e}); reinstall smartrain or set PANDOC.")
     return None
+
+
+def _pandoc_executable() -> str | None:
+    return resolve_pandoc_executable(quiet=False)
+
+
+def check_weasyprint_ready() -> tuple[bool, str]:
+    if _weasyprint_import_ok():
+        return True, "import ok"
+    return False, "not installed or missing OS libraries (Cairo/Pango)"
+
+
+def check_pandoc_ready(*, quiet: bool = True) -> tuple[bool, str]:
+    exe = resolve_pandoc_executable(quiet=quiet)
+    if exe:
+        return True, exe
+    return False, "not found (reinstall smartrain or set PANDOC)"
 
 
 def _pandoc_resource_path(out_dir: str, lang: str) -> str:

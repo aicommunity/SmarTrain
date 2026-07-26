@@ -27,5 +27,6 @@ def test_write_unified_snapshot_creates_layout_and_manifest(tmp_path: Path) -> N
     assert man["hash_algorithm"] == "sha256"
     assert man["aggregate_artifacts_hash_sha256"] == rep.aggregate_artifacts_hash_sha256
     assert man["artifacts"]["snapshot.json"]["sha256"] == rep.payload_hash_sha256
-    assert man["source_run_ref"] == str(run_dir.resolve())
+    assert man["source_run_ref"] == "runs/ds/run1"
+    assert "\\" not in man["source_run_ref"]
     assert rep.manifest_hash_sha256

@@ -194,16 +194,32 @@ def test_executive_summary_is_first_section(tmp_path: Path) -> None:
             }
         ]
     ).to_csv(rs, index=False)
+    run_dir = tmp_path / "run_a"
+    models = run_dir / "models"
+    models.mkdir(parents=True)
+    stem = "detect_yolo11n_20260704_183140_640px_200epochs_b16"
+    (models / f"{stem}.pt").write_bytes(b"pt")
+    (models / f"{stem}.onnx").write_bytes(b"onnx")
+    (run_dir / "training_metadata.json").write_text(
+        '{"paths": {"best_model": "%s.pt"}, "hyperparameters": {"epochs": 1}}' % stem,
+        encoding="utf-8",
+    )
+    data_yaml = tmp_path / "data.yaml"
+    data_yaml.write_text(
+        "names:\n  0: construct\n  1: digits\n",
+        encoding="utf-8",
+    )
     manifest = {
         "session_name": "s_exec",
         "profile": "full",
-        "baseline": "run_a",
+        "baseline": str(run_dir),
         "others": [],
         "tables": ["artifacts/table/runs_summary.csv"],
         "images": [],
         "artifacts": [],
         "format_comparison": {},
-        "abbreviations": {"run_a": "M1 yolo11n"},
+        "abbreviations": {run_dir.name: "M1 yolo11n"},
+        "run_data_yaml_map": {str(run_dir): str(data_yaml)},
         "run_legend": [
             {
                 "index": 1,
@@ -212,8 +228,8 @@ def test_executive_summary_is_first_section(tmp_path: Path) -> None:
                 "dataset_label": "D1",
                 "epochs": "200",
                 "batch": "16",
-                "run_name": "run_a",
-                "run_dir": "run_a",
+                "run_name": run_dir.name,
+                "run_dir": str(run_dir),
                 "role": "baseline",
             }
         ],
@@ -222,10 +238,21 @@ def test_executive_summary_is_first_section(tmp_path: Path) -> None:
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
     pos_exec = ru_md.find("## 1. Краткое резюме")
     pos_context = ru_md.find("## 2. Контекст")
+    pos_identity = ru_md.find("### Справочник запусков")
+    pos_legend = ru_md.find("Легенда запусков")
+    pos_classes = ru_md.find("Классы по моделям")
     pos_metrics = ru_md.find("Основные метрики по запускам")
     assert pos_exec != -1 and pos_context != -1
     assert pos_exec < pos_context
-    assert pos_metrics != -1 and pos_metrics < pos_context
+    assert pos_identity != -1 and pos_exec < pos_identity < pos_metrics < pos_context
+    assert pos_legend != -1 and pos_identity < pos_legend < pos_metrics
+    assert pos_classes != -1 and pos_legend < pos_classes < pos_metrics
+    assert stem + ".pt" in ru_md
+    assert stem + ".onnx" in ru_md
+    assert "0: construct" in ru_md
+    assert "1: digits" in ru_md
+    assert "Файлы модели" in ru_md
+    assert "Сокращения M1, M2" in ru_md or "порядковые ярлыки" in ru_md
     assert "Рейтинг моделей (сводка)" not in ru_md[:pos_context]
     assert "Компромисс скорость–качество" not in ru_md[:pos_context]
 

@@ -6,6 +6,8 @@ from typing import Any, Callable
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from smartrain.core.runtime.path_portable import posix_relpath
+
 
 def collect_confidence_recommendation_tables(
     *,
@@ -203,6 +205,6 @@ def write_speed_quality_artifacts(
     plt.savefig(png_path, dpi=220)
     plt.close()
     return {
-        "csv": os.path.relpath(csv_path, session_root),
-        "png": os.path.relpath(png_path, session_root),
+        "csv": posix_relpath(csv_path, session_root),
+        "png": posix_relpath(png_path, session_root),
     }

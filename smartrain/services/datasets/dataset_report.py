@@ -599,8 +599,8 @@ def build_report_dataset_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-pdf", action="store_true", help="Do not build PDF")
     p.add_argument("--no-odt", action="store_true", help="Do not build ODT")
     p.epilog = (
-        "Default install includes bundled pandoc (pypandoc-binary) and WeasyPrint for PDF; "
-        "system PDF engines (typst, wkhtmltopdf, TeX) are used when on PATH. "
+        "PDF/ODT via pandoc use bundled pandoc from base install (pypandoc-binary). "
+        "Optional weasyprint PDF engine: smartrain deps install or pip install -e \".[export]\". "
         "Env PANDOC=/full/path/to/pandoc overrides discovery."
     )
     return p

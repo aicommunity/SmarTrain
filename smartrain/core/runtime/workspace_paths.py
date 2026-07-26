@@ -239,6 +239,10 @@ def extract_dataset_archive_to_cache(workspace_root: str, archive_path: str) -> 
     _safe_extract_archive(abs_archive, cache_dir)
     dataset_root = _choose_extracted_dataset_root(cache_dir)
     rel_root = os.path.relpath(dataset_root, cache_dir)
+    if rel_root == ".":
+        dataset_root_rel = ""
+    else:
+        dataset_root_rel = rel_root.replace("\\", "/")
 
     archive_stored: str = abs_archive
     rel_archive = relativize_if_under(wr_abs, abs_archive)
@@ -254,7 +258,7 @@ def extract_dataset_archive_to_cache(workspace_root: str, archive_path: str) -> 
                 "zip_path": archive_stored if kind == "zip" else None,
                 "size": stat.st_size,
                 "mtime_ns": stat.st_mtime_ns,
-                "dataset_root_rel": "" if rel_root == "." else rel_root,
+                "dataset_root_rel": dataset_root_rel,
             },
             f,
             ensure_ascii=False,

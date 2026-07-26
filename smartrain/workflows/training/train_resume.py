@@ -397,7 +397,7 @@ def list_incomplete_runs(workspace_root: str) -> list[RunDiagnosis]:
     ]
 
 
-def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
+def _load_dataset_from_runtime_yaml(run_dir: str, workspace_root: str | None = None) -> str | None:
     preferred = os.path.join(str(run_tmp_dir(run_dir)), "_runtime_data_train.yaml")
     legacy = os.path.join(run_dir, "_runtime_data_train.yaml")
     data_yaml = preferred if os.path.isfile(preferred) else legacy
@@ -407,7 +407,21 @@ def _load_dataset_from_runtime_yaml(run_dir: str) -> str | None:
         with open(data_yaml, "r", encoding="utf-8") as f:
             obj = yaml.safe_load(f) or {}
         path_val = obj.get("path")
-        return str(path_val) if isinstance(path_val, str) and path_val.strip() else None
+        if not isinstance(path_val, str) or not path_val.strip():
+            return None
+        raw = path_val.strip()
+        from smartrain.core.runtime.path_portable import is_abs_like, resolve_stored_path_under_workspace
+
+        if is_abs_like(raw) and os.path.isdir(os.path.abspath(os.path.expanduser(raw))):
+            return os.path.abspath(os.path.expanduser(raw))
+        ws = workspace_root or _infer_workspace_root_from_run_dir(run_dir)
+        if ws:
+            resolved = resolve_stored_path_under_workspace(ws, raw)
+            if os.path.isdir(resolved):
+                return resolved
+        if os.path.isdir(raw):
+            return os.path.abspath(raw)
+        return raw
     except Exception:
         return None
 
@@ -483,24 +497,43 @@ def _hydrate_training_info(payload: dict[str, Any], run_dir: str) -> None:
         if not isinstance(cur_name, str) or not cur_name.strip():
             ds["name"] = dataset_name
 
-    dataset_path = _load_dataset_from_runtime_yaml(run_dir)
-    if dataset_path:
+    workspace_root = _infer_workspace_root_from_run_dir(run_dir)
+    dataset_path = _load_dataset_from_runtime_yaml(run_dir, workspace_root)
+    if dataset_path and workspace_root:
+        from smartrain.core.runtime.path_portable import posix_relpath, relativize_if_under, store_path_under_workspace
+
+        under = relativize_if_under(workspace_root, dataset_path)
+        if under is not None and under != dataset_path:
+            ds.setdefault("path_under_workspace", under)
+            ds.pop("path_absolute", None)
+        else:
+            cur_abs = ds.get("path_absolute")
+            if not isinstance(cur_abs, str) or not cur_abs.strip():
+                ds["path_absolute"] = dataset_path
+    elif dataset_path:
         cur_abs = ds.get("path_absolute")
         if not isinstance(cur_abs, str) or not cur_abs.strip():
             ds["path_absolute"] = dataset_path
 
-    workspace_root = _infer_workspace_root_from_run_dir(run_dir)
     if workspace_root:
+        from smartrain.core.runtime.path_portable import (
+            is_abs_like,
+            posix_relpath,
+            store_path_under_workspace,
+        )
+
         workspace_block = payload.setdefault("workspace", {})
         if not isinstance(workspace_block, dict):
             workspace_block = {}
             payload["workspace"] = workspace_block
         workspace_block.setdefault("root", ".")
         try:
-            workspace_block.setdefault("run_directory_relative", os.path.relpath(run_dir, workspace_root))
-            if dataset_path and os.path.abspath(dataset_path).startswith(os.path.abspath(workspace_root) + os.sep):
-                workspace_block.setdefault("dataset_path_relative", os.path.relpath(dataset_path, workspace_root))
-                ds.setdefault("path_under_workspace", os.path.relpath(dataset_path, workspace_root))
+            workspace_block.setdefault("run_directory_relative", posix_relpath(run_dir, workspace_root))
+            if dataset_path:
+                rel_ds = store_path_under_workspace(workspace_root, dataset_path)
+                if not is_abs_like(rel_ds):
+                    workspace_block.setdefault("dataset_path_relative", rel_ds)
+                    ds.setdefault("path_under_workspace", rel_ds)
         except Exception:
             pass
 

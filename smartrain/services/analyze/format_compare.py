@@ -16,6 +16,7 @@ from smartrain.core.workflow_adapters.analyze_runtime_api import (
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.core.runtime.run_artifacts import resolve_run_model
 from smartrain.run_model_contract.gateway import load_metrics as unified_load_metrics
 from smartrain.tasks.metric_columns import (
@@ -563,7 +564,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                         "format": fmt,
                         "backend_status": var.get("backend"),
                         "target_path": var.get("target_path"),
-                        "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
+                        "metrics_source": posix_relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
                         "inference_source": eval_args.get("inference_source"),
                         "gt_source": eval_args.get("gt_source"),
                         "nms_profile": eval_args.get("nms_profile"),
@@ -734,7 +735,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
                             "format": fmt,
                             "backend_status": var.get("backend"),
                             "target_path": var.get("target_path"),
-                            "metrics_source": os.path.relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
+                            "metrics_source": posix_relpath(metrics_path, run_dir) if metrics_exists and metrics_path else None,
                             "inference_source": eval_args.get("inference_source"),
                             "gt_source": eval_args.get("gt_source"),
                             "nms_profile": eval_args.get("nms_profile"),
@@ -833,7 +834,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
             if run_dir:
                 resolved = resolve_run_model(run_dir, ".pt")
                 if resolved is not None and os.path.isfile(resolved):
-                    target_path = os.path.relpath(str(resolved), run_dir)
+                    target_path = posix_relpath(str(resolved), run_dir)
                     row["target_path"] = target_path
         alias_legend.append(
             {
@@ -846,18 +847,18 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
     if test_rows:
         out_csv = os.path.join(out_dir, "format_metrics_compare_test.csv")
         pd.DataFrame(test_rows).to_csv(out_csv, index=False, encoding="utf-8")
-        out["test_csv"] = os.path.relpath(out_csv, session_root)
+        out["test_csv"] = posix_relpath(out_csv, session_root)
         perf_csv = os.path.join(out_dir, "format_performance_compare_test.csv")
         pd.DataFrame(test_rows).to_csv(perf_csv, index=False, encoding="utf-8")
-        out["perf_test_csv"] = os.path.relpath(perf_csv, session_root)
+        out["perf_test_csv"] = posix_relpath(perf_csv, session_root)
     if val_rows:
         out_csv = os.path.join(out_dir, "format_metrics_compare_val.csv")
         pd.DataFrame(val_rows).to_csv(out_csv, index=False, encoding="utf-8")
-        out["val_csv"] = os.path.relpath(out_csv, session_root)
+        out["val_csv"] = posix_relpath(out_csv, session_root)
     if pt_uni_rows:
         out_csv = os.path.join(out_dir, "format_metrics_compare_pt_uni.csv")
         pd.DataFrame(pt_uni_rows).to_csv(out_csv, index=False, encoding="utf-8")
-        out["pt_uni_csv"] = os.path.relpath(out_csv, session_root)
+        out["pt_uni_csv"] = posix_relpath(out_csv, session_root)
     eval_rows = test_eval_rows + val_eval_rows + pt_uni_eval_rows
     # Prefer alias from metrics rows; join without target_path because eval_rows often
     # keep an empty path while metrics rows already resolved the weights file.
@@ -889,11 +890,11 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
     if eval_rows:
         eval_csv = os.path.join(out_dir, "format_eval_settings.csv")
         pd.DataFrame(eval_rows).drop_duplicates().to_csv(eval_csv, index=False, encoding="utf-8")
-        out["eval_csv"] = os.path.relpath(eval_csv, session_root)
+        out["eval_csv"] = posix_relpath(eval_csv, session_root)
     if alias_legend:
         alias_csv = os.path.join(out_dir, "format_alias_legend.csv")
         pd.DataFrame(alias_legend).to_csv(alias_csv, index=False, encoding="utf-8")
-        out["alias_legend_csv"] = os.path.relpath(alias_csv, session_root)
+        out["alias_legend_csv"] = posix_relpath(alias_csv, session_root)
     issues = test_issues + val_issues + pt_uni_issues
     if issues:
         deduped_issues: dict[tuple[str, str, str, str], dict[str, Any]] = {}
@@ -921,7 +922,7 @@ def write_format_compare_artifacts(session_root: str, run_dirs: list[str]) -> di
         issues_json = os.path.join(out_dir, "format_compare_issues.json")
         with open(issues_json, "w", encoding="utf-8") as f:
             json.dump(issues, f, ensure_ascii=False, indent=2)
-        out["issues_json"] = os.path.relpath(issues_json, session_root)
+        out["issues_json"] = posix_relpath(issues_json, session_root)
     out_sources = os.path.join(out_dir, "format_metrics_sources.json")
     with open(out_sources, "w", encoding="utf-8") as f:
         json.dump(test_sources + val_sources + pt_uni_sources, f, ensure_ascii=False, indent=2)

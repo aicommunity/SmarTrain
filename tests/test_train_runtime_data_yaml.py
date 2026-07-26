@@ -6,7 +6,10 @@ import pytest
 import yaml
 
 from smartrain.core.runtime.run_artifacts import ensure_run_layout, run_tmp_dir
-from smartrain.services.training.train_runtime_data_yaml_service import build_runtime_data_yaml
+from smartrain.services.training.train_runtime_data_yaml_service import (
+    build_runtime_data_yaml,
+    materialize_ultralytics_data_yaml,
+)
 from smartrain.services.training.train_yolo_execution_service import train_yolo
 from smartrain.services.training.train_yolo_hooks import build_train_yolo_hooks
 
@@ -40,15 +43,68 @@ def test_runtime_data_yaml_rebinds_paths_to_selected_dataset(tmp_path: Path) -> 
         stage="train",
         ensure_run_layout_cb=ensure_run_layout,
         run_tmp_dir_cb=run_tmp_dir,
+        workspace_root=str(tmp_path),
     )
 
     with open(out, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    assert cfg["path"] == str(ds)
+    assert cfg["path"] == "datasets/291124"
+    assert "\\" not in cfg["path"]
     assert cfg["train"] == "train/images"
     assert cfg["val"] == "val/images"
     assert cfg["nc"] == 2
     assert cfg["names"] == ["edge", "tear"]
+
+
+def test_runtime_data_yaml_external_dataset_keeps_abs(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    outside = tmp_path / "outside_ds"
+    _touch_jpg(outside / "train" / "images" / "a.jpg")
+    (outside / "data.yaml").write_text(
+        "train: train/images\nval: train/images\nnc: 1\nnames: [a]\n",
+        encoding="utf-8",
+    )
+    run_dir = ws / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    out = build_runtime_data_yaml(
+        str(outside),
+        str(run_dir),
+        stage="train",
+        ensure_run_layout_cb=ensure_run_layout,
+        run_tmp_dir_cb=run_tmp_dir,
+        workspace_root=str(ws),
+    )
+    cfg = yaml.safe_load(Path(out).read_text(encoding="utf-8"))
+    assert Path(cfg["path"]).resolve() == outside.resolve()
+
+
+def test_materialize_ultralytics_data_yaml_resolves_abs(tmp_path: Path) -> None:
+    ds = tmp_path / "datasets" / "d1"
+    _touch_jpg(ds / "train" / "images" / "a.jpg")
+    (ds / "data.yaml").write_text(
+        "train: train/images\nval: train/images\nnc: 1\nnames: [a]\n",
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    portable = build_runtime_data_yaml(
+        str(ds),
+        str(run_dir),
+        stage="train",
+        ensure_run_layout_cb=ensure_run_layout,
+        run_tmp_dir_cb=run_tmp_dir,
+        workspace_root=str(tmp_path),
+    )
+    portable_cfg = yaml.safe_load(Path(portable).read_text(encoding="utf-8"))
+    assert portable_cfg["path"] == "datasets/d1"
+
+    abs_yaml = materialize_ultralytics_data_yaml(portable, str(tmp_path))
+    assert abs_yaml.endswith(".ultralytics.yaml")
+    abs_cfg = yaml.safe_load(Path(abs_yaml).read_text(encoding="utf-8"))
+    assert Path(abs_cfg["path"]).resolve() == ds.resolve()
+    # portable unchanged
+    assert yaml.safe_load(Path(portable).read_text(encoding="utf-8"))["path"] == "datasets/d1"
 
 
 def test_runtime_data_yaml_cvat_style_shared_images_bucket(tmp_path: Path) -> None:
@@ -106,10 +162,12 @@ def test_runtime_data_yaml_train_only_aug_dataset_falls_back_val_to_train(tmp_pa
         stage="train",
         ensure_run_layout_cb=ensure_run_layout,
         run_tmp_dir_cb=run_tmp_dir,
+        workspace_root=str(tmp_path),
     )
 
     with open(out, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
+    assert cfg["path"] == "datasets/ds_aug"
     assert cfg["train"] == "train/images"
     assert cfg["val"] == "train/images"
     assert cfg["test"] == "train/images"
@@ -143,6 +201,7 @@ def test_runtime_data_yaml_release_bundle_uses_tmp_without_tests(tmp_path: Path)
         stage="test",
         ensure_run_layout_cb=ensure_runtime_layout_for_yaml,
         run_tmp_dir_cb=ensure_runtime_tmp_dir,
+        workspace_root=str(tmp_path),
     )
     assert Path(out).is_file()
     assert Path(out).parent == release_dir / "tmp"
@@ -169,15 +228,16 @@ def test_resume_pt_test_runner_passes_runtime_yaml_callbacks(monkeypatch: pytest
 
     captured: dict[str, object] = {}
 
-    def _fake_build(dataset_path, model_dir, *, stage, ensure_run_layout_cb, run_tmp_dir_cb):
+    def _fake_build(dataset_path, model_dir, *, stage, ensure_run_layout_cb, run_tmp_dir_cb, workspace_root=None):
         captured["stage"] = stage
         captured["has_layout_cb"] = callable(ensure_run_layout_cb)
         captured["has_tmp_cb"] = callable(run_tmp_dir_cb)
+        captured["workspace_root"] = workspace_root
         ensure_run_layout_cb(model_dir)
         tmp = Path(run_tmp_dir_cb(model_dir))
         out = tmp / f"_runtime_data_{stage}.yaml"
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("path: .\n", encoding="utf-8")
+        out.write_text("path: datasets/ds\n", encoding="utf-8")
         return str(out)
 
     class _Res:
@@ -188,6 +248,7 @@ def test_resume_pt_test_runner_passes_runtime_yaml_callbacks(monkeypatch: pytest
         test_end_time = None
 
     monkeypatch.setattr(mod, "build_runtime_data_yaml", _fake_build)
+    monkeypatch.setattr(mod, "materialize_ultralytics_data_yaml", lambda p, _w: p)
     monkeypatch.setattr(mod, "run_ultralytics_backend", lambda **_k: _Res())
     monkeypatch.setattr(mod, "resolve_task_context", lambda *_a, **_k: type("C", (), {"task_type": "detection"})())
     monkeypatch.setattr(mod, "ensure_matplotlib_training_runtime", lambda **_k: type("R", (), {"as_dict": lambda self: {}})())
@@ -226,9 +287,20 @@ def test_train_yolo_builds_runtime_yaml_under_run_dir(monkeypatch: pytest.Monkey
         called["stage"] = stage
         return "/tmp/runtime_data_train.yaml"
 
+    materialized: dict[str, str] = {}
+
+    def _fake_materialize(portable: str, workspace_root: str) -> str:
+        materialized["portable"] = portable
+        materialized["workspace_root"] = workspace_root
+        return "/tmp/runtime_data_train.ultralytics.yaml"
+
     monkeypatch.setattr(
         "smartrain.services.training.train_yolo_execution_service.build_runtime_data_yaml",
         _fake_build_runtime_yaml,
+    )
+    monkeypatch.setattr(
+        "smartrain.services.training.train_yolo_execution_service.materialize_ultralytics_data_yaml",
+        _fake_materialize,
     )
 
     def _stop_after_finalize(*_args, **_kwargs):
@@ -240,12 +312,20 @@ def test_train_yolo_builds_runtime_yaml_under_run_dir(monkeypatch: pytest.Monkey
     )
 
     with pytest.raises(RuntimeError, match="stop-after-runtime-yaml"):
-        train_yolo(str(ds), str(target_dir), non_interactive=True, hooks=build_train_yolo_hooks())
+        train_yolo(
+            str(ds),
+            str(target_dir),
+            non_interactive=True,
+            workspace_root=str(tmp_path),
+            hooks=build_train_yolo_hooks(),
+        )
 
     expected_run_dir = target_dir / ds.name / "run-id"
     assert called["dataset_path"] == str(ds)
     assert called["run_dir"] == str(expected_run_dir)
     assert called["stage"] == "train"
+    assert materialized.get("portable") == "/tmp/runtime_data_train.yaml"
+    assert materialized.get("workspace_root") == str(tmp_path)
 
 
 def test_runtime_data_yaml_accepts_data_yaml_file_path(tmp_path: Path) -> None:
@@ -266,8 +346,9 @@ def test_runtime_data_yaml_accepts_data_yaml_file_path(tmp_path: Path) -> None:
         stage="test",
         ensure_run_layout_cb=ensure_run_layout,
         run_tmp_dir_cb=run_tmp_dir,
+        workspace_root=str(tmp_path),
     )
     with open(out, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    assert cfg["path"] == str(ds)
+    assert cfg["path"] == "datasets/d1"
     assert cfg["train"] == "train/images"

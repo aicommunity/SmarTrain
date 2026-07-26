@@ -34,12 +34,18 @@ Smart Train reads configuration from CLI flags and environment variables. CLI fl
 
 | Extra | Packages | Purpose |
 |-------|----------|---------|
-| `export` | `pypandoc-binary`, `weasyprint` | PDF/ODT export for dataset and analyze reports |
+| `export` | `weasyprint` | Optional WeasyPrint PDF engine for dataset and analyze reports |
 | `dev` | `pytest`, `ruff`, `mypy` | Development and CI tooling |
 | `clearml` | `clearml` | ClearML experiment tracking |
 | `sahi` | `sahi` | SAHI tiled inference CLI |
 
-Install example: `pip install -e ".[dev,export]"`.
+Install example: `pip install -e ".[dev,export]"` or `smartrain deps install`.
+
+## Report export environment
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PANDOC` | unset | Full path to pandoc binary; overrides PATH and bundled pandoc from `pypandoc-binary`. |
 
 ## Notes
 

@@ -208,12 +208,31 @@ def test_ensure_run_layout_merges_parallel_test_ultralytics_dir(tmp_path: Path) 
     assert not parallel.exists()
 
 
-def test_ensure_run_layout_no_empty_train_dir_without_legacy(tmp_path: Path) -> None:
-    run_dir = tmp_path / "runs" / "ds1" / "run-fresh"
-    run_dir.mkdir(parents=True)
+def test_ensure_run_layout_removes_identical_root_runtime_yaml(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-runtime-dup"
+    tmp = run_dir / "tmp"
+    tmp.mkdir(parents=True)
+    body = "train: train/images\nnames: [a]\n"
+    (run_dir / "_runtime_data_train.yaml").write_text(body, encoding="utf-8")
+    (tmp / "_runtime_data_train.yaml").write_text(body, encoding="utf-8")
+
     ensure_run_layout(str(run_dir))
-    train_root = run_train_backend_dir(str(run_dir), "ultralytics")
-    assert not train_root.exists() or not any(train_root.iterdir())
+
+    assert not (run_dir / "_runtime_data_train.yaml").exists()
+    assert (tmp / "_runtime_data_train.yaml").read_text(encoding="utf-8") == body
+
+
+def test_ensure_run_layout_keeps_conflicting_root_runtime_yaml(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-runtime-conflict"
+    tmp = run_dir / "tmp"
+    tmp.mkdir(parents=True)
+    (run_dir / "_runtime_data_train.yaml").write_text("train: a\n", encoding="utf-8")
+    (tmp / "_runtime_data_train.yaml").write_text("train: b\n", encoding="utf-8")
+
+    ensure_run_layout(str(run_dir))
+
+    assert (run_dir / "_runtime_data_train.yaml").is_file()
+    assert (tmp / "_runtime_data_train.yaml").read_text(encoding="utf-8") == "train: b\n"
 
 
 def test_consolidate_train_merges_suffix(tmp_path: Path) -> None:
@@ -298,4 +317,39 @@ def test_prune_empty_sidecar_dirs(tmp_path: Path) -> None:
     prune_empty_sidecar_dirs(str(run_dir))
     assert not (run_dir / ".ultralytics_scratch").exists()
     assert not (run_dir / ".ultralytics_predict_scratch").exists()
+
+
+def test_write_model_sidecar_metadata_portable_paths(tmp_path: Path) -> None:
+    from smartrain.core.runtime.run_artifacts import write_model_sidecar_metadata
+
+    run_dir = tmp_path / "runs" / "ds1" / "run-side"
+    models = run_dir / "models"
+    models.mkdir(parents=True)
+    onnx = models / "a.onnx"
+    onnx.write_bytes(b"onnx")
+    side = write_model_sidecar_metadata(
+        onnx,
+        format_name="onnx",
+        run_dir=str(run_dir),
+        source_path=str(models / "a.pt"),
+        workspace_root=str(tmp_path),
+    )
+    data = json.loads(side.read_text(encoding="utf-8"))
+    assert data["path"] == "models/a.onnx"
+    assert data["run_path"] == "runs/ds1/run-side"
+    assert "\\" not in data["path"]
+    assert "\\" not in data["run_path"]
+    assert not Path(data["path"]).is_absolute()
+
+
+def test_resolve_sidecar_stored_path_relative_to_run(tmp_path: Path) -> None:
+    from smartrain.core.runtime.run_artifacts import resolve_sidecar_stored_path
+
+    run_dir = tmp_path / "runs" / "ds" / "r1"
+    models = run_dir / "models"
+    models.mkdir(parents=True)
+    onnx = models / "a.onnx"
+    onnx.write_bytes(b"x")
+    got = resolve_sidecar_stored_path("models/a.onnx", model_path=onnx, run_dir=run_dir)
+    assert Path(got).resolve() == onnx.resolve()
 

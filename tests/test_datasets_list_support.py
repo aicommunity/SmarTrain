@@ -109,3 +109,20 @@ def test_workspace_auto_reads_default_datasets_list(tmp_path: Path) -> None:
     assert "dataset_hash" in info["auto_list_dataset"]
     assert "source_hash" in info["auto_list_dataset"]
     assert "source_ref" in info["auto_list_dataset"]
+
+
+def test_workspace_dataset_data_path_is_posix_relative(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    deploy_workspace(str(workspace))
+    ds_dir = _make_flat_dataset(workspace / "raw_data", "under_ws_ds")
+    list_file = workspace / "raw_data" / "datasets_list.txt"
+    list_file.write_text(f"{ds_dir}\n", encoding="utf-8")
+
+    datasets_json_main(["--workspace", str(workspace)])
+
+    info = json.loads((workspace / "datasets" / DATASETS_INFO_FILE).read_text(encoding="utf-8"))
+    assert info["under_ws_ds"]["data_path"] == "datasets/under_ws_ds"
+    assert "\\" not in info["under_ws_ds"]["data_path"]
+    src_ref = str(info["under_ws_ds"].get("source_ref") or "")
+    assert src_ref == "raw_data/under_ws_ds"
+    assert "\\" not in src_ref

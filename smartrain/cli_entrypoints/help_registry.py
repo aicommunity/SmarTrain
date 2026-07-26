@@ -53,6 +53,14 @@ COMMANDS: dict[str, CommandHelp] = {
             "repair portable paths, and run final scan in target workspace."
         ),
     ),
+    "update": CommandHelp(
+        name="update",
+        summary="Migrate workspace on-disk legacy layouts to the canonical shape.",
+        description=(
+            "Scan runs/, models/, datasets/ for legacy paths and manifests; apply safe migrations "
+            "and prompt for unsafe ones. Supports --dry-run, --yes, --apply-all, --check, --only."
+        ),
+    ),
     "normalize-data-yaml": CommandHelp(
         name="normalize-data-yaml",
         summary="Rewrite datasets/*/data.yaml to portable Ultralytics layout.",
@@ -215,10 +223,11 @@ COMMANDS: dict[str, CommandHelp] = {
     ),
     "model": CommandHelp(
         name="model",
-        summary="Convert, release, comment on, and rename workspace models.",
+        summary="Convert, release, unrelease, comment on, and rename workspace models.",
         description=(
-            "Export to ONNX/TensorRT, release run weights into models/, set one-line comments, "
-            "and rename released artifacts. Subcommands: convert, release, comment, rename."
+            "Export to ONNX/TensorRT, release run weights into models/, move releases back to runs/, "
+            "set one-line comments, and rename released artifacts. "
+            "Subcommands: convert, release, unrelease, comment, rename."
         ),
     ),
     "sahi": CommandHelp(
@@ -298,7 +307,8 @@ COMMANDS: dict[str, CommandHelp] = {
         name="deps",
         summary="Dependency management helpers.",
         description=(
-            "Sync PyTorch/CUDA packages to the recommended policy. Subcommand: sync-torch."
+            "Sync PyTorch/CUDA policy, check optional report-export dependencies, and install "
+            "pip extras (export/weasyprint, clearml, sahi, dev). Subcommands: sync-torch, doctor, install."
         ),
     ),
 }
@@ -306,7 +316,7 @@ COMMANDS: dict[str, CommandHelp] = {
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     (
         "Workspace",
-        ["deploy", "info", "quickstart", "sync"],
+        ["deploy", "info", "quickstart", "sync", "update"],
     ),
     (
         "Dataset catalog and preparation",

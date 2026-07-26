@@ -152,19 +152,20 @@ def build_rename_plan(entry: ReleaseModelEntry, new_stem: str) -> RenamePlan:
 
     operations: list[RenameOperation] = []
     if nested:
-        # Nested releases keep the release folder name; only weight/sidecar files rename.
-        siblings = [s for s in collect_stem_siblings(entry.release_dir, old_stem) if s.is_file()]
+        # Nested / unified releases keep the release folder name; rename files next to the PT.
+        file_parent = entry.pt_path.parent.resolve()
+        siblings = [s for s in collect_stem_siblings(file_parent, old_stem) if s.is_file()]
         if entry.pt_path.resolve() not in siblings:
             siblings.append(entry.pt_path.resolve())
         for src in siblings:
             dst_name = _replace_stem_in_name(src.name, old_stem, sanitized)
-            dst = (entry.release_dir / dst_name).resolve()
+            dst = (file_parent / dst_name).resolve()
             if dst.exists() and dst != src:
                 raise ReleaseRenameError(f"target already exists: {dst}")
             operations.append(RenameOperation(src=src, dst=dst))
         new_release_dir = entry.release_dir.resolve()
-        new_pt = (new_release_dir / f"{sanitized}.pt").resolve()
-        new_json = (new_release_dir / f"{sanitized}.json").resolve()
+        new_pt = (file_parent / f"{sanitized}.pt").resolve()
+        new_json = (file_parent / f"{sanitized}.json").resolve()
     else:
         siblings = collect_stem_siblings(entry.dataset_dir, old_stem)
         if entry.pt_path.resolve() not in siblings:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from smartrain.external_providers.adapters import build_external_infer_spec, build_external_train_spec
 
 
@@ -20,7 +22,7 @@ def test_mfel_train_adapter_uses_launcher() -> None:
     assert "--repo" in spec.args
     assert "--project" in spec.args
     project_idx = spec.args.index("--project") + 1
-    assert spec.args[project_idx].endswith("/runs/ds")
+    assert Path(spec.args[project_idx]).as_posix().endswith("/runs/ds")
     assert "--name" in spec.args
 
 

@@ -860,15 +860,20 @@ def test_runtime_probe_fallback_without_buildonly(monkeypatch, tmp_path: Path):
         save=lambda _model, path: Path(path).write_text("onnx", encoding="utf-8"),
     )
     monkeypatch.setitem(sys.modules, "onnx", fake_onnx)
-    monkeypatch.setattr(mcs, "_resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
-    monkeypatch.setattr(mcs, "_get_trtexec_capabilities",
+    # Probe logic lives in core.models.tensorrt_checks; service wraps the call.
+    import smartrain.core.models.tensorrt_checks as core_trt
+
+    monkeypatch.setattr(core_trt, "resolve_trtexec_bin", lambda: "/usr/bin/trtexec")
+    monkeypatch.setattr(
+        core_trt,
+        "get_trtexec_capabilities",
         lambda _bin: mcs.TrtexecCapabilities(
             supports_build_only=True,
             supports_explicit_batch=True,
             workspace_mode="workspace",
         ),
     )
-    monkeypatch.setattr(mcs.trt_checks.tempfile, "mkdtemp", lambda prefix: str(tmp_path / "probe_dir"))
+    monkeypatch.setattr(core_trt.tempfile, "mkdtemp", lambda prefix: str(tmp_path / "probe_dir"))
     (tmp_path / "probe_dir").mkdir(parents=True, exist_ok=True)
 
     calls: list[list[str]] = []
@@ -882,12 +887,13 @@ def test_runtime_probe_fallback_without_buildonly(monkeypatch, tmp_path: Path):
         engine_path.write_text("ok", encoding="utf-8")
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(mcs.subprocess, "run", _fake_run)
-    monkeypatch.setattr(mcs.shutil, "rmtree", lambda *_a, **_k: None)
+    monkeypatch.setattr(core_trt.subprocess, "run", _fake_run)
+    monkeypatch.setattr(core_trt.shutil, "rmtree", lambda *_a, **_k: None)
     monkeypatch.setattr(mcs, "_TRTEXEC_RUNTIME_CACHE", None)
+    monkeypatch.setattr(core_trt, "_TRTEXEC_RUNTIME_CACHE", None)
 
     ok, reason = mcc._check_trtexec_runtime_ready()
-    assert ok is True
+    assert ok is True, reason
     assert reason == ""
     assert any("--buildOnly" in cmd for cmd in calls)
     assert any("--buildOnly" not in cmd for cmd in calls)

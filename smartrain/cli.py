@@ -20,7 +20,7 @@ from smartrain.cli_entrypoints.support.typer_non_interactive import (
     strip_typer_meta_non_interactive_flags,
 )
 from smartrain.core.runtime.completion_autoinstall import ensure_completion_auto_setup
-from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV
+from smartrain.core.runtime.interactive_contract import INTERACTIVE_ALLOWED_ENV, ensure_stdin_isatty_truthful
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 app = plain_typer(
@@ -229,6 +229,33 @@ def cmd_sync(ctx: typer.Context) -> None:
         build_parser=build_sync_arg_parser,
         prog="smartrain sync",
         empty_args_mode="invoke",
+    )
+
+
+@app.command(
+    "update",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_update(ctx: typer.Context) -> None:
+    """Scan workspace for legacy on-disk shapes and migrate toward the canonical layout.
+
+    Examples:
+      smartrain update --dry-run
+      smartrain update --yes
+      smartrain update --yes --apply-all
+      smartrain update --check
+      smartrain update --only layout,releases,yaml
+      smartrain update
+    """
+    from smartrain.workflows.update.update_cli import build_update_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.update.update_cli",
+        build_parser=build_update_arg_parser,
+        prog="smartrain update",
+        empty_args_mode="invoke_if_tty_else_help",
     )
 
 
@@ -822,6 +849,80 @@ def cmd_deps_sync_torch() -> None:
     typer.echo(f"{prefix} {message}")
 
 
+@deps_app.command("doctor")
+def cmd_deps_doctor(
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", help="Print full detail strings for each dependency row."),
+    ] = False,
+) -> None:
+    """Check optional report-export dependencies (pandoc, weasyprint, fallbacks)."""
+    from smartrain.services.deps.optional_extras import check_export_deps, ubuntu_weasyprint_apt_hint
+
+    report = check_export_deps()
+    typer.echo("[INFO] Export dependencies doctor:")
+    for row in report.rows:
+        status = "ok" if row.ok else "missing"
+        if verbose or not row.ok:
+            typer.echo(f"  - {row.name}: {status} ({row.detail})")
+        else:
+            typer.echo(f"  - {row.name}: {status}")
+    if not report.export_ready:
+        typer.echo("[INFO] Reinstall smartrain to restore bundled pandoc: pip install -e .")
+    weasy_row = next((r for r in report.rows if r.name.startswith("weasyprint")), None)
+    if weasy_row is not None and not weasy_row.ok:
+        typer.echo("[INFO] Optional WeasyPrint PDF engine: smartrain deps install")
+        hint = ubuntu_weasyprint_apt_hint()
+        if hint:
+            typer.echo(f"[INFO] Ubuntu/Debian WeasyPrint system libraries: {hint}")
+    raise typer.Exit(0 if report.export_ready else 1)
+
+
+@deps_app.command("install")
+def cmd_deps_install(
+    extra: Annotated[
+        list[str],
+        typer.Option("--extra", help="Optional extra to install (repeatable). Default: export."),
+    ] = [],
+    all_extras: Annotated[
+        bool,
+        typer.Option("--all-extras", help="Install all known optional extras."),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Print pip command without running it."),
+    ] = False,
+) -> None:
+    """Install optional pip extras (default: export/weasyprint for enhanced PDF export)."""
+    from smartrain.services.deps.optional_extras import (
+        check_export_deps,
+        install_optional_extras,
+        known_optional_extras,
+    )
+
+    if all_extras:
+        selected = list(known_optional_extras())
+    elif extra:
+        selected = list(extra)
+    else:
+        selected = ["export"]
+    try:
+        cmd = install_optional_extras(selected, dry_run=dry_run)
+    except ValueError as exc:
+        typer.echo(f"[ERROR] {exc}", err=True)
+        raise typer.Exit(2) from exc
+    if dry_run:
+        typer.echo(f"[INFO] Would run: {cmd}")
+        raise typer.Exit(0)
+    typer.echo(f"[OK] Installed extras: {', '.join(selected)}")
+    report = check_export_deps()
+    if report.export_ready:
+        typer.echo("[OK] pandoc is available for report export.")
+    else:
+        typer.echo("[WARN] pandoc still unavailable; run: smartrain deps doctor --verbose", err=True)
+        raise typer.Exit(1)
+
+
 def _deps_group_callback(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         typer.echo("Usage: smartrain deps [OPTIONS] COMMAND [ARGS]...")
@@ -1075,6 +1176,30 @@ def cmd_model_comment(ctx: typer.Context) -> None:
 
 
 @model_app.command(
+    "unrelease",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def cmd_model_unrelease(ctx: typer.Context) -> None:
+    """Move a released model back into runs/ and remove it from the release catalog.
+
+    Examples:
+      smartrain model unrelease --release models/my_ds/run_id/models/detect_yolo11s_20260101_000000_640px_100epochs_b16.pt --yes
+      smartrain model unrelease --release 1 --yes
+      smartrain model unrelease
+    """
+    from smartrain.workflows.models.model_unrelease_cli import build_model_unrelease_arg_parser
+
+    _forward_argparse_command(
+        ctx,
+        module="smartrain.workflows.models.model_unrelease_cli",
+        build_parser=build_model_unrelease_arg_parser,
+        prog="smartrain model unrelease",
+        empty_args_mode="invoke_if_tty_else_help",
+    )
+
+
+@model_app.command(
     "rename",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     add_help_option=False,
@@ -1103,6 +1228,7 @@ def _model_group_callback(ctx: typer.Context) -> None:
         typer.echo(HELP_MODEL_GROUP)
         typer.echo("Run: smartrain model convert -- --help")
         typer.echo("Run: smartrain model release -- --help")
+        typer.echo("Run: smartrain model unrelease -- --help")
         typer.echo("Run: smartrain model comment -- --help")
         typer.echo("Run: smartrain model rename -- --help")
         raise typer.Exit(0)
@@ -1412,6 +1538,7 @@ def cmd_rotate(ctx: typer.Context) -> None:
 
 
 def main() -> None:
+    ensure_stdin_isatty_truthful()
     app()
 
 
