@@ -7,6 +7,7 @@
 ## 1) Начало работы
 
 - [Установка](getting-started/installation.md)
+- [Docker (CUDA 12.8)](getting-started/docker.md)
 - [Рабочий каталог и каталоги проекта](getting-started/workspace.md)
 - [Быстрый сценарий `scan -> fusion -> train`](getting-started/quickstart.md)
 
@@ -43,6 +44,7 @@
 - [Тестирование](development/testing.md)
 - [Расширение проекта](development/extension-guide.md)
 - [Разработка новых внешних провайдеров](development/provider-development.md)
+- [Аудит проекта 2026-07-26](audit/2026-07-26-project-audit.md)
 
 ## 5) Migration
 

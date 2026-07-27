@@ -8,6 +8,7 @@ import hashlib
 import zipfile
 import shutil
 from pathlib import Path
+from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
 from typing import Any, Dict, List, Optional, Set, Tuple
 import xml.etree.ElementTree as ET
 
@@ -22,6 +23,7 @@ from smartrain.services.datasets.dataset_scan import (
     load_obj_data,
     load_obj_names,
 )
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.core.runtime.workspace_paths import (
     WORKSPACE_ENV_VAR,
     WorkspaceLayout,
@@ -30,6 +32,9 @@ from smartrain.core.runtime.workspace_paths import (
     DATASETS_INFO_FILE,
     CLASS_NAMES_FILE,
 )
+
+_LOG = get_logger("smartrain.datasets.scan")
+
 from smartrain.providers.core.global_index import reconcile_stale_provider_paths
 from smartrain.services.datasets.datasets_json_normalize_service import _normalize_path_for_data_path
 from smartrain.services.datasets.datasets_json_report_io import (
@@ -419,7 +424,7 @@ def _append_explicit_dataset(
             extracted = resolve_or_extract_dataset_root(
                 layout.root,
                 logical_name,
-                {"data_path": os.path.relpath(src_path, layout.root)},
+                {"data_path": posix_relpath(src_path, layout.root)},
                 layout.raw_data,
             )
         except Exception as e:
@@ -432,11 +437,12 @@ def _append_explicit_dataset(
         _copy_source_to_training(source_for_copy, dst)
     else:
         print(f"[INFO] Skipping {logical_name!r}: source has not changed.")
+        _LOG.info("Skipping %r: source has not changed.", logical_name)
     folder_roots.append(
         (
             logical_name,
             dst,
-            {"data_path": os.path.relpath(dst, layout.root), SOURCE_SIGNATURE_KEY: sig},
+            {"data_path": posix_relpath(dst, layout.root), SOURCE_SIGNATURE_KEY: sig},
         )
     )
     _append_to_datasets_list(os.path.join(layout.raw_data, DEFAULT_DATASETS_LIST_FILE), list_value)
@@ -602,6 +608,7 @@ def main(argv=None):
             prev_sig = prev_entry.get(SOURCE_SIGNATURE_KEY) if isinstance(prev_entry, dict) else None
             if prev_sig == source_signature and _dir_has_content(dst_dir):
                 print(f"[INFO] Skipping {logical_name!r}: source has not changed.")
+                _LOG.info("Skipping %r: source has not changed.", logical_name)
                 # Even with skip we maintain compatibility: we configure the training-ready layout.
                 normalized_on_skip = _ensure_training_ready_after_copy(dst_dir)
             else:
@@ -636,7 +643,7 @@ def main(argv=None):
                             extracted = resolve_or_extract_dataset_root(
                                 layout.root,
                                 logical_name,
-                                {"data_path": os.path.relpath(src_path, layout.root)},
+                                {"data_path": posix_relpath(src_path, layout.root)},
                                 raw_source_dir,
                             )
                         except Exception as e:
@@ -645,7 +652,7 @@ def main(argv=None):
                         synced = _sync_one_source(
                             logical_name=logical_name,
                             source_for_copy=extracted,
-                            source_ref=os.path.relpath(src_path, layout.root),
+                            source_ref=store_path_under_workspace(layout.root, src_path),
                             source_signature=sig,
                         )
                         if synced:
@@ -654,7 +661,7 @@ def main(argv=None):
                         synced = _sync_one_source(
                             logical_name=logical_name,
                             source_for_copy=src_path,
-                            source_ref=os.path.relpath(src_path, layout.root),
+                            source_ref=store_path_under_workspace(layout.root, src_path),
                             source_signature=_compute_source_signature(src_path),
                         )
                         if synced:
@@ -699,7 +706,7 @@ def main(argv=None):
                         extracted = resolve_or_extract_dataset_root(
                             layout.root,
                             logical_name,
-                            {"data_path": os.path.relpath(src_path, layout.root)},
+                            {"data_path": posix_relpath(src_path, layout.root)},
                             layout.raw_data,
                         )
                     except Exception as e:
@@ -708,14 +715,14 @@ def main(argv=None):
                     _sync_one_source(
                         logical_name=logical_name,
                         source_for_copy=extracted,
-                        source_ref=src_path,
+                        source_ref=store_path_under_workspace(layout.root, src_path),
                         source_signature=sig,
                     )
                 else:
                     _sync_one_source(
                         logical_name=logical_name,
                         source_for_copy=src_path,
-                        source_ref=src_path,
+                        source_ref=store_path_under_workspace(layout.root, src_path),
                         source_signature=_compute_source_signature(src_path),
                     )
                 _append_to_datasets_list(
@@ -772,7 +779,7 @@ def main(argv=None):
                     _sync_one_source(
                         logical_name=logical_name,
                         source_for_copy=source_for_copy,
-                        source_ref=src_path,
+                        source_ref=store_path_under_workspace(layout.root, src_path),
                         source_signature=sig,
                     )
             else:
@@ -791,7 +798,7 @@ def main(argv=None):
                 continue
             overrides: dict[str, Any] = {}
             if use_workspace:
-                rel = os.path.relpath(folder_path, layout.root)
+                rel = posix_relpath(folder_path, layout.root)
                 overrides = {"data_path": rel}
             folder_roots.append((folder_name, folder_path, overrides))
             used_names.add(folder_name)

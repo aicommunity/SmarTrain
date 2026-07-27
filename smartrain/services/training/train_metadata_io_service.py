@@ -16,12 +16,9 @@ from smartrain.core.training.confidence_recommendation import (
 
 
 def relative_to_workspace(path: str, workspace_root: str) -> str:
-    ap = os.path.abspath(path)
-    wr = os.path.abspath(workspace_root)
-    try:
-        return os.path.relpath(ap, wr)
-    except ValueError:
-        return ap
+    from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
+
+    return store_path_under_workspace(workspace_root, path) or posix_relpath(path, workspace_root)
 
 
 def write_json_atomic(path: str, payload: dict[str, Any]) -> None:
@@ -43,16 +40,12 @@ def write_json_atomic(path: str, payload: dict[str, Any]) -> None:
 
 
 def get_relative_path(target_path: str, base_path: str) -> str:
+    from smartrain.core.runtime.path_portable import posix_relpath
+
     try:
-        target = Path(os.path.abspath(target_path))
-        base = Path(os.path.abspath(base_path))
-        try:
-            relative = os.path.relpath(target, base)
-            return relative
-        except ValueError:
-            return target.as_posix()
+        return posix_relpath(target_path, base_path)
     except Exception:
-        return os.path.abspath(target_path)
+        return Path(os.path.abspath(target_path)).as_posix()
 
 
 def recommendation_summary_for_metadata(model_dir: str) -> dict[str, Any] | None:
@@ -113,6 +106,12 @@ def ensure_initial_training_metadata(
     ds.setdefault("name", os.path.basename(os.path.normpath(dataset_path)))
     ds.setdefault("path_relative", get_relative_path(dataset_path, model_dir))
     ds.setdefault("hash", dataset_hash)
+    if workspace_root is not None and "path_under_workspace" not in ds and "path_absolute" not in ds:
+        rel_uw = relativize_if_under(workspace_root, os.path.abspath(dataset_path))
+        if rel_uw is not None and rel_uw != os.path.abspath(dataset_path):
+            ds["path_under_workspace"] = rel_uw
+        else:
+            ds["path_absolute"] = os.path.abspath(dataset_path)
     hp = ti.setdefault("hyperparameters", {})
     if not isinstance(hp, dict):
         hp = {}
@@ -211,11 +210,9 @@ def save_training_metadata(
         "hash": dataset_hash,
     }
     if workspace_root is not None:
-        wr_abs = os.path.abspath(workspace_root)
-        if ds_abs == wr_abs or ds_abs.startswith(wr_abs + os.sep):
-            rel_uw = relativize_if_under(workspace_root, ds_abs)
-            if rel_uw is not None:
-                dataset_block["path_under_workspace"] = rel_uw
+        rel_uw = relativize_if_under(workspace_root, ds_abs)
+        if rel_uw is not None and rel_uw != ds_abs:
+            dataset_block["path_under_workspace"] = rel_uw
         else:
             dataset_block["path_absolute"] = ds_abs
     else:

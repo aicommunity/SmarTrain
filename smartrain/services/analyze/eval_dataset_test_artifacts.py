@@ -5,6 +5,8 @@ import os
 import shutil
 from typing import Any
 
+from smartrain.core.runtime.path_portable import posix_relpath
+
 
 def collect_eval_dataset_test_artifacts(
     session_root: str,
@@ -54,7 +56,7 @@ def collect_eval_dataset_test_artifacts(
                     os.makedirs(dst_dir, exist_ok=True)
                     dst_csv = os.path.join(dst_dir, "test_metrics.csv")
                     shutil.copy2(src_csv, dst_csv)
-                    rel = os.path.relpath(dst_csv, session_root)
+                    rel = posix_relpath(dst_csv, session_root)
                     row["session_metrics_csv"] = rel
                     artifacts.append({"role": "eval_dataset_test_metrics_csv", "path": rel})
             rows.append(row)

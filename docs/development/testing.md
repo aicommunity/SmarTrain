@@ -4,6 +4,13 @@
 
 Project pytest defaults (`pyproject.toml`, `[tool.pytest.ini_options]`): `testpaths = ["tests"]`, `pythonpath = ["."]` — run commands from the repository root.
 
+Optional local coverage (not enforced in CI):
+
+```bash
+pip install pytest-cov
+pytest --cov=smartrain.cli --cov=smartrain.cli_entrypoints --cov-report=term-missing -q
+```
+
 ## Launch
 
 ```bash

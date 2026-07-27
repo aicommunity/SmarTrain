@@ -13,6 +13,7 @@ from smartrain.core.testing.ultralytics_artifact_resolver import (
     resolve_ultralytics_artifacts,
 )
 from smartrain.core.testing.ultralytics_test_contract import ULTRALYTICS_TEST_COLLECT_IMAGE_NAMES
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.services.analyze.metrics_reader import training_args_yaml_path
 from smartrain.services.analyze.run_query import _system_profile_flat_from_training_metadata
 
@@ -130,7 +131,7 @@ def collect_ultralytics_test_artifacts(
             dst = os.path.join(dst_dir, name)
             try:
                 shutil.copy2(src, dst)
-                rel = os.path.relpath(dst, session_root)
+                rel = posix_relpath(dst, session_root)
                 if name in csv_names:
                     row["csv"][name] = rel
                     artifacts.append({"role": f"ultralytics_test_{name.replace('.', '_')}", "path": rel})

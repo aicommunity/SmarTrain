@@ -17,6 +17,7 @@ from smartrain.services.analyze.data_yaml_splits import (
     collect_split_images_for_split,
     collect_split_images_resolved,
 )
+from smartrain.core.runtime.path_portable import posix_relpath
 
 
 def resolve_selected_run_dirs(
@@ -286,7 +287,7 @@ def run_inference_benchmark(
             pd.DataFrame([row]).to_csv(cache_csv, index=False, encoding="utf-8")
             append_cache_entry_cb(
                 run_dir,
-                {"artifact": "inference.benchmark", "fingerprint": fp, "path": os.path.relpath(cache_csv, run_dir)},
+                {"artifact": "inference.benchmark", "fingerprint": fp, "path": posix_relpath(cache_csv, run_dir)},
             )
             cache_stats.append({"run_dir": run_dir, "artifact": "inference.benchmark", "status": "miss"})
             if avg_infer is not None:

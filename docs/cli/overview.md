@@ -9,15 +9,15 @@ Entry point: `smartrain` (Typer router with unified command behavior).
 - Datasets: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `dataset report`, `dataset rename`
 - Training: `train`, `clearml-upload`
 - Providers: `providers`
-- Workspace: `deploy`, `quickstart`, `info`, `sync`
+- Workspace: `deploy`, `quickstart`, `info`, `sync`, `update`
 - Queue: `queue`, `queue-run`
 - Analytics: `analyze`, `plot` (outdated wrapper)
 - Register: `registry`
-- Models: `model convert`, `model release`, `model rename`
+- Models: `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`
 - Dataset catalog: `dataset report`, `dataset rename`
 - Format tools: `dataset convert`, `sahi`, `heatmap`, `vis`
-- Migration: `migrate`, `migrate-models`
-- Maintenance: `deps sync-torch`
+- Migration: `migrate`, `migrate-models` (companions of `update` for snapshots / missing metadata)
+- Maintenance: `deps sync-torch`, `deps doctor`, `deps install`
 
 ## Reference
 
@@ -44,7 +44,7 @@ smartrain <group> <subcommand> -- --help
 Unified interactive contract:
 
 - interactive mode starts only when a command is run with zero arguments (TTY required);
-- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model rename`, empty invocation enters interactive mode;
+- for `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `orient`, `rotate`, `dataset report`, `dataset rename`, `inference`, `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`, `update`, empty invocation enters interactive mode;
 - if any arguments are provided but required ones are missing, command exits with a clear "incomplete arguments" error (no interactive prompts).
 Most important commands and groups also include `Examples` / `Quick examples` directly in help output.
 
@@ -60,6 +60,12 @@ Completion:
 - Prints `Supported train models` section for copy-paste use in `smartrain train --model ...`.
 - Includes default backend aliases plus provider-scoped aliases for installed external providers.
 
+Workspace update highlights:
+
+- `smartrain update` scans the workspace for legacy on-disk shapes (run layout, root-level release weights, manifests, `data.yaml`) and migrates toward the canonical layout.
+- `--dry-run` prints the plan; `--yes` applies safe steps; `--apply-all` (with `--yes`) also applies ask/unsafe steps; `--check` exits non-zero if residual legacy remains.
+- Reports land under `analytics/update-reports/<timestamp>/`. Inventory: [`../refactor/legacy-compat-inventory.md`](../refactor/legacy-compat-inventory.md).
+
 Model convert highlights:
 
 - `smartrain model convert` exports `.pt` to `onnx`, `tensorrt-engine`, and `tensorrt-trt`, and supports `.onnx -> tensorrt-trt`.
@@ -67,13 +73,14 @@ Model convert highlights:
 - ONNX export options are configured in `model convert` (`--opset`, `--simplify/--no-simplify`, `--half/--no-half`).
 - Interactive mode auto-discovers `.pt/.onnx` candidates in workspace `models/` and `runs/` and allows source selection by number or manual path input.
 - Target selection is model-based (`onnx`, `engine`, `trt`) with multi-select input (`1,2` or `onnx,trt`), and unavailable targets are shown with reason.
-- For run sources, interactive discovery uses canonical run artifacts (`<run_dir>/<run_dir_name>.<ext>`). Legacy run layouts are canonized automatically on first access.
-- When ONNX export is skipped because a public `.onnx` already exists, interactive ONNX+TRT (and `--format onnx` skip) still materialize the dedicated `*_trtprep.onnx` cache for `trtexec` when signatures match.
+- For run sources, interactive discovery uses canonical run weight files under `models/` (detect_* stem when available; legacy `<run_dir_name>.pt` still resolves). Legacy run layouts are canonized automatically on first access.
+- Released models keep the source run folder name under `models/<dataset>/<run_name>/`; internal layout matches runs (weights and convert under `models/<stem>.*`, sidecar `models/<stem>.json`). Convert writes short `{stem}.onnx`/`.engine`/`.trt` next to the `.pt` for both runs and releases.
+- Dedicated `*_trtprep.onnx` is an internal cache for `trtexec` only: created when TensorRT-trt is requested, kept after success for training runs and unified releases; removed only for legacy flat catalog releases. Pure `--format onnx` does not write `*_trtprep`.
 
 Inference highlights:
 
 - `smartrain inference` supports local model artifacts `pt`, `onnx`, `engine`, `trt` through unified backend routing, plus external provider references.
-- `smartrain inference` writes `inference/<model>/<timestamp>-<source>/inference_results.json`. By default it also exports a YOLO autolabel dataset under `<basename>_autolabeled/` (with `autolabel_manifest.json`) and optional `pred_overlays/`; use `--no-export-dataset` to skip. Empty exports (no labels after the confidence filter) do not create dataset or overlay folders. The `vis` command runs inference internally with export disabled.
+- `smartrain inference` writes `inference/<model>/<timestamp>-<source>/inference_results.json`. By default it also exports a YOLO autolabel dataset under `<basename>_autolabeled/` split into independent `part_XXX/` sub-datasets (with `autolabel_manifest.json`) and optional `pred_overlays/`; use `--no-export-dataset` or `--no-export-split-dirs` to change that. Empty exports (no labels after the confidence filter) do not create dataset or overlay folders. The `vis` command runs inference internally with export disabled.
 - Inference report now includes dual performance profile (`performance.end_to_end` and `performance.infer_only`) with warmup-separated steady stats.
 - Inference run saves `environment_profile.json` next to `inference_results.json` with machine and key framework/python versions for reproducibility.
 - Full inference JSON/artifact contract: [`inference.md`](inference.md).
@@ -81,13 +88,27 @@ Inference highlights:
 
 Model release highlights:
 
-- `smartrain model release` publishes canonical run model `<run_dir_name>.pt` from a selected run into `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
-- A sidecar JSON with the same basename is created next to the model file and includes source/training/metrics/classes/io specification.
-- Re-running for the same run with the same source hash performs a no-op skip.
+- `smartrain model release` **moves** the full run from `runs/` into `models/<dataset>/<run_dir_name>/` (no duplicate left in `runs/`). Weights and sidecar live under `models/<detect_stem>.pt` + `models/<detect_stem>.json`.
+- Compatible layouts (inference/analyze/ROI discover all of them): **R3 unified** `…/<run_id>/models/detect_*.pt` (current); **R3 legacy** `…/<run_id>/detect_*.pt` at bundle root; **R1** `…/<detect_stem>/models/<detect_stem>.pt`; **R2** sibling `…/<stem>.pt` next to `…/<stem>/`. Details: [`../refactor/run-layout.md`](../refactor/run-layout.md).
+- A global catalog `models/releases_manifest.json` stores one-line comments (keys `<dataset>/<weight_stem>`, with folder-name fallback for R3); the same comment is duplicated in each model's sidecar JSON.
+- Interactive mode prompts for an optional one-line comment (any language); non-interactive mode accepts `--comment`.
+- Re-running for the same run with the same source hash performs a no-op skip; if a duplicate run still exists under `runs/`, it is removed safely.
+
+Model unrelease highlights:
+
+- `smartrain model unrelease` removes the manifest entry, deletes the release sidecar, and **moves** the bundle back to `runs/<dataset>/<run_dir_name>/`.
+- For legacy root-level releases, convert artifacts are relocated into `models/` before the move.
+- Fails if the target `runs/...` path already exists (typical for old copy-era duplicates).
+- Non-interactive mode requires `--yes`.
+
+Model comment highlights:
+
+- `smartrain model comment` sets or updates the one-line comment for a released model in `releases_manifest.json` and the sidecar JSON.
+- Interactive mode lists released models (with current comments) and pre-fills the comment field for editing.
 
 Model rename highlights:
 
-- `smartrain model rename` renames a released model in `models/<dataset>/` by changing the release stem (`.pt`, sidecar `.json`, release artifact directory, and converted ONNX/engine/trt files with matching prefix).
+- `smartrain model rename` renames weight/sidecar/convert files for a released model (nested layout keeps the release folder name).
 - Registry-promoted bundles (`model_manifest.json`) and run models under `runs/` are not affected.
 - Interactive mode lists released models and pre-fills the current stem for editing.
 
@@ -95,13 +116,15 @@ Analyze highlights:
 
 - `smartrain analyze` (TTY, no subcommand) runs the interactive `analyze all` workflow (compare, metrics, optional speed/PR, report).
 - Quality artifacts use training-time metrics; a separate `smartrain test` run is not required for compare and test-metrics plots.
+- For `profile=full`, the session ensures Ultralytics PT test artifacts when incomplete, then recomputes missing confidence recommendations (`tests/confidence_recommendations_*.json`). Transient `confidence_compute_failed` stubs are retried; permanent stubs (e.g. missing PT) are not.
 - For `profile=full`, speed (inference benchmark) resolves frames from `test`, then `val`, then `train` split; if no split images exist, speed/PR stages degrade with warnings and the session report still completes.
-- Runtime `_runtime_data_*.yaml` paths are resolved via the `path:` field in data.yaml (not relative to the yaml file location in `run/tmp/`).
+- Runtime `_runtime_data_*.yaml` paths are resolved via the `path:` field in data.yaml (not relative to the yaml file location in `run/tmp/`). Release dirs get `tmp/` only (no empty `tests/` pollution).
+- Report §2 Dataset legend uses bullets `- D1 = <dataset>`; model labels use M* abbreviations; release comments appear when present in manifest/sidecar.
 - Use `--strict-diagnostics` only when missing PR/metric_sources artifacts must fail the session.
 
 Dataset report highlights:
 
-- `smartrain dataset report` writes a multilingual per-class sample report (Markdown + PNG; default folder `analytics/datasets-reports/<dataset>_<timestamp>/`). PDF/ODT export helpers (`pypandoc-binary`, `weasyprint`) are installed via optional extra `pip install -e ".[export]"`; `fpdf2` and `odfpy` remain base dependencies. WeasyPrint may need OS libraries (Cairo, Pango) if wheels are unavailable.
+- `smartrain dataset report` writes a multilingual per-class sample report (Markdown + PNG; default folder `analytics/datasets-reports/<dataset>_<timestamp>/`). Base install includes `pypandoc-binary` (bundled pandoc) and `fpdf2`/`odfpy` for PDF/ODT export; optional `pip install -e ".[export]"` or `smartrain deps install` adds WeasyPrint as a PDF engine. WeasyPrint may need OS libraries (Cairo, Pango) if wheels are unavailable.
 
 Dataset rename highlights:
 

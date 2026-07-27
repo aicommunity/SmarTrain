@@ -8,27 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from smartrain.core.inference.ultralytics_prediction_extract import extract_task_outputs_from_ultralytics_preds
+from smartrain.external_providers.launchers.mfel_shim import MFELConvModuleShim, patch_mfel_missing_symbols
 from smartrain.external_providers.task_alias import ultralytics_task_alias
+
+# Re-export for pickle/compat with workers that resolve this module name.
+__all__ = ["MFELConvModuleShim", "main"]
 
 
 def _extract_task_outputs(preds: Any, task_type: str) -> dict[str, Any]:
     return extract_task_outputs_from_ultralytics_preds(None, preds, task_type=task_type)
-
-
-class MFELConvModuleShim:  # picklable top-level shim for broken forks
-    def __init__(self, c1, c2, k=1, s=1, p=0, norm_cfg=None, act_cfg=None, **kwargs):
-        import torch.nn as nn
-
-        super().__init__()
-        groups = int(kwargs.get("groups", 1) or 1)
-        dilation = int(kwargs.get("dilation", 1) or 1)
-        bias = bool(kwargs.get("bias", False))
-        self.conv = nn.Conv2d(c1, c2, k, s, p, groups=groups, dilation=dilation, bias=bias)
-        self.bn = nn.BatchNorm2d(int(c2))
-        self.act = nn.SiLU(inplace=True)
-
-    def forward(self, x):
-        return self.act(self.bn(self.conv(x)))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -61,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         raise
-    _patch_mfel_missing_symbols()
+    patch_mfel_missing_symbols(host_globals=globals())
 
     model = YOLO(args.model, task=ultralytics_task_alias(args.task))
     resolved_device = _resolve_mfel_predict_device(args.device)
@@ -95,24 +83,6 @@ def _resolve_mfel_predict_device(requested_device: str | None) -> str | None:
     return requested_device
 
 
-def _patch_mfel_missing_symbols() -> None:
-    try:
-        import torch.nn as nn
-        from ultralytics.nn.modules import block as block_mod
-    except Exception:
-        return
-    if getattr(block_mod, "ConvModule", None) is not None:
-        return
-
-    class _PatchedConvModule(MFELConvModuleShim, nn.Module):  # type: ignore[misc]
-        pass
-
-    _PatchedConvModule.__module__ = __name__
-    _PatchedConvModule.__qualname__ = "MFELPatchedConvModule"
-    globals()["MFELPatchedConvModule"] = _PatchedConvModule
-    setattr(block_mod, "ConvModule", _PatchedConvModule)
-
-
 def _write_structured_result(path: str, preds, *, task_type: str) -> None:
     images: list[dict[str, object]] = []
     task_outputs = extract_task_outputs_from_ultralytics_preds(
@@ -128,4 +98,3 @@ def _write_structured_result(path: str, preds, *, task_type: str) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

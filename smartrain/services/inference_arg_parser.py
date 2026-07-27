@@ -16,14 +16,56 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--run", type=str, default=None, help="Run path or run index from workspace/runs list.")
     p.add_argument("--weights", type=str, default=None, help="Explicit model weights path (.pt/.onnx/.engine/.trt).")
     p.add_argument("--data-mode", choices=DATA_MODES, default="folder", help="Data source mode.")
-    p.add_argument("--source-dir", type=str, default=None, help="Folder with images (recursive).")
+    p.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        help="Folder or archive with images (.zip, .tar, .tar.gz, .tgz) for folder mode.",
+    )
+    p.add_argument(
+        "--source-dir",
+        type=str,
+        default=None,
+        help="Folder or archive with images (.zip, .tar, .tar.gz, .tgz); alias for --source.",
+    )
     p.add_argument("--dataset", type=str, default=None, help="Dataset key from datasets/datasets_info.json.")
-    p.add_argument("--split", choices=("train", "val", "test"), default="test", help="Dataset split for dataset-split mode.")
+    p.add_argument("--split", choices=("train", "val", "test"), default=None, help="Dataset split for dataset-split mode.")
     p.add_argument("--limit", type=int, default=0, help="Max images to process (0 = all).")
     p.add_argument("--conf", type=float, default=0.25, help="Confidence threshold for inference model.")
+    p.add_argument(
+        "--confidence-objective",
+        type=str,
+        choices=("A", "B", "C"),
+        default=None,
+        help=(
+            "Opt-in: read recommended conf from confidence_recommendations JSON "
+            "(objective A=F1, B=recall-priority F-β, C=precision-priority). "
+            "Requires --confidence-recommendations or a run with recommendations. "
+            "Default inference conf stays 0.25 when this flag is omitted."
+        ),
+    )
+    p.add_argument(
+        "--confidence-aggregation",
+        type=str,
+        choices=("macro", "micro"),
+        default="macro",
+        help="Aggregation for --confidence-objective (default: macro).",
+    )
+    p.add_argument(
+        "--confidence-recommendations",
+        type=str,
+        default=None,
+        help="Path to confidence_recommendations_{split}.json for --confidence-objective.",
+    )
     p.add_argument("--img-size", type=int, default=None, help="Inference input resolution (imgsz).")
     p.add_argument("--device", type=str, default=None, help="Ultralytics device (cpu, 0, etc). Default: GPU 0 if available, otherwise cpu.")
     p.add_argument("--half", action="store_true", help="Enable FP16 where supported.")
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+        help="Local Ultralytics inference batch size (default: 8). Ignored for external providers.",
+    )
     p.add_argument("--perf-warmup-images", type=int, default=5, help="Warmup images excluded from steady perf statistics.")
     p.add_argument("--roi-pre-detect", action="store_true", help="Pre-detect ROI before inference (folder mode only).")
     p.add_argument("--roi-weights", type=str, default=None, help="ROI detector weights path (.pt/.onnx).")
@@ -65,6 +107,33 @@ def build_inference_arg_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=None,
         help="Save prediction overlay images to pred_overlays/ (default: on when --export-dataset, else off).",
+    )
+    p.add_argument(
+        "--export-split-dirs",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Split autolabel export into independent part_XXX/ sub-datasets "
+            "(and mirror pred_overlays/). Default: on."
+        ),
+    )
+    p.add_argument(
+        "--export-files-per-dir",
+        type=int,
+        default=500,
+        help=(
+            "Max actually exported images per independent autolabel sub-dataset "
+            "(after label conf filter). Default: 500. Used when --export-split-dirs is on."
+        ),
+    )
+    p.add_argument(
+        "--export-classes",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated class names or ids to keep when saving results "
+            "(empty = all classes). Frames without selected classes are omitted."
+        ),
     )
     return p
 

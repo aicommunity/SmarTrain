@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from smartrain.core.runtime.path_portable import posix_relpath
+
 import csv
 import json
 import os
@@ -193,15 +195,15 @@ def update_test_artifacts_manifest(
     snapshot = get_test_artifacts_status(root_dir, fmt)
     record = TestFormatArtifact(
         format=fmt,
-        target_path=os.path.relpath(target_path, root_dir) if target_path and os.path.isabs(target_path) else target_path,
-        dataset_yaml=os.path.relpath(dataset_yaml, root_dir) if dataset_yaml and os.path.isabs(dataset_yaml) else dataset_yaml,
+        target_path=posix_relpath(target_path, root_dir) if target_path and os.path.isabs(target_path) else target_path,
+        dataset_yaml=posix_relpath(dataset_yaml, root_dir) if dataset_yaml and os.path.isabs(dataset_yaml) else dataset_yaml,
         backend=backend,
-        metrics_csv=os.path.relpath(format_metrics_path_for_write(root_dir, fmt), root_dir) if snapshot.metrics_exists else None,
-        test_dir=os.path.relpath(format_test_dir_for_write(root_dir, fmt), root_dir) if snapshot.test_dir_exists else None,
-        confidence_test_json=os.path.relpath(format_recommendation_path_for_write(root_dir, "test", fmt), root_dir)
+        metrics_csv=posix_relpath(format_metrics_path_for_write(root_dir, fmt), root_dir) if snapshot.metrics_exists else None,
+        test_dir=posix_relpath(format_test_dir_for_write(root_dir, fmt), root_dir) if snapshot.test_dir_exists else None,
+        confidence_test_json=posix_relpath(format_recommendation_path_for_write(root_dir, "test", fmt), root_dir)
         if snapshot.confidence_test_complete
         else None,
-        confidence_val_json=os.path.relpath(format_recommendation_path_for_write(root_dir, "val", fmt), root_dir)
+        confidence_val_json=posix_relpath(format_recommendation_path_for_write(root_dir, "val", fmt), root_dir)
         if snapshot.confidence_val_complete
         else None,
         status=status or ("ok" if snapshot.complete else "incomplete"),
@@ -226,7 +228,7 @@ def update_test_artifacts_manifest(
             eval_datasets[eval_slot] = slot_payload
         if dataset_yaml and not slot_payload.get("dataset_yaml"):
             slot_payload["dataset_yaml"] = (
-                os.path.relpath(dataset_yaml, root_dir) if os.path.isabs(dataset_yaml) else dataset_yaml
+                posix_relpath(dataset_yaml, root_dir) if os.path.isabs(dataset_yaml) else dataset_yaml
             )
         formats = slot_payload.get("formats")
         if not isinstance(formats, dict):
@@ -257,14 +259,14 @@ def update_test_artifacts_manifest(
         existing["artifacts"] = artifacts
         if target_path:
             sidecar = model_sidecar_metadata_path(target_path)
-            existing["target_metadata_json"] = os.path.relpath(str(sidecar), root_dir) if sidecar.is_file() else None
+            existing["target_metadata_json"] = posix_relpath(str(sidecar), root_dir) if sidecar.is_file() else None
         formats[fmt] = existing
     else:
         rec_dict = asdict(record)
         rec_dict["artifacts"] = [asdict(record)]
         if target_path:
             sidecar = model_sidecar_metadata_path(target_path)
-            rec_dict["target_metadata_json"] = os.path.relpath(str(sidecar), root_dir) if sidecar.is_file() else None
+            rec_dict["target_metadata_json"] = posix_relpath(str(sidecar), root_dir) if sidecar.is_file() else None
         formats[fmt] = rec_dict
     payload["updated_at"] = datetime.now().isoformat(timespec="seconds")
     _write_json_atomic(artifacts_manifest_path_for_write(root_dir), payload)
@@ -304,12 +306,12 @@ def sync_test_artifacts_manifest(
                 target_path=target_by_format.get(fmt),
                 dataset_yaml=None,
                 backend=backend_by_format.get(fmt),
-                metrics_csv=os.path.relpath(format_metrics_path_for_write(root_dir, fmt), root_dir) if status.metrics_exists else None,
-                test_dir=os.path.relpath(format_test_dir_for_write(root_dir, fmt), root_dir) if status.test_dir_exists else None,
-                confidence_test_json=os.path.relpath(format_recommendation_path_for_write(root_dir, "test", fmt), root_dir)
+                metrics_csv=posix_relpath(format_metrics_path_for_write(root_dir, fmt), root_dir) if status.metrics_exists else None,
+                test_dir=posix_relpath(format_test_dir_for_write(root_dir, fmt), root_dir) if status.test_dir_exists else None,
+                confidence_test_json=posix_relpath(format_recommendation_path_for_write(root_dir, "test", fmt), root_dir)
                 if status.confidence_test_complete
                 else None,
-                confidence_val_json=os.path.relpath(format_recommendation_path_for_write(root_dir, "val", fmt), root_dir)
+                confidence_val_json=posix_relpath(format_recommendation_path_for_write(root_dir, "val", fmt), root_dir)
                 if status.confidence_val_complete
                 else None,
                 status="ok" if status.complete else "incomplete",

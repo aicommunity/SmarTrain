@@ -1,7 +1,11 @@
+"""Train interactive prompts — shared yes/no/int from cli_prompts; text keeps completer support."""
+
 from __future__ import annotations
 
 import sys
 
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_int as _shared_prompt_int
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_yes_no as _shared_prompt_yes_no
 from smartrain.core.runtime.device_selector import default_device_value, prompt_device_selection
 
 
@@ -26,23 +30,11 @@ def prompt_input(label: str, default: str = "", completer=None, show_default_hin
 
 
 def prompt_yes_no(label: str, default: bool = False) -> bool:
-    suffix = "Y/n" if default else "y/N"
-    default_text = "y" if default else "n"
-    raw = prompt_input(f"{label} [{suffix}]: ", default=default_text, show_default_hint=False).strip().lower()
-    if not raw:
-        return default
-    return raw in ("y", "yes", "1", "true", "yes", "d")
+    return _shared_prompt_yes_no(label, default=default)
 
 
 def prompt_int(label: str, default: int) -> int:
-    while True:
-        raw = prompt_input(f"{label}: ", default=str(default)).strip()
-        if not raw:
-            return default
-        try:
-            return int(raw)
-        except ValueError:
-            print(f"[ERROR] Expected integer, received: {raw!r}")
+    return _shared_prompt_int(label, default=default)
 
 
 def prompt_optional_int(label: str, default: int | None = None) -> int | None:
@@ -71,4 +63,3 @@ def prompt_optional_float(label: str, default: float | None = None) -> float | N
 
 def prompt_train_device(default: str | None = None) -> str:
     return prompt_device_selection(title="Train devices", default_device=default or default_device_value())
-

@@ -125,6 +125,57 @@ def test_finalize_all_session_sets_single_run_mode_in_manifest(tmp_path) -> None
     assert captured["payload"]["others"] == []
 
 
+def test_finalize_all_session_stores_baseline_workspace_relative(tmp_path: Path) -> None:
+    captured: dict = {}
+
+    def write_manifest(path: str, payload: dict) -> None:
+        captured["payload"] = payload
+
+    run_a = tmp_path / "runs" / "ds" / "run_a"
+    run_a.mkdir(parents=True)
+    data_yaml = tmp_path / "datasets" / "ds" / "data.yaml"
+    data_yaml.parent.mkdir(parents=True)
+    data_yaml.write_text("train: images\n", encoding="utf-8")
+
+    args = SimpleNamespace(
+        no_pdf=True,
+        no_odt=True,
+        strict_diagnostics=False,
+        scatter_x="avg_inference_ms_per_frame",
+        scatter_y="mAP50-95",
+        report_languages="en",
+        recompute_missing_metrics_choice="no",
+        workspace=str(tmp_path),
+    )
+    finalize_all_session(
+        args=args,
+        session_root=str(tmp_path / "analytics" / "session"),
+        profile="quality",
+        baseline=str(run_a),
+        others=[],
+        data_yaml=str(data_yaml),
+        report_languages=["en"],
+        run_data_yaml_map={str(run_a): str(data_yaml)},
+        unresolved_data_yaml_runs=[],
+        artifacts=[],
+        cache_events=[],
+        artifact_failures=[],
+        metric_sources_payload={"sources": {}},
+        recompute_missing_metrics=False,
+        build_abbreviations_for_report_cb=lambda runs: {"run_a": "R1"},
+        collect_ultralytics_test_artifacts_cb=lambda *a, **k: ([], []),
+        write_format_compare_artifacts_cb=lambda *a, **k: None,
+        collect_confidence_recommendation_tables_cb=lambda *a, **k: {},
+        write_manifest_cb=write_manifest,
+        write_analysis_report_cb=lambda *a, **k: {"en": str(tmp_path / "en" / "index.md")},
+        record_failure_cb=MagicMock(),
+        replay_parser=None,
+    )
+    assert captured["payload"]["baseline"] == "runs/ds/run_a"
+    assert "\\" not in captured["payload"]["baseline"]
+    assert captured["payload"]["run_data_yaml_map"] == {"runs/ds/run_a": "datasets/ds/data.yaml"}
+
+
 def test_report_context_mentions_single_run_mode(tmp_path: Path) -> None:
     from smartrain.services.analyze.report_writer import write_analysis_report
 

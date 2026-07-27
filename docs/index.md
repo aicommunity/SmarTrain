@@ -7,6 +7,7 @@ This section reflects the current codebase and is organized by scenarios: gettin
 ## 1) Getting started
 
 - [Installation](getting-started/installation.md)
+- [Docker (CUDA 12.8)](getting-started/docker.md)
 - [Workspace and project directories](getting-started/workspace.md)
 - [Quick workflow `scan -> merge -> train`](getting-started/quickstart.md)
 
@@ -43,6 +44,7 @@ This section reflects the current codebase and is organized by scenarios: gettin
 - [Testing](development/testing.md)
 - [Project extensibility](development/extension-guide.md)
 - [Developing new external providers](development/provider-development.md)
+- [Project audit 2026-07-26](audit/2026-07-26-project-audit.md)
 
 ## 5) Migration
 

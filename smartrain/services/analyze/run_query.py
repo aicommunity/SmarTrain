@@ -161,13 +161,25 @@ def _system_profile_flat_from_training_metadata(run_dir: str) -> dict[str, Any]:
 
 def flat_row_unified(run_dir: str, *, build_run_record_cb: Any) -> dict[str, Any]:
     rec = build_run_record_cb(run_dir)
+    from smartrain.services.models.release_models_manifest import release_comment_for_run_dir
+
     out: dict[str, Any] = {
         "run_dir": run_dir,
         "run_name": os.path.basename(run_dir.rstrip(os.sep)),
         "model": rec.model,
         "dataset_name": rec.dataset_name,
+        "release_comment": release_comment_for_run_dir(run_dir),
     }
     out.update(_system_profile_flat_from_training_metadata(run_dir))
+    try:
+        from smartrain.services.analyze.ultralytics_test_artifacts import build_ultralytics_run_info
+
+        info = build_ultralytics_run_info(run_dir, model_fallback=str(rec.model or "") or None)
+        for key in ("epochs", "batch_size", "train_image_size", "val_imgsz"):
+            if info.get(key) is not None:
+                out[key] = info.get(key)
+    except Exception:
+        pass
     return out
 
 

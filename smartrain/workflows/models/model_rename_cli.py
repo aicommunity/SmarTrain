@@ -21,6 +21,7 @@ from smartrain.services.models.release_model_rename_service import (
     apply_release_rename,
     build_rename_plan,
     discover_release_models,
+    format_release_entry_label,
 )
 
 
@@ -72,7 +73,7 @@ def _resolve_release_ref(layout: WorkspaceLayout, ref: str, entries: list[Releas
 def _pick_release_interactive(entries: list[ReleaseModelEntry]) -> ReleaseModelEntry:
     if not entries:
         raise RuntimeError("no released models found in workspace models catalog")
-    printable = [entry.rel_path for entry in entries]
+    printable = [format_release_entry_label(entry.rel_path, entry.comment) for entry in entries]
     options = [str(entry.pt_path) for entry in entries]
     print_numbered_options("released models", printable)
     picked = prompt_choice("Select release model", options, default=options[0], show_options=False)
@@ -132,7 +133,7 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(0)
 
     try:
-        result = apply_release_rename(plan)
+        result = apply_release_rename(plan, layout=layout)
     except ReleaseRenameError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         raise SystemExit(1) from e

@@ -116,7 +116,9 @@ smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
   - авто-ограничение head-классов включено по умолчанию (`--auto-head-cap`): инструмент автоматически рассчитывает рекомендованные множители ослабления для слишком крупных классов по train-статистике; отключить — `--no-auto-head-cap`;
   - стратегия **`hybrid-aug`**: тот же hybrid-сэмплинг, что у `hybrid`, затем офлайн-запуск **`augment`** только для сплита **train**. Пресеты аугментации: `--aug-preset geo-photo` (по умолчанию: flip + фотометрия + поворот относительно центра, якорь center) или `conveyor-lite` (добавляет все conveyor-эффекты через `--enable-conveyor`). **`--aug-class-aware-geo`** (по умолчанию **вкл.**) снижает вероятность flip / фотометрии / conveyor на кадрах с доминирующими классами, чтобы офлайн geo-photo не раздувала вклад majority по числу bbox (мотивация: class-independent DA может усиливать перекос — **DODA**, [ICLR 2024 PDF](https://proceedings.iclr.cc/paper_files/paper/2024/file/54d2d38a56a74387d5916ee40e462295-Paper-Conference.pdf); разная сила аугментации по классам — **CUDA**, [arXiv:2302.05499](https://arxiv.org/abs/2302.05499)). **По умолчанию** для hybrid-aug включён режим контролируемого роста и приоритета хвоста: `--aug-total-bbox-cap-mult 1.10`, `--aug-budget-tail-first`, `--aug-budget-tail-gamma 1.0`, а также `--train-head-bbox-undersample median-factor --train-head-bbox-cap-mult 5.0`; для eval-сплитов по умолчанию также включено консервативное прореживание head `--eval-head-bbox-undersample median-factor --eval-head-bbox-cap-mult 8.0 --eval-head-bbox-min-count 30 --eval-head-bbox-max-remove-frac 0.35` (все параметры можно переопределить явными флагами). **`--aug-total-bbox-cap-mult`** пробрасывается в `augment`: опционально ограничить суммарное число bbox на train после аугментации значением `ceil(mult × базовая сумма до доп. кадров)` при сохранении всех базовых hybrid train-кадров (слив только под **дополнительные** аугментированные файлы). При cap **> 0** в augment также передаются **`--aug-budget-tail-first`** / **`--aug-budget-tail-gamma`**, чтобы сначала тратить слоты бюджета на хвост (MVP: только порядок train-кадров). **`--aug-enable-bbox-copy`** включает copy-paste по bbox (по умолчанию выкл.). Промежуточный каталог вида `[output-name]_balanced_aug__hybrid` удаляется с диска и из `datasets_info.json` после успешного augment, если не задано `--keep-hybrid-intermediate`; при записи манифеста в `balance_manifest.json` фиксируются настройки head-прореживания train/eval и блок **`post_augment`** (`class_aware_geo`, `total_bbox_cap_mult`, `budget_tail_first`, `budget_tail_gamma`, суммы bbox до/после augment);
   - опциональное **прореживание head по bbox**: `--train-head-bbox-undersample median-factor` и `--train-head-bbox-cap-mult` (по умолчанию `5.0`) убирают лишние строки разметки YOLO для классов выше `floor(mult * медиана числа bbox на класс)` со стратифицированным round-robin; при использовании смотрите в `balance_manifest.json` ключ `head_bbox_undersample`;
-  - контекст: таксономия long-tailed learning [arXiv:2110.04596](https://arxiv.org/abs/2110.04596), обзоры по detection/long-tail [arXiv:2408.00483](https://arxiv.org/abs/2408.00483); сочетание rebalance и офлайн-аугментации согласуется с практикой на перекошенных бенчмарках (в т.ч. линия COCO-ZIPF: [arXiv:2403.07113](https://arxiv.org/abs/2403.07113)).
+  - стратегия **`irfs`** (пресет **`irfs-default`**): instance-aware Repeat Factor Sampling — частота ``f_c`` по доле **инстансов/bbox** (не presence на изображении); фактор кадра — средневзвешенное по инстансам ``r_c`` (слабее раздувает head при co-occurrence редких и частых классов). Общие флаги ``--rfs-thresh`` / ``--rfs-power`` с image-level ``rfs``. **`hybrid` / `hybrid-aug` по умолчанию по-прежнему используют image-level RFS**; IRFS — отдельная strategy. Ссылки: [arXiv:2305.08069](https://arxiv.org/abs/2305.08069), [arXiv:2104.05702](https://arxiv.org/abs/2104.05702);
+  - dry-run сравнение пресетов (без train): `python scripts/balance_preset_harness.py --workspace ... --dataset ...` → `analytics/balance-harness/*.csv|json`;
+  - контекст: Repeat Factor Sampling как в LVIS [arXiv:1908.03195](https://arxiv.org/abs/1908.03195); веса Class-Balanced effective number [arXiv:1901.05555](https://arxiv.org/abs/1901.05555); таксономия long-tailed learning [arXiv:2110.04596](https://arxiv.org/abs/2110.04596), обзоры по detection/long-tail [arXiv:2408.00483](https://arxiv.org/abs/2408.00483); сочетание rebalance и офлайн-аугментации согласуется с практикой на перекошенных бенчмарках (в т.ч. линия COCO-ZIPF: [arXiv:2403.07113](https://arxiv.org/abs/2403.07113)).
 - `orient` — коррекция поворота кадров;
 - `rotate` — фиксированный поворот всего датасета на `90`, `180` или `270`° по часовой стрелке в `datasets/<name>_rot<angle>` (интерактивный режим по умолчанию);
 - `roi` — кроп по ROI-модели.
@@ -143,19 +145,22 @@ smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
 
 ## `dataset convert`
 
-Конвертация датасетов между поддерживаемыми форматами (CVAT for images 1.1, YOLO, CvsDclDet). Источники: каталог workspace (`datasets/`), `raw_data/` или явные внешние пути.
+Конвертация датасетов между поддерживаемыми форматами (CVAT for images 1.1, YOLO, CvsDclDet). Источники: каталог workspace (`datasets/`), `raw_data/` (каталоги и архивы), пути из `raw_data/datasets_list.txt` или явные внешние пути.
 
 ```bash
 smartrain dataset convert
-smartrain dataset convert --source-zip /path/to/export.zip --to yolo --output-dir datasets/task_yolo
-smartrain dataset convert --source-dir datasets/task_yolo --to cvat11_zip --output-dir /path/to/out.cvat11.zip
-smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
-smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --rename-classes white_line line --zip
-smartrain dataset convert --dataset my_dataset --to cvat11_zip --output-dir /tmp/my_dataset.cvat11.zip
+smartrain dataset convert --source /path/to/export.zip --to yolo --output-dir datasets/task_yolo
+smartrain dataset convert --source datasets/task_yolo --to cvat11 --output-dir converted_raw_data/task --zip
+smartrain dataset convert --source raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
+smartrain dataset convert --source raw_data/StartMarker14_PU50.zip --to cvat11 --output-dir converted_raw_data/StartMarker14_PU50 --zip
+smartrain dataset convert --source /data/external/dataset.tar.gz --to cvat11 --output-dir converted_raw_data/external
+smartrain dataset convert --source raw_data/my_det --to cvat11 --rename-classes white_line line --zip
+smartrain dataset convert --dataset my_dataset --to cvat11 --output-dir converted_raw_data/my_dataset --zip
 ```
 
-- **Интерактивный режим** (`smartrain dataset convert` из TTY): выбор источника (каталог / `raw_data` / ручной путь или zip), показ формата, выбор цели (`yolo`, `cvat11`, `cvat11_zip`), путь вывода, опциональное переименование классов для CvsDclDet, затем zip-архив (по умолчанию **нет**) и удаление папки после zip (по умолчанию **да**, если zip включён).
-- **`--to`**: `yolo`, `cvat11` (папка), `cvat11_zip` (только zip).
+- **Интерактивный режим** (`smartrain dataset convert` из TTY): единое меню с секциями `[datasets]`, `[raw_data]` (каталоги и архивы `.zip`/`.tar`/`.tar.gz`), `[external]` из `datasets_list.txt`, ручной ввод пути к каталогу или архиву; затем показ формата, выбор цели (`yolo`, `cvat11`), путь вывода, опциональное переименование классов для CvsDclDet, zip-архив (по умолчанию **нет**) и удаление папки после zip (по умолчанию **да**, если zip включён).
+- **`--source`**: каталог или архив (`.zip`, `.tar`, `.tar.gz`, `.tgz`). Архивы распаковываются во временный кэш (`tmp/extracted_datasets/` в workspace или в текущем каталоге), затем определяется структура. `--source-dir` — алиас для обратной совместимости.
+- **`--to`**: `yolo`, `cvat11` (папка `annotations.xml` + `images/`).
 - **`--zip` / `--no-zip`**: упаковать папку в zip (`.cvat11.zip` для CVAT, `.zip` для YOLO).
 - **`--delete-after-zip` / `--no-delete-after-zip`**: удалить папку после zip (по умолчанию при `--zip`).
 - Пишет `dataset_passport.json` для папочного вывода. `datasets_info.json` обновляется отдельно через `smartrain scan`.
@@ -164,9 +169,9 @@ smartrain dataset convert --dataset my_dataset --to cvat11_zip --output-dir /tmp
 
 | Было | Стало |
 |------|-------|
-| `cvat import --cvat-zip X --output-dir Y` | `dataset convert --source-zip X --to yolo --output-dir Y` |
-| `cvat export --dataset-dir D --zip-path Z` | `dataset convert --source-dir D --to cvat11_zip --output-dir Z` |
-| `cvat from-cvsdcldet --source-dir S --output-dir O --zip` | `dataset convert --source-dir S --to cvat11 --output-dir O --zip` |
+| `cvat import --cvat-zip X --output-dir Y` | `dataset convert --source X --to yolo --output-dir Y` |
+| `cvat export --dataset-dir D --zip-path Z` | `dataset convert --source-dir D --to cvat11 --output-dir Z --zip` |
+| `cvat from-cvsdcldet --source-dir S --output-dir O --zip` | `dataset convert --source S --to cvat11 --output-dir O --zip` |
 
 ## `dataset report`
 

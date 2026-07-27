@@ -14,7 +14,7 @@
 - `smartrain/workflows/queue/training_queue_cli.py` and `smartrain/workflows/queue/training_queue.py` — queue (`queue` and `queue-run`).
 - `smartrain/workflows/registry/registry_cli.py` — `registry`.
 - `smartrain/workflows/analyze/analyze_entry.py` and `smartrain/workflows/analyze/plot_creator.py` — `analyze` and legacy `plot`.
-- `smartrain/workflows/models/model_convert_cli.py`, `model_release_cli.py`, `model_rename_cli.py` — `model` group.
+- `smartrain/workflows/models/model_convert_cli.py`, `model_release_cli.py`, `model_unrelease_cli.py`, `model_comment_cli.py`, `model_rename_cli.py` — `model` group.
 - `smartrain/providers/cli.py` — `providers`.
 
 ## CLI mapping -> module
@@ -44,10 +44,11 @@
 | `smartrain plot` | `smartrain/workflows/analyze/plot_creator.py` |
 | `smartrain queue` / `queue-run` | `smartrain/workflows/queue/training_queue_cli.py` / `smartrain/workflows/queue/training_queue.py` |
 | `smartrain registry` | `smartrain/workflows/registry/registry_cli.py` |
-| `smartrain model convert` / `model release` / `model rename` | `smartrain/workflows/models/model_convert_cli.py` / `model_release_cli.py` / `model_rename_cli.py` |
+| `smartrain model convert` / `model release` / `model unrelease` / `model comment` / `model rename` | `smartrain/workflows/models/model_convert_cli.py` / `model_release_cli.py` / `model_unrelease_cli.py` / `model_comment_cli.py` / `model_rename_cli.py` |
 | `smartrain providers` | `smartrain/providers/cli.py` |
 | `smartrain deps sync-torch` | `smartrain/external_providers/installer.py` |
-| `smartrain deploy` / `quickstart` / `info` / `sync` | `smartrain/cli.py` (+ `smartrain/services/workspace/workspace_sync_service.py` for `sync`) |
+| `smartrain deps doctor` / `deps install` | `smartrain/services/deps/optional_extras.py` |
+| `smartrain deploy` / `quickstart` / `info` / `sync` / `update` | `smartrain/cli.py` (+ `workspace_sync_service.py` for `sync`; `workflows/update/update_cli.py` for `update`) |
 | `smartrain migrate` | `smartrain/workflows/migration/cli_migration.py` |
 | `smartrain migrate-models` | `smartrain/workflows/migration/migrate_models_to_smartrain.py` |
 | `smartrain clearml-upload` | `smartrain/workflows/analyze/clearml_upload.py` |

@@ -25,16 +25,37 @@ def scan_runs(
     if not runs:
         print("(no runs or promoted models found)")
         return
-    print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'path'}")
-    print("-" * 100)
-    for i, run_dir in enumerate(runs, start=1):
+    rows: list[dict[str, Any]] = []
+    for run_dir in runs:
         try:
             flat = flat_row_for_run(run_dir)
+            rows.append({"run_dir": run_dir, **flat})
+        except Exception as exc:
+            rows.append({"run_dir": run_dir, "model": "?", "dataset_name": "?", "release_comment": "", "_error": exc})
+    show_comment = any(str(r.get("release_comment") or "").strip() for r in rows)
+    if show_comment:
+        print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'comment':<32}  {'path'}")
+        print("-" * 130)
+        for i, flat in enumerate(rows, start=1):
+            run_dir = flat["run_dir"]
+            if flat.get("_error"):
+                print(f"{i:4d}  {'?':<14}  {'?':<24}  {'':<32}  {run_dir}  [error: {flat['_error']}]")
+                continue
+            model = flat.get("model") or "?"
+            dataset = flat.get("dataset_name") or "?"
+            comment = str(flat.get("release_comment") or "")[:32]
+            print(f"{i:4d}  {str(model)[:14]:<14}  {str(dataset)[:24]:<24}  {comment:<32}  {run_dir}")
+    else:
+        print(f"{'#':>4}  {'model':<14}  {'dataset':<24}  {'path'}")
+        print("-" * 100)
+        for i, flat in enumerate(rows, start=1):
+            run_dir = flat["run_dir"]
+            if flat.get("_error"):
+                print(f"{i:4d}  {'?':<14}  {'?':<24}  {run_dir}  [error: {flat['_error']}]")
+                continue
             model = flat.get("model") or "?"
             dataset = flat.get("dataset_name") or "?"
             print(f"{i:4d}  {str(model)[:14]:<14}  {str(dataset)[:24]:<24}  {run_dir}")
-        except Exception as exc:
-            print(f"{i:4d}  {'?':<14}  {'?':<24}  {run_dir}  [error: {exc}]")
 
 
 def export_runs_table(
@@ -75,6 +96,12 @@ def export_runs_table(
                     last = train_df.iloc[-1]
                     row["train_last_epoch"] = last.get("epoch")
                     row[f"train_last_{map_col}"] = last.get(map_col)
+                    map_series = pd.to_numeric(train_df[map_col], errors="coerce")
+                    if map_series.notna().any():
+                        best_idx = int(map_series.idxmax())
+                        best = train_df.loc[best_idx]
+                        row["train_best_epoch"] = best.get("epoch")
+                        row[f"train_best_{map_col}"] = best.get(map_col)
             except Exception as exc:
                 row["train_read_error"] = str(exc)
         rows.append(row)

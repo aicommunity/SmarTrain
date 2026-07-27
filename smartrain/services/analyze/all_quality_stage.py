@@ -5,6 +5,8 @@ import json
 import os
 from typing import Any, Callable
 
+from smartrain.core.runtime.path_portable import posix_relpath
+
 
 def run_all_quality_stage(
     *,
@@ -94,8 +96,8 @@ def run_all_quality_stage(
             run_data_yaml_map=run_data_yaml_map,
         )
         cmd_test_metrics_plot_cb(tm_ns)
-        artifacts.append({"role": "metrics_dir", "path": os.path.relpath(tm_ns.out_dir, session_root)})
-        artifacts.append({"role": "metric_sources", "path": os.path.relpath(metric_sources_json, session_root)})
+        artifacts.append({"role": "metrics_dir", "path": posix_relpath(tm_ns.out_dir, session_root)})
+        artifacts.append({"role": "metric_sources", "path": posix_relpath(metric_sources_json, session_root)})
         if os.path.isfile(metric_sources_json):
             try:
                 with open(metric_sources_json, "r", encoding="utf-8") as f:
@@ -113,7 +115,7 @@ def run_all_quality_stage(
                     analytics_session=args.analytics_session,
                 )
             )
-            artifacts.append({"role": "summary_csv", "path": os.path.relpath(exp_csv, session_root)})
+            artifacts.append({"role": "summary_csv", "path": posix_relpath(exp_csv, session_root)})
 
     return artifacts, metric_sources_payload, recompute_missing_metrics
 

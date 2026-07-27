@@ -118,7 +118,9 @@ smartrain roi --dataset my_seg --mode yolo_segment --weights yolo11s-seg.pt
   - auto head-class dampening is enabled by default (`--auto-head-cap`): the tool computes recommended dampening multipliers for overrepresented classes from train statistics; disable via `--no-auto-head-cap`;
   - strategy **`hybrid-aug`**: same hybrid sampling as `hybrid`, then offline **`augment`** on the **train** split only. Augment presets: `--aug-preset geo-photo` (default: flip + photometric + center-rotate, anchor center) or `conveyor-lite` (adds all conveyor effects via `--enable-conveyor`). **`--aug-class-aware-geo`** (default **on**) lowers flip / photometric / conveyor rates on frequent-class frames so offline geo-photo does not amplify majority bbox mass (motivation: class-independent DA can worsen skew — **DODA**, [ICLR 2024 PDF](https://proceedings.iclr.cc/paper_files/paper/2024/file/54d2d38a56a74387d5916ee40e462295-Paper-Conference.pdf); per-class augmentation strength — **CUDA**, [arXiv:2302.05499](https://arxiv.org/abs/2302.05499)). **By default**, hybrid-aug uses constrained-growth tail-first mode: `--aug-total-bbox-cap-mult 1.10`, `--aug-budget-tail-first`, `--aug-budget-tail-gamma 1.0`, plus `--train-head-bbox-undersample median-factor --train-head-bbox-cap-mult 5.0`; eval splits also get conservative head trimming defaults `--eval-head-bbox-undersample median-factor --eval-head-bbox-cap-mult 8.0 --eval-head-bbox-min-count 30 --eval-head-bbox-max-remove-frac 0.35` (all can be overridden explicitly). **`--aug-total-bbox-cap-mult`** passes through to augment: optional hard cap so total train bbox count after augment stays ≤ `ceil(mult × baseline)` while keeping every baseline hybrid train frame (slack applies only to **extra** augmented images). With cap **> 0**, **`--aug-budget-tail-first`** / **`--aug-budget-tail-gamma`** are forwarded so scarce classes consume slack first (MVP: reorder train images only). **`--aug-enable-bbox-copy`** turns on bbox copy-paste (off by default). The intermediate dataset folder named like `[output-name]_balanced_aug__hybrid` is deleted from disk and from `datasets_info.json` after a successful augment unless `--keep-hybrid-intermediate` is set; `balance_manifest.json` records train/eval head-trimming settings and `post_augment` fields (`class_aware_geo`, `total_bbox_cap_mult`, `budget_tail_first`, `budget_tail_gamma`, train bbox sums before/after augment) when emitted;
   - optional **head bbox undersampling** after sampling: `--train-head-bbox-undersample median-factor` with `--train-head-bbox-cap-mult` (default `5.0`) drops excess YOLO label lines for classes above `floor(cap_mult * median bbox count per class)` using stratified round-robin; see `balance_manifest.json` key `head_bbox_undersample` when used;
-  - background: long-tailed learning taxonomy [arXiv:2110.04596](https://arxiv.org/abs/2110.04596), detection/long-tail surveys [arXiv:2408.00483](https://arxiv.org/abs/2408.00483); combining rebalancing with offline augmentation follows common practice on skewed benchmarks (e.g. COCO-ZIPF-style studies such as [arXiv:2403.07113](https://arxiv.org/abs/2403.07113)).
+  - strategy **`irfs`** (preset **`irfs-default`**): instance-aware Repeat Factor Sampling — category frequency ``f_c`` from **bbox/instance** share (not image presence); image factor is the instance-weighted mean of ``r_c`` (reduces head inflation when rare and frequent classes co-occur). Shares ``--rfs-thresh`` / ``--rfs-power`` with image-level ``rfs``. **`hybrid` / `hybrid-aug` still use image-level RFS** by default; IRFS is a separate strategy. Refs: [arXiv:2305.08069](https://arxiv.org/abs/2305.08069), [arXiv:2104.05702](https://arxiv.org/abs/2104.05702);
+  - dry-run preset comparison (no train): `python scripts/balance_preset_harness.py --workspace ... --dataset ...` → `analytics/balance-harness/*.csv|json`;
+  - background: Repeat Factor Sampling as in LVIS [arXiv:1908.03195](https://arxiv.org/abs/1908.03195); Class-Balanced effective-number weights [arXiv:1901.05555](https://arxiv.org/abs/1901.05555); long-tailed learning taxonomy [arXiv:2110.04596](https://arxiv.org/abs/2110.04596), detection/long-tail surveys [arXiv:2408.00483](https://arxiv.org/abs/2408.00483); combining rebalancing with offline augmentation follows common practice on skewed benchmarks (e.g. COCO-ZIPF-style studies such as [arXiv:2403.07113](https://arxiv.org/abs/2403.07113)).
 - `orient` — frame rotation correction;
 - `rotate` — fixed clockwise rotation of the whole dataset by `90`, `180`, or `270` degrees into `datasets/<name>_rot<angle>` (interactive by default);
 - `roi` — crop according to the ROI-model.
@@ -143,19 +145,22 @@ All of the above commands form `dataset_passport.json` in the new dataset direct
 
 ## `dataset convert`
 
-Convert datasets between supported formats (CVAT for images 1.1, YOLO, CvsDclDet). Sources can come from the workspace catalog (`datasets/`), `raw_data/`, or explicit external paths.
+Convert datasets between supported formats (CVAT for images 1.1, YOLO, CvsDclDet). Sources can come from the workspace catalog (`datasets/`), `raw_data/` (folders and archives), paths listed in `raw_data/datasets_list.txt`, or explicit external paths.
 
 ```bash
 smartrain dataset convert
-smartrain dataset convert --source-zip /path/to/export.zip --to yolo --output-dir datasets/task_yolo
-smartrain dataset convert --source-dir datasets/task_yolo --to cvat11_zip --output-dir /path/to/out.cvat11.zip
-smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
-smartrain dataset convert --source-dir raw_data/my_det --to cvat11 --rename-classes white_line line --zip
-smartrain dataset convert --dataset my_dataset --to cvat11_zip --output-dir /tmp/my_dataset.cvat11.zip
+smartrain dataset convert --source /path/to/export.zip --to yolo --output-dir datasets/task_yolo
+smartrain dataset convert --source datasets/task_yolo --to cvat11 --output-dir converted_raw_data/task --zip
+smartrain dataset convert --source raw_data/my_det --to cvat11 --output-dir converted_raw_data/my_det
+smartrain dataset convert --source raw_data/StartMarker14_PU50.zip --to cvat11 --output-dir converted_raw_data/StartMarker14_PU50 --zip
+smartrain dataset convert --source /data/external/dataset.tar.gz --to cvat11 --output-dir converted_raw_data/external
+smartrain dataset convert --source raw_data/my_det --to cvat11 --rename-classes white_line line --zip
+smartrain dataset convert --dataset my_dataset --to cvat11 --output-dir converted_raw_data/my_dataset --zip
 ```
 
-- **Interactive mode** (`smartrain dataset convert` from TTY): pick source (catalog / `raw_data` / manual path or zip), see detected format, choose target (`yolo`, `cvat11`, `cvat11_zip`), set output path, optional class rename for CvsDclDet, then optional zip archive (default **off**) and folder deletion after zip (default **on** when zip is enabled).
-- **`--to`**: `yolo` (flat `images/` + `labels/` + `data.yaml`), `cvat11` (folder), `cvat11_zip` (zip only).
+- **Interactive mode** (`smartrain dataset convert` from TTY): unified menu with `[datasets]`, `[raw_data]` (folders and `.zip`/`.tar`/`.tar.gz` archives), `[external]` from `datasets_list.txt`, and manual path entry; then detected format, target (`yolo`, `cvat11`), output path, optional CvsDclDet class rename, optional zip (default **off**) and folder deletion after zip (default **on** when zip is enabled).
+- **`--source`**: directory or archive (`.zip`, `.tar`, `.tar.gz`, `.tgz`). Archives are extracted to a cache directory (`tmp/extracted_datasets/` under workspace or current directory), then structure is detected. `--source-dir` is a backward-compatible alias.
+- **`--to`**: `yolo` (flat `images/` + `labels/` + `data.yaml`), `cvat11` (folder `annotations.xml` + `images/`).
 - **`--zip` / `--no-zip`**: after folder output, optionally pack to zip (`.cvat11.zip` for CVAT folders, `.zip` for YOLO).
 - **`--delete-after-zip` / `--no-delete-after-zip`**: remove output folder after zip (default: delete when `--zip`).
 - Writes `dataset_passport.json` in folder outputs. Run `smartrain scan` separately to update `datasets_info.json`.
@@ -164,9 +169,9 @@ Migration from removed `smartrain cvat`:
 
 | Old | New |
 |-----|-----|
-| `cvat import --cvat-zip X --output-dir Y` | `dataset convert --source-zip X --to yolo --output-dir Y` |
-| `cvat export --dataset-dir D --zip-path Z` | `dataset convert --source-dir D --to cvat11_zip --output-dir Z` |
-| `cvat from-cvsdcldet --source-dir S --output-dir O --zip` | `dataset convert --source-dir S --to cvat11 --output-dir O --zip` |
+| `cvat import --cvat-zip X --output-dir Y` | `dataset convert --source X --to yolo --output-dir Y` |
+| `cvat export --dataset-dir D --zip-path Z` | `dataset convert --source-dir D --to cvat11 --output-dir Z --zip` |
+| `cvat from-cvsdcldet --source-dir S --output-dir O --zip` | `dataset convert --source S --to cvat11 --output-dir O --zip` |
 
 ## `dataset report`
 

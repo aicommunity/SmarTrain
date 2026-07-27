@@ -25,6 +25,7 @@ from smartrain.services.testing.model_test_service import (
     resolve_root_dir_for_target,
 )
 from smartrain.services.inference_runtime_helpers import _resolve_run_ref, resolve_model_from_name
+from smartrain.services.analyze.metrics_reader import training_args_yaml_path
 from smartrain.services.testing.model_test_runner import run_model_test_after_setup
 from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
@@ -388,12 +389,16 @@ def _pick_interactive_target(layout: WorkspaceLayout) -> tuple[str, str, str, st
                 run_pt = Path(materialized)
         return str(run_dir), str(run_pt), "runs", run_dir.name
     if selected == "models":
-        entries = sorted(d.name for d in Path(layout.models).iterdir() if d.is_dir()) if os.path.isdir(layout.models) else []
+        from smartrain.services.inference_runtime_helpers import discover_model_entries
+
+        model_entries = discover_model_entries(layout)
+        entries = [x[0] for x in model_entries if "/(no model files)" not in x[0]]
         if not entries:
             raise RuntimeError("No promoted models found.")
         surf.print_numbered_options("models", entries)
-        chosen = surf.prompt_choice("Select model", entries, default=entries[0], show_options=False)
-        model_path, model_key = resolve_model_from_name(layout, chosen)
+        chosen_label = surf.prompt_choice("Select model", entries, default=entries[0], show_options=False)
+        chosen_arg = next((x[1] for x in model_entries if x[0] == chosen_label), chosen_label)
+        model_path, model_key = resolve_model_from_name(layout, chosen_arg)
         return str(model_path.parent), str(model_path), "models", model_key
     raw = surf.prompt_text("Weights path", default="models").strip() or "models"
     weights_path = Path(raw).expanduser()
@@ -419,9 +424,14 @@ def _resolve_data_yaml_for_target(
     manifest_path = os.path.join(root_dir, "model_manifest.json")
     if os.path.isfile(manifest_path):
         payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-        source_run = payload.get("source_run")
+        source_run = payload.get("source_run_relative") or payload.get("source_run")
         if isinstance(source_run, str) and source_run.strip():
-            dataset_dir = resolve_dataset_path_for_resume(source_run, layout.root)
+            from smartrain.core.runtime.path_portable import is_abs_like, resolve_stored_path_under_workspace, to_posix
+
+            run_ref = to_posix(source_run.strip())
+            if not is_abs_like(run_ref):
+                run_ref = resolve_stored_path_under_workspace(layout.root, run_ref)
+            dataset_dir = resolve_dataset_path_for_resume(run_ref, layout.root)
             if dataset_dir:
                 return _normalize_data_to_yaml(dataset_dir)
     raise RuntimeError("Dataset path is required for models/weights targets. Pass --data.")
@@ -474,7 +484,7 @@ def _resolve_default_inference_params(root_dir: str) -> dict[str, int | float | 
                         defaults[key] = inf.get(key)
         except Exception as exc:
             logger.debug("Failed to read training metadata defaults from %s: %s", metadata_path, exc)
-    train_args = Path(root_dir) / "train" / "args.yaml"
+    train_args = Path(training_args_yaml_path(root_dir))
     if train_args.is_file():
         try:
             payload = json.loads(json.dumps(yaml.safe_load(train_args.read_text(encoding="utf-8")) or {}))
@@ -770,6 +780,17 @@ def _check_onnx_format_preflight(policy: str) -> tuple[bool, str | None]:
     return False, f"No usable ONNX providers. available={available}"
 
 
+def _ensure_interactive_tty_or_exit() -> None:
+    if sys.stdin.isatty():
+        return
+    print(
+        "[ERROR] Interactive test mode requires a terminal (TTY). "
+        "Run with explicit --run/--model-name/--weights in non-interactive environments.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = build_model_test_arg_parser()
     args = parser.parse_args(argv)
@@ -793,6 +814,7 @@ def main(argv: list[str] | None = None) -> None:
     if not any((args.run, args.model_name, args.weights)):
         if not interactive:
             parser.error("Specify one of --run, --model-name or --weights in non-interactive mode.")
+        _ensure_interactive_tty_or_exit()
         root_dir, primary_path, target_kind, target_label = surf._pick_interactive_target(layout)
         formats = _parse_formats("pt,onnx,engine,trt")
         default_data_yaml: str | None = None

@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 
-def test_subsection_intro_after_context_dataset_heading(tmp_path: Path) -> None:
+def test_subsection_intro_after_context_models_and_dataset(tmp_path: Path) -> None:
     from smartrain.services.analyze.report_writer import write_analysis_report
 
     (tmp_path / "artifacts" / "metrics").mkdir(parents=True, exist_ok=True)
@@ -32,12 +32,14 @@ def test_subsection_intro_after_context_dataset_heading(tmp_path: Path) -> None:
     }
     write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
-    idx = ru_md.find("### 2.1")
-    assert idx != -1
-    tail = ru_md[idx : idx + 800]
-    assert "Датасет" in tail
-    assert "::: {style=" in tail
-    assert "Здесь зафиксированы датасеты" in tail
+    idx_models = ru_md.find("### 2.1 Модели")
+    idx_dataset = ru_md.find("### 2.2 Датасет")
+    assert idx_models != -1 and idx_dataset != -1
+    models_tail = ru_md[idx_models : idx_models + 600]
+    assert "базовый запуск" in models_tail.lower() or "перечислены" in models_tail.lower()
+    dataset_tail = ru_md[idx_dataset : idx_dataset + 800]
+    assert "Датасет" in dataset_tail
+    assert "Здесь зафиксированы датасеты" in dataset_tail
 
 
 def test_table_preamble_before_first_table_and_runs_summary_takeaways(tmp_path: Path) -> None:

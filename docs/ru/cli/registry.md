@@ -1,8 +1,10 @@
 > English version: [../../cli/registry.md](../../cli/registry.md)
 
-# CLI: реестр
+# CLI: registry
 
-`smartrain registry` управляет артефактами запусков и каталогом моделей в рабочем каталоге.
+`smartrain registry` управляет **инвентарём runs** и **registry-бандлами** промоутированных моделей.
+
+Это **не** то же самое, что `smartrain model release` / `model comment` (каталог релизов `models/<dataset>/<run_id>/` со stem `detect_*` и `releases_manifest.json`). См. [`overview.md`](overview.md) и [`../../refactor/run-layout.md`](../../refactor/run-layout.md).
 
 ## Подкоманды
 
@@ -16,16 +18,16 @@
 
 ## `models-add`
 
-Переносит run в `models/<friendly_name>/` и создаёт `model_manifest.json`.
+Промоутит run в **registry-бандл** `models/<friendly_name>/` и пишет `model_manifest.json`.
 
-В бандл копируется (если есть у run):
+В бандл копируется (если есть на run):
 
-- каталог `models/` — все веса и sidecar-файлы, с той же структурой, что у run;
-- `train/` и все каталоги `train-*/` (например `train-ultralytics/`), **без** подкаталога `weights/` с чекпойнтами;
-- унаследованный корневой `test/` и целиком дерево `tests/` (каноничная вёрстка тестов, метрики, манифесты);
-- `training_metadata.json` (пути к основному `.pt` приводятся к относительным от корня бандла), `test_metrics*.csv` из корня run и `_runtime_data_*.yaml` из корня run или `tmp/`.
+- `models/` — веса и sidecar (та же раскладка, что в run).
+- `train/` и все `train-*/` (например `train-ultralytics/`), без checkpoint в `weights/`.
+- Legacy `test/` в корне run, плюс полное дерево `tests/`.
+- `training_metadata.json` (пути к `.pt` приводятся к путям относительно бандла), `test_metrics*.csv` из корня run, `_runtime_data_*.yaml` из корня или `tmp/`.
 
-Поле `weights_file` в манифесте — путь относительно каталога бандла (обычно `models/<имя_каталога_run>.pt`). Ранее промотированные каталоги с файлом `<friendly_name>.pt` в корне не меняются.
+`weights_file` в манифесте — путь относительно бандла (обычно `models/<stem>.pt` с detect_* или legacy stem имени run). Старые деревья с `<friendly_name>.pt` в корне бандла не меняются.
 
 ## Примеры
 

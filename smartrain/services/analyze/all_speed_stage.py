@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.services.analyze.report_labels import build_run_display_labels
 
 
@@ -281,14 +281,14 @@ def run_all_speed_stage(
         cmd_inference_plot_cb(ip_ns)
         artifacts.extend(
             [
-                {"role": "inference_csv", "path": os.path.relpath(inf_csv, session_root)},
-                {"role": "inference_png", "path": os.path.relpath(inf_png, session_root)},
+                {"role": "inference_csv", "path": posix_relpath(inf_csv, session_root)},
+                {"role": "inference_png", "path": posix_relpath(inf_png, session_root)},
             ]
         )
     else:
         print("[WARN] Speed stage: skipping inference plot (no benchmark timing metrics).")
         if os.path.isfile(inf_csv):
-            artifacts.append({"role": "inference_csv", "path": os.path.relpath(inf_csv, session_root)})
+            artifacts.append({"role": "inference_csv", "path": posix_relpath(inf_csv, session_root)})
 
     for g_idx in range(1, len(run_groups) + 1):
         cache_stats_path = os.path.join(session_root, "artifacts", "inference", f"cache_stats_group_{g_idx}.json")

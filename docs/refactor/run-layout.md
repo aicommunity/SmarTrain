@@ -6,7 +6,9 @@ SmarTrain normalizes each training run directory under `runs/<dataset>/<run_name
 
 ```
 <run_dir>/
-  models/                    # <run_name>.pt|onnx|engine|trt (+ .meta.json)
+  models/                    # <stem>.pt|onnx|engine|trt (+ .meta.json / sidecar .json)
+                             # Prefer detect_* stem (e.g. detect_yolo11s_…_b16.pt);
+                             # legacy <run_name>.pt still resolves.
   tmp/                       # _runtime_data_{train,test}.yaml
   tests/
     test-ultralytics/        # PT Ultralytics val artifacts
@@ -22,6 +24,33 @@ SmarTrain normalizes each training run directory under `runs/<dataset>/<run_name
 
 Dot dirs: `.smartrain_cache/` (analyze cache), `.smartrain/unified/` (unified snapshot dual-write; legacy `.smartrain/canonical/` read fallback), `.ultralytics_*` (scratch; removed when empty).
 
+## Weight path API
+
+| API | Meaning |
+|-----|---------|
+| `preferred_run_model_path(run_dir)` | Canonical path under `models/<stem>.pt` (does **not** create files or directories). Stem from metadata / detect_* / sole `.pt` / folder name. Ignores legacy metadata refs like `train/weights/best.pt`. |
+| `resolve_run_model(run_dir)` | First **existing** weight: preferred, release layouts, then legacy (`train-ultralytics/weights/{best,last}.pt`, `train/weights/…`). |
+| `materialize_preferred_run_model(run_dir)` | Copy/move from `resolve_run_model` into the preferred path when missing. |
+| `ensure_run_layout(run_dir)` | Creates `models/`, `tmp/`, `tests/`, migrates legacy run paths. **Do not** call on release catalog dirs — use `ensure_runtime_tmp_dir` / `ensure_runtime_layout_for_yaml` (tmp only). |
+
+## Run vs release layouts
+
+Training runs live under `runs/`. Published weights live under workspace `models/` (release catalog). Compatible release shapes:
+
+| Layout | Path pattern | Notes |
+|--------|--------------|-------|
+| **R3 unified (current)** | `models/<dataset>/<run_id>/models/detect_*.pt` | Full run tree moved under `models/`; sidecar `models/detect_*.json`. |
+| **R3 legacy (compat)** | `models/<dataset>/<run_id>/detect_*.pt` | Root-level catalog weight from copy-era releases. |
+| **R1 (compat)** | `models/<dataset>/<detect_stem>/models/<detect_stem>.pt` | Nested `models/` inside release folder. |
+| **R2 (compat)** | `models/<dataset>/<stem>.pt` next to `models/<dataset>/<stem>/` | Flat sibling weight. |
+| **Registry bundle** | `models/<friendly_name>/` + `model_manifest.json` | From `registry models-add`; not the same as `model release`. |
+
+`model release` moves the run directory from `runs/` to `models/<dataset>/<run_id>/` without leaving a duplicate. `model unrelease` moves it back and removes the manifest entry. Workspace migration of legacy shapes: `smartrain update` ([`legacy-compat-inventory.md`](./legacy-compat-inventory.md)).
+
+Comments: `models/releases_manifest.json` keys as `<dataset>/<weight_stem>`; lookup also accepts `<dataset>/<folder>` for R3 when the PT is only under nested `models/`.
+
+Inference / analyze / ROI discover resolve all of the above via `resolve_run_model` / `discover_model_entries`.
+
 ## Legacy → action
 
 | Legacy path | Action |
@@ -33,10 +62,8 @@ Dot dirs: `.smartrain_cache/` (analyze cache), `.smartrain/unified/` (unified sn
 | `val-recs-*` at **run root** | move to `tests/val-recs-*` or delete if empty |
 | empty any dir under run/tests | removed by `prune_empty_subdirs` |
 
-## API
-
-`ensure_run_layout(run_dir)` creates `models/`, `tmp/`, `tests/`, migrates legacy paths, then calls `normalize_ultralytics_run_layout(run_dir)` (idempotent).
-
-Preferred model path: `preferred_run_model_path(run_dir)`; materialize via `materialize_preferred_run_model`.
+## Notes
 
 Training uses `finalize_train_kwargs` with `exist_ok=True` and empty `train-ultralytics/` preflight removal.
+
+See also: [`../cli/overview.md`](../cli/overview.md) (release/comment), [`../cli/registry.md`](../cli/registry.md) (registry vs release).

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from smartrain.core.training.train_profile import task_to_metadata_task_type
@@ -30,11 +30,16 @@ def _resolve_class_names(model: Any | None, class_names: Mapping[Any, str] | Non
     return _names_map(model)
 
 
-def _extract_detections(preds: Any, names: dict[Any, Any]) -> list[dict[str, Any]]:
+def _empty_outputs(resolved: str) -> dict[str, Any]:
+    if resolved == "classification":
+        return {"classification": {}}
+    if resolved == "segmentation":
+        return {"segments": []}
+    return {"detections": []}
+
+
+def _extract_detections_from_result(r: Any, names: dict[Any, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    if not preds:
-        return rows
-    r = preds[0]
     boxes_obj = getattr(r, "boxes", None)
     if boxes_obj is None or len(boxes_obj) == 0:
         return rows
@@ -58,10 +63,13 @@ def _extract_detections(preds: Any, names: dict[Any, Any]) -> list[dict[str, Any
     return rows
 
 
-def _extract_classification(preds: Any, names: dict[Any, Any]) -> dict[str, Any] | None:
+def _extract_detections(preds: Any, names: dict[Any, Any]) -> list[dict[str, Any]]:
     if not preds:
-        return None
-    r = preds[0]
+        return []
+    return _extract_detections_from_result(preds[0], names)
+
+
+def _extract_classification_from_result(r: Any, names: dict[Any, Any]) -> dict[str, Any] | None:
     probs = getattr(r, "probs", None)
     if probs is None:
         return None
@@ -107,10 +115,13 @@ def _extract_classification(preds: Any, names: dict[Any, Any]) -> dict[str, Any]
     }
 
 
-def _extract_segments(preds: Any, names: dict[Any, Any]) -> list[dict[str, Any]]:
+def _extract_classification(preds: Any, names: dict[Any, Any]) -> dict[str, Any] | None:
     if not preds:
-        return []
-    r = preds[0]
+        return None
+    return _extract_classification_from_result(preds[0], names)
+
+
+def _extract_segments_from_result(r: Any, names: dict[Any, Any]) -> list[dict[str, Any]]:
     boxes_obj = getattr(r, "boxes", None)
     masks_obj = getattr(r, "masks", None)
     if boxes_obj is None or len(boxes_obj) == 0:
@@ -150,6 +161,50 @@ def _extract_segments(preds: Any, names: dict[Any, Any]) -> list[dict[str, Any]]
     return rows
 
 
+def _extract_segments(preds: Any, names: dict[Any, Any]) -> list[dict[str, Any]]:
+    if not preds:
+        return []
+    return _extract_segments_from_result(preds[0], names)
+
+
+def extract_task_outputs_from_ultralytics_result(
+    model: Any | None,
+    result: Any,
+    *,
+    task_type: str | None = None,
+    class_names: Mapping[Any, str] | None = None,
+) -> dict[str, Any]:
+    """Build task_outputs for a single Ultralytics ``Results`` object."""
+    resolved = task_to_metadata_task_type(task_type)
+    names = _resolve_class_names(model, class_names)
+    if result is None:
+        return _empty_outputs(resolved)
+    if resolved == "classification":
+        classification = _extract_classification_from_result(result, names)
+        return {"classification": classification or {}}
+    if resolved == "segmentation":
+        return {"segments": _extract_segments_from_result(result, names)}
+    return {"detections": _extract_detections_from_result(result, names)}
+
+
+def extract_task_outputs_list_from_ultralytics_preds(
+    model: Any | None,
+    preds: Sequence[Any] | None,
+    *,
+    task_type: str | None = None,
+    class_names: Mapping[Any, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build one task_outputs dict per Ultralytics result (batch-aware)."""
+    if not preds:
+        return []
+    return [
+        extract_task_outputs_from_ultralytics_result(
+            model, result, task_type=task_type, class_names=class_names
+        )
+        for result in preds
+    ]
+
+
 def extract_task_outputs_from_ultralytics_preds(
     model: Any | None,
     preds: Any,
@@ -162,15 +217,14 @@ def extract_task_outputs_from_ultralytics_preds(
 
     ``model`` may be ``None`` (external subprocess path); class names default to index strings unless
     ``class_names`` is provided (overrides ``model.names`` when both are present).
+
+    For a list/batch of Ultralytics results, only the first item is used (historical single-image API).
+    Prefer ``extract_task_outputs_list_from_ultralytics_preds`` for batch inference.
     """
     resolved = task_to_metadata_task_type(task_type)
     names = _resolve_class_names(model, class_names)
     if not preds:
-        if resolved == "classification":
-            return {"classification": {}}
-        if resolved == "segmentation":
-            return {"segments": []}
-        return {"detections": []}
+        return _empty_outputs(resolved)
 
     if resolved == "classification":
         classification = _extract_classification(preds, names)

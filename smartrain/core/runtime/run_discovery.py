@@ -7,15 +7,25 @@ from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_work
 
 def _looks_like_run_dir(path: str, filenames: set[str]) -> bool:
     root = os.path.abspath(path)
-    canonical_best = os.path.join(root, "models", f"{os.path.basename(root)}.pt")
-    train_dir = os.path.join(path, "train")
-    has_train_artifacts = (
-        os.path.isfile(os.path.join(train_dir, "args.yaml"))
-        or os.path.isfile(os.path.join(train_dir, "results.csv"))
-        or os.path.isfile(os.path.join(train_dir, "weights", "last.pt"))
-        or os.path.isfile(canonical_best)
-    )
-    return "training_metadata.json" in filenames or has_train_artifacts
+    basename = os.path.basename(root)
+    canonical_best = os.path.join(root, "models", f"{basename}.pt")
+    models_dir = os.path.join(root, "models")
+    has_models_pt = os.path.isdir(models_dir) and any(
+        name.endswith(".pt") for name in os.listdir(models_dir) if os.path.isfile(os.path.join(models_dir, name))
+    ) if os.path.isdir(models_dir) else False
+    for train_name in ("train-ultralytics", "train"):
+        train_dir = os.path.join(path, train_name)
+        has_train_artifacts = (
+            os.path.isfile(os.path.join(train_dir, "args.yaml"))
+            or os.path.isfile(os.path.join(train_dir, "results.csv"))
+            or os.path.isfile(os.path.join(train_dir, "weights", "last.pt"))
+            or os.path.isfile(os.path.join(train_dir, "weights", "best.pt"))
+            or os.path.isfile(canonical_best)
+            or has_models_pt
+        )
+        if has_train_artifacts:
+            return True
+    return "training_metadata.json" in filenames
 
 
 def resolve_models_scan_root(workspace_cli: str | None, models_root_cli: str | None) -> str:

@@ -47,7 +47,10 @@ from smartrain.services.training.train_model_resolution_service import (
     extract_model_family_scale,
     normalize_model_spec,
 )
-from smartrain.services.training.train_runtime_data_yaml_service import build_runtime_data_yaml
+from smartrain.services.training.train_runtime_data_yaml_service import (
+    build_runtime_data_yaml,
+    materialize_ultralytics_data_yaml,
+)
 
 DEFAULT_MODEL_VERSION = "yolov8n"
 DEFAULT_EPOCHS = 50
@@ -127,13 +130,28 @@ def ensure_confidence_recommendations(
     beta_recall: float,
     beta_precision: float,
     fallback_confidence: float,
+    compute_lrp: bool = False,
+    lrp_detections: Any = None,
+    lrp_gt_count: Any = None,
 ) -> None:
+    from smartrain.core.training.lrp_recommendation import maybe_write_lrp_recommendations
+
     test_path = recommendation_file_path(model_dir, "test")
     val_path = recommendation_file_path(model_dir, "val")
     has_test = recommendations_complete(read_recommendation_file(test_path))
     has_val = recommendations_complete(read_recommendation_file(val_path))
     if has_test and has_val:
         print("[INFO] Confidence recommendations already exist (val/test), skipping recompute.")
+        if compute_lrp:
+            maybe_write_lrp_recommendations(
+                model_dir=model_dir,
+                split="test",
+                compute_lrp=True,
+                detections=lrp_detections,
+                gt_count=lrp_gt_count,
+                iou_thr=float(val_iou) if val_iou is not None else 0.5,
+                fallback_confidence=float(fallback_confidence),
+            )
         return
 
     if not has_test:
@@ -146,6 +164,16 @@ def ensure_confidence_recommendations(
         )
         write_recommendation_file(test_path, test_payload)
         print(f"[OK] Confidence recommendations (test): {test_path}")
+        if compute_lrp:
+            maybe_write_lrp_recommendations(
+                model_dir=model_dir,
+                split="test",
+                compute_lrp=True,
+                detections=lrp_detections,
+                gt_count=lrp_gt_count,
+                iou_thr=float(val_iou) if val_iou is not None else 0.5,
+                fallback_confidence=float(fallback_confidence),
+            )
 
     if has_val:
         return
@@ -184,6 +212,16 @@ def ensure_confidence_recommendations(
         )
         write_recommendation_file(val_path, val_payload)
         print(f"[OK] Confidence recommendations (val): {val_path}")
+        if compute_lrp:
+            maybe_write_lrp_recommendations(
+                model_dir=model_dir,
+                split="val",
+                compute_lrp=True,
+                detections=lrp_detections,
+                gt_count=lrp_gt_count,
+                iou_thr=float(val_iou) if val_iou is not None else 0.5,
+                fallback_confidence=float(fallback_confidence),
+            )
     except Exception as exc:
         write_not_available_recommendations(
             model_dir=model_dir,
@@ -266,12 +304,18 @@ def train_yolo(
     else:
         os.makedirs(model_dir, exist_ok=True)
 
-    data_yaml = build_runtime_data_yaml(
+    portable_yaml = build_runtime_data_yaml(
         dataset_path,
         model_dir,
         stage="train",
         ensure_run_layout_cb=ensure_run_layout,
         run_tmp_dir_cb=run_tmp_dir,
+        workspace_root=workspace_root,
+    )
+    data_yaml = (
+        materialize_ultralytics_data_yaml(portable_yaml, workspace_root)
+        if workspace_root
+        else portable_yaml
     )
     train_kw = finalize_train_kwargs(ultralytics_cfg, data_yaml, model_dir)
     if non_interactive or mpl_rt.force_ultralytics_plots_false:
@@ -416,6 +460,7 @@ def test_yolo(
     conf_rec_beta_recall: float = 2.0,
     conf_rec_beta_precision: float = 0.5,
     conf_rec_fallback: float = 0.25,
+    compute_lrp: bool = False,
     *,
     non_interactive: bool = False,
 ):
@@ -423,12 +468,22 @@ def test_yolo(
     mpl_rt = ensure_matplotlib_training_runtime(non_interactive=non_interactive)
     test_start_time = datetime.now()
 
-    data_yaml = build_runtime_data_yaml(
+    from smartrain.services.models.release_models_manifest import layout_for_run_dir
+
+    ws_layout = layout_for_run_dir(model_dir)
+    workspace_root = str(ws_layout.root) if ws_layout is not None else None
+    portable_yaml = build_runtime_data_yaml(
         dataset_path,
         model_dir,
         stage="test",
         ensure_run_layout_cb=ensure_run_layout,
         run_tmp_dir_cb=run_tmp_dir,
+        workspace_root=workspace_root,
+    )
+    data_yaml = (
+        materialize_ultralytics_data_yaml(portable_yaml, workspace_root)
+        if workspace_root
+        else portable_yaml
     )
     imgsz = val_imgsz if val_imgsz is not None else train_img_size
 
@@ -489,6 +544,7 @@ def test_yolo(
                 beta_recall=conf_rec_beta_recall,
                 beta_precision=conf_rec_beta_precision,
                 fallback_confidence=conf_rec_fallback,
+                compute_lrp=bool(compute_lrp),
             )
 
         test_end_time = datetime.now()

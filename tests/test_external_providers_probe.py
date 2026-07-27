@@ -20,13 +20,19 @@ def test_probe_provider_repo_detects_entrypoints(tmp_path: Path) -> None:
 
 
 def test_probe_mfel_reports_missing_dcnv4(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
     spec = get_provider_spec("mfel-yolo")
     (tmp_path / "train.py").write_text("print('train')\n", encoding="utf-8")
     (tmp_path / "val.py").write_text("print('infer')\n", encoding="utf-8")
-    venv_dir = tmp_path / "venv" / "bin"
-    venv_dir.mkdir(parents=True, exist_ok=True)
-    py = venv_dir / "python"
-    py.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    if sys.platform == "win32":
+        venv_bin = tmp_path / "venv" / "Scripts"
+        venv_bin.mkdir(parents=True, exist_ok=True)
+        (venv_bin / "python.exe").write_text("", encoding="utf-8")
+    else:
+        venv_bin = tmp_path / "venv" / "bin"
+        venv_bin.mkdir(parents=True, exist_ok=True)
+        (venv_bin / "python").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
 
     class _R:
         returncode = 1

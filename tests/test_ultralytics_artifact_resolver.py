@@ -48,7 +48,7 @@ def test_resolver_prefers_test_dir_over_train_val(tmp_path: Path) -> None:
     for name in ("BoxF1_curve.png", "BoxP_curve.png", "BoxR_curve.png", "confusion_matrix.png", "confusion_matrix_normalized.png"):
         (test_dir / name).write_bytes(b"x")
     resolved = resolve_ultralytics_artifacts(str(run_dir))
-    assert resolved.resolved["BoxPR_curve.png"][0].endswith("tests/test-ultralytics/BoxPR_curve.png")
+    assert Path(resolved.resolved["BoxPR_curve.png"][0]).as_posix().endswith("tests/test-ultralytics/BoxPR_curve.png")
 
 
 def test_build_ultralytics_run_info_from_metadata(tmp_path: Path) -> None:

@@ -91,7 +91,9 @@ def _count_images_in_buckets(buckets) -> int:
 
 def _interactive_fill(args, *, dataset_names: list[str]) -> None:
     print("[INFO] Interactive rotate mode")
-    args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
+    from smartrain.cli_entrypoints.support.cli_interactive import ensure_dataset_arg
+
+    ensure_dataset_arg(args, dataset_names)
     print("[INFO] Fixed clockwise rotation for every frame in the dataset:")
     print("  90  - quarter turn clockwise (width and height swap)")
     print("  180 - half turn")

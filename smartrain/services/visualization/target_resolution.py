@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from smartrain.core.runtime.path_portable import is_abs_like, resolve_stored_path_under_workspace
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.core.workflow_adapters.inference_runtime_api import resolve_dataset_root_for_entry
@@ -14,6 +15,29 @@ from smartrain.services.inference_runtime_helpers import _resolve_run_ref, load_
 from smartrain.services.visualization.contracts import VisRequest
 
 _DATA_YAML_META_KEYS = {"path", "nc", "names", "download", "yaml_file"}
+
+
+def _normalize_source_run_ref(layout: WorkspaceLayout, run_ref: str) -> str:
+    """Dual-read abs or workspace-relative ``source_run`` / ``source_run_relative``."""
+    s = (run_ref or "").strip()
+    if not s or s.isdigit():
+        return s
+    if not is_abs_like(s):
+        return resolve_stored_path_under_workspace(layout.root, s)
+    p = Path(s)
+    if p.exists():
+        return str(p.expanduser().resolve())
+    try:
+        return resolve_stored_path_under_workspace(layout.root, s)
+    except ValueError:
+        return str(p.expanduser().resolve())
+
+
+def _pick_source_run_ref(layout: WorkspaceLayout, *candidates: Any) -> str | None:
+    for val in candidates:
+        if isinstance(val, str) and val.strip():
+            return _normalize_source_run_ref(layout, val.strip())
+    return None
 
 
 def _load_data_yaml(path: Path) -> dict[str, Any]:
@@ -132,9 +156,33 @@ def resolve_model_target(layout: WorkspaceLayout, req: VisRequest) -> dict[str, 
                 payload = json.loads(manifest_path.read_text(encoding="utf-8"))
             except Exception:
                 payload = {}
-            source_run = payload.get("source_run")
-            if isinstance(source_run, str) and source_run.strip():
-                run_ref = source_run
+            run_ref = _pick_source_run_ref(
+                layout,
+                payload.get("source_run_relative"),
+                payload.get("source_run"),
+            )
+    if not run_ref:
+        # Release sidecar next to weights: <stem>.json with source.source_run.
+        sidecar = model_path.with_suffix(".json")
+        if not sidecar.is_file() and model_path.suffix.lower() != ".pt":
+            # e.g. .onnx next to detect_*.json
+            for cand in model_dir.glob(f"{model_path.stem.split('.')[0]}*.json"):
+                if cand.name.endswith(".meta.json"):
+                    continue
+                sidecar = cand
+                break
+        if sidecar.is_file():
+            try:
+                meta = json.loads(sidecar.read_text(encoding="utf-8"))
+            except Exception:
+                meta = None
+            if isinstance(meta, dict):
+                source = meta.get("source") if isinstance(meta.get("source"), dict) else {}
+                run_ref = _pick_source_run_ref(
+                    layout,
+                    source.get("source_run_relative") if isinstance(source, dict) else None,
+                    source.get("source_run") if isinstance(source, dict) else None,
+                )
     if not run_ref:
         runs = find_run_directories(layout.runs)
         if runs:
