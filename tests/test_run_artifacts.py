@@ -40,6 +40,70 @@ def test_resolve_run_model_finds_sibling_pt_for_release_bundle(tmp_path: Path) -
 
     resolved = resolve_run_model(str(release_dir), ".pt")
     assert resolved == sibling
+    # Must not create empty run-layout dirs on release bundles.
+    assert not (release_dir / "tmp").exists()
+    assert not (release_dir / "tests").exists()
+
+
+def test_resolve_run_model_finds_nested_pt_for_release_bundle(tmp_path: Path) -> None:
+    release_dir = tmp_path / "models" / "ds1" / "detect_yolo_20260115"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    nested = release_dir / "detect_yolo_20260115.pt"
+    nested.write_bytes(b"released-nested")
+
+    resolved = resolve_run_model(str(release_dir), ".pt")
+    assert resolved == nested
+
+
+def test_resolve_run_model_r1_nested_models_subdir(tmp_path: Path) -> None:
+    """Uralk-style R1: models/<ds>/<detect_stem>/models/<detect_stem>.pt"""
+    release_dir = tmp_path / "models" / "ds1" / "detect_yolo11m_20260708_194933"
+    nested = release_dir / "models" / "detect_yolo11m_20260708_194933.pt"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_bytes(b"r1")
+    (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
+
+    resolved = resolve_run_model(str(release_dir), ".pt")
+    assert resolved == nested
+    assert not (release_dir / "tmp").exists()
+
+
+def test_resolve_run_model_r3_run_folder_detect_stem_mismatch(tmp_path: Path) -> None:
+    """Uralk-style R3: models/<ds>/<run_id>/detect_*.pt (folder ≠ stem)."""
+    run_folder = "2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc"
+    release_dir = tmp_path / "models" / "merged3" / run_folder
+    release_dir.mkdir(parents=True, exist_ok=True)
+    pt = release_dir / "detect_yolo11s_20260714_204230_640px_400epochs_b16.pt"
+    pt.write_bytes(b"r3")
+    (release_dir / "detect_yolo11s_20260714_204230_640px_400epochs_b16.json").write_text(
+        json.dumps({"artifacts": {"release_dir": str(release_dir), "model_path": str(pt)}, "source": {"source_run": "x"}}),
+        encoding="utf-8",
+    )
+
+    resolved = resolve_run_model(str(release_dir), ".pt")
+    assert resolved == pt
+    assert not (release_dir / "tmp").exists()
+    assert not (release_dir / "tests").exists()
+
+
+def test_resolve_run_model_run_fallback_train_ultralytics_last(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-last-only"
+    weights = run_dir / "train-ultralytics" / "weights" / "last.pt"
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"last")
+
+    resolved = resolve_run_model(str(run_dir), ".pt")
+    assert resolved == weights
+
+
+def test_resolve_run_model_run_fallback_legacy_train_last(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-legacy-train"
+    weights = run_dir / "train" / "weights" / "last.pt"
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"legacy-last")
+
+    resolved = resolve_run_model(str(run_dir), ".pt")
+    assert resolved == weights
 
 
 def test_resolve_run_model_prefers_canonical(tmp_path: Path) -> None:
@@ -144,12 +208,31 @@ def test_ensure_run_layout_merges_parallel_test_ultralytics_dir(tmp_path: Path) 
     assert not parallel.exists()
 
 
-def test_ensure_run_layout_no_empty_train_dir_without_legacy(tmp_path: Path) -> None:
-    run_dir = tmp_path / "runs" / "ds1" / "run-fresh"
-    run_dir.mkdir(parents=True)
+def test_ensure_run_layout_removes_identical_root_runtime_yaml(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-runtime-dup"
+    tmp = run_dir / "tmp"
+    tmp.mkdir(parents=True)
+    body = "train: train/images\nnames: [a]\n"
+    (run_dir / "_runtime_data_train.yaml").write_text(body, encoding="utf-8")
+    (tmp / "_runtime_data_train.yaml").write_text(body, encoding="utf-8")
+
     ensure_run_layout(str(run_dir))
-    train_root = run_train_backend_dir(str(run_dir), "ultralytics")
-    assert not train_root.exists() or not any(train_root.iterdir())
+
+    assert not (run_dir / "_runtime_data_train.yaml").exists()
+    assert (tmp / "_runtime_data_train.yaml").read_text(encoding="utf-8") == body
+
+
+def test_ensure_run_layout_keeps_conflicting_root_runtime_yaml(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "ds1" / "run-runtime-conflict"
+    tmp = run_dir / "tmp"
+    tmp.mkdir(parents=True)
+    (run_dir / "_runtime_data_train.yaml").write_text("train: a\n", encoding="utf-8")
+    (tmp / "_runtime_data_train.yaml").write_text("train: b\n", encoding="utf-8")
+
+    ensure_run_layout(str(run_dir))
+
+    assert (run_dir / "_runtime_data_train.yaml").is_file()
+    assert (tmp / "_runtime_data_train.yaml").read_text(encoding="utf-8") == "train: b\n"
 
 
 def test_consolidate_train_merges_suffix(tmp_path: Path) -> None:
@@ -234,4 +317,39 @@ def test_prune_empty_sidecar_dirs(tmp_path: Path) -> None:
     prune_empty_sidecar_dirs(str(run_dir))
     assert not (run_dir / ".ultralytics_scratch").exists()
     assert not (run_dir / ".ultralytics_predict_scratch").exists()
+
+
+def test_write_model_sidecar_metadata_portable_paths(tmp_path: Path) -> None:
+    from smartrain.core.runtime.run_artifacts import write_model_sidecar_metadata
+
+    run_dir = tmp_path / "runs" / "ds1" / "run-side"
+    models = run_dir / "models"
+    models.mkdir(parents=True)
+    onnx = models / "a.onnx"
+    onnx.write_bytes(b"onnx")
+    side = write_model_sidecar_metadata(
+        onnx,
+        format_name="onnx",
+        run_dir=str(run_dir),
+        source_path=str(models / "a.pt"),
+        workspace_root=str(tmp_path),
+    )
+    data = json.loads(side.read_text(encoding="utf-8"))
+    assert data["path"] == "models/a.onnx"
+    assert data["run_path"] == "runs/ds1/run-side"
+    assert "\\" not in data["path"]
+    assert "\\" not in data["run_path"]
+    assert not Path(data["path"]).is_absolute()
+
+
+def test_resolve_sidecar_stored_path_relative_to_run(tmp_path: Path) -> None:
+    from smartrain.core.runtime.run_artifacts import resolve_sidecar_stored_path
+
+    run_dir = tmp_path / "runs" / "ds" / "r1"
+    models = run_dir / "models"
+    models.mkdir(parents=True)
+    onnx = models / "a.onnx"
+    onnx.write_bytes(b"x")
+    got = resolve_sidecar_stored_path("models/a.onnx", model_path=onnx, run_dir=run_dir)
+    assert Path(got).resolve() == onnx.resolve()
 

@@ -10,6 +10,7 @@ from typing import Any
 from smartrain.run_model_contract.io.write.layout import unified_snapshot_write_dir
 from smartrain.run_model_contract.io.write.manifest import build_manifest
 from smartrain.run_model_contract.domain.models import UnifiedPayload
+from smartrain.core.runtime.path_portable import posix_relpath
 
 
 @dataclass(frozen=True)
@@ -65,7 +66,7 @@ def write_unified_snapshot(payload: UnifiedPayload, target_root: str) -> WriteRe
         payload=payload,
         payload_hash=digest,
         created_at=created_at,
-        source_run_ref=str(root),
+        source_run_ref=posix_relpath(str(root), str(root.parent.parent.parent)) if len(root.parts) >= 3 else root.name,
         policy_mode="unified_only",
         artifact_hashes=artifact_hashes,
         aggregate_artifacts_hash_sha256=aggregate_hash,

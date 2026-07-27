@@ -4,7 +4,31 @@ import os
 import sys
 from typing import Any, Callable
 
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.core.runtime.workspace_paths import resolve_workspace_root
+
+
+def _display_model_column(run_dir: str, rec: Any, *, width: int = 20) -> str:
+    """Prefer weights stem (detect_*) over folder name for R3 release display."""
+    label = ""
+    try:
+        from smartrain.core.runtime.run_artifacts import resolve_run_model, resolve_run_weights_stem
+
+        resolved = resolve_run_model(run_dir)
+        if resolved is not None and resolved.is_file():
+            label = resolved.stem
+        if not label:
+            stem = resolve_run_weights_stem(run_dir)
+            folder = os.path.basename(os.path.abspath(run_dir.rstrip(os.sep)))
+            if stem and stem != folder:
+                label = stem
+            elif stem and stem.startswith(("detect_", "segment_", "classify_")):
+                label = stem
+    except Exception:
+        label = ""
+    if not label:
+        label = str(getattr(rec, "model", None) or "?").strip() or "?"
+    return label[:width]
 
 
 def prepare_all_selection(
@@ -55,20 +79,37 @@ def prepare_all_selection(
             ap = os.path.abspath(path)
             if workspace_root:
                 try:
-                    rel = os.path.relpath(ap, workspace_root)
+                    rel = posix_relpath(ap, workspace_root)
                     if not rel.startswith(".."):
                         return rel
                 except Exception:
                     pass
             return ap
 
-        print(f"{'#':>4}  {'src':<7}  {'model':<14}  {'dataset':<24}  {'path (relative to workspace)'}")
-        print("-" * 130)
+        preview_rows: list[tuple[int, str, Any, str, str]] = []
         for i, (rd, rec) in enumerate(indexed, start=1):
-            print(
-                f"{i:4d}  {_source_label(rd):<7}  {str(rec.model or '?')[:14]:<14}  "
-                + f"{str(rec.dataset_name or '?')[:24]:<24}  {_display_target_dir(rd)}"
-            )
+            from smartrain.services.models.release_models_manifest import release_comment_for_run_dir
+
+            comment = release_comment_for_run_dir(rd) if _source_label(rd) == "models" else ""
+            preview_rows.append((i, rd, rec, _display_target_dir(rd), comment))
+        show_comment = any(str(c).strip() for *_rest, c in preview_rows)
+        model_w = 20
+        if show_comment:
+            print(f"{'#':>4}  {'src':<7}  {'model':<{model_w}}  {'dataset':<24}  {'comment':<32}  {'path (relative to workspace)'}")
+            print("-" * 170)
+            for i, rd, rec, rel_path, comment in preview_rows:
+                print(
+                    f"{i:4d}  {_source_label(rd):<7}  {_display_model_column(rd, rec, width=model_w):<{model_w}}  "
+                    + f"{str(rec.dataset_name or '?')[:24]:<24}  {str(comment)[:32]:<32}  {rel_path}"
+                )
+        else:
+            print(f"{'#':>4}  {'src':<7}  {'model':<{model_w}}  {'dataset':<24}  {'path (relative to workspace)'}")
+            print("-" * 140)
+            for i, rd, rec, rel_path, _comment in preview_rows:
+                print(
+                    f"{i:4d}  {_source_label(rd):<7}  {_display_model_column(rd, rec, width=model_w):<{model_w}}  "
+                    + f"{str(rec.dataset_name or '?')[:24]:<24}  {rel_path}"
+                )
         if len(indexed) == 1:
             baseline = indexed[0][0]
             others = []

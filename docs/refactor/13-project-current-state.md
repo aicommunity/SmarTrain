@@ -59,7 +59,7 @@
 - **Чтение:** [`run_model_contract/gateway.py`](../../smartrain/run_model_contract/gateway.py) — `load_target`, `load_metrics`, `resolve_task_context`, predictions API и др.
 - **Запись:** [`run_model_contract/io/write/`](../../smartrain/run_model_contract/io/write/) — snapshot, manifest (provenance, хеши), [`dual_write.py`](../../smartrain/run_model_contract/io/write/dual_write.py) (`unified_only`, `dual_write_strict`, `dual_write_best_effort`).
 - **Миграция:** [`workflows/migration/cli_migration.py`](../../smartrain/workflows/migration/cli_migration.py) и связанные модули; режимы dry-run / apply / report-only (см. тесты `tests/migration/`).
-- **Cutover / policy:** аварийный legacy read — только при явных env-флагаx (см. [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md) и регрессии `tests/regression/test_unified_cutover.py`).
+- **Cutover / policy:** on-disk legacy shapes are inventoried in [`legacy-compat-inventory.md`](./legacy-compat-inventory.md) and migrated via `smartrain update`; phased reader removal in [`legacy-fallback-removal.md`](./legacy-fallback-removal.md). Env flags `SMARTTRAIN_CANONICAL_READ` / `SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK` are **not** used in current runtime (docs that still mention them are obsolete). See [`06-deprecation-and-alias-policy.md`](./06-deprecation-and-alias-policy.md).
 
 ---
 

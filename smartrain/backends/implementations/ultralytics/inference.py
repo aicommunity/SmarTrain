@@ -7,7 +7,10 @@ from typing import Any
 
 from smartrain.backends.contracts import BackendCapabilities
 from smartrain.backends.registry import CapabilityRegistry
-from smartrain.core.inference.ultralytics_prediction_extract import extract_task_outputs_from_ultralytics_preds
+from smartrain.core.inference.ultralytics_prediction_extract import (
+    extract_task_outputs_from_ultralytics_preds,
+    extract_task_outputs_list_from_ultralytics_preds,
+)
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.external_providers.runner import run_external_infer
@@ -44,11 +47,21 @@ class InferenceBackend:
 
 
 class UltralyticsBackend(InferenceBackend):
-    def __init__(self, weights_path: str, *, backend_name: str = "ultralytics") -> None:
+    def __init__(
+        self,
+        weights_path: str,
+        *,
+        backend_name: str = "ultralytics",
+        task_type: str | None = None,
+    ) -> None:
         from ultralytics import YOLO
 
+        from smartrain.external_providers.task_alias import ultralytics_task_alias
+
         self.name = backend_name
-        self._model = YOLO(str(weights_path))
+        self._task_type = task_to_metadata_task_type(task_type)
+        ultra_task = ultralytics_task_alias(self._task_type)
+        self._model = YOLO(str(weights_path), task=ultra_task)
         self._predict_project = ultralytics_sidecar_dir(
             tempfile.gettempdir(), "smartrain_ultralytics_inference"
         )
@@ -84,6 +97,71 @@ class UltralyticsBackend(InferenceBackend):
             infer_only_ns=int(t1 - t0),
             stage_ns={},
         )
+
+    def predict_many(
+        self,
+        image_sources: list[Any],
+        *,
+        conf: float,
+        imgsz: int,
+        device: str | None,
+        half: bool,
+        task_type: str | None = None,
+    ) -> list[BackendPrediction]:
+        if not image_sources:
+            return []
+        if len(image_sources) == 1:
+            return [
+                self.predict(
+                    image_sources[0],
+                    conf=conf,
+                    imgsz=imgsz,
+                    device=device,
+                    half=half,
+                    task_type=task_type,
+                )
+            ]
+        t0 = time.perf_counter_ns()
+        preds = self._model.predict(
+            source=image_sources,
+            conf=float(conf),
+            imgsz=int(imgsz),
+            verbose=False,
+            device=str(device) if device is not None else None,
+            half=bool(half),
+            save=False,
+            project=self._predict_project,
+            name="inference-cli",
+            exist_ok=True,
+        )
+        t1 = time.perf_counter_ns()
+        total_ns = int(t1 - t0)
+        resolved_task = task_to_metadata_task_type(task_type)
+        outputs_list = extract_task_outputs_list_from_ultralytics_preds(
+            self._model, preds, task_type=resolved_task
+        )
+        n = max(1, len(outputs_list))
+        # Ultralytics may return fewer/more results than sources in edge cases; align lengths.
+        if len(outputs_list) < len(image_sources):
+            empty = extract_task_outputs_from_ultralytics_preds(self._model, [], task_type=resolved_task)
+            outputs_list = list(outputs_list) + [dict(empty) for _ in range(len(image_sources) - len(outputs_list))]
+        elif len(outputs_list) > len(image_sources):
+            outputs_list = list(outputs_list[: len(image_sources)])
+            n = max(1, len(outputs_list))
+        per_ns = total_ns // n
+        rem = total_ns - per_ns * n
+        out: list[BackendPrediction] = []
+        for i, outputs in enumerate(outputs_list):
+            share = per_ns + (rem if i == 0 else 0)
+            out.append(
+                BackendPrediction(
+                    task_type=resolved_task,
+                    outputs=outputs if isinstance(outputs, dict) else {},
+                    infer_only_ns=int(share),
+                    stage_ns={},
+                )
+            )
+        return out
 
 
 class ExternalProviderBackend:
@@ -134,7 +212,11 @@ class InferenceBackendRegistry:
         caps = self._capabilities.resolve(task_type=resolved_task_type, model_format=fmt, require="infer")
         backend_id = str(caps.backend or "").strip().lower()
         if backend_id == "ultralytics":
-            return UltralyticsBackend(model_path, backend_name=f"ultralytics:{fmt}")
+            return UltralyticsBackend(
+                model_path,
+                backend_name=f"ultralytics:{fmt}",
+                task_type=resolved_task_type,
+            )
         raise ValueError(
             "Unsupported local inference backend capability "
             f"{caps.backend!r} for model format {model_format!r}"

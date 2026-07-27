@@ -188,6 +188,11 @@ def _column_display_name(name: str, is_ru: bool) -> str:
         "performance_reason": "Причина performance" if is_ru else "Performance reason",
         "train_last_epoch": "Последняя эпоха (train)" if is_ru else "Last train epoch",
         "train_last_metrics/mAP50-95(B)": "mAP50-95 (последняя эпоха train)" if is_ru else "mAP50-95 (last train epoch)",
+        "train_best_epoch": "Лучшая эпоха (train)" if is_ru else "Best train epoch",
+        "train_best_metrics/mAP50-95(B)": "mAP50-95 (лучшая эпоха train)" if is_ru else "mAP50-95 (best train epoch)",
+        "train_best_metrics/mAP50(B)": "mAP50 (лучшая эпоха train)" if is_ru else "mAP50 (best train epoch)",
+        "input_imgsz": "Разрешение входа" if is_ru else "Input size",
+        "release_comment": "Комментарий" if is_ru else "Comment",
     }
     return common.get(name, name)
 
@@ -210,6 +215,69 @@ def _pretty_value(v: Any, abbreviations: dict[str, str], *, is_ru: bool, float_d
 def _diag_cell_placeholder(col: str) -> bool:
     c = str(col)
     return c.startswith("perf_diag_") or c == "perf_io_load_ms_per_frame"
+
+
+def _perf_cell_placeholder(col: str, row: Any) -> bool:
+    c = str(col)
+    perf_cols = (
+        c.startswith("perf_")
+        or c
+        in {
+            "avg_inference_ms_per_frame",
+            "avg_inference_fps",
+            "throughput_img_s",
+            "latency_p50_ms",
+            "latency_p95_ms",
+            "pure_inference_ms_per_frame",
+            "pure_inference_fps",
+            "pipeline_end_to_end_ms_per_frame",
+            "pipeline_end_to_end_fps",
+        }
+    )
+    if not perf_cols or _diag_cell_placeholder(c):
+        return False
+    try:
+        reason = str(row.get("performance_reason") or "").strip().lower()
+    except Exception:
+        reason = ""
+    if not reason or reason in {"ok", "success"}:
+        return False
+    return any(
+        token in reason
+        for token in (
+            "not_collected",
+            "missing_manifest",
+            "performance_not_collected",
+            "perf_not_collected",
+        )
+    )
+
+
+def _pretty_table_cell_value(
+    v: Any,
+    abbreviations: dict[str, str],
+    *,
+    col: str,
+    row: Any,
+    is_ru: bool,
+    float_decimals: int,
+    diag_style: bool,
+) -> str:
+    if diag_style and _diag_cell_placeholder(col):
+        if pd.isna(v):
+            return "н/п" if is_ru else "n/a"
+        sv = str(v).strip()
+        if sv.lower() in {"nan", "none", "null", "", "-"}:
+            return "н/п" if is_ru else "n/a"
+    if _perf_cell_placeholder(col, row):
+        if pd.isna(v):
+            return "н/п" if is_ru else "n/a"
+        sv = str(v).strip()
+        if sv.lower() in {"nan", "none", "null", "", "-"}:
+            return "н/п" if is_ru else "n/a"
+    if diag_style:
+        return _pretty_diag_table_value(v, abbreviations, col=col, is_ru=is_ru, float_decimals=float_decimals)
+    return _pretty_value(v, abbreviations, is_ru=is_ru, float_decimals=float_decimals)
 
 
 def _pretty_diag_table_value(
@@ -307,24 +375,30 @@ def _md_table_from_df(
     is_ru: bool = True,
     float_decimals: int = 4,
     diag_style: bool = False,
+    hide_cols: set[str] | None = None,
 ) -> list[str]:
     if len(df) == 0:
         return ["_No data._"]
     preview = df.head(limit).copy() if isinstance(limit, int) and limit > 0 else df.copy()
-    cols = [_column_display_name(abbreviations.get(str(c), str(c)), is_ru) for c in preview.columns]
+    hidden = hide_cols or set()
+    display_cols = [c for c in preview.columns if str(c) not in hidden]
+    cols = [_column_display_name(abbreviations.get(str(c), str(c)), is_ru) for c in display_cols]
     lines = ["| " + " | ".join(cols) + " |", "| " + " | ".join(["---"] * len(cols)) + " |"]
     for _, row in preview.iterrows():
         vals = []
-        for real_col in preview.columns:
+        for real_col in display_cols:
             v = row.get(real_col)
-            if diag_style:
-                vals.append(
-                    _pretty_diag_table_value(
-                        v, abbreviations, col=str(real_col), is_ru=is_ru, float_decimals=float_decimals
-                    )
+            vals.append(
+                _pretty_table_cell_value(
+                    v,
+                    abbreviations,
+                    col=str(real_col),
+                    row=row,
+                    is_ru=is_ru,
+                    float_decimals=float_decimals,
+                    diag_style=diag_style,
                 )
-            else:
-                vals.append(_pretty_value(v, abbreviations, is_ru=is_ru, float_decimals=float_decimals))
+            )
         lines.append("| " + " | ".join(vals) + " |")
     if isinstance(limit, int) and limit > 0 and len(df) > limit:
         lines.append(f"_Showing first {limit} rows out of {len(df)}._")
@@ -346,10 +420,32 @@ def _abbrev_value(v: Any, abbreviations: dict[str, str]) -> str:
 
 def _abbrev_df(df: pd.DataFrame, abbreviations: dict[str, str]) -> pd.DataFrame:
     out = df.copy()
-    out.columns = [_abbrev_value(c, abbreviations) for c in out.columns]
+    # Do not collapse path-like column names via basename alone: train_best/last metrics
+    # would become duplicate ``mAP50-95(B)`` columns and break dtype access.
+    new_cols: list[str] = []
+    seen: dict[str, int] = {}
     for c in out.columns:
-        if str(out[c].dtype) == "object":
-            out[c] = out[c].map(lambda x: _abbrev_value(x, abbreviations))
+        raw = str(c)
+        abbreviated = _abbrev_value(raw, abbreviations)
+        # Keep distinguishing prefix for hierarchical metric columns.
+        if "/" in raw and abbreviated == os.path.basename(raw.rstrip("/")):
+            parent = raw.rsplit("/", 1)[0]
+            parent_tail = os.path.basename(parent.rstrip("/")) if parent else ""
+            if parent_tail and not abbreviated.startswith(parent_tail):
+                abbreviated = f"{parent_tail}/{abbreviated}"
+        if abbreviated in seen:
+            seen[abbreviated] += 1
+            abbreviated = f"{abbreviated}_{seen[abbreviated]}"
+        else:
+            seen[abbreviated] = 1
+        new_cols.append(abbreviated)
+    out.columns = new_cols
+    for c in out.columns:
+        series = out[c]
+        if isinstance(series, pd.DataFrame):
+            continue
+        if str(series.dtype) == "object":
+            out[c] = series.map(lambda x: _abbrev_value(x, abbreviations))
     return out
 
 
@@ -450,11 +546,14 @@ def _select_table_columns(rel: str, df: pd.DataFrame) -> pd.DataFrame:
             "run_name",
             "model",
             "dataset_name",
-            "train_last_epoch",
-            "epochs",
-            "batch_size",
+            "release_comment",
+            "train_best_epoch",
             "train_image_size",
             "val_imgsz",
+            "epochs",
+            "batch_size",
+            "train_best_metrics/mAP50-95(B)",
+            "train_last_epoch",
             "train_last_metrics/mAP50-95(B)",
             *runs_summary_test_column_names(),
         ]
@@ -649,6 +748,18 @@ def _filter_runs_summary_for_selection(df: pd.DataFrame, manifest: dict[str, Any
     filtered = work[keep].copy()
     if len(filtered) == 0:
         return work
+    # Prefer exact selected abs dirs; otherwise prefer models/ over runs/ duplicates.
+    if "run_dir" in filtered.columns and selected_dirs:
+        by_dir = filtered[filtered["run_dir"].astype(str).str.strip().isin(selected_dirs)]
+        if len(by_dir) > 0:
+            filtered = by_dir
+    if "run_name" in filtered.columns and "run_dir" in filtered.columns and filtered["run_name"].astype(str).duplicated().any():
+        ranked = filtered.copy()
+        ranked["_pref"] = ranked["run_dir"].astype(str).map(
+            lambda p: 0 if ("/models/" in p.replace("\\", "/") or p.replace("\\", "/").startswith("models/")) else 1
+        )
+        ranked = ranked.sort_values(["run_name", "_pref"])
+        filtered = ranked.drop_duplicates(subset=["run_name"], keep="first").drop(columns=["_pref"])
     return filtered
 
 

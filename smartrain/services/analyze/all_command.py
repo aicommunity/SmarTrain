@@ -16,8 +16,9 @@ def run_all_command(
     prompt_choice_cb: Callable[..., Any],
     build_run_data_yaml_map_cb: Callable[..., Any],
     auto_select_data_yaml_cb: Callable[..., Any],
-    run_all_baseline_artifacts_cb: Callable[..., tuple[list[dict[str, str]], str]],
+    run_all_baseline_artifacts_cb: Callable[..., list[dict[str, str]]],
     run_all_quality_stage_cb: Callable[..., tuple[list[dict[str, str]], dict[str, Any], bool]],
+    run_all_leaderboard_stage_cb: Callable[..., list[dict[str, str]]],
     run_all_speed_stage_cb: Callable[..., tuple[list[dict[str, str]], list[dict[str, Any]]]],
     run_all_pr_stage_cb: Callable[..., tuple[list[dict[str, str]], list[dict[str, Any]]]],
     finalize_all_session_cb: Callable[..., None],
@@ -98,10 +99,9 @@ def run_all_command(
         role = "baseline" if idx == 1 else "other"
         print(f"[INFO]  - {role}: {label} ({run_dir})")
 
-    baseline_artifacts, _ = run_all_baseline_artifacts_cb(
+    baseline_artifacts = run_all_baseline_artifacts_cb(
         baseline=baseline,
         others=others,
-        selected_run_dirs=selected_run_dirs,
         session_root=session_root,
         workspace=args.workspace,
         analytics_session=args.analytics_session,
@@ -111,7 +111,6 @@ def run_all_command(
         cmd_export_table_cb=cmd_export_table_cb,
         write_system_profile_compare_csv_cb=write_system_profile_compare_csv_cb,
         write_test_system_profile_compare_csv_cb=write_test_system_profile_compare_csv_cb,
-        cmd_leaderboard_cb=cmd_leaderboard_cb,
     )
     artifacts.extend(baseline_artifacts)
 
@@ -131,6 +130,17 @@ def run_all_command(
         refresh_runs_summary_cb=cmd_export_table_cb,
     )
     artifacts.extend(quality_artifacts)
+
+    leaderboard_artifacts = run_all_leaderboard_stage_cb(
+        selected_run_dirs=selected_run_dirs,
+        session_root=session_root,
+        workspace=args.workspace,
+        analytics_session=args.analytics_session,
+        models_root=args.models_root,
+        cmd_leaderboard_cb=cmd_leaderboard_cb,
+        record_failure_cb=_record_failure,
+    )
+    artifacts.extend(leaderboard_artifacts)
 
     speed_artifacts, speed_cache_events = run_all_speed_stage_cb(
         args=args,

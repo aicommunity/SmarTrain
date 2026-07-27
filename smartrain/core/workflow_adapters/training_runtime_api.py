@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-def calculate_dataset_hash(dataset_path: str) -> str | None:
-    from smartrain.services.datasets.dataset_hash import calculate_dataset_hash as _impl
-
-    return _impl(dataset_path)
+from smartrain.core.runtime.dataset_hash import calculate_dataset_hash
 
 
 def resolve_dataset_path_for_resume(run_dir: str, workspace_root: str) -> str | None:

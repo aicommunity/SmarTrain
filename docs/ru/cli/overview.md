@@ -9,15 +9,15 @@
 - Датасеты: `scan`, `normalize-data-yaml`, `fusion`, `augment`, `balance`, `prune`, `filter`, `orient`, `rotate`, `roi`, `inference`, `hash`, `stats`, `dataset report`, `dataset rename`
 - Обучение: `train`, `clearml-upload`
 - Провайдеры: `providers`
-- Workspace: `deploy`, `quickstart`, `info`, `sync`
+- Workspace: `deploy`, `quickstart`, `info`, `sync`, `update`
 - Очередь: `queue`, `queue-run`
 - Аналитика: `analyze`, `plot` (устаревшая обёртка)
 - Реестр: `registry`
-- Модели: `model convert`, `model release`, `model rename`
+- Модели: `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`
 - Каталог датасетов: `dataset report`, `dataset rename`
 - Инструменты форматов: `dataset convert`, `sahi`, `heatmap`, `vis`
-- Миграция: `migrate`, `migrate-models`
-- Обслуживание: `deps sync-torch`
+- Миграция: `migrate`, `migrate-models` (компаньоны `update` для snapshot / отсутствующих metadata)
+- Обслуживание: `deps sync-torch`, `deps doctor`, `deps install`
 
 ## Справка
 
@@ -38,7 +38,7 @@ smartrain model convert --help
 
 - интерактив включается только при запуске команды без аргументов (TTY обязателен);
 - выбор датасета(ов): сразу нумерованный список; ввод по имени или по номеру (несколько датасетов — через CSV номеров или имён);
-- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model rename` пустой вызов запускает интерактивный режим;
+- для `train`, `fusion`, `augment`, `balance`, `stats`, `roi`, `inference`, `orient`, `rotate`, `dataset report`, `dataset rename`, `model convert`, `model release`, `model unrelease`, `model comment`, `model rename`, `update` пустой вызов запускает интерактивный режим;
 - если переданы любые аргументы, но их недостаточно, команда завершится понятной ошибкой о неполных аргументах (без prompt-режима).
 Для ключевых команд и групп в help также добавлены блоки `Examples` / `Quick examples`.
 
@@ -54,6 +54,12 @@ smartrain model convert --help
 - Печатает секцию `Supported train models` с алиасами, которые можно копировать напрямую в `smartrain train --model ...`.
 - Включает алиасы backend по умолчанию и провайдер-специфичные алиасы установленных внешних провайдеров.
 
+Особенности `smartrain update`:
+
+- Сканирует workspace на legacy on-disk формы (layout run, root-level release, манифесты, `data.yaml`) и приводит к канону.
+- `--dry-run` — план; `--yes` — safe-шаги; `--apply-all` (с `--yes`) — также ask-шаги; `--check` — ненулевой exit при residual.
+- Отчёты: `analytics/update-reports/<timestamp>/`. Карта: [`../../refactor/legacy-compat-inventory.md`](../../refactor/legacy-compat-inventory.md).
+
 Особенности `model convert`:
 
 - `smartrain model convert` экспортирует `.pt` в `onnx`, `tensorrt-engine` и `tensorrt-trt`, а также поддерживает прямую конвертацию `.onnx -> tensorrt-trt`.
@@ -61,18 +67,33 @@ smartrain model convert --help
 - ONNX-параметры настраиваются в `model convert` (`--opset`, `--simplify/--no-simplify`, `--half/--no-half`).
 - В интерактивном режиме команда автоматически находит `.pt/.onnx` в `models/` и `runs/` workspace и даёт выбор источника по номеру или ручной ввод пути.
 - Выходные модели выбираются отдельно (`onnx`, `engine`, `trt`) с мультивыбором (`1,2` или `onnx,trt`), недоступные варианты показываются с причиной.
-- Для run-источников интерактивный выбор использует канонические артефакты (`<run_dir>/<run_dir_name>.<ext>`). Legacy-раскладка run автоматически канонизируется при первом обращении.
-- Если экспорт ONNX пропущен (уже есть публичный `.onnx`), интерактивный ONNX+TRT и пропуск в `--format onnx` всё равно создают dedicated `*_trtprep.onnx` для `trtexec` при совпадении подписи ONNX.
+- Для run-источников интерактивный выбор использует канонические файлы весов в `models/` (detect_* stem при наличии; legacy `<run_dir_name>.pt` тоже находится). Legacy-раскладка run автоматически канонизируется при первом обращении.
+- Release-модели сохраняют имя папки исходного run (`models/<dataset>/<run_name>/`); внутренняя структура совпадает с run (веса и convert в `models/<stem>.*`, sidecar `models/<stem>.json`). Convert пишет короткие `{stem}.onnx`/`.engine`/`.trt` рядом с `.pt` и для runs, и для release.
+- Dedicated `*_trtprep.onnx` — внутренний кэш только для `trtexec`: создаётся при запросе TensorRT-trt, сохраняется после успеха для training runs и unified release; удаляется только для legacy flat catalog release. Чистый `--format onnx` не пишет `*_trtprep`.
 
 Особенности `model release`:
 
-- `smartrain model release` публикует canonical run-модель `<run_dir_name>.pt` из выбранного run в `models/<dataset>/<task>_<model>_<train_datetime>.pt`.
-- Рядом создаётся JSON с тем же basename (`.json`) c описанием источника, данных обучения, метрик, классов и `io_spec` модели.
-- Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`).
+- `smartrain model release` **перемещает** весь run из `runs/` в `models/<dataset>/<run_dir_name>/` (дубликат в `runs/` не остаётся). Веса и sidecar — `models/<detect_stem>.pt` + `models/<detect_stem>.json`.
+- Совместимые раскладки (их находят inference/analyze/ROI): **R3 unified** `…/<run_id>/models/detect_*.pt` (текущая); **R3 legacy** `…/<run_id>/detect_*.pt` в корне; **R1** `…/<detect_stem>/models/<detect_stem>.pt`; **R2** sibling `…/<stem>.pt` рядом с `…/<stem>/`. Подробнее: [`../../refactor/run-layout.md`](../../refactor/run-layout.md).
+- Общий каталог `models/releases_manifest.json` хранит однострочные комментарии (ключи `<dataset>/<weight_stem>`, с fallback по имени папки для R3); тот же комментарий дублируется в sidecar JSON модели.
+- В интерактивном режиме запрашивается необязательный однострочный комментарий (на любом языке); в non-interactive — флаг `--comment`.
+- Повторный вызов для того же run и того же веса (совпадают источник и хеш) ничего не делает (`skip`); если дубль run ещё в `runs/` — безопасно удаляется.
+
+Особенности `model unrelease`:
+
+- `smartrain model unrelease` удаляет запись из `releases_manifest.json`, снимает release-sidecar и **перемещает** каталог обратно в `runs/<dataset>/<run_dir_name>/`.
+- Для legacy root-level release convert-артефакты переносятся в `models/` перед возвратом.
+- Если целевой `runs/...` уже существует — ошибка (типично для старых copy-дублей).
+- Non-interactive режим требует `--yes`.
+
+Особенности `model comment`:
+
+- `smartrain model comment` задаёт или обновляет однострочный комментарий release-модели в `releases_manifest.json` и sidecar JSON.
+- В интерактивном режиме показывается список release-моделей (с текущими комментариями), поле ввода предзаполнено текущим комментарием.
 
 Особенности `model rename`:
 
-- `smartrain model rename` переименовывает release-модель в `models/<dataset>/`: меняется stem (`.pt`, sidecar `.json`, каталог артефактов release и конвертированные ONNX/engine/trt с тем же префиксом).
+- `smartrain model rename` переименовывает файлы release-модели (`.pt`, sidecar `.json`, convert с тем же stem); в nested layout имя папки release не меняется.
 - Registry-бандлы (`model_manifest.json`) и модели в `runs/` не затрагиваются.
 - В интерактивном режиме показывается список release-моделей, текущий stem подставляется в поле ввода для редактирования.
 
@@ -80,13 +101,15 @@ smartrain model convert --help
 
 - `smartrain analyze` без подкоманды (TTY) запускает интерактивный `analyze all` (compare, метрики, опционально speed/PR, отчёт).
 - Блок quality использует метрики обучения; отдельный `smartrain test` для compare и графиков test-metrics не обязателен.
+- При `profile=full` сессия при необходимости дозапускает Ultralytics PT test и пересчитывает отсутствующие confidence recommendations (`tests/confidence_recommendations_*.json`). Временные stubs `confidence_compute_failed` пересчитываются; постоянные (нет PT) — нет.
 - При `profile=full` speed (inference benchmark) берёт кадры из split `test`, затем `val`, затем `train`; если изображений нет — speed/PR деградируют с предупреждениями, отчёт всё равно строится.
-- Пути в runtime `_runtime_data_*.yaml` разрешаются через поле `path:` в data.yaml (а не относительно файла в `run/tmp/`).
+- Пути в runtime `_runtime_data_*.yaml` разрешаются через поле `path:` в data.yaml (а не относительно файла в `run/tmp/`). Для release-каталогов создаётся только `tmp/` (без пустых `tests/`).
+- В отчёте §2 Dataset — маркеры `- D1 = <dataset>`; модели — сокращения M*; комментарии release — из manifest/sidecar при наличии.
 - `--strict-diagnostics` включайте только если отсутствие PR/metric_sources должно прерывать сессию.
 
 Особенности `dataset report`:
 
-- `smartrain dataset report` формирует многоязычный отчёт с примерами по классам (Markdown + PNG; по умолчанию `analytics/datasets-reports/<dataset>_<timestamp>/`). Для PDF/ODT зависимости `pypandoc-binary` и `weasyprint` ставятся через optional extra: `pip install -e ".[export]"`; `fpdf2` и `odfpy` остаются базовыми зависимостями. Для WeasyPrint на некоторых ОС могут понадобиться системные библиотеки (Cairo, Pango), если нет подходящего wheel.
+- `smartrain dataset report` формирует многоязычный отчёт с примерами по классам (Markdown + PNG; по умолчанию `analytics/datasets-reports/<dataset>_<timestamp>/`). Базовая установка включает `pypandoc-binary` (bundled pandoc) и `fpdf2`/`odfpy` для PDF/ODT; optional `pip install -e ".[export]"` или `smartrain deps install` добавляет WeasyPrint как PDF-движок. Для WeasyPrint на некоторых ОС могут понадобиться системные библиотеки (Cairo, Pango).
 
 Особенности `dataset rename`:
 
@@ -116,4 +139,4 @@ smartrain model convert --help
 - `smartrain prune classes` удаляет неиспользуемые классы из метаданных в `<dataset>_classes_pruned` (файлы не удаляются, `class_id` перенумеровывается).
 - `smartrain filter` удаляет edge-truncated bbox в `<dataset>_fltd` (baseline inset + пороги; аудит в `_filter_audit/`; `--stats-only`, `--drop-images`, интерактивный preview).
 - `smartrain scan --strip-unused-classes` очищает неиспользуемые классы у **новых** датасетов при scan (по умолчанию **вкл.**; `--no-strip-unused-classes` для отключения).
-- `smartrain inference` запускает инференс по двум режимам источника данных: `folder` (произвольная папка с изображениями) и `dataset-split` (`train|val|test` подвыборка из датасета по `datasets_info` + `data.yaml`). Результат сохраняется в `inference/<model>/<timestamp>-<source>/inference_results.json`; по умолчанию дополнительно создаётся YOLO-датасет `<basename>_autolabeled/` с `autolabel_manifest.json` и опционально `pred_overlays/`. Пустой экспорт (нет меток после фильтра confidence) не создаёт эти каталоги. Команда `vis` вызывает inference без экспорта датасета.
+- `smartrain inference` запускает инференс по двум режимам источника данных: `folder` (произвольная папка с изображениями) и `dataset-split` (`train|val|test` подвыборка из датасета по `datasets_info` + `data.yaml`). Результат сохраняется в `inference/<model>/<timestamp>-<source>/inference_results.json`; по умолчанию дополнительно создаётся YOLO-датасет `<basename>_autolabeled/` в виде независимых поддатасетов `part_XXX/` с `autolabel_manifest.json` и опционально `pred_overlays/`. Пустой экспорт (нет меток после фильтра confidence) не создаёт эти каталоги. Команда `vis` вызывает inference без экспорта датасета.

@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import math
 import os
 import sys
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
-from smartrain.cli_entrypoints.support.cli_prompts import print_numbered_options, prompt_choice, prompt_text, prompt_yes_no
+from smartrain.cli_entrypoints.support.cli_prompts import (
+    print_numbered_options,
+    prompt_choice,
+    prompt_int,
+    prompt_multi_choice_csv,
+    prompt_text,
+    prompt_yes_no,
+)
 from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.run_discovery import find_run_directories
@@ -27,11 +35,18 @@ from smartrain.services.inference_runtime_helpers import (
     DATA_MODES,
     ON_EMPTY_MODES,
     ROI_POLICIES,
+    default_inference_batch_for_model,
     discover_model_entries,
-    infer_img_size_from_model_context_safe,
+    infer_img_size_with_source_safe,
     load_catalog,
+    resolve_inference_source,
+    resolve_inference_task_type,
     resolve_model,
+    load_model_class_names,
+    format_model_class_option_labels,
+    export_classes_csv_from_picked_labels,
 )
+from smartrain.workflows.models.model_context import DEFAULT_INFERENCE_IMGSZ, FALLBACK_IMGSZ_SOURCE
 
 # Test / integration imports (canonical model resolution).
 _resolve_model = resolve_model
@@ -89,15 +104,42 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         args.weights = prompt_text("Weights path", default="models").strip()
 
     inferred_imgsz = None
+    inferred_imgsz_source = FALLBACK_IMGSZ_SOURCE
+    resolved_model_path = None
     try:
         mpath, _mname, _msrc = resolve_model(args, layout)
-        inferred_imgsz = infer_img_size_from_model_context_safe(mpath)
+        resolved_model_path = mpath
+        if getattr(args, "task", None) is None or not str(getattr(args, "task", "") or "").strip():
+            args.task = resolve_inference_task_type(
+                args, layout, model_path=mpath, model_source=_msrc
+            )
+            print(f"[INFO] Resolved task from model context: {args.task}")
+        inferred_imgsz, inferred_imgsz_source = infer_img_size_with_source_safe(mpath)
+        try:
+            class_names = load_model_class_names(mpath, task_type=getattr(args, "task", None))
+        except Exception as exc:
+            print(f"[WARN] Could not load model classes: {exc}")
+            class_names = {}
+        if class_names:
+            class_labels = format_model_class_option_labels(class_names)
+            picked = prompt_multi_choice_csv(
+                "Export classes (empty=all; counts after export conf filter)",
+                class_labels,
+                default_values=[],
+            )
+            args.export_classes = export_classes_csv_from_picked_labels(picked)
+        elif getattr(args, "export_classes", None):
+            print("[WARN] Model classes unavailable; --export-classes will use numeric ids only.")
     except Exception:
         inferred_imgsz = None
+        inferred_imgsz_source = FALLBACK_IMGSZ_SOURCE
 
     args.data_mode = prompt_choice("Data mode", list(DATA_MODES), default=args.data_mode)
     if args.data_mode == "folder":
-        args.source_dir = prompt_text("Source directory", default=args.source_dir or "datasets").strip()
+        args.source_dir = prompt_text(
+            "Source directory or archive",
+            default=str(getattr(args, "source", None) or args.source_dir or "datasets"),
+        ).strip()
         args.roi_pre_detect = prompt_yes_no("Enable ROI pre-detect", default=bool(args.roi_pre_detect))
         if args.roi_pre_detect:
             args.roi_weights = prompt_text("ROI weights (empty = main model)", default=str(args.roi_weights or "")).strip() or None
@@ -114,19 +156,54 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
             return False
         print_numbered_options("datasets", ds_names)
         args.dataset = prompt_choice("Select dataset", ds_names, default=ds_names[0], show_options=False)
-        args.split = prompt_choice("Split", ["train", "val", "test"], default=args.split)
+        args.split = prompt_choice("Split", ["train", "val", "test"], default=args.split or "test")
         args.roi_pre_detect = False
         args.source_dir = None
 
     args.limit = int(prompt_text("Images limit (0=all)", default=str(args.limit)).strip() or str(args.limit))
-    img_default = inferred_imgsz if inferred_imgsz is not None else (args.img_size if args.img_size is not None else 640)
-    args.img_size = int(prompt_text("Input resolution (--img-size)", default=str(img_default)).strip() or str(img_default))
+    total_files = 0
+    try:
+        preview_images, _resolved = resolve_inference_source(args, layout)
+        total_files = len(preview_images)
+        print(f"[INFO] Files found: {total_files}")
+    except Exception as exc:
+        print(f"[WARN] Could not count source files yet: {exc}")
+
+    if args.img_size is None:
+        if inferred_imgsz is not None:
+            print(f"[INFO] Resolved input size: {inferred_imgsz} (source: {inferred_imgsz_source})")
+        else:
+            print(
+                f"[WARN] Model input size not found. Using fallback {DEFAULT_INFERENCE_IMGSZ}. "
+                "Set --img-size to override."
+            )
+    img_default = (
+        args.img_size
+        if args.img_size is not None
+        else (inferred_imgsz if inferred_imgsz is not None else DEFAULT_INFERENCE_IMGSZ)
+    )
+    img_source = inferred_imgsz_source if inferred_imgsz is not None else FALLBACK_IMGSZ_SOURCE
+    chosen = prompt_text("Input resolution (--img-size)", default=str(img_default)).strip() or str(img_default)
+    args.img_size = int(chosen)
+    args.img_size_source = img_source if str(args.img_size) == str(img_default) else "cli"
     args.conf = float(prompt_text("Inference conf", default=str(args.conf)).strip() or str(args.conf))
     args.device = prompt_device_selection(
         title="inference devices",
         default_device=str(args.device or default_device_value()),
     )
     args.half = prompt_yes_no("Use FP16 (--half)", default=bool(args.half))
+    batch_default = int(getattr(args, "batch_size", 8) or 8)
+    if resolved_model_path is not None:
+        batch_default = default_inference_batch_for_model(resolved_model_path, fallback=batch_default)
+    args.batch_size = max(
+        1,
+        int(
+            prompt_int(
+                "Inference batch size (--batch-size; local Ultralytics only)",
+                default=batch_default,
+            )
+        ),
+    )
     args.export_dataset = prompt_yes_no("Export YOLO autolabel dataset", default=bool(getattr(args, "export_dataset", True)))
     if args.export_dataset:
         args.export_label_conf_min = float(
@@ -141,6 +218,36 @@ def _interactive_fill(args: argparse.Namespace, layout: WorkspaceLayout) -> bool
         "Save prediction overlays",
         default=bool(args.export_dataset),
     )
+    if args.export_dataset or args.export_visualize:
+        args.export_split_dirs = prompt_yes_no(
+            "Split export into independent sub-datasets (part_XXX/)",
+            default=bool(getattr(args, "export_split_dirs", True)),
+        )
+        if args.export_split_dirs:
+            print(
+                f"[INFO] Files found: {total_files}. "
+                "Chunk size N applies to actually exported images (after label conf filter)."
+            )
+            args.export_files_per_dir = max(
+                1,
+                int(
+                    prompt_int(
+                        "Exported images per sub-dataset (--export-files-per-dir)",
+                        default=int(getattr(args, "export_files_per_dir", 500) or 500),
+                    )
+                ),
+            )
+            n = int(args.export_files_per_dir)
+            if total_files > 0:
+                est = int(math.ceil(total_files / float(n)))
+                print(
+                    f"[INFO] Sub-datasets if all {total_files} files are exported: {est}. "
+                    f"Exact count = ceil(exported/{n})."
+                )
+            else:
+                print(f"[INFO] Exact sub-dataset count = ceil(exported/{n}).")
+        else:
+            args.export_files_per_dir = int(getattr(args, "export_files_per_dir", 500) or 500)
     return True
 
 
@@ -153,12 +260,22 @@ def _ensure_device_available_or_exit(device: str | None) -> None:
 
 
 def _validate_non_interactive_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    if args.data_mode == "folder" and not args.source_dir:
-        parser.error("incomplete arguments: --source-dir is required for --data-mode folder.")
+    if args.data_mode == "folder":
+        source_path = getattr(args, "source", None) or args.source_dir
+        if getattr(args, "source", None) and args.source_dir:
+            parser.error("Specify only one of --source or --source-dir.")
+        if not source_path:
+            parser.error("incomplete arguments: --source or --source-dir is required for --data-mode folder.")
+        if not args.source_dir:
+            args.source_dir = str(source_path)
     if args.data_mode == "dataset-split" and not args.dataset:
         parser.error("incomplete arguments: --dataset is required for --data-mode dataset-split.")
+    if args.data_mode == "dataset-split" and not args.split:
+        args.split = "test"
     if not args.model_name and not args.run and not args.weights:
         parser.error("incomplete arguments: specify --model-name, --run or --weights.")
+    if int(getattr(args, "batch_size", 8) or 8) < 1:
+        parser.error("--batch-size must be >= 1.")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -167,6 +284,35 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_inference_arg_parser()
     args = parser.parse_args(argv)
     args.device = resolve_device_request(args.device or default_device_value())
+
+    # Opt-in production threshold from recommendation JSON (default conf stays 0.25).
+    if getattr(args, "confidence_objective", None) or getattr(args, "confidence_recommendations", None):
+        from smartrain.core.training.confidence_policy import (
+            DEFAULT_OBJECTIVE,
+            resolve_inference_confidence,
+        )
+        from smartrain.core.training.confidence_recommendation import read_recommendation_file
+
+        rec_path = str(getattr(args, "confidence_recommendations", None) or "").strip()
+        payload = read_recommendation_file(rec_path) if rec_path else None
+        if payload is None and not rec_path:
+            print(
+                "[WARN] --confidence-objective set without --confidence-recommendations; "
+                f"keeping conf={args.conf}",
+                file=sys.stderr,
+            )
+        else:
+            args.conf = resolve_inference_confidence(
+                payload,
+                objective=str(getattr(args, "confidence_objective", None) or DEFAULT_OBJECTIVE),
+                aggregation=str(getattr(args, "confidence_aggregation", None) or "macro"),
+                fallback=float(args.conf),
+            )
+            print(
+                f"[INFO] Inference conf from recommendations "
+                f"(objective={getattr(args, 'confidence_objective', None) or DEFAULT_OBJECTIVE}, "
+                f"aggregation={getattr(args, 'confidence_aggregation', None) or 'macro'}): {args.conf}"
+            )
 
     try:
         workspace_root = resolve_workspace_root(args.workspace)

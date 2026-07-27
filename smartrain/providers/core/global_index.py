@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from smartrain.core.runtime.file_lock import locked_file
 
 
 def _utc_now() -> str:
@@ -23,25 +24,6 @@ def _config_root() -> Path:
 
 def index_path() -> Path:
     return _config_root() / "smartrain" / "providers" / "index.json"
-
-
-@contextmanager
-def _locked_file(path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    with open(lock_path, "a+", encoding="utf-8") as f:
-        try:
-            import fcntl
-
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            yield
-        finally:
-            try:
-                import fcntl
-
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-            except Exception:
-                pass
 
 
 def read_index() -> dict[str, Any]:
@@ -75,7 +57,7 @@ def write_index(payload: dict[str, Any]) -> None:
     payload = dict(payload)
     payload["schema_version"] = 1
     payload["updated_at"] = _utc_now()
-    with _locked_file(p):
+    with locked_file(p):
         if p.is_file():
             backup = p.with_suffix(".json.bak")
             try:

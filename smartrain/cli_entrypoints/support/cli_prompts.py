@@ -10,8 +10,11 @@ YES_TOKENS = {"y", "yes", "1", "true", "yes", "d"}
 NO_TOKENS = {"n", "no", "0", "false", "No", "n"}
 
 
+from smartrain.core.runtime.interactive_contract import stdin_is_tty
+
+
 def is_interactive_tty() -> bool:
-    return bool(sys.stdin.isatty())
+    return stdin_is_tty()
 
 
 def _prompt_label(label: str, default: str | None = None) -> str:
@@ -123,6 +126,21 @@ def print_numbered_options(label: str, options: Sequence[str]) -> None:
     print(f"[INFO] Options for {label}:")
     for i, opt in enumerate(options, start=1):
         print(f"  {i}. {opt}")
+
+
+def print_grouped_numbered_options(groups: Sequence[tuple[str, Sequence[str]]]) -> list[str]:
+    """Print grouped options with a single global index. Returns flat option list."""
+    flat: list[str] = []
+    idx = 1
+    for group_label, options in groups:
+        if not options:
+            continue
+        print(f"[INFO] {group_label}:")
+        for opt in options:
+            print(f"  {idx}. {opt}")
+            flat.append(opt)
+            idx += 1
+    return flat
 
 
 def prompt_choice(

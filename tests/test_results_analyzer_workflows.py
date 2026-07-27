@@ -52,6 +52,35 @@ def _write_run(
     return run_dir
 
 
+def _write_run_without_test_metrics(
+    root: Path,
+    dataset: str,
+    run_name: str,
+    *,
+    model: str,
+    map5095: float,
+) -> Path:
+    run_dir = root / "runs" / dataset / run_name
+    (run_dir / "train").mkdir(parents=True, exist_ok=True)
+    (run_dir / "models").mkdir(parents=True, exist_ok=True)
+    model_name = str(model or "").strip() or "best.pt"
+    if "." not in model_name:
+        model_name = f"{model_name}.pt"
+    (run_dir / "models" / model_name).write_bytes(b"model")
+    md = {
+        "training_info": {"model": model, "dataset": {"name": dataset}, "hyperparameters": {"epochs": 2}},
+        "status": {"training": {"success": True}, "testing": {"success": False}},
+    }
+    (run_dir / "training_metadata.json").write_text(json.dumps(md), encoding="utf-8")
+    pd.DataFrame(
+        [
+            {"epoch": 0, "metrics/mAP50-95(B)": map5095 - 0.1},
+            {"epoch": 1, "metrics/mAP50-95(B)": map5095},
+        ]
+    ).to_csv(run_dir / "train" / "results.csv", index=False)
+    return run_dir
+
+
 def _run_interactive(
     tmp_path: Path,
     *,
@@ -911,7 +940,7 @@ def test_collect_ultralytics_test_artifacts_prefers_new_layout(tmp_path: Path) -
         {"run_new_layout": "R1"},
     )
     assert rows and rows[0]["exists"] is True
-    assert str(rows[0]["test_dir"]).endswith("tests/test-ultralytics")
+    assert Path(str(rows[0]["test_dir"])).as_posix().endswith("tests/test-ultralytics")
 
 
 def test_analyze_all_does_not_prompt_for_missing_metrics_and_auto_recomputes(
@@ -1400,7 +1429,7 @@ def test_analyze_report_includes_images_and_tables_from_manifest(tmp_path: Path)
     assert "## 4. Model Format Comparison" in en_md
     assert "Format alias legend" in en_md
     assert "| Alias | Run | Target path |" in en_md
-    assert "Datasets: D1 = ds_a" in en_md
+    assert "Datasets: D1 = ds_a" in en_md or "- D1 = ds_a" in en_md
     assert "### 6.1 Run R1" in en_md
 
 
@@ -2263,8 +2292,7 @@ def test_runs_with_missing_metrics_uses_run_resolved_yaml_for_unresolved_cache(
     session_yaml = str(tmp_path / "datasets" / "other" / "data.yaml")
 
     monkeypatch.setattr(
-        results_analyzer,
-        "_resolve_data_yaml_for_run",
+        "smartrain.services.analyze.cli_commands._resolve_data_yaml_for_run",
         lambda *_a, **_k: (run_yaml, "mock"),
     )
 
@@ -2272,7 +2300,10 @@ def test_runs_with_missing_metrics_uses_run_resolved_yaml_for_unresolved_cache(
         assert data_yaml == run_yaml
         return {"unresolved_metrics": ["Box-F1"]}
 
-    monkeypatch.setattr(workflow_dispatch, "_load_recompute_status", _fake_load_status)
+    monkeypatch.setattr(
+        "smartrain.services.analyze.cli_commands._load_recompute_status",
+        _fake_load_status,
+    )
 
     missing = results_analyzer._runs_with_missing_metrics(
         [str(run_dir)],
@@ -2295,11 +2326,13 @@ def test_runs_with_missing_metrics_skips_prompt_without_resolved_data_yaml(
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
 
     monkeypatch.setattr(
-        results_analyzer,
-        "_resolve_data_yaml_for_run",
+        "smartrain.services.analyze.cli_commands._resolve_data_yaml_for_run",
         lambda *_a, **_k: ("", "none"),
     )
-    monkeypatch.setattr(workflow_dispatch, "_load_recompute_status", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "smartrain.services.analyze.cli_commands._load_recompute_status",
+        lambda *_a, **_k: None,
+    )
 
     missing = results_analyzer._runs_with_missing_metrics(
         [str(run_dir)],
@@ -2318,16 +2351,18 @@ def test_runs_with_missing_metrics_skips_prompt_without_best_pt(
     run_dir = tmp_path / "runs" / "ds_a" / "run_a"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "models").mkdir(parents=True, exist_ok=True)
-    (run_dir / "models" / "best.pt").write_bytes(b"model")
+    # No weights under models/ — recompute prompt must be skipped.
     pd.DataFrame([{"mAP50-95": 0.55}]).to_csv(run_dir / "test_metrics.csv", index=False)
     run_yaml = str(tmp_path / "datasets" / "ds_a" / "data.yaml")
 
     monkeypatch.setattr(
-        results_analyzer,
-        "_resolve_data_yaml_for_run",
+        "smartrain.services.analyze.cli_commands._resolve_data_yaml_for_run",
         lambda *_a, **_k: (run_yaml, "mock"),
     )
-    monkeypatch.setattr(workflow_dispatch, "_load_recompute_status", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "smartrain.services.analyze.cli_commands._load_recompute_status",
+        lambda *_a, **_k: None,
+    )
 
     missing = results_analyzer._runs_with_missing_metrics(
         [str(run_dir)],
@@ -2485,6 +2520,48 @@ def test_analyze_all_pr_group_artifacts_do_not_overwrite_between_groups(
     pr_pngs = [a["path"] for a in manifest.get("artifacts", []) if a.get("role") == "pr_per_class_png"]
     assert any("group_1/per_class" in p for p in pr_pngs)
     assert any("group_2/per_class" in p for p in pr_pngs)
+
+
+def test_analyze_all_continues_when_leaderboard_has_no_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_a = _write_run_without_test_metrics(tmp_path, "ds_a", "run_a", model="yolo11n.pt", map5095=0.52)
+    run_b = _write_run_without_test_metrics(tmp_path, "ds_a", "run_b", model="yolo11s.pt", map5095=0.56)
+    (tmp_path / "datasets" / "ds_a").mkdir(parents=True, exist_ok=True)
+    data_yaml = tmp_path / "datasets" / "ds_a" / "data.yaml"
+    data_yaml.write_text("test: test/images\n", encoding="utf-8")
+
+    monkeypatch.setattr(workflow_dispatch, "cmd_test_metrics_plot", lambda _args: None)
+    monkeypatch.setattr(workflow_dispatch, "_collect_ultralytics_test_artifacts", lambda *_a, **_k: ([], []))
+
+    analyze_main(
+        [
+            "all",
+            "--workspace",
+            str(tmp_path),
+            "--models-root",
+            str(tmp_path / "runs"),
+            "--baseline",
+            str(run_a),
+            "--others",
+            str(run_b),
+            "--profile",
+            "quality",
+            "--analytics-session",
+            "session_lb_soft_fail",
+            "--data-yaml",
+            str(data_yaml),
+            "--no-pdf",
+            "--no-odt",
+        ]
+    )
+    session_root = tmp_path / "analytics" / "analyze-reports" / "session_lb_soft_fail"
+    assert (session_root / "session.json").is_file()
+    manifest = json.loads((session_root / "session.json").read_text(encoding="utf-8"))
+    failures = manifest.get("artifact_failures", [])
+    assert any(f.get("reason_code") == "leaderboard_no_metrics" for f in failures)
+    assert not (session_root / "artifacts" / "leaderboard" / "leaderboard.csv").exists()
 
 
 def test_analyze_all_strict_diagnostics_fails_on_missing_metric_sources(

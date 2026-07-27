@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 
 HEARTBEAT_INTERVAL_SEC = 30
@@ -168,8 +169,23 @@ def _write_lease(path: Path, payload: dict[str, Any]) -> None:
 def _process_alive(pid: int | None) -> bool:
     if pid is None or pid <= 0:
         return False
+    pid_i = int(pid)
+    if sys.platform == "win32":
+        # os.kill(pid, 0) is unreliable on Windows for non-existent PIDs.
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, wintypes.DWORD(pid_i))
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            return False
+        except Exception:
+            return False
     try:
-        os.kill(int(pid), 0)
+        os.kill(pid_i, 0)
     except OSError as exc:
         if exc.errno == errno.ESRCH:
             return False
@@ -212,11 +228,8 @@ def _is_stale_lease(lease: dict[str, Any], *, local_host: str | None = None) -> 
         if _process_alive(pid) and _looks_like_smartrain(pid):
             return False
         return not _heartbeat_fresh(lease)
-    if not _heartbeat_fresh(lease):
-        return True
-    if not _process_alive(pid):
-        return True
-    return False
+    # Remote holder: PID is not meaningful on this host — trust heartbeat only.
+    return not _heartbeat_fresh(lease)
 
 
 def iter_peer_and_lock_files(layout: WorkspaceLayout) -> list[Path]:
@@ -245,7 +258,7 @@ def reconcile_local_holders(layout: WorkspaceLayout) -> int:
         try:
             path.unlink(missing_ok=True)
             removed += 1
-            rel = os.path.relpath(path, layout.root)
+            rel = posix_relpath(path, layout.root)
             print(
                 f"[INFO] Removed stale coordination file from previous interrupted run: "
                 f"{rel} (pid {pid} not running)",
@@ -282,7 +295,7 @@ def _reconcile_previous_session_sidecar(layout: WorkspaceLayout, host: str) -> N
             continue
         try:
             path.unlink(missing_ok=True)
-            rel = os.path.relpath(path, layout.root)
+            rel = posix_relpath(path, layout.root)
             print(f"[INFO] Removed stale file from previous session {previous}: {rel}", flush=True)
         except OSError:
             pass
@@ -329,7 +342,7 @@ def list_active_peers(layout: WorkspaceLayout) -> list[dict[str, Any]]:
         lease = _read_lease(path)
         if lease and not _is_stale_lease(lease):
             lease = dict(lease)
-            lease["_path"] = str(path.relative_to(layout.root))
+            lease["_path"] = path.relative_to(layout.root).as_posix()
             out.append(lease)
     return out
 
@@ -348,7 +361,7 @@ def list_active_locks(layout: WorkspaceLayout) -> list[dict[str, Any]]:
         if _is_stale_lease(lease):
             continue
         item = dict(lease)
-        item["_path"] = str(path.relative_to(layout.root))
+        item["_path"] = path.relative_to(layout.root).as_posix()
         item["_lock_name"] = path.stem
         out.append(item)
     return out

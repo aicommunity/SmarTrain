@@ -5,24 +5,11 @@ import os
 import sys
 from pathlib import Path
 
-
-class MFELConvModuleShim:  # picklable top-level shim for broken forks
-    def __init__(self, c1, c2, k=1, s=1, p=0, norm_cfg=None, act_cfg=None, **kwargs):
-        import torch.nn as nn
-
-        super().__init__()
-        groups = int(kwargs.get("groups", 1) or 1)
-        dilation = int(kwargs.get("dilation", 1) or 1)
-        bias = bool(kwargs.get("bias", False))
-        self.conv = nn.Conv2d(c1, c2, k, s, p, groups=groups, dilation=dilation, bias=bias)
-        self.bn = nn.BatchNorm2d(int(c2))
-        self.act = nn.SiLU(inplace=True)
-
-    def forward(self, x):
-        return self.act(self.bn(self.conv(x)))
-
-
+from smartrain.external_providers.launchers.mfel_shim import MFELConvModuleShim, patch_mfel_missing_symbols
 from smartrain.external_providers.task_alias import ultralytics_task_alias
+
+# Re-export for pickle/compat with workers that resolve this module name.
+__all__ = ["MFELConvModuleShim", "main"]
 
 
 def _resolve_mfel_model_spec(repo: Path, model_arg: str) -> str:
@@ -87,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         raise
-    _patch_mfel_missing_symbols()
+    patch_mfel_missing_symbols(host_globals=globals())
 
     # MFEL provider supports only its own custom configs from ultralytics/cfg/MFEL-YOLO.
     try:
@@ -117,25 +104,6 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["name"] = str(args.name)
     model.train(**kwargs)
     return 0
-
-
-def _patch_mfel_missing_symbols() -> None:
-    # Some MFEL forks reference MMCV ConvModule but do not vendor it.
-    try:
-        import torch.nn as nn
-        from ultralytics.nn.modules import block as block_mod
-    except Exception:
-        return
-    if getattr(block_mod, "ConvModule", None) is not None:
-        return
-
-    class _PatchedConvModule(MFELConvModuleShim, nn.Module):  # type: ignore[misc]
-        pass
-
-    _PatchedConvModule.__module__ = __name__
-    _PatchedConvModule.__qualname__ = "MFELPatchedConvModule"
-    globals()["MFELPatchedConvModule"] = _PatchedConvModule
-    setattr(block_mod, "ConvModule", _PatchedConvModule)
 
 
 if __name__ == "__main__":

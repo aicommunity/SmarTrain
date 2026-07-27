@@ -24,8 +24,18 @@ def _write_training_run(tmp_path: Path, name: str, *, model: str, dataset: str, 
         + ', "batch_size": 16}}}',
         encoding="utf-8",
     )
-    yaml.safe_dump({"model": f"{model}.pt", "epochs": epochs, "batch": 16}, (train / "args.yaml").open("w", encoding="utf-8"))
+    yaml.safe_dump({"model": f"{model}.pt", "epochs": epochs, "batch": 16, "imgsz": 640}, (train / "args.yaml").open("w", encoding="utf-8"))
     return run_dir
+
+
+def test_collision_labels_include_imgsz(tmp_path: Path) -> None:
+    from smartrain.services.analyze.report_labels import build_run_legend_rows
+
+    run_a = _write_training_run(tmp_path, "run_a", model="yolo11m", dataset="ds_a", epochs=200)
+    run_b = _write_training_run(tmp_path, "run_b", model="yolo11m", dataset="ds_b", epochs=100)
+    legend = build_run_legend_rows([str(run_a), str(run_b)])
+    assert "i640" in legend[0].short_label
+    assert legend[0].image_size == "640"
 
 
 def test_collision_labels_include_dataset(tmp_path: Path) -> None:
@@ -141,6 +151,34 @@ def test_append_figure_caption_lines_inserts_blank_lines() -> None:
     assert lines[6].startswith("*Рисунок 1.")
 
 
+def test_context_section_structure(tmp_path: Path) -> None:
+    from smartrain.services.analyze.report_writer import write_analysis_report
+
+    (tmp_path / "artifacts" / "table").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"run_name": "run_a", "test_mAP50-95": 0.9}]).to_csv(
+        tmp_path / "artifacts" / "table" / "runs_summary.csv", index=False
+    )
+    manifest = {
+        "session_name": "s_ctx",
+        "profile": "full",
+        "baseline": "run_a",
+        "others": ["run_b"],
+        "tables": ["artifacts/table/runs_summary.csv"],
+        "images": [],
+        "artifacts": [],
+        "format_comparison": {},
+        "abbreviations": {"run_a": "M1 yolo11m", "run_b": "M2 yolo11m", "ds_a": "D1"},
+        "run_legend": [],
+    }
+    write_analysis_report(str(tmp_path), manifest, no_pdf=True, no_odt=True)
+    ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
+    assert "### 2.1 Модели" in ru_md
+    assert "### 2.2 Датасет" in ru_md
+    assert "### 2.3 Модели и артефакты" in ru_md
+    ctx = ru_md[ru_md.find("## 2. Контекст") : ru_md.find("### 2.1")]
+    assert "Датасеты:" not in ctx or "D1 =" not in ctx
+
+
 def test_executive_summary_is_first_section(tmp_path: Path) -> None:
     from smartrain.services.analyze.report_writer import write_analysis_report
 
@@ -156,16 +194,32 @@ def test_executive_summary_is_first_section(tmp_path: Path) -> None:
             }
         ]
     ).to_csv(rs, index=False)
+    run_dir = tmp_path / "run_a"
+    models = run_dir / "models"
+    models.mkdir(parents=True)
+    stem = "detect_yolo11n_20260704_183140_640px_200epochs_b16"
+    (models / f"{stem}.pt").write_bytes(b"pt")
+    (models / f"{stem}.onnx").write_bytes(b"onnx")
+    (run_dir / "training_metadata.json").write_text(
+        '{"paths": {"best_model": "%s.pt"}, "hyperparameters": {"epochs": 1}}' % stem,
+        encoding="utf-8",
+    )
+    data_yaml = tmp_path / "data.yaml"
+    data_yaml.write_text(
+        "names:\n  0: construct\n  1: digits\n",
+        encoding="utf-8",
+    )
     manifest = {
         "session_name": "s_exec",
         "profile": "full",
-        "baseline": "run_a",
+        "baseline": str(run_dir),
         "others": [],
         "tables": ["artifacts/table/runs_summary.csv"],
         "images": [],
         "artifacts": [],
         "format_comparison": {},
-        "abbreviations": {"run_a": "M1 yolo11n"},
+        "abbreviations": {run_dir.name: "M1 yolo11n"},
+        "run_data_yaml_map": {str(run_dir): str(data_yaml)},
         "run_legend": [
             {
                 "index": 1,
@@ -174,8 +228,8 @@ def test_executive_summary_is_first_section(tmp_path: Path) -> None:
                 "dataset_label": "D1",
                 "epochs": "200",
                 "batch": "16",
-                "run_name": "run_a",
-                "run_dir": "run_a",
+                "run_name": run_dir.name,
+                "run_dir": str(run_dir),
                 "role": "baseline",
             }
         ],
@@ -184,10 +238,21 @@ def test_executive_summary_is_first_section(tmp_path: Path) -> None:
     ru_md = (tmp_path / "ru" / "index.md").read_text(encoding="utf-8")
     pos_exec = ru_md.find("## 1. Краткое резюме")
     pos_context = ru_md.find("## 2. Контекст")
+    pos_identity = ru_md.find("### Справочник запусков")
+    pos_legend = ru_md.find("Легенда запусков")
+    pos_classes = ru_md.find("Классы по моделям")
     pos_metrics = ru_md.find("Основные метрики по запускам")
     assert pos_exec != -1 and pos_context != -1
     assert pos_exec < pos_context
-    assert pos_metrics != -1 and pos_metrics < pos_context
+    assert pos_identity != -1 and pos_exec < pos_identity < pos_metrics < pos_context
+    assert pos_legend != -1 and pos_identity < pos_legend < pos_metrics
+    assert pos_classes != -1 and pos_legend < pos_classes < pos_metrics
+    assert stem + ".pt" in ru_md
+    assert stem + ".onnx" in ru_md
+    assert "0: construct" in ru_md
+    assert "1: digits" in ru_md
+    assert "Файлы модели" in ru_md
+    assert "Сокращения M1, M2" in ru_md or "порядковые ярлыки" in ru_md
     assert "Рейтинг моделей (сводка)" not in ru_md[:pos_context]
     assert "Компромисс скорость–качество" not in ru_md[:pos_context]
 

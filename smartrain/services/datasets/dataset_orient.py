@@ -119,7 +119,9 @@ def _interactive_fill(args, *, dataset_names: list[str]) -> None:
     from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_prefilled_text, prompt_text
 
     print("[INFO] Interactive mode orient")
-    args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
+    from smartrain.cli_entrypoints.support.cli_interactive import ensure_dataset_arg
+
+    ensure_dataset_arg(args, dataset_names)
     output_default = str(args.output_name or "").strip()
     if output_default:
         args.output_name = prompt_prefilled_text("Output dataset name", output_default).strip() or None

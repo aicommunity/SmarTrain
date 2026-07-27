@@ -58,12 +58,9 @@ def build_run_name(
     ts = timestamp or datetime.now()
     timestamp_str = ts.strftime("%Y-%m-%d_%H-%M")
     provider = str(provider_id or "ultralytics").strip().lower().replace(" ", "-")
-    model_token = Path(str(model_version)).name
-    if model_token.endswith(".pt"):
-        model_token = model_token[:-3]
-    if model_token.endswith(".yaml"):
-        model_token = model_token[:-5]
-    model_token = re.sub(r"[^a-zA-Z0-9._+-]+", "-", model_token).strip("-") or "model"
+    from smartrain.services.models.release_model_naming import model_token_from_version
+
+    model_token = model_token_from_version(model_version)
     img_token = f"_{int(img_size)}px" if img_size is not None else ""
     batch_token = format_batch_token(batch)
     folder_name = f"{timestamp_str}_{provider}_{model_token}{img_token}_{epochs}epochs_{batch_token}"
@@ -71,6 +68,27 @@ def build_run_name(
         folder_name = f"{folder_name}-{dataset_hash}"
     return folder_name
 
+
+def build_model_weights_stem(
+    task_type: str | None,
+    model_version: str,
+    epochs: int,
+    batch: int | float,
+    img_size: int,
+    *,
+    timestamp: datetime | None = None,
+) -> str:
+    """Filename stem for ``.pt`` / convert artifacts (independent of run folder name)."""
+    from smartrain.services.models.release_model_naming import build_model_weights_stem as _build
+
+    return _build(
+        task_type,
+        model_version,
+        epochs,
+        batch,
+        img_size,
+        timestamp=timestamp,
+    )
 
 def read_effective_ultralytics_train_hyperparams(run_dir: str) -> dict[str, Any]:
     args_path = training_args_yaml_path(run_dir)
@@ -117,6 +135,28 @@ def _rename_run_model_files(run_dir: str, old_name: str, new_name: str) -> None:
             entry.rename(target)
 
 
+def _sync_run_weights_to_stem(run_dir: str, weights_stem: str) -> None:
+    """Rename weight artifacts in run models/ to the canonical weights stem."""
+    models_dir = run_models_dir(run_dir)
+    if not models_dir.is_dir() or not weights_stem:
+        return
+    # Prefer an existing .pt as the rename source.
+    pt_candidates: list[Path] = []
+    resolved = resolve_run_model(run_dir, ".pt")
+    if resolved is not None and resolved.is_file() and resolved.parent == models_dir:
+        pt_candidates.append(resolved)
+    for entry in sorted(models_dir.glob("*.pt")):
+        if entry.is_file() and entry not in pt_candidates:
+            pt_candidates.append(entry)
+    if not pt_candidates:
+        return
+    source_pt = pt_candidates[0]
+    old_stem = source_pt.stem
+    if old_stem == weights_stem:
+        return
+    _rename_run_model_files(run_dir, old_stem, weights_stem)
+
+
 def _patch_metadata_after_run_rename(
     metadata_path: Path,
     *,
@@ -125,6 +165,7 @@ def _patch_metadata_after_run_rename(
     effective: dict[str, Any],
     workspace_root: str | None,
     new_run_dir: str,
+    weights_stem: str | None = None,
 ) -> None:
     if not metadata_path.is_file():
         return
@@ -139,13 +180,20 @@ def _patch_metadata_after_run_rename(
     paths = payload.get("paths")
     if isinstance(paths, dict):
         best_model = paths.get("best_model")
+        target_stem = weights_stem or new_name
         if isinstance(best_model, str):
             if best_model == f"{old_name}.pt" or best_model == old_name:
-                paths["best_model"] = f"{new_name}.pt"
+                paths["best_model"] = f"{target_stem}.pt"
                 changed = True
             elif best_model.startswith(f"{old_name}."):
-                paths["best_model"] = f"{new_name}{best_model[len(old_name):]}"
+                paths["best_model"] = f"{target_stem}{best_model[len(old_name):]}"
                 changed = True
+            elif weights_stem and best_model != f"{weights_stem}.pt":
+                paths["best_model"] = f"{weights_stem}.pt"
+                changed = True
+        elif weights_stem:
+            paths["best_model"] = f"{weights_stem}.pt"
+            changed = True
 
     ti = payload.get("training_info")
     if isinstance(ti, dict):
@@ -169,8 +217,9 @@ def _patch_metadata_after_run_rename(
     source = payload.get("source")
     if isinstance(source, dict):
         src_weights = source.get("source_weights")
+        target_stem = weights_stem or new_name
         if isinstance(src_weights, str) and src_weights.startswith(f"{old_name}."):
-            source["source_weights"] = f"{new_name}{src_weights[len(old_name):]}"
+            source["source_weights"] = f"{target_stem}{src_weights[len(old_name):]}"
             changed = True
 
     if not changed:
@@ -188,8 +237,12 @@ def finalize_run_dir_naming(
     dataset_hash: str | None,
     training_start_time: datetime | None,
     workspace_root: str | None = None,
+    task_type: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Reconcile run directory name with effective Ultralytics hyperparameters from args.yaml."""
+    """Reconcile run directory name with effective Ultralytics hyperparameters from args.yaml.
+
+    Folder naming stays ``build_run_name``; weight files are synced to ``build_model_weights_stem``.
+    """
     run_path = Path(model_dir).expanduser().resolve()
     if not run_path.is_dir() or not run_dir_has_train_artifacts(str(run_path)):
         return str(run_path), {}
@@ -214,35 +267,57 @@ def finalize_run_dir_naming(
         img_size=int(eff_img_size),
         timestamp=training_start_time,
     )
-    if new_name == old_name:
-        return str(run_path), effective
 
-    new_run_dir = run_path.parent / new_name
-    if new_run_dir.exists():
-        logger.warning(
-            "Skip run rename %s -> %s: target directory already exists",
-            run_path,
-            new_run_dir,
-        )
-        return str(run_path), effective
+    meta_path = run_path / "training_metadata.json"
+    resolved_task = task_type
+    if resolved_task is None and meta_path.is_file():
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            ti = payload.get("training_info") if isinstance(payload, dict) else None
+            if isinstance(ti, dict) and ti.get("task_type"):
+                resolved_task = str(ti.get("task_type"))
+        except Exception:
+            resolved_task = task_type
 
-    try:
-        run_path.rename(new_run_dir)
-    except OSError as exc:
-        logger.warning("Failed to rename run directory %s -> %s: %s", run_path, new_run_dir, exc)
-        return str(run_path), effective
+    weights_stem = build_model_weights_stem(
+        resolved_task,
+        model_version,
+        int(eff_epochs),
+        eff_batch,
+        int(eff_img_size),
+        timestamp=training_start_time,
+    )
 
-    _rename_run_model_files(str(new_run_dir), old_name, new_name)
+    current_run = run_path
+    if new_name != old_name:
+        new_run_dir = run_path.parent / new_name
+        if new_run_dir.exists():
+            logger.warning(
+                "Skip run rename %s -> %s: target directory already exists",
+                run_path,
+                new_run_dir,
+            )
+        else:
+            try:
+                run_path.rename(new_run_dir)
+                current_run = new_run_dir
+                _rename_run_model_files(str(new_run_dir), old_name, new_name)
+                print(f"[INFO] Run directory renamed to match effective training hyperparameters: {new_run_dir}")
+            except OSError as exc:
+                logger.warning("Failed to rename run directory %s -> %s: %s", run_path, new_run_dir, exc)
+                current_run = run_path
+
+    _sync_run_weights_to_stem(str(current_run), weights_stem)
     _patch_metadata_after_run_rename(
-        new_run_dir / "training_metadata.json",
+        current_run / "training_metadata.json",
         old_name=old_name,
-        new_name=new_name,
+        new_name=current_run.name,
         effective=effective,
         workspace_root=workspace_root,
-        new_run_dir=str(new_run_dir),
+        new_run_dir=str(current_run),
+        weights_stem=weights_stem,
     )
-    print(f"[INFO] Run directory renamed to match effective training hyperparameters: {new_run_dir}")
-    return str(new_run_dir), effective
+    return str(current_run), effective
 
 
 def run_dir_has_train_artifacts(run_dir: str) -> bool:

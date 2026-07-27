@@ -24,7 +24,10 @@ from ultralytics.utils import nms as ultralytics_nms
 from ultralytics.utils.metrics import ap_per_class
 
 from smartrain.core.runtime.run_artifacts import ensure_run_layout, read_model_sidecar_metadata
-from smartrain.core.testing.artifact_paths import format_test_dir_for_write
+from smartrain.core.testing.artifact_paths import (
+    format_metrics_path_for_write,
+    format_test_dir_for_write,
+)
 from smartrain.services.testing.unified_metrics_adapter import collect_ultralytics_style_gt
 
 

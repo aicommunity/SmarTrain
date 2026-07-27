@@ -40,57 +40,26 @@ from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-BALANCE_PRESETS: dict[str, dict[str, object]] = {
-    # Conservative weighted balancing for most datasets.
-    "weights-safe": {
-        "strategy": "weights",
-        "weight_mode": "effective",
-        "beta": 0.9999,
-        "image_weight_agg": "mean",
-        "weight_clip_min": 0.5,
-        "weight_clip_max": 2.0,
-        "replacement": "auto",
-        "target": 1.2,
-        "max_repeat_per_image": 3,
-    },
-    # LVIS-like repeat-factor sampling, more aggressive on tail classes.
-    "rfs-aggressive": {
-        "strategy": "rfs",
-        "rfs_thresh": 0.002,
-        "rfs_power": 0.5,
-        "target": 1.5,
-        "max_repeat_per_image": 6,
-    },
-    # Recommended default: moderate RFS + weighted sampling.
-    "hybrid-default": {
-        "strategy": "hybrid",
-        "weight_mode": "effective",
-        "beta": 0.9999,
-        "image_weight_agg": "max",
-        "weight_clip_min": 0.4,
-        "weight_clip_max": 3.0,
-        "replacement": "auto",
-        "rfs_thresh": 0.001,
-        "rfs_power": 0.5,
-        "target": 1.3,
-        "max_repeat_per_image": 5,
-    },
-    # Default for hybrid-aug: constrained growth + tail-first budget + head trim.
-    "hybrid-aug-tail-budget": {
-        "strategy": "hybrid-aug",
-        "aug_class_aware_geo": True,
-        "aug_total_bbox_cap_mult": 1.10,
-        "aug_budget_tail_first": True,
-        "aug_budget_tail_gamma": 1.0,
-        "train_head_bbox_undersample": "median-factor",
-        "train_head_bbox_cap_mult": 5.0,
-        "eval_head_bbox_undersample": "median-factor",
-        "eval_head_bbox_cap_mult": 8.0,
-        "eval_head_bbox_min_count": 30,
-        "eval_head_bbox_max_remove_frac": 0.35,
-    },
-}
-
+from smartrain.services.datasets.balance_presets import (
+    BALANCE_PRESETS,
+    _apply_hybrid_aug_default_mode,
+    _build_hybrid_aug_augment_argv,
+)
+from smartrain.services.datasets.balance_strategies import (
+    _apply_class_weight_multipliers,
+    _auto_head_cap_multipliers,
+    _class_weights,
+    _image_weights,
+    _irfs_expand_pool,
+    _parse_class_weight_multiplier,
+    _rfs_expand_pool,
+    _weighted_sample_items,
+)
+from smartrain.services.datasets.balance_eval_coverage import (
+    _enforce_no_cross_split_duplicates,
+    _ensure_non_empty_eval_splits,
+    _head_bbox_undersample_balanced_train,
+)
 
 def build_balance_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(description="Balancing the dataset into a new datasets/<name>")
@@ -110,7 +79,17 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--strategy",
-        choices=("copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid", "hybrid-aug"),
+        choices=(
+            "copy",
+            "oversample",
+            "undersample",
+            "class-aware",
+            "weights",
+            "rfs",
+            "irfs",
+            "hybrid",
+            "hybrid-aug",
+        ),
         default="oversample",
     )
     p.add_argument("--target", type=float, default=1.0, help="Train size multiplier after balancing")
@@ -323,11 +302,23 @@ def _read_label_classes(label_path: str) -> list[int]:
 
 def _interactive_fill(args, dataset_names: list[str], catalog: dict) -> None:
     print("[INFO] Interactive balance mode")
-    args.dataset = prompt_choice("Dataset", dataset_names, default=dataset_names[0])
+    from smartrain.cli_entrypoints.support.cli_interactive import ensure_dataset_arg
+
+    ensure_dataset_arg(args, dataset_names)
     class_names = sorted_class_names_for_dataset(catalog, str(args.dataset))
     args.strategy = prompt_choice(
         "Strategy",
-        ["copy", "oversample", "undersample", "class-aware", "weights", "rfs", "hybrid", "hybrid-aug"],
+        [
+            "copy",
+            "oversample",
+            "undersample",
+            "class-aware",
+            "weights",
+            "rfs",
+            "irfs",
+            "hybrid",
+            "hybrid-aug",
+        ],
         default=args.strategy,
     )
     if args.strategy == "hybrid-aug":
@@ -516,32 +507,6 @@ def _apply_preset_defaults(args: argparse.Namespace, provided_flags: set[str]) -
         setattr(args, attr, value)
 
 
-def _apply_hybrid_aug_default_mode(args: argparse.Namespace, provided_flags: set[str]) -> None:
-    """Default mode for hybrid-aug unless explicitly overridden by CLI flags."""
-    if str(getattr(args, "strategy", "")) != "hybrid-aug":
-        return
-    mode_defaults: dict[str, object] = BALANCE_PRESETS["hybrid-aug-tail-budget"]
-    flags_by_attr: dict[str, set[str]] = {
-        "aug_class_aware_geo": {"--aug-class-aware-geo", "--no-aug-class-aware-geo"},
-        "aug_total_bbox_cap_mult": {"--aug-total-bbox-cap-mult"},
-        "aug_budget_tail_first": {"--aug-budget-tail-first", "--no-aug-budget-tail-first"},
-        "aug_budget_tail_gamma": {"--aug-budget-tail-gamma"},
-        "train_head_bbox_undersample": {"--train-head-bbox-undersample"},
-        "train_head_bbox_cap_mult": {"--train-head-bbox-cap-mult"},
-        "eval_head_bbox_undersample": {"--eval-head-bbox-undersample"},
-        "eval_head_bbox_cap_mult": {"--eval-head-bbox-cap-mult"},
-        "eval_head_bbox_min_count": {"--eval-head-bbox-min-count"},
-        "eval_head_bbox_max_remove_frac": {"--eval-head-bbox-max-remove-frac"},
-    }
-    for attr, value in mode_defaults.items():
-        if attr == "strategy":
-            continue
-        flags = flags_by_attr.get(attr, set())
-        if flags and any(f in provided_flags for f in flags):
-            continue
-        setattr(args, attr, value)
-
-
 def _build_balancing_stats(
     selected_pool: list[tuple[str, str, str, list[str]]],
     selected_classes: set[str],
@@ -564,471 +529,6 @@ def _build_balancing_stats(
     return bbox_count, image_presence, img_to_classes
 
 
-def _class_weights(
-    bbox_count: dict[str, int],
-    *,
-    mode: str,
-    beta: float,
-    min_count: int,
-) -> dict[str, float]:
-    out: dict[str, float] = {}
-    for c, n_raw in bbox_count.items():
-        n = max(int(n_raw), int(min_count))
-        if mode == "inverse":
-            w = 1.0 / max(1, n)
-        elif mode == "sqrt-inverse":
-            w = 1.0 / math.sqrt(max(1, n))
-        else:
-            b = min(max(float(beta), 0.0), 0.999999)
-            eff = (1.0 - (b**n)) / max(1e-12, 1.0 - b)
-            w = 1.0 / max(eff, 1e-12)
-        out[c] = w
-    if not out:
-        return out
-    mean_w = sum(out.values()) / len(out)
-    if mean_w > 0:
-        out = {k: v / mean_w for k, v in out.items()}
-    return out
-
-
-def _parse_class_weight_multiplier(raw: str) -> dict[str, float]:
-    out: dict[str, float] = {}
-    text = (raw or "").strip()
-    if not text:
-        return out
-    for token in text.split(","):
-        part = token.strip()
-        if not part:
-            continue
-        if ":" not in part:
-            raise ValueError(f"Invalid class multiplier token: '{part}'. Expected <class>:<multiplier>.")
-        name, value = part.split(":", 1)
-        cls_name = name.strip()
-        if not cls_name:
-            raise ValueError(f"Invalid class multiplier token: '{part}'. Class name is empty.")
-        try:
-            mult = float(value.strip())
-        except ValueError as exc:
-            raise ValueError(f"Invalid multiplier for class '{cls_name}': '{value.strip()}'.") from exc
-        if not math.isfinite(mult) or mult <= 0:
-            raise ValueError(f"Multiplier for class '{cls_name}' must be a positive finite number.")
-        out[cls_name] = mult
-    return out
-
-
-def _quantile(values: list[int], q: float) -> float:
-    if not values:
-        return 0.0
-    data = sorted(values)
-    q_clamped = min(max(float(q), 0.0), 1.0)
-    if len(data) == 1:
-        return float(data[0])
-    pos = (len(data) - 1) * q_clamped
-    lo = int(math.floor(pos))
-    hi = int(math.ceil(pos))
-    if lo == hi:
-        return float(data[lo])
-    frac = pos - lo
-    return float(data[lo] * (1.0 - frac) + data[hi] * frac)
-
-
-def _auto_head_cap_multipliers(
-    bbox_count: dict[str, int],
-    *,
-    quantile: float,
-    min_mult: float,
-) -> dict[str, float]:
-    if len(bbox_count) < 3:
-        return {}
-    counts = [int(v) for v in bbox_count.values() if int(v) > 0]
-    if not counts:
-        return {}
-    threshold = _quantile(counts, quantile)
-    if threshold <= 0:
-        return {}
-    median_count = _quantile(counts, 0.5)
-    if median_count <= 0:
-        return {}
-    out: dict[str, float] = {}
-    floor_mult = max(0.01, min(1.0, float(min_mult)))
-    for cls_name, n_raw in bbox_count.items():
-        n = max(1, int(n_raw))
-        if float(n) <= threshold:
-            continue
-        # Smoothly reduce weights for head classes above quantile threshold.
-        mult = math.sqrt(float(median_count) / float(n))
-        out[cls_name] = max(floor_mult, min(1.0, mult))
-    return out
-
-
-def _apply_class_weight_multipliers(
-    class_weights: dict[str, float],
-    multipliers: dict[str, float],
-) -> dict[str, float]:
-    if not class_weights:
-        return class_weights
-    if not multipliers:
-        return class_weights
-    out: dict[str, float] = {}
-    for cls_name, w in class_weights.items():
-        out[cls_name] = float(w) * float(multipliers.get(cls_name, 1.0))
-    return out
-
-
-def _image_weights(
-    selected_pool: list[tuple[str, str, str, list[str]]],
-    class_weights: dict[str, float],
-    *,
-    agg: str,
-    clip_min: float,
-    clip_max: float,
-    selected_classes: set[str],
-) -> list[float]:
-    weights: list[float] = []
-    for _split, _img, _lbl, cls_names in selected_pool:
-        classes = [c for c in cls_names if (not selected_classes or c in selected_classes)]
-        vals = [class_weights.get(c, 1.0) for c in classes] or [1.0]
-        if agg == "sum":
-            w = sum(vals)
-        elif agg == "mean":
-            w = sum(vals) / len(vals)
-        else:
-            w = max(vals)
-        w = max(float(clip_min), min(float(clip_max), float(w)))
-        weights.append(w)
-    return weights
-
-
-def _weighted_sample_items(
-    pool: list[tuple[str, str, str, list[str]]],
-    weights: list[float],
-    target_n: int,
-    *,
-    replacement: str,
-    max_repeat_per_image: int,
-    rng: random.Random,
-) -> list[tuple[str, str, str, list[str]]]:
-    if not pool:
-        return []
-    if replacement == "on":
-        use_repl = True
-    elif replacement == "off":
-        use_repl = False
-    else:
-        use_repl = target_n > len(pool)
-    target_n = max(1, int(target_n))
-    out: list[tuple[str, str, str, list[str]]] = []
-    if not use_repl:
-        idxs = list(range(len(pool)))
-        pick_n = min(target_n, len(pool))
-        chosen = rng.choices(idxs, weights=weights, k=pick_n * 2)
-        seen = set()
-        for i in chosen:
-            if i in seen:
-                continue
-            seen.add(i)
-            out.append(pool[i])
-            if len(out) >= pick_n:
-                break
-        if len(out) < pick_n:
-            for i in idxs:
-                if i in seen:
-                    continue
-                out.append(pool[i])
-                if len(out) >= pick_n:
-                    break
-        return out
-    counts_by_img: dict[str, int] = defaultdict(int)
-    idxs = list(range(len(pool)))
-    while len(out) < target_n:
-        i = rng.choices(idxs, weights=weights, k=1)[0]
-        img_key = pool[i][1]
-        if counts_by_img[img_key] >= max(1, int(max_repeat_per_image)):
-            continue
-        counts_by_img[img_key] += 1
-        out.append(pool[i])
-    return out
-
-
-def _rfs_expand_pool(
-    pool: list[tuple[str, str, str, list[str]]],
-    img_to_classes: dict[str, set[str]],
-    image_presence: dict[str, int],
-    *,
-    rfs_thresh: float,
-    rfs_power: float,
-    max_repeat_per_image: int,
-    rng: random.Random,
-) -> list[tuple[str, str, str, list[str]]]:
-    n_images = max(1, len({img for _s, img, _l, _c in pool}))
-    class_repeat: dict[str, float] = {}
-    for c, n_img in image_presence.items():
-        f_c = max(1e-12, float(n_img) / float(n_images))
-        class_repeat[c] = max(1.0, (float(rfs_thresh) / f_c) ** float(rfs_power))
-    out: list[tuple[str, str, str, list[str]]] = []
-    for item in pool:
-        img = item[1]
-        classes = img_to_classes.get(img, set())
-        r_i = max([class_repeat.get(c, 1.0) for c in classes] or [1.0])
-        base = int(math.floor(r_i))
-        frac = r_i - base
-        repeats = base + (1 if rng.random() < frac else 0)
-        repeats = min(max(1, repeats), max(1, int(max_repeat_per_image)))
-        for _ in range(repeats):
-            out.append(item)
-    return out
-
-
-def _ensure_non_empty_eval_splits(
-    balanced_train: list[tuple[str, str, str, list[str]]],
-    passthrough_items: list[tuple[str, str, str, list[str]]],
-    *,
-    seed: int,
-    eval_min_class_count: int = 0,
-) -> list[tuple[str, str, str, list[str]]]:
-    """
-    Ensure val/test are not empty in output when possible.
-    We keep the current logic as-is unless one of eval splits is empty.
-    If needed, move a deterministic subset of balanced-train items to val/test
-    targeting roughly 80/10/10 split.
-    """
-    out_train = list(balanced_train)
-    passthrough_keys = {_source_image_key(img) for _s, img, _lbl, _cls in passthrough_items}
-
-    def train_groups() -> dict[str, list[int]]:
-        groups: dict[str, list[int]] = defaultdict(list)
-        for i, (s, img, _lbl, _cls) in enumerate(out_train):
-            if s != "train":
-                continue
-            groups[_source_image_key(img)].append(i)
-        return groups
-
-    def movable_train_keys() -> list[str]:
-        groups = train_groups()
-        return [key for key in groups.keys() if key not in passthrough_keys]
-
-    def move_key_to_split(key: str, target_split: str) -> int:
-        moved = 0
-        for i in train_groups().get(key, []):
-            s, img, lbl, cls = out_train[i]
-            if s != target_split:
-                out_train[i] = (target_split, img, lbl, cls)
-                moved += 1
-        return moved
-
-    val_count = sum(1 for s, *_ in passthrough_items if s == "val")
-    test_count = sum(1 for s, *_ in passthrough_items if s == "test")
-    total = len(out_train) + len(passthrough_items)
-    if total < 3:
-        return out_train
-    have_non_empty_eval = val_count > 0 and test_count > 0
-
-    target_val = max(1, int(round(total * 0.1)))
-    target_test = max(1, int(round(total * 0.1)))
-    need_val = max(0, target_val - val_count)
-    need_test = max(0, target_test - test_count)
-    # Keep at least one source key in train and move only split-safe keys.
-    can_move = max(0, len(movable_train_keys()) - 1)
-    if need_val + need_test > can_move:
-        # Prioritize making both splits non-empty first.
-        min_need_val = 1 if val_count == 0 and can_move > 0 else 0
-        min_need_test = 1 if test_count == 0 and can_move > min_need_val else 0
-        left = max(0, can_move - min_need_val - min_need_test)
-        need_val = min_need_val
-        need_test = min_need_test
-        # Distribute remaining budget approximately evenly.
-        add_val = min(left // 2 + left % 2, max(0, target_val - val_count - need_val))
-        need_val += add_val
-        left -= add_val
-        add_test = min(left, max(0, target_test - test_count - need_test))
-        need_test += add_test
-
-    if (not have_non_empty_eval) and (need_val > 0 or need_test > 0):
-        rng = random.Random(seed)
-        keys = movable_train_keys()
-        rng.shuffle(keys)
-
-        pos = 0
-        for _ in range(need_val):
-            if pos >= len(keys):
-                break
-            key = keys[pos]
-            pos += 1
-            move_key_to_split(key, "val")
-        for _ in range(need_test):
-            if pos >= len(keys):
-                break
-            key = keys[pos]
-            pos += 1
-            move_key_to_split(key, "test")
-
-        cur_val = sum(1 for s, *_ in out_train if s == "val") + val_count
-        cur_test = sum(1 for s, *_ in out_train if s == "test") + test_count
-        if val_count == 0 and cur_val == 0:
-            print(
-                "[WARN] eval_coverage: val is empty and could not be seeded; "
-                "no split-safe train source keys are available."
-            )
-        if test_count == 0 and cur_test == 0:
-            print(
-                "[WARN] eval_coverage: test is empty and could not be seeded; "
-                "no split-safe train source keys are available."
-            )
-
-    # Optional class-coverage enrichment for eval splits:
-    # if a class exists globally but is absent in val/test, move a minimal
-    # number of train items containing that class to the target split.
-    global_classes = {
-        c
-        for _s, _img, _lbl, cls_names in (out_train + passthrough_items)
-        for c in cls_names
-    }
-    if not global_classes:
-        return out_train
-
-    rng_cov = random.Random(seed + 17)
-
-    def present_classes(split_name: str) -> set[str]:
-        out = set()
-        for s, _img, _lbl, cls_names in out_train:
-            if s == split_name:
-                out.update(cls_names)
-        for s, _img, _lbl, cls_names in passthrough_items:
-            if s == split_name:
-                out.update(cls_names)
-        return out
-
-    def train_count() -> int:
-        return sum(1 for s, *_ in out_train if s == "train")
-
-    for target_split in ("val", "test"):
-        missing = set(global_classes) - present_classes(target_split)
-        # keep at least one sample in train
-        while missing and train_count() > 1:
-            groups = train_groups()
-            movable = [k for k in groups.keys() if k not in passthrough_keys]
-            candidates: list[tuple[int, str]] = []
-            for key in movable:
-                idxs = groups.get(key, [])
-                group_classes: set[str] = set()
-                for i in idxs:
-                    s, _img, _lbl, cls_names = out_train[i]
-                    if s != "train":
-                        continue
-                    group_classes.update(cls_names)
-                cover = len(group_classes & missing)
-                if cover > 0:
-                    candidates.append((cover, key))
-            if not candidates:
-                missing_preview = ", ".join(sorted(missing)[:8])
-                movable_count = len(movable)
-                print(
-                    f"[WARN] eval_coverage: cannot cover missing classes in '{target_split}' "
-                    f"without cross-split duplicate risk. Missing ({len(missing)}): {missing_preview}"
-                    f"{' ...' if len(missing) > 8 else ''}; movable source keys: {movable_count}."
-                )
-                break
-            # maximize coverage; tie-break with deterministic random jitter.
-            max_cover = max(c for c, _ in candidates)
-            best_keys = [k for c, k in candidates if c == max_cover]
-            chosen_key = best_keys[rng_cov.randrange(len(best_keys))]
-            covered: set[str] = set()
-            for i in train_groups().get(chosen_key, []):
-                s, _img, _lbl, cls_names = out_train[i]
-                if s != "train":
-                    continue
-                covered.update(cls_names)
-            move_key_to_split(chosen_key, target_split)
-            missing -= covered
-
-    # Optional eval-tail strengthening:
-    # raise per-class bbox minimum in val/test by moving split-safe train groups.
-    target_min = max(0, int(eval_min_class_count))
-    if target_min <= 0:
-        return out_train
-
-    def split_bbox_counts(split_name: str) -> dict[str, int]:
-        counts: dict[str, int] = defaultdict(int)
-        for s, _img, _lbl, cls_names in out_train:
-            if s != split_name:
-                continue
-            for c in cls_names:
-                counts[c] += 1
-        for s, _img, _lbl, cls_names in passthrough_items:
-            if s != split_name:
-                continue
-            for c in cls_names:
-                counts[c] += 1
-        return counts
-
-    for target_split in ("val", "test"):
-        while train_count() > 1:
-            current = split_bbox_counts(target_split)
-            shortage = {c: target_min - int(current.get(c, 0)) for c in global_classes if int(current.get(c, 0)) < target_min}
-            if not shortage:
-                break
-            groups = train_groups()
-            movable = [k for k in groups.keys() if k not in passthrough_keys]
-            best_key = None
-            best_gain = 0
-            for key in movable:
-                idxs = groups.get(key, [])
-                key_box_counts: dict[str, int] = defaultdict(int)
-                for i in idxs:
-                    s, _img, _lbl, cls_names = out_train[i]
-                    if s != "train":
-                        continue
-                    for c in cls_names:
-                        key_box_counts[c] += 1
-                gain = 0
-                for c, miss in shortage.items():
-                    gain += min(int(miss), int(key_box_counts.get(c, 0)))
-                if gain > best_gain:
-                    best_gain = gain
-                    best_key = key
-            if best_key is None or best_gain <= 0:
-                break
-            move_key_to_split(best_key, target_split)
-    return out_train
-
-
-def _enforce_no_cross_split_duplicates(
-    balanced_train: list[tuple[str, str, str, list[str]]],
-    passthrough_items: list[tuple[str, str, str, list[str]]],
-) -> tuple[list[tuple[str, str, str, list[str]]], list[tuple[str, str, str, list[str]]], int]:
-    """
-    Force each source image key to belong to exactly one split globally.
-    Priority: train > val > test.
-    """
-    split_priority = {"train": 0, "val": 1, "test": 2}
-    grouped: dict[str, list[str]] = defaultdict(list)
-    for s, img, _lbl, _cls in balanced_train:
-        grouped[_source_image_key(img)].append(s)
-    for s, img, _lbl, _cls in passthrough_items:
-        grouped[_source_image_key(img)].append(s)
-
-    winner_by_key: dict[str, str] = {}
-    for key, splits in grouped.items():
-        winner_by_key[key] = min(splits, key=lambda s: split_priority.get(s, 99))
-
-    changed = 0
-    new_balanced: list[tuple[str, str, str, list[str]]] = []
-    for s, img, lbl, cls in balanced_train:
-        win = winner_by_key[_source_image_key(img)]
-        if s != win:
-            changed += 1
-        new_balanced.append((win, img, lbl, cls))
-
-    new_passthrough: list[tuple[str, str, str, list[str]]] = []
-    for s, img, lbl, cls in passthrough_items:
-        win = winner_by_key[_source_image_key(img)]
-        if s != win:
-            changed += 1
-        new_passthrough.append((win, img, lbl, cls))
-
-    return new_balanced, new_passthrough, changed
-
-
 def _remove_dataset_from_workspace_catalog(layout: WorkspaceLayout, dataset_key: str) -> None:
     info_path = layout.work_datasets_info_path()
     if not os.path.isfile(info_path):
@@ -1040,73 +540,6 @@ def _remove_dataset_from_workspace_catalog(layout: WorkspaceLayout, dataset_key:
     del data[dataset_key]
     with open(info_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-
-
-def _build_hybrid_aug_augment_argv(
-    *,
-    workspace: str,
-    intermediate_dataset: str,
-    final_base: str,
-    seed: int,
-    preset: str,
-    aug_enable_bbox_copy: bool,
-    aug_class_aware_geo: bool,
-    aug_total_bbox_cap_mult: float,
-    aug_budget_tail_first: bool,
-    aug_budget_tail_gamma: float,
-    aug_imbalance_mode: str = "soft",
-    aug_imbalance_strength: float = 1.0,
-    aug_flip_sampling: str = "probabilistic",
-    aug_flip_prob: float = 0.5,
-    aug_min_diversity_iou: float = 0.97,
-) -> list[str]:
-    argv = [
-        "--workspace",
-        workspace,
-        "--dataset",
-        intermediate_dataset,
-        "--output-name",
-        final_base,
-        "--seed",
-        str(seed),
-        "--splits",
-        "train",
-        "--enable-flip",
-        "--enable-photometric",
-        "--enable-center-rotate",
-        "--center-rotate-anchor",
-        "center",
-        "--center-rotate-deg",
-        "5",
-        "--rotate-copies",
-        "1",
-        "--imbalance-mode",
-        str(aug_imbalance_mode),
-        "--imbalance-strength",
-        str(float(aug_imbalance_strength)),
-        "--flip-sampling",
-        str(aug_flip_sampling),
-        "--flip-prob",
-        str(float(aug_flip_prob)),
-        "--min-diversity-iou",
-        str(float(aug_min_diversity_iou)),
-    ]
-    if preset == "conveyor-lite":
-        argv.append("--enable-conveyor")
-    if aug_enable_bbox_copy:
-        argv.append("--enable-bbox-copy")
-    if aug_class_aware_geo:
-        argv.append("--aug-class-aware-geo")
-    else:
-        argv.append("--no-aug-class-aware-geo")
-    if float(aug_total_bbox_cap_mult) > 0:
-        argv.extend(["--aug-total-bbox-cap-mult", str(float(aug_total_bbox_cap_mult))])
-        if aug_budget_tail_first:
-            argv.append("--aug-budget-tail-first")
-        else:
-            argv.append("--no-aug-budget-tail-first")
-        argv.extend(["--aug-budget-tail-gamma", str(float(aug_budget_tail_gamma))])
-    return argv
 
 
 def _read_label_text_lines(lbl_path: str) -> list[str]:
@@ -1124,133 +557,6 @@ def _line_class_id(line: str) -> int | None:
         return int(float(parts[0]))
     except ValueError:
         return None
-
-
-def _head_bbox_undersample_balanced_train(
-    balanced_train: list[tuple[str, str, str, list[str]]],
-    *,
-    id_to_name: dict[int, str],
-    cap_mult: float,
-    seed: int,
-    selected_classes: set[str],
-) -> tuple[list[tuple[str, str, str, list[str]]], dict[str, object], list[set[int]]]:
-    """Stratified removal of excess bbox lines for head classes (plan §7)."""
-    empty_skips = [set() for _ in balanced_train]
-    counts: Counter[str] = Counter()
-    for _s, _img, _lbl, cls_names in balanced_train:
-        for c in cls_names:
-            if selected_classes and c not in selected_classes:
-                continue
-            counts[c] += 1
-    if not counts:
-        return balanced_train, {}, empty_skips
-
-    vals_sorted = sorted(int(v) for v in counts.values())
-    median_bbox = int(_quantile(vals_sorted, 0.5))
-    if median_bbox <= 0:
-        return balanced_train, {}, empty_skips
-
-    cap_target = max(0, int(math.floor(float(cap_mult) * float(median_bbox))))
-    omit: dict[int, set[int]] = {}
-
-    for cls_name, n_raw in counts.items():
-        if int(n_raw) <= cap_target:
-            continue
-        excess = int(n_raw) - cap_target
-        pool: list[tuple[int, int]] = []
-        for ti, (_sp, img, lbl, _cn) in enumerate(balanced_train):
-            lines = _read_label_text_lines(lbl)
-            for li, raw in enumerate(lines):
-                cid = _line_class_id(raw)
-                if cid is None:
-                    continue
-                name = id_to_name.get(cid, f"id_{cid}")
-                if selected_classes and name not in selected_classes:
-                    continue
-                if name != cls_name:
-                    continue
-                pool.append((ti, li))
-        pool.sort(key=lambda p: (Path(balanced_train[p[0]][1]).stem, p[0], p[1]))
-        if not pool or excess <= 0:
-            continue
-        g_sz = min(32, max(1, len(pool)))
-        groups: dict[int, list[tuple[int, int]]] = defaultdict(list)
-        for ti, li in pool:
-            stem = Path(balanced_train[ti][1]).stem
-            h = int(hashlib.md5(f"{seed}:{stem}".encode()).hexdigest(), 16)
-            groups[h % g_sz].append((ti, li))
-        removed_pairs: set[tuple[int, int]] = set()
-        while len(removed_pairs) < excess and groups:
-            best_g: int | None = None
-            best_sz = -1
-            for g in sorted(groups.keys()):
-                sz = sum(1 for pair in groups[g] if pair not in removed_pairs)
-                if sz > best_sz:
-                    best_sz = sz
-                    best_g = g
-            if best_g is None or best_sz <= 0:
-                break
-            for pair in groups[best_g]:
-                if pair not in removed_pairs:
-                    removed_pairs.add(pair)
-                    ti, li = pair
-                    omit.setdefault(ti, set()).add(li)
-                    break
-
-    dropped_indices = set()
-    for ti, it in enumerate(balanced_train):
-        lines = _read_label_text_lines(it[2])
-        kept_is = [j for j in range(len(lines)) if j not in omit.get(ti, set())]
-        if not kept_is:
-            dropped_indices.add(ti)
-
-    after_counts: Counter[str] = Counter()
-    for ti, (_s, _img, lbl, _cn) in enumerate(balanced_train):
-        if ti in dropped_indices:
-            continue
-        lines = _read_label_text_lines(lbl)
-        kept_lines = [lines[j] for j in range(len(lines)) if j not in omit.get(ti, set())]
-        for raw in kept_lines:
-            cid = _line_class_id(raw)
-            if cid is None:
-                continue
-            name = id_to_name.get(cid, f"id_{cid}")
-            if selected_classes and name not in selected_classes:
-                continue
-            after_counts[name] += 1
-
-    per_class: dict[str, dict[str, int]] = {}
-    for cls_name, before in counts.items():
-        after = int(after_counts.get(cls_name, 0))
-        per_class[str(cls_name)] = {"before": int(before), "after": after, "removed": max(0, int(before) - after)}
-
-    new_train: list[tuple[str, str, str, list[str]]] = []
-    for ti, it in enumerate(balanced_train):
-        if ti in dropped_indices:
-            continue
-        lines = _read_label_text_lines(it[2])
-        kept_lines = [lines[j] for j in range(len(lines)) if j not in omit.get(ti, set())]
-        new_cls: list[str] = []
-        for raw in kept_lines:
-            cid = _line_class_id(raw)
-            if cid is None:
-                continue
-            new_cls.append(id_to_name.get(cid, f"id_{cid}"))
-        new_train.append((it[0], it[1], it[2], new_cls))
-
-    stats: dict[str, object] = {
-        "mode": "median-factor",
-        "cap_mult": float(cap_mult),
-        "median_bbox_per_class": median_bbox,
-        "cap_target": cap_target,
-        "per_class": per_class,
-    }
-    label_skips: list[set[int]] = []
-    for ti, _it in enumerate(balanced_train):
-        if ti in dropped_indices:
-            continue
-        label_skips.append(set(omit.get(ti, set())))
-    return new_train, stats, label_skips
 
 
 def _head_bbox_undersample_items(
@@ -1521,16 +827,27 @@ def main(argv=None):
     else:
         rng = random.Random(args.seed)
         bbox_count, image_presence, img_to_classes = _build_balancing_stats(selected_pool, selected_classes)
-        if args.strategy == "rfs":
-            expanded = _rfs_expand_pool(
-                selected_pool,
-                img_to_classes,
-                image_presence,
-                rfs_thresh=args.rfs_thresh,
-                rfs_power=args.rfs_power,
-                max_repeat_per_image=args.max_repeat_per_image,
-                rng=rng,
-            )
+        if args.strategy in ("rfs", "irfs"):
+            if args.strategy == "irfs":
+                expanded = _irfs_expand_pool(
+                    selected_pool,
+                    bbox_count,
+                    rfs_thresh=args.rfs_thresh,
+                    rfs_power=args.rfs_power,
+                    max_repeat_per_image=args.max_repeat_per_image,
+                    rng=rng,
+                    selected_classes=selected_classes or None,
+                )
+            else:
+                expanded = _rfs_expand_pool(
+                    selected_pool,
+                    img_to_classes,
+                    image_presence,
+                    rfs_thresh=args.rfs_thresh,
+                    rfs_power=args.rfs_power,
+                    max_repeat_per_image=args.max_repeat_per_image,
+                    rng=rng,
+                )
             target_n = max(1, int(len(selected_pool) * max(0.1, args.target)))
             if target_n <= len(expanded):
                 balanced_train = expanded[:target_n]

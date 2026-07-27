@@ -63,6 +63,31 @@ def run_tmp_dir(run_dir: str) -> Path:
     return root / "tmp"
 
 
+def ensure_runtime_tmp_dir(run_dir: str) -> Path:
+    """Ensure a writable tmp dir for runtime data.yaml without polluting release bundles.
+
+    Training runs get full ``ensure_run_layout``. Release bundles only get ``tmp/``
+    (no empty ``tests/`` / layout migration).
+    """
+    root = _normalize_run_root(run_dir)
+    if _looks_like_release_bundle_dir(root):
+        tmp = root / "tmp"
+        tmp.mkdir(parents=True, exist_ok=True)
+        return tmp
+    ensure_run_layout(str(root))
+    return run_tmp_dir(str(root))
+
+
+def ensure_runtime_layout_for_yaml(run_dir: str) -> tuple[Path, Path]:
+    """Callbacks for ``build_runtime_data_yaml``: release-safe layout + tmp path."""
+    root = _normalize_run_root(run_dir)
+    if _looks_like_release_bundle_dir(root):
+        tmp = ensure_runtime_tmp_dir(str(root))
+        models = root / "models"
+        return models, tmp
+    return ensure_run_layout(str(root))
+
+
 def run_tests_dir(run_dir: str) -> Path:
     root = _normalize_run_root(run_dir)
     return root / "tests"
@@ -333,43 +358,195 @@ def ensure_run_layout(run_dir: str) -> tuple[Path, Path]:
     for runtime_name in ("_runtime_data_train.yaml", "_runtime_data_test.yaml"):
         src = root / runtime_name
         dst = tmp / runtime_name
-        if src.is_file() and not dst.exists():
-            try:
+        if not src.is_file():
+            continue
+        try:
+            if not dst.exists():
                 src.replace(dst)
-            except Exception:
-                pass
+            elif src.resolve() == dst.resolve():
+                continue
+            elif src.read_bytes() == dst.read_bytes():
+                src.unlink(missing_ok=True)
+            # Differing content: leave both; ``smartrain update`` ASK-step removes root.
+        except Exception:
+            pass
     return models, tmp
 
 
 def preferred_run_model_path(run_dir: str, ext: str = ".pt") -> str:
+    """Return canonical weights path under ``models/`` (does not create directories)."""
     root = _normalize_run_root(run_dir)
-    models, _tmp = ensure_run_layout(str(root))
+    models = root / "models"
     suffix = ext if str(ext).startswith(".") else f".{ext}"
-    return str(models / f"{root.name}{suffix}")
+    stem = resolve_run_weights_stem(str(root))
+    return str(models / f"{stem}{suffix}")
 
 
-def resolve_run_model(run_dir: str, ext: str = ".pt") -> Path | None:
-    """Resolve weights under canonical run layout (call ensure_run_layout first for migration)."""
-    canonical = Path(preferred_run_model_path(run_dir, ext))
-    if canonical.is_file():
-        return canonical
+def resolve_run_weights_stem(run_dir: str) -> str:
+    """Canonical weight basename stem for a run (independent of folder name when possible)."""
     root = _normalize_run_root(run_dir)
-    suffix = ext if str(ext).startswith(".") else f".{ext}"
+    meta_path = root / "training_metadata.json"
+    payload: dict[str, Any] | None = None
+    if meta_path.is_file():
+        try:
+            loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:
+            payload = None
+
+    if payload is not None:
+        paths = payload.get("paths")
+        if isinstance(paths, dict):
+            best = paths.get("best_model")
+            if isinstance(best, str) and best.strip():
+                raw = best.strip().replace("\\", "/")
+                # Ignore legacy relative paths (train/weights/best.pt); only trust top-level basenames.
+                if "/" not in raw and not _looks_like_legacy_model_reference(raw, ".pt"):
+                    name = Path(raw).name
+                    if name.lower().endswith(".pt"):
+                        return name[:-3]
+                    return Path(name).stem
+
+        from smartrain.core.models.release_model_naming import build_model_weights_stem_from_metadata
+
+        computed = build_model_weights_stem_from_metadata(payload)
+        if computed:
+            return computed
+
+    models = root / "models"
+    legacy = models / f"{root.name}.pt"
+    if legacy.is_file():
+        return root.name
+    if models.is_dir():
+        pts = sorted(p for p in models.glob("*.pt") if p.is_file())
+        if len(pts) == 1:
+            return pts[0].stem
+        detect_like = [
+            p
+            for p in pts
+            if p.stem.startswith(
+                ("detect_", "segment_", "segmentation_", "classify_", "classification_")
+            )
+            or "_epochs_b" in p.stem
+        ]
+        if len(detect_like) == 1:
+            return detect_like[0].stem
+
+    # Legacy: weight basename matched the run folder name.
+    return root.name
+
+
+_TASK_WEIGHT_STEM_PREFIXES = (
+    "detect_",
+    "segment_",
+    "segmentation_",
+    "classify_",
+    "classification_",
+)
+
+
+def _task_like_weight_paths(candidates: list[Path]) -> list[Path]:
+    return [
+        p
+        for p in candidates
+        if p.stem.startswith(_TASK_WEIGHT_STEM_PREFIXES) or "_epochs_b" in p.stem
+    ]
+
+
+def _looks_like_release_bundle_dir(root: Path) -> bool:
+    """True when ``root`` looks like a published release bundle (do not mkdir run layout)."""
+    for json_path in root.glob("*.json"):
+        if json_path.name in {
+            "training_metadata.json",
+            "model_manifest.json",
+            "test_artifacts_manifest.json",
+            "releases_manifest.json",
+        }:
+            continue
+        if (root / f"{json_path.stem}.pt").is_file():
+            return True
+    for prefix in ("detect_", "segment_", "classify_"):
+        if any(root.glob(f"{prefix}*.pt")):
+            return True
+    models = root / "models"
+    if models.is_dir():
+        for pt in sorted(models.glob("*.pt")):
+            sidecar = models / f"{pt.stem}.json"
+            if sidecar.is_file():
+                try:
+                    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+                except Exception:
+                    payload = None
+                if isinstance(payload, dict) and payload.get("source") and payload.get("artifacts"):
+                    return True
+    if models.is_dir() and root.name.startswith(("detect_", "segment_", "classify_")):
+        nested = models / f"{root.name}.pt"
+        if nested.is_file():
+            return True
+    return False
+
+
+def _resolve_run_model_existing(root: Path, suffix: str) -> Path | None:
+    """Locate existing weight files without mutating the directory tree."""
+    models = root / "models"
+    stem = resolve_run_weights_stem(str(root))
+    preferred = models / f"{stem}{suffix}"
+    if preferred.is_file():
+        return preferred
+    legacy = models / f"{root.name}{suffix}"
+    if legacy.is_file():
+        return legacy
+    if models.is_dir():
+        candidates = sorted(p for p in models.glob(f"*{suffix}") if p.is_file())
+        if len(candidates) == 1:
+            return candidates[0]
+        task_like = _task_like_weight_paths(candidates)
+        if len(task_like) == 1:
+            return task_like[0]
+    root_named = root / f"{root.name}{suffix}"
+    if root_named.is_file():
+        return root_named
+    # R3 / nested release: ``models/<ds>/<run_id>/detect_*.pt`` (folder ≠ stem).
+    root_pts = sorted(p for p in root.glob(f"*{suffix}") if p.is_file())
+    if len(root_pts) == 1:
+        return root_pts[0]
+    task_like = _task_like_weight_paths(root_pts)
+    if len(task_like) == 1:
+        return task_like[0]
+    for pt in root_pts:
+        if (root / f"{pt.stem}.json").is_file():
+            return pt
+    # R2: sibling ``models/<ds>/<stem>.pt`` next to ``models/<ds>/<stem>/``.
+    sibling = root.parent / f"{root.name}{suffix}"
+    if sibling.is_file():
+        return sibling
     for rel in (
         f"train-ultralytics/weights/best{suffix}",
+        f"train-ultralytics/weights/last{suffix}",
         f"train-ultralytics/best{suffix}",
+        f"train/weights/best{suffix}",
+        f"train/weights/last{suffix}",
+        f"train/best{suffix}",
     ):
         cand = root / rel
         if cand.is_file():
             return cand
-    root_named = root / f"{root.name}{suffix}"
-    if root_named.is_file():
-        return root_named
-    # Released models: weights live next to the bundle dir (models/<ds>/<stem>.pt).
-    sibling = root.parent / f"{root.name}{suffix}"
-    if sibling.is_file():
-        return sibling
     return None
+
+
+def resolve_run_model(run_dir: str, ext: str = ".pt") -> Path | None:
+    """Resolve weights under run or release layouts (additive; preserves legacy paths)."""
+    root = _normalize_run_root(run_dir)
+    suffix = ext if str(ext).startswith(".") else f".{ext}"
+    found = _resolve_run_model_existing(root, suffix)
+    if found is not None:
+        return found
+    if _looks_like_release_bundle_dir(root):
+        return None
+    # Training runs may still need layout migration (legacy train/ → models/).
+    ensure_run_layout(str(root))
+    return _resolve_run_model_existing(root, suffix)
 
 
 def _looks_like_legacy_model_reference(value: str, ext: str) -> bool:
@@ -493,22 +670,55 @@ def write_model_sidecar_metadata(
     params: dict[str, Any] | None = None,
     status: str = "ok",
     error: str | None = None,
+    workspace_root: str | None = None,
 ) -> Path:
+    from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
+
     p = Path(model_path).expanduser().resolve()
     sidecar = model_sidecar_metadata_path(p)
+    run_root = Path(run_dir).expanduser().resolve() if run_dir else None
+    if run_root is not None:
+        try:
+            path_stored = posix_relpath(str(p), str(run_root))
+        except Exception:
+            path_stored = p.name
+    elif workspace_root:
+        path_stored = store_path_under_workspace(workspace_root, str(p))
+    else:
+        path_stored = p.name
+
+    source_stored: str | None = None
+    if isinstance(source_path, str) and source_path.strip():
+        if run_root is not None:
+            try:
+                source_stored = posix_relpath(source_path, str(run_root))
+            except Exception:
+                source_stored = Path(source_path).name
+        elif workspace_root:
+            source_stored = store_path_under_workspace(workspace_root, source_path)
+        else:
+            source_stored = Path(source_path).name
+
+    run_path_stored: str | None = None
+    if run_root is not None:
+        if workspace_root:
+            run_path_stored = store_path_under_workspace(workspace_root, str(run_root))
+        else:
+            run_path_stored = run_root.as_posix()
+
     payload: dict[str, Any] = {
         "format": str(format_name),
-        "path": str(p),
+        "path": path_stored,
         "filename": p.name,
         "created_at": datetime.now().isoformat(timespec="seconds"),
-        "source_path": source_path,
+        "source_path": source_stored,
         "tool": tool,
         "params": params or {},
         "status": status,
         "error": error,
         "fingerprint_sha256": _fingerprint_file(p) if p.is_file() else None,
         "size_bytes": p.stat().st_size if p.is_file() else None,
-        "run_path": str(Path(run_dir).expanduser().resolve()) if run_dir else None,
+        "run_path": run_path_stored,
     }
     tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -527,6 +737,43 @@ def read_model_sidecar_metadata(model_path: str | Path) -> dict[str, Any] | None
     return payload if isinstance(payload, dict) else None
 
 
+def resolve_sidecar_stored_path(
+    stored: str | None,
+    *,
+    model_path: str | Path | None = None,
+    run_dir: str | Path | None = None,
+    workspace_root: str | None = None,
+) -> str | None:
+    """Dual-read sidecar path/source_path/run_path fields to an absolute filesystem path."""
+    from smartrain.core.runtime.path_portable import is_abs_like, resolve_stored_path_under_workspace, to_posix
+
+    if stored is None:
+        return None
+    s = to_posix(str(stored).strip())
+    if not s:
+        return None
+    if is_abs_like(s):
+        return str(Path(s).expanduser().resolve())
+    anchors: list[Path] = []
+    if run_dir:
+        anchors.append(Path(run_dir).expanduser().resolve())
+    if model_path:
+        mp = Path(model_path).expanduser().resolve()
+        anchors.append(mp.parent)
+        # models/ sibling of run root
+        if mp.parent.name == "models":
+            anchors.append(mp.parent.parent)
+    for anchor in anchors:
+        cand = anchor.joinpath(*s.split("/"))
+        if cand.exists():
+            return str(cand.resolve())
+    if workspace_root:
+        return resolve_stored_path_under_workspace(workspace_root, s)
+    if anchors:
+        return str(anchors[0].joinpath(*s.split("/")).resolve())
+    return s
+
+
 def scan_run_models(run_dir: str) -> list[dict[str, Any]]:
     root = _normalize_run_root(run_dir)
     models, _tmp = ensure_run_layout(str(root))
@@ -541,12 +788,19 @@ def scan_run_models(run_dir: str) -> list[dict[str, Any]]:
             fmt = "engine"
         if fmt == "tensorrt-trt":
             fmt = "trt"
+        # Keep filesystem path absolute for runtime; also attach resolved sidecar path if relative.
+        resolved_meta_path = resolve_sidecar_stored_path(
+            meta.get("path") if isinstance(meta.get("path"), str) else None,
+            model_path=p,
+            run_dir=root,
+        )
         out.append(
             {
                 "format": fmt,
                 "path": str(p),
                 "name": p.name,
                 "metadata": meta,
+                "sidecar_path_resolved": resolved_meta_path,
             }
         )
     return out

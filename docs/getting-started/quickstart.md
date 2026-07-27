@@ -76,7 +76,7 @@ smartrain train --data my_dataset --model yolo11n.pt -y
 ```bash
 smartrain train --data my_seg_dataset --task segment --model yolo11s-seg.pt -y
 smartrain test --run <run> --formats pt --task segment
-smartrain inference --model <best.pt> --source images/ --task segment
+smartrain inference --weights <path-to-seg.pt> --source-dir images/ --task segment --data-mode folder
 ```
 
 5. **Build dataset report**

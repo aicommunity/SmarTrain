@@ -12,6 +12,9 @@ from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_c
 
 from smartrain.services.analyze.ultralytics_test_ensure import ensure_ultralytics_test_for_runs
 from smartrain.services.analyze.eval_dataset_test_artifacts import collect_eval_dataset_test_artifacts
+from smartrain.services.analyze.confidence_ensure import ensure_confidence_recommendations_for_analyze_runs
+from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
+from smartrain.core.runtime.workspace_paths import resolve_workspace_root
 
 
 def finalize_all_session(
@@ -98,6 +101,19 @@ def finalize_all_session(
                         split="test",
                     )
 
+    try:
+        workspace_root = resolve_workspace_root(getattr(args, "workspace", None))
+    except ValueError:
+        workspace_root = os.getcwd()
+    ensure_confidence_recommendations_for_analyze_runs(
+        [baseline] + others,
+        run_data_yaml_map=run_data_yaml_map,
+        workspace_root=workspace_root,
+        val_batch=int(getattr(args, "val_batch", 1) or 1),
+        val_imgsz=int(getattr(args, "val_imgsz", 640) or 640),
+        compute_lrp=bool(getattr(args, "compute_lrp", False)),
+    )
+
     conf_tables = collect_confidence_recommendation_tables_cb(
         [baseline] + others,
         os.path.join(session_root, "artifacts", "confidence"),
@@ -108,7 +124,7 @@ def finalize_all_session(
             artifacts.append(
                 {
                     "role": f"confidence_recommendations_{objective.lower()}_csv",
-                    "path": os.path.relpath(p, session_root),
+                    "path": posix_relpath(p, session_root),
                 }
             )
 
@@ -116,8 +132,8 @@ def finalize_all_session(
     manifest = {
         "session_name": os.path.basename(session_root),
         "profile": profile,
-        "baseline": baseline,
-        "others": others,
+        "baseline": store_path_under_workspace(workspace_root, baseline),
+        "others": [store_path_under_workspace(workspace_root, o) for o in others],
         "single_run_mode": single_run_mode,
         "artifacts": artifacts,
         "images": [a["path"] for a in artifacts if a["path"].endswith(".png")],
@@ -137,7 +153,10 @@ def finalize_all_session(
         ],
         "abbreviations": abbreviations,
         "run_legend": run_legend,
-        "run_data_yaml_map": run_data_yaml_map,
+        "run_data_yaml_map": {
+            store_path_under_workspace(workspace_root, k): store_path_under_workspace(workspace_root, v)
+            for k, v in (run_data_yaml_map or {}).items()
+        },
         "runs_with_unresolved_data_yaml": unresolved_data_yaml_runs,
     }
     if ultralytics_test_rows:
@@ -146,7 +165,7 @@ def finalize_all_session(
         manifest["eval_dataset_tests"] = eval_dataset_rows
     if conf_tables:
         manifest["confidence_recommendations"] = {
-            key: os.path.relpath(path, session_root) for key, path in conf_tables.items()
+            key: posix_relpath(path, session_root) for key, path in conf_tables.items()
         }
     if metric_sources_payload is not None:
         manifest["metric_sources"] = metric_sources_payload

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -62,7 +63,7 @@ def test_resolve_queue_status_paths_prefers_explicit_queue_file(tmp_path) -> Non
     queue_file = tmp_path / "custom_queue.txt"
     queue_path, status_path = tq.resolve_queue_status_paths(str(queue_file), None, None)
     assert queue_path == str(queue_file.resolve())
-    assert status_path.endswith("tmp/status.txt")
+    assert Path(status_path).as_posix().endswith("tmp/status.txt")
 
 
 def test_main_window_falls_back_without_gnome_terminal(capsys) -> None:

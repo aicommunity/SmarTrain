@@ -4,10 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.run_model_contract.refs import unified_target_from_model_dir
 from smartrain.run_model_contract.domain.models import UnifiedModelRef, UnifiedPayload
 
-from .normalizers import normalize_backend, normalize_path, normalize_task
+from .normalizers import normalize_backend, normalize_task
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -85,12 +86,12 @@ class ModelAdapter:
         model = UnifiedModelRef(
             model_id=target.source_id,
             format=model_format,
-            weights_path=normalize_path(str(target.model_path)),
+            weights_path=posix_relpath(str(target.model_path), str(model_dir)),
             config_path=None,
             labels_path=None,
             provenance={
                 "source_kind": "model",
-                "source_ref": str(model_dir),
+                "source_ref": model_dir.name,
                 "task_resolution": task_resolution,
                 "backend_resolution": backend_resolution,
             },

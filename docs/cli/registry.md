@@ -2,7 +2,9 @@
 
 # CLI: registry
 
-`smartrain registry` manages run artifacts and the `models/` catalog in the workspace.
+`smartrain registry` manages **run inventory** and **registry-promoted model bundles**.
+
+This is **not** the same as `smartrain model release` / `model comment` (those publish into the release catalog under `models/<dataset>/<run_id>/` with `detect_*` stems and `releases_manifest.json`). See [`overview.md`](overview.md) and [`../refactor/run-layout.md`](../refactor/run-layout.md).
 
 ## Subcommands
 
@@ -16,7 +18,7 @@
 
 ## `models-add`
 
-Promotes a run into `models/<friendly_name>/` and writes `model_manifest.json`.
+Promotes a run into a **registry bundle** `models/<friendly_name>/` and writes `model_manifest.json`.
 
 Copied into the bundle (when present on the run):
 
@@ -25,7 +27,7 @@ Copied into the bundle (when present on the run):
 - Legacy `test/` at the run root, plus the full `tests/` tree (canonical test layout, metrics, manifests).
 - `training_metadata.json` (paths to the primary `.pt` are adjusted to bundle-relative form), `test_metrics*.csv` from the run root, and `_runtime_data_*.yaml` from the run root or `tmp/`.
 
-`weights_file` in the manifest is the path relative to the bundle directory (typically `models/<run_dir_name>.pt`). Older promoted trees that used `<friendly_name>.pt` at the bundle root are unchanged.
+`weights_file` in the manifest is the path relative to the bundle directory (typically `models/<stem>.pt` with detect_* or legacy run-folder stem). Older promoted trees that used `<friendly_name>.pt` at the bundle root are unchanged.
 
 ## Examples
 

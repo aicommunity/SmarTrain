@@ -36,5 +36,5 @@ def test_load_predictions_finds_deep_diagnostics_jsonl(tmp_path: Path) -> None:
     dd.mkdir(parents=True, exist_ok=True)
     (dd / "debug_test.jsonl").write_text("{}\n", encoding="utf-8")
     strict = load_predictions(str(run_dir), options=UnifiedGatewayOptions(validate=False, predictions_strict=True))
-    paths = {p.items_path for p in strict}
-    assert any(str(p).endswith("deep_diagnostics/debug_test.jsonl") for p in paths)
+    paths = {Path(p.items_path).as_posix() for p in strict}
+    assert any(p.endswith("deep_diagnostics/debug_test.jsonl") for p in paths)

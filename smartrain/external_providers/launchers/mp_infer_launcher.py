@@ -28,7 +28,9 @@ def main(argv: list[str] | None = None) -> int:
 
     from ultralytics import YOLO  # noqa
 
-    model = YOLO(args.model)
+    from smartrain.external_providers.task_alias import ultralytics_task_alias
+
+    model = YOLO(args.model, task=ultralytics_task_alias(args.task))
     kwargs = {"source": args.source, "conf": float(args.conf), "imgsz": int(args.imgsz), "save": True}
     if args.device:
         kwargs["device"] = str(args.device)

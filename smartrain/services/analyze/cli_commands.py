@@ -104,6 +104,9 @@ from smartrain.services.analyze.all_data_yaml import (
 from smartrain.services.analyze.all_baseline_artifacts import (
     run_all_baseline_artifacts as _svc_run_all_baseline_artifacts,
 )
+from smartrain.services.analyze.all_leaderboard_stage import (
+    run_all_leaderboard_stage as _svc_run_all_leaderboard_stage,
+)
 from smartrain.services.analyze.all_quality_stage import (
     run_all_quality_stage as _svc_run_all_quality_stage,
 )
@@ -444,23 +447,9 @@ def _recompute_run_test_metrics(
 
 
 def _load_dataset_class_names(data_yaml: str) -> dict[int, str]:
-    try:
-        with open(data_yaml, "r", encoding="utf-8") as f:
-            payload = yaml.safe_load(f) or {}
-    except Exception:
-        return {}
-    names = payload.get("names")
-    if isinstance(names, dict):
-        out: dict[int, str] = {}
-        for k, v in names.items():
-            try:
-                out[int(k)] = str(v)
-            except Exception:
-                continue
-        return out
-    if isinstance(names, list):
-        return {i: str(v) for i, v in enumerate(names)}
-    return {}
+    from smartrain.services.analyze.report_labels import load_dataset_class_names
+
+    return load_dataset_class_names(data_yaml)
 
 
 
@@ -776,6 +765,9 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
         compute_composite_score=compute_composite_score,
     )
     if not records:
+        if getattr(args, "soft_fail", False):
+            print("[WARN] No runs for leaderboard.", file=sys.stderr)
+            return
         print("[ERROR] No runs for leaderboard.", file=sys.stderr)
         sys.exit(1)
     out_csv = _default_relative_output(
@@ -783,6 +775,9 @@ def cmd_leaderboard(args: argparse.Namespace) -> None:
     )
     rc = write_leaderboard_csv(records=records, out_csv=out_csv)
     if rc != 0:
+        if getattr(args, "soft_fail", False):
+            print("[WARN] No runs with enough metrics for leaderboard.", file=sys.stderr)
+            return
         print("[ERROR] No runs with enough metrics for leaderboard.", file=sys.stderr)
         sys.exit(1)
 
@@ -953,9 +948,11 @@ def _build_report_manifest_labels(baseline: str, others: list[str]) -> dict[str,
                 "dataset_name": row.dataset_name,
                 "epochs": row.epochs,
                 "batch": row.batch,
+                "image_size": row.image_size,
                 "run_name": row.run_name,
                 "run_dir": row.run_dir,
                 "role": row.role,
+                "comment": row.comment,
             }
             for row in legend_rows
         ],
@@ -1156,6 +1153,7 @@ def cmd_all(args: argparse.Namespace) -> None:
         auto_select_data_yaml_cb=_auto_select_data_yaml,
         run_all_baseline_artifacts_cb=_svc_run_all_baseline_artifacts,
         run_all_quality_stage_cb=_svc_run_all_quality_stage,
+        run_all_leaderboard_stage_cb=_svc_run_all_leaderboard_stage,
         run_all_speed_stage_cb=_svc_run_all_speed_stage,
         run_all_pr_stage_cb=_svc_run_all_pr_stage,
         finalize_all_session_cb=_finalize_all_session_with_replay,
@@ -1268,6 +1266,22 @@ def build_analyze_arg_parser() -> argparse.ArgumentParser:
     )
     p_all.add_argument("--val-batch", type=int, default=1, help="Validation batch size for GPU memory-safe val()")
     p_all.add_argument("--val-imgsz", type=int, default=640, help="Validation image size for GPU memory-safe val()")
+    p_all.add_argument(
+        "--compute-lrp",
+        dest="compute_lrp",
+        action="store_true",
+        default=False,
+        help=(
+            "Opt-in Optimal LRP JSON (tests/lrp_recommendations_*.json) after confidence stage. "
+            "Does not change A/B/C confidence_recommendations."
+        ),
+    )
+    p_all.add_argument(
+        "--no-compute-lrp",
+        dest="compute_lrp",
+        action="store_false",
+        help="Disable Optimal LRP recommendation (default).",
+    )
     p_all.add_argument("--val-half", dest="val_half", action="store_true", default=True, help="Use FP16 for validation on GPU")
     p_all.add_argument("--no-val-half", dest="val_half", action="store_false", help="Disable FP16 for validation")
     p_all.add_argument("--gpu-only-val", dest="gpu_only_val", action="store_true", default=True, help="Do not fallback to CPU in val()")

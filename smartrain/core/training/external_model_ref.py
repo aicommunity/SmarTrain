@@ -22,6 +22,9 @@ def parse_external_model_ref(value: Any) -> ExternalModelRef:
     raw = str(value or "").strip()
     if not raw or ":" not in raw:
         return ExternalModelRef(provider_id=None, model_ref=raw, raw_value=raw, is_external=False)
+    # Windows absolute path (C:\… / C:/…) is not a provider prefix.
+    if len(raw) >= 3 and raw[1] == ":" and raw[2] in "/\\":
+        return ExternalModelRef(provider_id=None, model_ref=raw, raw_value=raw, is_external=False)
     provider, model_part = raw.split(":", 1)
     provider = provider.strip().lower()
     model_part = model_part.strip()

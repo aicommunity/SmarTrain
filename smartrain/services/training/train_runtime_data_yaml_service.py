@@ -6,6 +6,13 @@ from typing import Any
 
 import yaml
 
+from smartrain.core.runtime.path_portable import (
+    is_abs_like,
+    resolve_stored_path_under_workspace,
+    store_path_under_workspace,
+    to_posix,
+)
+
 
 def resolve_training_data_path(
     layout,
@@ -89,6 +96,21 @@ def resolve_runtime_split_dirs(dataset_path: str, raw: dict) -> tuple[str, str, 
     return train_rel, val_rel, test_rel
 
 
+def coerce_dataset_root(dataset_path: str) -> tuple[str, str]:
+    """Accept a dataset directory or a ``data.yaml`` path; return ``(root, yaml)``."""
+    raw = str(dataset_path or "").strip()
+    if not raw:
+        raise ValueError("dataset_path is empty")
+    abs_in = os.path.abspath(os.path.expanduser(raw))
+    base = os.path.basename(abs_in).lower()
+    if os.path.isfile(abs_in) and base.endswith((".yaml", ".yml")):
+        return os.path.dirname(abs_in), abs_in
+    if base in {"data.yaml", "data.yml"}:
+        # Path written as …/data.yaml even if the file is missing momentarily.
+        return os.path.dirname(abs_in), abs_in
+    return abs_in, os.path.join(abs_in, "data.yaml")
+
+
 def build_runtime_data_yaml(
     dataset_path: str,
     run_dir: str,
@@ -96,20 +118,25 @@ def build_runtime_data_yaml(
     stage: str,
     ensure_run_layout_cb,
     run_tmp_dir_cb,
+    workspace_root: str | None = None,
 ) -> str:
-    src_yaml = os.path.join(dataset_path, "data.yaml")
+    dataset_root, src_yaml = coerce_dataset_root(dataset_path)
     with open(src_yaml, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"Incorrect YAML format data.yaml: {src_yaml}")
 
-    train_rel, val_rel, test_rel = resolve_runtime_split_dirs(dataset_path, raw)
+    train_rel, val_rel, test_rel = resolve_runtime_split_dirs(dataset_root, raw)
 
     runtime_cfg: dict[str, Any] = dict(raw)
-    runtime_cfg["path"] = dataset_path
-    runtime_cfg["train"] = train_rel
-    runtime_cfg["val"] = val_rel
-    runtime_cfg["test"] = test_rel
+    if workspace_root:
+        stored = store_path_under_workspace(workspace_root, dataset_root)
+        runtime_cfg["path"] = stored
+    else:
+        runtime_cfg["path"] = dataset_root
+    runtime_cfg["train"] = to_posix(train_rel)
+    runtime_cfg["val"] = to_posix(val_rel)
+    runtime_cfg["test"] = to_posix(test_rel) if test_rel else test_rel
 
     ensure_run_layout_cb(run_dir)
     out_yaml = os.path.join(str(run_tmp_dir_cb(run_dir)), f"_runtime_data_{stage}.yaml")
@@ -120,3 +147,35 @@ def build_runtime_data_yaml(
     )
     return out_yaml
 
+
+def materialize_ultralytics_data_yaml(
+    portable_yaml_path: str,
+    workspace_root: str,
+) -> str:
+    """
+    Write a sibling ``*.ultralytics.yaml`` with an absolute ``path`` for Ultralytics.
+
+    The portable file is left unchanged (workspace-relative ``path`` when under WS).
+    """
+    src = os.path.abspath(portable_yaml_path)
+    if not os.path.isfile(src):
+        raise FileNotFoundError(f"portable runtime yaml missing: {src}")
+    with open(src, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Incorrect YAML format: {src}")
+    path_val = cfg.get("path")
+    if isinstance(path_val, str) and path_val.strip():
+        if is_abs_like(path_val) and os.path.isdir(os.path.abspath(os.path.expanduser(path_val))):
+            abs_path = os.path.abspath(os.path.expanduser(path_val))
+        else:
+            abs_path = resolve_stored_path_under_workspace(workspace_root, path_val)
+        cfg["path"] = abs_path
+    stem, ext = os.path.splitext(src)
+    if stem.endswith(".ultralytics"):
+        out = src
+    else:
+        out = f"{stem}.ultralytics{ext or '.yaml'}"
+    with open(out, "w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+    return out

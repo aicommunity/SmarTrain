@@ -4,10 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
 from smartrain.run_model_contract.refs import unified_target_from_run
 from smartrain.run_model_contract.domain.models import UnifiedModelRef, UnifiedPayload, UnifiedRunRef
 
-from .normalizers import normalize_backend, normalize_path, normalize_task
+from .normalizers import normalize_backend, normalize_task
 
 
 def _dataset_ref_from_run_dir(run_dir: Path, ti: dict[str, Any]) -> str | None:
@@ -75,18 +76,19 @@ class RunAdapter:
         model = UnifiedModelRef(
             model_id=target.source_id,
             format=model_format,
-            weights_path=normalize_path(str(target.model_path)),
+            weights_path=posix_relpath(str(target.model_path), str(run_dir)),
             config_path=None,
             labels_path=None,
-            provenance={"source_kind": "run", "source_ref": str(run_dir)},
+            provenance={"source_kind": "run", "source_ref": posix_relpath(str(run_dir), str(run_dir.parent.parent.parent)) if len(run_dir.parts) >= 3 else run_dir.name},
             task_type=task_type,
             backend_type=backend,
         )
+        ws_guess = str(run_dir.parent.parent.parent) if len(run_dir.parts) >= 3 else str(run_dir.parent)
         run = UnifiedRunRef(
             run_id=run_dir.name,
-            workspace=str(run_dir.parent.parent.parent) if len(run_dir.parts) >= 3 else str(run_dir.parent),
+            workspace=".",
             dataset_ref=_dataset_ref_from_run_dir(run_dir, ti),
-            training_ref=str(run_dir),
+            training_ref=store_path_under_workspace(ws_guess, str(run_dir)),
             task_type=task_type,
             backend_type=backend,
         )

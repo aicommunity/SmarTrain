@@ -10,6 +10,16 @@ __pycache__
 tmp/
 tmp_merge_check/
 models/
+# Package source trees named models/ (not workspace weight caches)
+!smartrain/core/models/
+!smartrain/core/models/**
+!smartrain/services/models/
+!smartrain/services/models/**
+!smartrain/workflows/models/
+!smartrain/workflows/models/**
+smartrain/core/models/__pycache__/
+smartrain/services/models/__pycache__/
+smartrain/workflows/models/__pycache__/
 /datasets/
 runs/
 dist/

@@ -39,18 +39,21 @@ from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
 from smartrain.services.inference_runtime_helpers import (
     build_report,
-    collect_folder_images,
-    collect_split_images_for_dataset,
-    infer_img_size_from_model_context_safe,
+    apply_inference_batch_from_model,
+    apply_inference_imgsz_from_model,
+    _portable_path_pair,
     predict_roi_crop,
-    resolve_external_source,
+    resolve_inference_source,
+    resolve_inference_task_type,
     resolve_model,
     resolve_output_root,
+    resolve_export_class_ids_for_args,
     sanitize_segment,
-    source_descriptor,
+    source_descriptor_from_resolved,
     write_report,
 )
 from smartrain.services.inference_dataset_export import (
+    filter_inference_report_by_classes,
     resolve_export_options,
     run_inference_exports,
     validate_export_options,
@@ -266,6 +269,7 @@ def _write_local_inference_report(
     skipped: int,
     performance_payload: dict[str, Any],
     environment_artifact_path: str,
+    source_archive: str | None = None,
 ) -> None:
     write_report(
         report_path,
@@ -284,6 +288,7 @@ def _write_local_inference_report(
             skipped=skipped,
             performance=performance_payload,
             environment_artifact_path=environment_artifact_path,
+            source_archive=source_archive,
         ),
     )
 
@@ -360,6 +365,25 @@ def _run_inference_postprocess(
         overlays = save_inference_segment_overlays(report_path)
         if overlays:
             print(f"[OK] Saved {len(overlays)} segmentation overlay image(s)")
+
+    options = resolve_export_options(args)
+    if options.export_class_ids:
+        import json
+
+        payload = json.loads(Path(report_path).read_text(encoding="utf-8"))
+        filtered, skipped = filter_inference_report_by_classes(
+            payload,
+            class_ids=options.export_class_ids,
+            conf_min=options.label_conf_min,
+            conf_max=options.label_conf_max,
+        )
+        if skipped:
+            print(
+                f"[INFO] Omitted {skipped} image(s) from saved results "
+                f"(no detections of selected classes after export filters)."
+            )
+        write_report(report_path, filtered)
+
     run_inference_exports(
         report_path=report_path,
         out_root=out_root,
@@ -367,6 +391,21 @@ def _run_inference_postprocess(
         args=args,
         layout=layout,
     )
+
+
+def _prepare_export_class_filter(args: argparse.Namespace, model_path: Path) -> tuple[int, bool] | None:
+    raw = getattr(args, "export_classes", None)
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        if model_path.is_file():
+            resolve_export_class_ids_for_args(args, model_path)
+        else:
+            args.export_class_ids = resolve_export_class_filter(str(raw), {})
+    except ValueError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1, False
+    return None
 
 
 def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tuple[int, bool]:
@@ -387,7 +426,9 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         return external_ref_outcome
 
     ext_provider = str(getattr(args, "external_provider", "") or "").strip()
-    task_type = task_to_metadata_task_type(getattr(args, "task", None))
+    model_path: Path | str | None = None
+    model_name = ""
+    model_source = ""
     if ext_provider and args.weights:
         raw_weight = str(args.weights).strip()
         maybe_path = Path(raw_weight).expanduser()
@@ -405,9 +446,39 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         except Exception as e:
             print(f"[ERROR] Failed to resolve model: {e}", file=sys.stderr)
             return 1, False
-    if args.img_size is None:
-        inferred = infer_img_size_from_model_context_safe(model_path) if isinstance(model_path, Path) else None
-        args.img_size = int(inferred) if inferred is not None else 640
+
+    task_type = resolve_inference_task_type(
+        args,
+        layout,
+        model_path=Path(model_path) if isinstance(model_path, Path) else None,
+        model_source=model_source,
+    )
+    # Keep args.task aligned so reports / replay reflect the resolved value.
+    if getattr(args, "task", None) is None or not str(getattr(args, "task", "") or "").strip():
+        args.task = task_type
+
+    class_filter_outcome = _prepare_export_class_filter(args, Path(model_path))
+    if class_filter_outcome is not None:
+        return class_filter_outcome
+    if args.img_size is None and isinstance(model_path, Path):
+        apply_inference_imgsz_from_model(model_path, args)
+    elif args.img_size is None:
+        from smartrain.core.workflow_adapters.inference_runtime_api import (
+            DEFAULT_INFERENCE_IMGSZ,
+            FALLBACK_IMGSZ_SOURCE,
+        )
+
+        args.img_size = DEFAULT_INFERENCE_IMGSZ
+        args.img_size_source = FALLBACK_IMGSZ_SOURCE
+        print(
+            f"[WARN] Model input size not found. Using fallback {DEFAULT_INFERENCE_IMGSZ}. "
+            "Set --img-size to override."
+        )
+    else:
+        args.img_size_source = "cli"
+
+    if isinstance(model_path, Path):
+        apply_inference_batch_from_model(model_path, args)
 
     if ext_provider:
         location = get_provider_location(ext_provider)
@@ -431,12 +502,13 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         )
         if model_validation_outcome is not None:
             return model_validation_outcome
-        source_for_external = resolve_external_source(args, layout)
-        source_short = (
-            os.path.basename(os.path.abspath(os.path.expanduser(str(args.source_dir))).rstrip(os.sep)) or "folder"
-            if args.data_mode == "folder"
-            else f"{args.dataset}-{args.split}"
-        )
+        try:
+            _, resolved_source = resolve_inference_source(args, layout)
+        except Exception as e:
+            print(f"[ERROR] Failed to resolve inference source: {e}", file=sys.stderr)
+            return 1, True
+        source_for_external = resolved_source.working_path
+        source_short = resolved_source.display_name
         out_root = resolve_output_root(layout, model_name, source_short)
         report_path = os.path.join(out_root, "inference_results.json")
         env_profile = collect_environment_profile()
@@ -481,14 +553,22 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
                 "name": model_name,
                 "provider": {"type": "external", "id": ext_provider},
                 "weights_value": str(model_path),
+                "weights_absolute": str(model_path) if isinstance(model_path, Path) else str(model_path),
+                "weights_relative": (
+                    relativize_if_under(layout.root, str(model_path)) or str(model_path)
+                    if isinstance(model_path, Path)
+                    else str(model_path)
+                ),
             },
             "parameters": {
                 "conf": args.conf,
                 "img_size": int(args.img_size),
+                "img_size_source": str(getattr(args, "img_size_source", "") or ""),
                 "device": args.device,
+                "batch_size": int(max(1, int(getattr(args, "batch_size", 8) or 8))),
                 "data_mode": args.data_mode,
             },
-            "source": source_descriptor(args, source_for_external, source_short, layout),
+            "source": source_descriptor_from_resolved(args, resolved_source, layout),
             "output": {
                 "dir_absolute": out_root,
                 "dir_relative": relativize_if_under(layout.root, out_root) or out_root,
@@ -572,28 +652,21 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
     if args.roi_pre_detect:
         from ultralytics import YOLO
 
+        from smartrain.external_providers.task_alias import ultralytics_task_alias
+
         if args.data_mode != "folder":
             print("[ERROR] --roi-pre-detect is supported only for --data-mode folder.", file=sys.stderr)
             return 1, False
         roi_w = args.roi_weights or str(model_path)
-        roi_model = YOLO(str(roi_w))
+        roi_model = YOLO(str(roi_w), task=ultralytics_task_alias(task_type))
         args.roi_weights = roi_w
         args._ultralytics_roi_project = ultralytics_sidecar_dir(layout.root, ".cache", "ultralytics_roi_infer")
 
     try:
-        if args.data_mode == "folder":
-            images = collect_folder_images(str(args.source_dir), int(args.limit))
-            source_abs = os.path.abspath(os.path.expanduser(str(args.source_dir)))
-            source_short = os.path.basename(source_abs.rstrip(os.sep)) or "folder"
-        else:
-            images, split_dir = collect_split_images_for_dataset(
-                layout,
-                str(args.dataset),
-                str(args.split),
-                int(args.limit),
-            )
-            source_abs = split_dir
-            source_short = f"{args.dataset}-{args.split}"
+        images, resolved_source = resolve_inference_source(args, layout)
+        source_abs = resolved_source.working_path
+        source_short = resolved_source.display_name
+        source_archive = resolved_source.source_archive
     except Exception as e:
         print(f"[ERROR] Failed to resolve inference source: {e}", file=sys.stderr)
         return 1, False
@@ -609,10 +682,12 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
 
     image_rows: list[dict[str, Any]] = []
     skipped = 0
+    batch_size = int(max(1, int(getattr(args, "batch_size", 8) or 8)))
     perf = DualPerfProfiler(warmup_images=int(max(0, args.perf_warmup_images)))
     perf_methodology = {
         "profile_mode": "dual",
         "warmup_images": int(max(0, args.perf_warmup_images)),
+        "batch_size": batch_size,
         "end_to_end_includes": ["image_io", "roi_preprocess", "model_infer", "postprocess", "report_update"],
         "infer_only_includes": ["model_infer_call"],
         "backend": backend.name,
@@ -633,89 +708,119 @@ def run_inference_job(args: argparse.Namespace, layout: WorkspaceLayout) -> tupl
         skipped=skipped,
         performance_payload=perf.to_payload(methodology=perf_methodology),
         environment_artifact_path=env_path,
+        source_archive=source_archive,
     )
     progress_desc = f"inference:{args.data_mode}"
-    for image_path in tqdm(images, desc=progress_desc, unit="img"):
-        loop_t0 = time.perf_counter_ns()
-        image_path_abs = os.path.abspath(image_path)
-        with Image.open(image_path_abs) as im:
-            im_rgb = im.convert("RGB")
-            iw, ih = im_rgb.size
-            roi_box: tuple[int, int, int, int] | None = None
-            src_for_predict: Any = image_path_abs
-            if roi_model is not None:
-                rb = predict_roi_crop(roi_model, image_path_abs, args)
-                if rb[0] < 0:
-                    skipped += 1
-                    _write_local_inference_report(
-                        report_path=report_path,
-                        args=args,
-                        layout=layout,
-                        model_source=model_source,
-                        model_name=model_name,
-                        model_path=model_path,
-                        source_abs=source_abs,
-                        source_short=source_short,
-                        out_root=out_root,
-                        images_input_count=len(images),
-                        image_rows=image_rows,
-                        skipped=skipped,
-                        performance_payload=perf.to_payload(methodology=perf_methodology),
-                        environment_artifact_path=env_path,
-                    )
-                    perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
-                    continue
-                roi_box = rb
-                crop = im_rgb.crop((roi_box[0], roi_box[1], roi_box[2], roi_box[3]))
-                src_for_predict = np.asarray(crop)
-            elif args.data_mode == "folder":
-                roi_box = (0, 0, iw, ih)
+    progress = tqdm(total=len(images), desc=progress_desc, unit="img")
+    try:
+        for batch_start in range(0, len(images), batch_size):
+            batch_paths = images[batch_start : batch_start + batch_size]
+            prepared: list[dict[str, Any]] = []
+            for image_path in batch_paths:
+                loop_t0 = time.perf_counter_ns()
+                image_path_abs = os.path.abspath(image_path)
+                with Image.open(image_path_abs) as im:
+                    im_rgb = im.convert("RGB")
+                    iw, ih = im_rgb.size
+                    roi_box: tuple[int, int, int, int] | None = None
+                    src_for_predict: Any = image_path_abs
+                    if roi_model is not None:
+                        rb = predict_roi_crop(roi_model, image_path_abs, args)
+                        if rb[0] < 0:
+                            skipped += 1
+                            perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
+                            continue
+                        roi_box = rb
+                        crop = im_rgb.crop((roi_box[0], roi_box[1], roi_box[2], roi_box[3]))
+                        src_for_predict = np.asarray(crop)
+                    elif args.data_mode == "folder":
+                        roi_box = (0, 0, iw, ih)
+                prepared.append(
+                    {
+                        "image_path_abs": image_path_abs,
+                        "iw": iw,
+                        "ih": ih,
+                        "roi_box": roi_box,
+                        "src_for_predict": src_for_predict,
+                        "loop_t0": loop_t0,
+                    }
+                )
 
-        pred_result = backend.predict(
-            src_for_predict,
-            conf=float(args.conf),
-            imgsz=int(args.img_size),
-            device=str(args.device),
-            half=bool(args.half),
-            task_type=task_type,
-        )
-        perf.record_infer_only(int(pred_result.infer_only_ns))
-        for stage, dt in pred_result.stage_ns.items():
-            perf.record_stage(stage, int(dt))
-        resolved_pred_task = task_to_metadata_task_type(getattr(pred_result, "task_type", task_type))
-        detections_payload, task_outputs_payload = _build_task_outputs_payload(
-            resolved_pred_task,
-            pred_result.outputs if isinstance(pred_result.outputs, dict) else {},
-            roi_box=roi_box,
-        )
-        image_rows.append(
-            {
-                "image_path_absolute": image_path_abs,
-                "image_path_relative": relativize_if_under(layout.root, image_path_abs) or image_path_abs,
-                "image_size": {"width": iw, "height": ih},
-                "roi_xyxy": list(roi_box) if roi_box is not None else None,
-                "task_type": resolved_pred_task,
-                "detections": detections_payload,
-                "task_outputs": task_outputs_payload,
-            }
-        )
-        perf.record_end_to_end(int(time.perf_counter_ns() - loop_t0))
-        _write_local_inference_report(
-            report_path=report_path,
-            args=args,
-            layout=layout,
-            model_source=model_source,
-            model_name=model_name,
-            model_path=model_path,
-            source_abs=source_abs,
-            source_short=source_short,
-            out_root=out_root,
-            images_input_count=len(images),
-            image_rows=image_rows,
-            skipped=skipped,
-            performance_payload=perf.to_payload(methodology=perf_methodology),
-            environment_artifact_path=env_path,
-        )
+            if prepared:
+                sources = [item["src_for_predict"] for item in prepared]
+                predict_many = getattr(backend, "predict_many", None)
+                if callable(predict_many) and len(sources) > 1:
+                    pred_results = predict_many(
+                        sources,
+                        conf=float(args.conf),
+                        imgsz=int(args.img_size),
+                        device=str(args.device),
+                        half=bool(args.half),
+                        task_type=task_type,
+                    )
+                else:
+                    pred_results = [
+                        backend.predict(
+                            src,
+                            conf=float(args.conf),
+                            imgsz=int(args.img_size),
+                            device=str(args.device),
+                            half=bool(args.half),
+                            task_type=task_type,
+                        )
+                        for src in sources
+                    ]
+                if len(pred_results) != len(prepared):
+                    raise RuntimeError(
+                        f"Inference backend returned {len(pred_results)} results for {len(prepared)} inputs"
+                    )
+                for item, pred_result in zip(prepared, pred_results):
+                    perf.record_infer_only(int(pred_result.infer_only_ns))
+                    for stage, dt in pred_result.stage_ns.items():
+                        perf.record_stage(stage, int(dt))
+                    resolved_pred_task = task_to_metadata_task_type(getattr(pred_result, "task_type", task_type))
+                    detections_payload, task_outputs_payload = _build_task_outputs_payload(
+                        resolved_pred_task,
+                        pred_result.outputs if isinstance(pred_result.outputs, dict) else {},
+                        roi_box=item["roi_box"],
+                    )
+                    image_rows.append(
+                        {
+                            **_portable_path_pair(
+                                layout.root,
+                                item["image_path_abs"],
+                                absolute_key="image_path_absolute",
+                                relative_key="image_path_relative",
+                            ),
+                            "image_size": {"width": item["iw"], "height": item["ih"]},
+                            "roi_xyxy": list(item["roi_box"]) if item["roi_box"] is not None else None,
+                            "task_type": resolved_pred_task,
+                            "detections": detections_payload,
+                            "task_outputs": task_outputs_payload,
+                        }
+                    )
+                    perf.record_end_to_end(int(time.perf_counter_ns() - int(item["loop_t0"])))
+
+            _write_local_inference_report(
+                report_path=report_path,
+                args=args,
+                layout=layout,
+                model_source=model_source,
+                model_name=model_name,
+                model_path=model_path,
+                source_abs=source_abs,
+                source_short=source_short,
+                out_root=out_root,
+                images_input_count=len(images),
+                image_rows=image_rows,
+                skipped=skipped,
+                performance_payload=perf.to_payload(methodology=perf_methodology),
+                environment_artifact_path=env_path,
+                source_archive=source_archive,
+            )
+            progress.update(len(batch_paths))
+    finally:
+        progress.close()
 
     print(f"[OK] Inference done: {len(image_rows)} images, skipped={skipped}")
     print(f"[OK] Report: {report_path}")

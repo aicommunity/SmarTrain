@@ -20,6 +20,7 @@ from smartrain.services.analyze.report_markdown_formatting import (
     _center_close,
     _center_open,
     _column_display_name,
+    _drop_all_nan_columns,
     _filter_generic_table_for_selection,
     _filter_runs_summary_for_selection,
     _justify_block,
@@ -37,8 +38,14 @@ from smartrain.services.analyze.report_markdown_formatting import (
     _table_takeaway_lines,
 )
 from smartrain.core.runtime.logging_config import get_logger
+from smartrain.core.runtime.path_portable import to_posix
 
 logger = get_logger(__name__)
+
+
+def _md_parent_rel(rel: str) -> str:
+    """Markdown image/link path relative to language subdir (always POSIX)."""
+    return "../" + to_posix(str(rel or "")).lstrip("./")
 
 
 from smartrain.services.analyze.report_sections.report_common import (
@@ -149,6 +156,18 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
 
     lines.append(_sec("exec"))
     lines.append("")
+    legend_lines, table_no = _render_run_legend_table_lines(
+        manifest,
+        is_ru=is_ru,
+        workspace_root=workspace_root,
+        table_no=table_no,
+        tpl=tpl,
+    )
+    if legend_lines:
+        lines.append("### " + ("Справочник запусков" if is_ru else "Run reference"))
+        lines.append("")
+        lines.extend(legend_lines)
+        lines.append("")
     exec_lines, table_no, figure_no, exec_ultra_images = _render_executive_summary_section(
         manifest,
         is_ru=is_ru,
@@ -158,16 +177,6 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
         figure_no=figure_no,
     )
     lines.extend(exec_lines)
-    legend_lines, table_no = _render_run_legend_table_lines(
-        manifest,
-        is_ru=is_ru,
-        workspace_root=workspace_root,
-        table_no=table_no,
-    )
-    if legend_lines:
-        lines.append("### " + ("Справочник запусков" if is_ru else "Run reference"))
-        lines.append("")
-        lines.extend(legend_lines)
     lines.append("")
     lines.append(_sec("context"))
     lines.append("")
@@ -177,14 +186,25 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     baseline_name = os.path.basename(baseline.rstrip("/")) if baseline else ""
     baseline_abbr = abbreviations.get(baseline_name, "")
     baseline_display = _path_for_report(baseline, workspace_root)
-    if baseline_abbr:
-        lines.append(f"- {('Базовый' if is_ru else 'Baseline')} ({baseline_abbr}): `{baseline_display}`")
-    else:
-        lines.append(f"- {('Базовый' if is_ru else 'Baseline')}: `{baseline_display}`")
     others = manifest.get("others") or []
     single_run_mode = bool(manifest.get("single_run_mode")) or (
         isinstance(others, list) and len(others) == 0 and bool(baseline)
     )
+    dataset_pairs: list[str] = []
+    for k, v in abbreviations.items():
+        if str(v).startswith("D"):
+            dataset_pairs.append(f"{v} = {k}")
+    context_idx = section_index["context"]
+    lines.append(
+        f"### {context_idx}.1 " + ("Модели" if is_ru else "Models")
+    )
+    lines.append("")
+    lines.extend(_subsection_intro_lines(tpl, "SUB_CONTEXT_RUNS"))
+    if baseline:
+        if baseline_abbr:
+            lines.append(f"- {('Базовый' if is_ru else 'Baseline')} ({baseline_abbr}): `{baseline_display}`")
+        else:
+            lines.append(f"- {('Базовый' if is_ru else 'Baseline')}: `{baseline_display}`")
     if single_run_mode:
         lines.append(
             "- "
@@ -204,20 +224,9 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.append(f"- {('Кандидат' if is_ru else 'Candidate')} ({item_abbr}): `{item_display}`")
             else:
                 lines.append(f"- {('Кандидат' if is_ru else 'Candidate')}: `{item_display}`")
-    dataset_pairs: list[str] = []
-    for k, v in abbreviations.items():
-        if str(v).startswith("D"):
-            dataset_pairs.append(f"{v} = {k}")
-    if dataset_pairs:
-        lines.append(
-            "- "
-            + ("Датасеты: " if is_ru else "Datasets: ")
-            + "; ".join(sorted(dataset_pairs))
-        )
     lines.append("")
-    context_idx = section_index["context"]
     lines.append(
-        f"### {context_idx}.1 " + ("Датасет" if is_ru else "Dataset")
+        f"### {context_idx}.2 " + ("Датасет" if is_ru else "Dataset")
     )
     lines.append("")
     lines.extend(_subsection_intro_lines(tpl, "SUB_CONTEXT_DATASET"))
@@ -226,7 +235,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.append(f"- {pair}")
     lines.append("")
     lines.append(
-        f"### {context_idx}.2 " + ("Модели и артефакты" if is_ru else "Models and artifacts")
+        f"### {context_idx}.3 " + ("Модели и артефакты" if is_ru else "Models and artifacts")
     )
     lines.append("")
     lines.extend(_subsection_intro_lines(tpl, "SUB_CONTEXT_MODELS"))
@@ -246,7 +255,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             return
         lines.extend(_figure_preamble_lines(rel_e, is_ru, tpl))
         lines.extend(_center_open())
-        lines.append(f"![]({os.path.join('..', rel_e)}){{ width=95% }}")
+        lines.append(f"![]({_md_parent_rel(rel_e)}){{ width=95% }}")
         append_figure_caption_lines(lines, rel_e, figure_no, abbreviations, manifest, is_ru)
         figure_no += 1
         lines.append("")
@@ -275,8 +284,18 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     alias_df = alias_df[preferred_alias]
                 dedup_cols = [c for c in ("run_name", "target_path") if c in alias_df.columns]
                 if dedup_cols:
-                    alias_df = alias_df.sort_values(by=[c for c in ("run_name", "alias") if c in alias_df.columns])
-                    alias_df = alias_df.drop_duplicates(subset=dedup_cols, keep="first")
+                    alias_df = alias_df.sort_values(
+                        by=[c for c in ("run_name", "alias") if c in alias_df.columns],
+                        ascending=[True, True],
+                    )
+                    if "target_path" in alias_df.columns:
+                        alias_df["_has_path"] = alias_df["target_path"].astype(str).str.strip().ne("")
+                        alias_df = alias_df.sort_values(
+                            by=["_has_path"] + [c for c in ("run_name", "alias") if c in alias_df.columns],
+                            ascending=[False, True, True],
+                        )
+                        alias_df = alias_df.drop(columns=["_has_path"])
+                    alias_df = alias_df.drop_duplicates(subset=["run_name"] if "run_name" in alias_df.columns else dedup_cols, keep="first")
                 alias_df = _abbrev_df(alias_df, abbreviations)
                 _emit_figure_1_before_table_11()
                 ak = _infer_table_kind(alias_rel)
@@ -525,14 +544,41 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                         else:
                             lines.append(f"**{('Запуск' if is_ru else 'Run')} `{run_label}`**")
                         lines.append("")
-                        card = pd.DataFrame(
-                            [
-                                {"Параметр" if is_ru else "Parameter": "CPU", "Значение" if is_ru else "Value": row.get("sys_cpu_model")},
-                                {"Параметр" if is_ru else "Parameter": "GPU", "Значение" if is_ru else "Value": row.get("sys_gpu_0_name")},
-                                {"Параметр" if is_ru else "Parameter": "RAM, GB", "Значение" if is_ru else "Value": row.get("sys_ram_total_gb")},
-                                {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": _os_display_train_profile_row(row)},
-                            ]
-                        )
+                        cpu_v = row.get("sys_cpu_model")
+                        gpu_v = row.get("sys_gpu_0_name")
+                        ram_v = row.get("sys_ram_total_gb")
+                        os_v = _os_display_train_profile_row(row)
+                        all_na = True
+                        for key in (cpu_v, gpu_v, ram_v, os_v):
+                            if key is None or (isinstance(key, float) and pd.isna(key)):
+                                continue
+                            if str(key).strip().lower() in {"", "nan", "none"}:
+                                continue
+                            all_na = False
+                            break
+                        if all_na:
+                            status_msg = (
+                                "Профиль не сохранён при обучении (нет system_profile в training_metadata.json)."
+                                if is_ru
+                                else "Profile was not saved during training (no system_profile in training_metadata.json)."
+                            )
+                            card = pd.DataFrame(
+                                [
+                                    {
+                                        "Параметр" if is_ru else "Parameter": ("Статус" if is_ru else "Status"),
+                                        "Значение" if is_ru else "Value": status_msg,
+                                    },
+                                ]
+                            )
+                        else:
+                            card = pd.DataFrame(
+                                [
+                                    {"Параметр" if is_ru else "Parameter": "CPU", "Значение" if is_ru else "Value": cpu_v},
+                                    {"Параметр" if is_ru else "Parameter": "GPU", "Значение" if is_ru else "Value": gpu_v},
+                                    {"Параметр" if is_ru else "Parameter": "RAM, GB", "Значение" if is_ru else "Value": ram_v},
+                                    {"Параметр" if is_ru else "Parameter": "OS", "Значение" if is_ru else "Value": os_v},
+                                ]
+                            )
                         lines.extend(_md_table_from_df(card, abbreviations, limit=None, is_ru=is_ru))
                         lines.append("")
                     append_table_source(lines, source_rel=rel, is_ru=is_ru)
@@ -701,7 +747,9 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     lines.append("")
     lines.extend(_subsection_intro_lines(tpl, "SUB_FORMAT_QUALITY"))
     # Optional deep-diagnostics report (generated by scripts/deep_diagnostics_onnx_map50_95.py).
-    baseline_root = str(manifest.get("baseline") or "")
+    from smartrain.core.runtime.path_portable import resolve_workspace_or_abs_path
+
+    baseline_root = resolve_workspace_or_abs_path(workspace_root, str(manifest.get("baseline") or ""))
     if baseline_root:
         deep_md = os.path.join(baseline_root, "deep_diagnostics_report", "deep_diagnostics_report.md")
         if os.path.isfile(deep_md):
@@ -890,7 +938,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.extend(_figure_preamble_lines(rel, is_ru, tpl))
             lines.extend(_center_open())
             lines.append("")
-            lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
+            lines.append(f"![]({_md_parent_rel(rel)}){{ width=95% }}")
             append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
             figure_no += 1
             lines.append("")
@@ -932,13 +980,19 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             try:
                 perf_df = pd.read_csv(perf_csv_abs)
                 perf_df = _filter_generic_table_for_selection(perf_df, manifest)
+                perf_reason_series = (
+                    perf_df["performance_reason"].copy() if "performance_reason" in perf_df.columns else None
+                )
                 # Hide legacy target-mismatch rows in the report table to keep
                 # the performance view focused on current comparable artifacts.
-                if "performance_reason" in perf_df.columns:
+                if perf_reason_series is not None:
                     perf_df = perf_df[
                         perf_df["performance_reason"].astype(str) != "perf_target_mismatch_legacy_variant"
                     ].copy()
+                    perf_reason_series = perf_df["performance_reason"].copy()
                 perf_df = _select_table_columns(perf_csv_rel, perf_df)
+                if perf_reason_series is not None:
+                    perf_df["performance_reason"] = perf_reason_series.reindex(perf_df.index).to_numpy()
                 perf_df = _abbrev_df(perf_df, abbreviations)
                 if _should_drop_split_column(perf_csv_rel, perf_df):
                     perf_df = perf_df.drop(columns=["split"], errors="ignore")
@@ -1024,6 +1078,10 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 ]
                 pure_df = perf_df[pure_cols].copy() if pure_cols else perf_df.copy()
                 pipeline_df = perf_df[pipeline_cols].copy() if pipeline_cols else perf_df.copy()
+                if "performance_reason" in perf_df.columns:
+                    pure_df["performance_reason"] = perf_df["performance_reason"].values
+                    pipeline_df["performance_reason"] = perf_df["performance_reason"].values
+                perf_hide = {"performance_reason"}
                 _emit_figure_1_before_table_11()
                 lines.extend(_center_open())
                 lines.append("")
@@ -1034,7 +1092,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                     is_ru,
                 )
                 lines.extend(_table_preamble_lines(perf_csv_rel, pure_df, "perf_pure", is_ru, tpl, table_no=table_no))
-                lines.extend(_md_table_from_df(pure_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                lines.extend(_md_table_from_df(pure_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1, hide_cols=perf_hide))
                 lines.append(
                     (
                         "Основной KPI: сопоставимые runtime-этапы по методике Ultralytics-like. "
@@ -1099,7 +1157,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.extend(
                     _table_preamble_lines(perf_csv_rel, pipeline_df, "perf_pipeline", is_ru, tpl, table_no=table_no)
                 )
-                lines.extend(_md_table_from_df(pipeline_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1))
+                lines.extend(_md_table_from_df(pipeline_df, abbreviations, limit=None, is_ru=is_ru, float_decimals=1, hide_cols=perf_hide))
                 lines.append(
                     (
                         "Здесь показан полный runtime-конвейер (preprocess + inference + postprocess), "
@@ -1399,12 +1457,61 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 table_no += 1
         except Exception as e:
             lines.append(f"- {('Ошибка чтения' if is_ru else 'Read error')}: {e}")
+    # D: Optimal LRP (opt-in artifact; only when file exists)
+    try:
+        from smartrain.core.training.lrp_recommendation import (
+            lrp_recommendation_file_path,
+            read_lrp_recommendation_file,
+        )
+
+        lrp_runs: list[str] = []
+        base_run = str(manifest.get("baseline") or "").strip()
+        if base_run:
+            lrp_runs.append(base_run)
+        others_runs = manifest.get("others") if isinstance(manifest.get("others"), list) else []
+        for o in others_runs:
+            if isinstance(o, str) and o.strip():
+                lrp_runs.append(o.strip())
+        lrp_lines: list[str] = []
+        for run_dir in lrp_runs:
+            for split in ("test", "val"):
+                path = lrp_recommendation_file_path(run_dir, split)
+                payload = read_lrp_recommendation_file(path)
+                if not payload:
+                    continue
+                g = payload.get("global") if isinstance(payload.get("global"), dict) else {}
+                thr = g.get("threshold")
+                lrp_val = g.get("lrp")
+                status = str(payload.get("status") or g.get("status") or "")
+                run_name = os.path.basename(run_dir.rstrip(os.sep))
+                lrp_lines.append(
+                    f"- `{run_name}` / {split}: threshold={thr}, LRP={lrp_val}, status={status}"
+                )
+        if lrp_lines:
+            lines.append("")
+            lines.append("#### " + ("D: Optimal LRP" if not is_ru else "D: Optimal LRP"))
+            lines.append("")
+            if is_ru:
+                lines.append(
+                    "Порог по минимуму LRP Error (arXiv:1807.01696). Файл отдельный от A/B/C: "
+                    "`tests/lrp_recommendations_{split}.json`."
+                )
+            else:
+                lines.append(
+                    "Threshold from argmin LRP Error (arXiv:1807.01696). Separate from A/B/C: "
+                    "`tests/lrp_recommendations_{split}.json`."
+                )
+            lines.append("")
+            lines.extend(lrp_lines)
+            lines.append("")
+    except Exception as e:
+        lines.append(f"- {('Ошибка чтения LRP' if is_ru else 'LRP read error')}: {e}")
     for rel in images:
         if isinstance(rel, str) and ("artifacts/pr/" in rel and rel.endswith("pr_all_classes.png")):
             lines.extend(_figure_preamble_lines(rel, is_ru, tpl))
             lines.extend(_center_open())
             lines.append("")
-            lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
+            lines.append(f"![]({_md_parent_rel(rel)}){{ width=95% }}")
             append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
             figure_no += 1
             lines.append("")
@@ -1425,7 +1532,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.extend(_figure_preamble_lines(rel, is_ru, tpl))
             lines.extend(_center_open())
             lines.append("")
-            lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
+            lines.append(f"![]({_md_parent_rel(rel)}){{ width=95% }}")
             append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
             figure_no += 1
             lines.append("")
@@ -1552,7 +1659,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
                 lines.extend(_figure_preamble_lines(rel, is_ru, tpl))
                 lines.extend(_center_open())
                 lines.append("")
-                lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
+                lines.append(f"![]({_md_parent_rel(rel)}){{ width=95% }}")
                 append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
                 figure_no += 1
                 lines.append("")
@@ -1634,7 +1741,7 @@ def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
             lines.extend(_figure_preamble_lines(rel, is_ru, tpl))
             lines.extend(_center_open())
             lines.append("")
-            lines.append(f"![]({os.path.join('..', rel)}){{ width=95% }}")
+            lines.append(f"![]({_md_parent_rel(rel)}){{ width=95% }}")
             append_figure_caption_lines(lines, rel, figure_no, abbreviations, manifest, is_ru)
             figure_no += 1
             lines.append("")

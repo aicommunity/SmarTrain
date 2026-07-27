@@ -7,7 +7,10 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from smartrain.core.inference.ultralytics_prediction_extract import extract_task_outputs_from_ultralytics_preds
+from smartrain.core.inference.ultralytics_prediction_extract import (
+    extract_task_outputs_from_ultralytics_preds,
+    extract_task_outputs_list_from_ultralytics_preds,
+)
 
 
 def test_empty_preds_detection() -> None:
@@ -104,3 +107,25 @@ def test_segmentation_one_mask() -> None:
     assert len(segs) == 1
     assert segs[0]["class_index"] == 0
     assert segs[0]["polygon_roi_xy"] == [[0.0, 0.0], [1.0, 0.0]]
+
+
+def test_extract_task_outputs_list_batch_detection() -> None:
+    def _one_box(cls_idx: int) -> MagicMock:
+        boxes = MagicMock()
+        boxes.__len__.return_value = 1
+        boxes.xyxy = MagicMock()
+        boxes.xyxy.cpu.return_value.numpy.return_value = np.array([[0.0, 0.0, 1.0, 1.0]])
+        boxes.cls = MagicMock()
+        boxes.cls.cpu.return_value.numpy.return_value = np.array([cls_idx])
+        boxes.conf = MagicMock()
+        boxes.conf.cpu.return_value.numpy.return_value = np.array([0.7])
+        r = MagicMock()
+        r.boxes = boxes
+        return r
+
+    outs = extract_task_outputs_list_from_ultralytics_preds(
+        None, [_one_box(0), _one_box(2)], task_type="detection"
+    )
+    assert len(outs) == 2
+    assert outs[0]["detections"][0]["class_index"] == 0
+    assert outs[1]["detections"][0]["class_index"] == 2

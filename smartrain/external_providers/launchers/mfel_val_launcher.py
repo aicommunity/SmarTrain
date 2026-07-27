@@ -5,7 +5,10 @@ import os
 import sys
 from pathlib import Path
 
+from smartrain.external_providers.launchers.mfel_shim import MFELConvModuleShim, patch_mfel_missing_symbols
 from smartrain.external_providers.task_alias import ultralytics_task_alias
+
+__all__ = ["MFELConvModuleShim", "main"]
 
 
 def _write_val_results_csv(result, out_dir: Path) -> None:
@@ -35,39 +38,6 @@ def _write_val_results_csv(result, out_dir: Path) -> None:
         ",".join("" if v is None else str(v) for v in vals),
     ]
     csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _patch_mfel_missing_symbols() -> None:
-    try:
-        import torch.nn as nn
-        from ultralytics.nn.modules import block as block_mod
-    except Exception:
-        return
-    if getattr(block_mod, "ConvModule", None) is not None:
-        return
-
-    class MFELConvModuleShim:
-        def __init__(self, c1, c2, k=1, s=1, p=0, norm_cfg=None, act_cfg=None, **kwargs):
-            import torch.nn as _nn
-
-            super().__init__()
-            groups = int(kwargs.get("groups", 1) or 1)
-            dilation = int(kwargs.get("dilation", 1) or 1)
-            bias = bool(kwargs.get("bias", False))
-            self.conv = _nn.Conv2d(c1, c2, k, s, p, groups=groups, dilation=dilation, bias=bias)
-            self.bn = _nn.BatchNorm2d(int(c2))
-            self.act = _nn.SiLU(inplace=True)
-
-        def forward(self, x):
-            return self.act(self.bn(self.conv(x)))
-
-    class _PatchedConvModule(MFELConvModuleShim, nn.Module):  # type: ignore[misc]
-        pass
-
-    _PatchedConvModule.__module__ = __name__
-    _PatchedConvModule.__qualname__ = "MFELPatchedConvModule"
-    globals()["MFELPatchedConvModule"] = _PatchedConvModule
-    setattr(block_mod, "ConvModule", _PatchedConvModule)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         raise
-    _patch_mfel_missing_symbols()
+    patch_mfel_missing_symbols(host_globals=globals())
 
     model = YOLO(args.model, task=ultralytics_task_alias(getattr(args, "task", "detection")))
     kwargs = {

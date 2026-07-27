@@ -1,5 +1,8 @@
 <!-- BLOCK: EXECUTIVE_SUMMARY -->
-The executive summary provides a table of main test metrics per run, confidence recommendations (A/B/C), and paired Ultralytics test figures (PR curve and confusion matrix) for visual comparison. Detailed analysis follows in later sections.
+This section opens with a run reference: M* label definitions, model file names (release artifacts such as pt/onnx/…), and per-model class lists by output index. It then provides a table of main test metrics per run, confidence recommendations (A/B/C), and paired Ultralytics test figures (PR curve and confusion matrix) for visual comparison. Detailed analysis follows in later sections.
+
+<!-- BLOCK: SUB_EXEC_MODEL_IDENTITY -->
+Labels M1, M2, … are ordered shorthand for the compared models; they match the “Run” column in all tables and figure captions. The “Model files” column links each label to weight artifact basenames from model release (typically `detect_…` / `segment_…` and similar stems with `.pt`, `.onnx`, `.engine`, etc. under the run’s `models/` directory). Below, each model lists class names in network output-index order.
 
 <!-- BLOCK: NARR_PREAMBLE_EXEC_METRICS -->
 Main test metrics for each selected run for direct side-by-side comparison.
@@ -49,11 +52,14 @@ This section describes class-level quality heterogeneity and identifies AP/PR bo
 <!-- BLOCK: CONCLUSION -->
 Conclusion: model choice should follow the target operating profile and SLA constraints. For latency-critical production paths, prioritize predictable speed with acceptable quality; for quality-critical paths, prioritize metric maximum with controlled per-class degradation and bounded compute cost.
 
+<!-- BLOCK: SUB_CONTEXT_RUNS -->
+This subsection lists the baseline run and comparison candidates with paths to run directories. Abbreviated M* labels match the run reference at the start of chapter 1 (legend, model files, and classes).
+
 <!-- BLOCK: SUB_CONTEXT_DATASET -->
 This subsection lists datasets involved in the comparison using the report’s abbreviated legend. It provides a quick anchor for which data underlies the metrics below.
 
 <!-- BLOCK: SUB_CONTEXT_MODELS -->
-Next we enumerate the baseline run and candidates, plus tables for format aliases and eval settings. This defines the artifact namespace referenced in later sections.
+The following tables define format comparison aliases and eval settings. They establish the artifact namespace referenced in later sections.
 
 <!-- BLOCK: SUB_QUALITY_GENERAL -->
 This subsection collects quality summary tables: per-run aggregates, recomputed metrics, and optional baseline deltas. It lets you compare runs without digging into raw logs.

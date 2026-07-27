@@ -45,16 +45,35 @@ jobs:
           smartrain/services/testing/model_test_cli_surface.py
           smartrain/cli_entrypoints/help_texts.py
           smartrain/cli_entrypoints/cli_forwarding.py
+          smartrain/cli_entrypoints/support/cli_interactive.py
           smartrain/core/runtime/logging_config.py
           smartrain/core/runtime/file_lock.py
+          smartrain/core/runtime/run_refs.py
+          smartrain/core/models
+          smartrain/backends
+          smartrain/services/registry
           tests/test_training_queue.py
           tests/test_workspace_sync_service.py
           tests/test_file_lock.py
+
+      - name: Coverage gate (core / contract / backends)
+        run: >-
+          python -m pytest -q
+          --cov=smartrain.core
+          --cov=smartrain.run_model_contract
+          --cov=smartrain.backends
+          --cov-report=term-missing:skip-covered
+          --cov-fail-under=40
+          tests/regression/test_layer_import_guardrails.py
+          tests/test_imports.py
+          tests/test_registry_models_add.py
+          tests/test_confidence_recommendation.py
 
       - name: Mypy
         run: >-
           python -m mypy
           smartrain/core/runtime/logging_config.py
           smartrain/core/runtime/file_lock.py
+          smartrain/core/runtime/run_refs.py
           smartrain/services/datasets/data_yaml_writer.py
           smartrain/services/datasets/augment_transforms.py

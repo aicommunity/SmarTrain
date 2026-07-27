@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from smartrain.core.runtime.path_portable import posix_relpath
+
 
 def run_all_pr_stage(
     *,
@@ -70,7 +72,7 @@ def run_all_pr_stage(
         )
         cmd_pr_curves_cb(pr_ns)
         if os.path.isfile(pr_png):
-            artifacts.append({"role": "pr_png", "path": os.path.relpath(pr_png, session_root)})
+            artifacts.append({"role": "pr_png", "path": posix_relpath(pr_png, session_root)})
             pr_png_written = True
 
         part_csv = os.path.join(group_pr_dir, "per_class", "pr_per_class.csv")
@@ -139,7 +141,7 @@ def run_all_pr_stage(
                 ignore_index=True,
             )
         merged.to_csv(pr_per_class_csv, index=False, encoding="utf-8")
-        artifacts.append({"role": "pr_per_class_csv", "path": os.path.relpath(pr_per_class_csv, session_root)})
+        artifacts.append({"role": "pr_per_class_csv", "path": posix_relpath(pr_per_class_csv, session_root)})
 
         combined_dir = os.path.join(session_root, "artifacts", "pr", "per_class_combined")
         os.makedirs(combined_dir, exist_ok=True)
@@ -185,7 +187,7 @@ def run_all_pr_stage(
                 )
                 plt.savefig(out_png, dpi=220)
                 plt.close()
-                artifacts.append({"role": "pr_per_class_png", "path": os.path.relpath(out_png, session_root)})
+                artifacts.append({"role": "pr_per_class_png", "path": posix_relpath(out_png, session_root)})
                 if len(present_models_local) < len(expected_models):
                     record_failure_cb(
                         stage="pr",
@@ -231,7 +233,7 @@ def run_all_pr_stage(
         )
 
     for p in sorted(glob(os.path.join(session_root, "artifacts", "pr", "**", "per_class", "*.png"), recursive=True)):
-        artifacts.append({"role": "pr_per_class_png", "path": os.path.relpath(p, session_root)})
+        artifacts.append({"role": "pr_per_class_png", "path": posix_relpath(p, session_root)})
 
     return artifacts, cache_events
 

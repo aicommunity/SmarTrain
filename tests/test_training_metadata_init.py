@@ -29,6 +29,10 @@ def test_ensure_initial_training_metadata_creates_skeleton(tmp_path: Path) -> No
     payload = json.loads((model_dir / "training_metadata.json").read_text(encoding="utf-8"))
     assert payload["training_info"]["model"] == "yolo11x"
     assert payload["training_info"]["dataset"]["name"] == "ds_a"
+    assert payload["training_info"]["dataset"].get("path_under_workspace") == "datasets/ds_a"
+    assert "path_absolute" not in payload["training_info"]["dataset"]
+    assert "\\" not in payload["workspace"]["dataset_path_relative"]
+    assert "\\" not in payload["workspace"]["run_directory_relative"]
     assert payload["status"]["training"]["success"] is None
     assert payload["timestamps"]["training"]["start"] == "2026-01-01T12:00:00"
 

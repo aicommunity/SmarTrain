@@ -78,7 +78,7 @@ def collect_available_base_runs(layout, selected_dataset: str, *, base_run_summa
             if not run_dir.exists() or not args_path.exists():
                 continue
             run_ts = extract_run_timestamp(run_dir.name, run_dir)
-            run_rel = str(run_dir.relative_to(runs_root))
+            run_rel = run_dir.relative_to(runs_root).as_posix()
             info = base_run_summary_cb(args_path)
             out.append(
                 {

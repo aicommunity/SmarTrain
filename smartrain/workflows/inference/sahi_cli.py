@@ -1,6 +1,8 @@
 """
-Tile inference via SAHI (large images/frames).
-Dependency: pip install 'smartrain[sahi]'
+Tile inference via SAHI (large images/frames) and dataset prepare-slices.
+
+Dependency for ``infer``: pip install 'smartrain[sahi]'
+``prepare-slices`` does not require the sahi package.
 """
 from __future__ import annotations
 
@@ -10,26 +12,47 @@ import sys
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 
 
+def _add_slice_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--slice-h", type=int, default=640)
+    p.add_argument("--slice-w", type=int, default=640)
+    p.add_argument("--overlap-h", type=float, default=0.2)
+    p.add_argument("--overlap-w", type=float, default=0.2)
+
+
 def build_sahi_arg_parser() -> argparse.ArgumentParser:
-    p = CliArgumentParser(description="SAHI: slicing + YOLO (Ultralytics)")
-    p.add_argument("--model", type=str, required=True, help="Path to .pt model")
-    p.add_argument("--source", type=str, required=True, help="Image or image directory")
-    p.add_argument(
+    p = CliArgumentParser(description="SAHI: slicing-aided inference and dataset prep")
+    sub = p.add_subparsers(dest="sahi_command", required=True)
+
+    p_infer = sub.add_parser("infer", help="Sliced inference + export_visuals (requires sahi)")
+    p_infer.add_argument("--model", type=str, required=True, help="Path to .pt model")
+    p_infer.add_argument("--source", type=str, required=True, help="Image or image directory")
+    p_infer.add_argument(
         "--output",
         type=str,
         default="sahi_out",
         help="Directory for visualizations (export_visuals)",
     )
-    p.add_argument("--slice-h", type=int, default=640)
-    p.add_argument("--slice-w", type=int, default=640)
-    p.add_argument("--overlap-h", type=float, default=0.2)
-    p.add_argument("--overlap-w", type=float, default=0.2)
-    p.add_argument("--conf", type=float, default=0.25)
-    p.add_argument("--device", type=str, default="cuda")
+    _add_slice_args(p_infer)
+    p_infer.add_argument("--conf", type=float, default=0.25)
+    p_infer.add_argument("--device", type=str, default="cuda")
+
+    p_prep = sub.add_parser(
+        "prepare-slices",
+        help="Build YOLO dataset of sliding-window slices for fine-tune (no sahi pkg needed)",
+    )
+    p_prep.add_argument("--workspace", type=str, default=None, help="Workspace root")
+    p_prep.add_argument("--dataset", type=str, required=True, help="Source dataset key")
+    p_prep.add_argument(
+        "--output-name",
+        type=str,
+        default=None,
+        help="Output dataset name (default: <dataset>_sahi_slices)",
+    )
+    _add_slice_args(p_prep)
     return p
 
 
-def main(argv: list[str] | None = None) -> None:
+def _run_infer(args: argparse.Namespace) -> None:
     try:
         from sahi import AutoDetectionModel
         from sahi.predict import get_sliced_prediction
@@ -40,10 +63,8 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    import os
     from pathlib import Path
 
-    args = build_sahi_arg_parser().parse_args(argv)
     src = Path(args.source).expanduser().resolve()
     out = Path(args.output).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -85,6 +106,45 @@ def main(argv: list[str] | None = None) -> None:
     else:
         print(f"[ERROR] There is no such path: {src}", file=sys.stderr)
         sys.exit(1)
+
+
+def _run_prepare_slices(args: argparse.Namespace) -> None:
+    from smartrain.core.runtime.workspace_paths import resolve_workspace_root
+    from smartrain.services.datasets.dataset_sahi_slices import prepare_sahi_slices_dataset
+
+    try:
+        workspace = resolve_workspace_root(getattr(args, "workspace", None))
+    except ValueError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        result = prepare_sahi_slices_dataset(
+            workspace=workspace,
+            dataset=str(args.dataset),
+            output_name=getattr(args, "output_name", None),
+            slice_h=int(args.slice_h),
+            slice_w=int(args.slice_w),
+            overlap_h=float(args.overlap_h),
+            overlap_w=float(args.overlap_w),
+        )
+    except Exception as exc:
+        print(f"[ERROR] prepare-slices failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[OK] SAHI slices dataset: {result['dataset']} ({result['slices_written']} slices)")
+    print(f"[INFO] path: {result['path']}")
+
+
+def main(argv: list[str] | None = None) -> None:
+    argv = list(argv if argv is not None else sys.argv[1:])
+    # Backward compatible: ``smartrain sahi --model ...`` → ``infer``.
+    if argv and argv[0].startswith("-"):
+        argv = ["infer", *argv]
+    parser = build_sahi_arg_parser()
+    args = parser.parse_args(argv)
+    if args.sahi_command == "prepare-slices":
+        _run_prepare_slices(args)
+        return
+    _run_infer(args)
 
 
 if __name__ == "__main__":

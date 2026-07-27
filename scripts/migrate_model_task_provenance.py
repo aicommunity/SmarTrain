@@ -51,7 +51,29 @@ def migrate_models_root(models_root: Path, *, dry_run: bool) -> tuple[int, int]:
     if not models_root.is_dir():
         raise FileNotFoundError(f"Models root not found: {models_root}")
 
-    for model_dir in sorted(p for p in models_root.iterdir() if p.is_dir()):
+    # Flat registry dirs + nested release bundles (models/<ds>/<release>/).
+    candidate_dirs: list[Path] = []
+    for top in sorted(p for p in models_root.iterdir() if p.is_dir()):
+        if (top / "model_manifest.json").is_file() or (top / "training_metadata.json").is_file():
+            candidate_dirs.append(top)
+            continue
+        nested = [
+            child
+            for child in sorted(top.iterdir())
+            if child.is_dir()
+            and (
+                (child / "model_manifest.json").is_file()
+                or (child / "training_metadata.json").is_file()
+                or any(child.glob("detect_*.pt"))
+                or any(child.glob("*.pt"))
+            )
+        ]
+        if nested:
+            candidate_dirs.extend(nested)
+        else:
+            candidate_dirs.append(top)
+
+    for model_dir in candidate_dirs:
         if _has_task_provenance(model_dir):
             skipped += 1
             continue

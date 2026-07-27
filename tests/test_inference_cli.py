@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tarfile
+import zipfile
 from pathlib import Path
 from types import ModuleType
 
@@ -43,12 +45,19 @@ class _FakeResult:
 
 class _FakeYOLO:
     last_predict_kwargs = None
+    last_init_args = None
+    last_init_kwargs = None
 
-    def __init__(self, _weights: str):
+    def __init__(self, _weights: str, *args, **kwargs):
+        _FakeYOLO.last_init_args = (_weights, *args)
+        _FakeYOLO.last_init_kwargs = dict(kwargs)
         self.names = {0: "obj"}
 
     def predict(self, **_kwargs):
         _FakeYOLO.last_predict_kwargs = dict(_kwargs)
+        source = _kwargs.get("source")
+        if isinstance(source, (list, tuple)):
+            return [_FakeResult() for _ in source]
         return [_FakeResult()]
 
 
@@ -68,6 +77,97 @@ def _latest_report_path(ws: Path) -> Path:
     all_json = sorted(root.rglob("inference_results.json"))
     assert all_json, "inference_results.json not found"
     return all_json[-1]
+
+
+def test_inference_resolves_task_from_manifest_and_passes_to_yolo(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _FakeYOLO.last_init_kwargs = None
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "seg_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "seg_model.pt").write_bytes(b"fake-pt")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps(
+            {"weights_file": "seg_model.pt", "task_type": "segmentation"},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (model_dir / "training_metadata.json").write_text(
+        json.dumps(
+            {
+                "training_info": {
+                    "task_type": "segmentation",
+                    "provider": {"id": "ultralytics"},
+                    "model": {"name": "yolo11n-seg"},
+                    "dataset": {"name": "ds", "hash": "abc"},
+                },
+                "timestamps": {"training": {"end": "2026-01-01T00:00:00Z"}},
+                "paths": {"best_model": "seg_model.pt"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "seg_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+
+    assert _FakeYOLO.last_init_kwargs is not None
+    assert _FakeYOLO.last_init_kwargs.get("task") == "segment"
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["task_type"] == "segmentation"
+
+
+def test_inference_resolves_task_from_weight_stem_prefix(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _FakeYOLO.last_init_kwargs = None
+    _install_fake_ultralytics(monkeypatch)
+
+    weights = tmp_path / "models" / "segment_yolo11n_20260101_000000.onnx"
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"fake-onnx")
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--weights",
+            str(weights),
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+
+    assert _FakeYOLO.last_init_kwargs is not None
+    assert _FakeYOLO.last_init_kwargs.get("task") == "segment"
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["task_type"] == "segmentation"
 
 
 def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
@@ -108,15 +208,23 @@ def test_inference_folder_model_name(tmp_path: Path, monkeypatch) -> None:
     assert isinstance(report.get("performance"), dict)
     assert "end_to_end" in report["performance"]
     assert "infer_only" in report["performance"]
-    env_path = Path(report["artifacts"]["environment_profile"]["path_absolute"])
+    env_profile = report["artifacts"]["environment_profile"]
+    env_rel = env_profile.get("path_relative")
+    env_abs = env_profile.get("path_absolute")
+    env_path = Path(env_abs) if env_abs else (tmp_path / str(env_rel))
     assert env_path.is_file()
+    if env_rel:
+        assert "\\" not in env_rel
+        assert "path_absolute" not in env_profile
     out_dir = _latest_report_path(tmp_path).parent
     autolabel = out_dir / "raw_images_autolabeled"
     assert autolabel.is_dir()
     assert (autolabel / "autolabel_manifest.json").is_file()
-    assert (autolabel / "data.yaml").is_file()
-    assert len(list((autolabel / "images").glob("*"))) == 2
+    assert (autolabel / "part_000" / "data.yaml").is_file()
+    assert len(list((autolabel / "part_000" / "images").glob("*"))) == 2
     assert report["artifacts"]["autolabel_dataset"]["images_exported"] == 2
+    assert report["artifacts"]["autolabel_dataset"]["layout"] == "independent_parts"
+    assert report["parameters"]["batch_size"] == 8
 
 
 def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monkeypatch) -> None:
@@ -124,6 +232,11 @@ def test_inference_uses_gpu0_default_device_when_available(tmp_path: Path, monke
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
     _install_fake_ultralytics(monkeypatch)
     monkeypatch.setattr("smartrain.workflows.inference.inference_cli.default_device_value", lambda: "0")
+    # resolve_device_request() consults real CUDA discovery; pin it so "0" survives without a GPU.
+    monkeypatch.setattr(
+        "smartrain.workflows.inference.inference_cli.resolve_device_request",
+        lambda request, options=None: "0" if str(request or "0").strip().lower() != "cpu" else "cpu",
+    )
     monkeypatch.setattr("smartrain.workflows.inference.inference_cli._ensure_device_available_or_exit", lambda _d: None)
 
     model_dir = tmp_path / "models" / "demo_model"
@@ -223,7 +336,9 @@ def test_inference_supports_engine_weights(tmp_path: Path, monkeypatch) -> None:
         ]
     )
     report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
-    assert report["model"]["weights_absolute"].endswith(".engine")
+    weights_rel = report["model"].get("weights_relative") or ""
+    weights_abs = report["model"].get("weights_absolute") or ""
+    assert (weights_rel or weights_abs).endswith(".engine")
     assert report["summary"]["images_processed"] == 1
 
 
@@ -580,7 +695,9 @@ def test_inference_external_provider_parsed_from_prefixed_weights(monkeypatch, t
     assert report["summary"]["task_outputs_total"] == 0
     assert report["summary"]["detections_total"] == 0
     assert report["images"] == []
-    assert Path(report["artifacts"]["environment_profile"]["path_absolute"]).is_file()
+    env_profile = report["artifacts"]["environment_profile"]
+    env_path = Path(env_profile["path_absolute"]) if env_profile.get("path_absolute") else (tmp_path / env_profile["path_relative"])
+    assert env_path.is_file()
 
 
 def test_inference_external_provider_accepts_task_outputs_payload(monkeypatch, tmp_path: Path) -> None:
@@ -947,10 +1064,13 @@ def test_inference_export_conf_filter(tmp_path: Path, monkeypatch) -> None:
             self.boxes = _FakeBoxesMulti()
 
     class _FakeYOLOMulti:
-        def __init__(self, _weights: str):
+        def __init__(self, _weights: str, *args, **kwargs):
             self.names = {0: "obj"}
 
         def predict(self, **_kwargs):
+            source = _kwargs.get("source")
+            if isinstance(source, (list, tuple)):
+                return [_FakeResultMulti() for _ in source]
             return [_FakeResultMulti()]
 
     fake_mod = __import__("types").ModuleType("ultralytics")
@@ -984,7 +1104,7 @@ def test_inference_export_conf_filter(tmp_path: Path, monkeypatch) -> None:
             "--no-export-visualize",
         ]
     )
-    label_path = _latest_report_path(tmp_path).parent / "raw_images_autolabeled" / "labels" / "a.txt"
+    label_path = _latest_report_path(tmp_path).parent / "raw_images_autolabeled" / "part_000" / "labels" / "a.txt"
     text = label_path.read_text(encoding="utf-8").strip().splitlines()
     assert len(text) == 1
 
@@ -1020,6 +1140,270 @@ def test_inference_visualize_without_dataset(tmp_path: Path, monkeypatch) -> Non
         ]
     )
     out_dir = _latest_report_path(tmp_path).parent
-    overlays = list((out_dir / "pred_overlays").glob("*"))
+    overlays = list((out_dir / "pred_overlays" / "part_000").glob("*"))
     assert len(overlays) == 2
+
+
+def _make_images_zip(tmp_path: Path, *, inner_dir: str = "images_set", count: int = 2) -> Path:
+    source = tmp_path / "build" / inner_dir
+    source.mkdir(parents=True)
+    for idx in range(count):
+        _write_image(source / f"img_{idx}.jpg")
+    zip_path = tmp_path / f"{inner_dir}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in source.rglob("*"):
+            if path.is_file():
+                zf.write(path, arcname=str(path.relative_to(source.parent)))
+    return zip_path
+
+
+def _make_images_tar_gz(tmp_path: Path, *, inner_dir: str = "images_set", count: int = 2) -> Path:
+    source = tmp_path / "build" / inner_dir
+    source.mkdir(parents=True)
+    for idx in range(count):
+        _write_image(source / f"img_{idx}.jpg")
+    archive_path = tmp_path / f"{inner_dir}.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        for path in source.rglob("*"):
+            if path.is_file():
+                tf.add(path, arcname=str(path.relative_to(source.parent)))
+    return archive_path
+
+
+def _setup_demo_model(tmp_path: Path) -> None:
+    model_dir = tmp_path / "models" / "demo_model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "demo_model.pt").write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "demo_model.pt", "task_type": "detection"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def test_inference_folder_zip_archive(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    _setup_demo_model(tmp_path)
+    zip_path = _make_images_zip(tmp_path)
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source",
+            str(zip_path),
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["source"]["mode"] == "folder"
+    assert report["source"]["name"] == "images_set"
+    src = report["source"]
+    if "source_archive_relative" in src:
+        assert src["source_archive_relative"].endswith("images_set.zip") or "images_set" in src["source_archive_relative"]
+        assert "\\" not in src["source_archive_relative"]
+    else:
+        assert src["source_archive_absolute"] == str(zip_path.resolve())
+    assert report["summary"]["images_processed"] == 2
+
+
+def test_inference_folder_tar_gz_archive(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    _setup_demo_model(tmp_path)
+    archive_path = _make_images_tar_gz(tmp_path)
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(archive_path),
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["summary"]["images_processed"] == 2
+    src = report["source"]
+    if "source_archive_relative" in src:
+        assert "\\" not in src["source_archive_relative"]
+        assert Path(src["source_archive_relative"]).name == archive_path.name or archive_path.name in src["source_archive_relative"]
+    else:
+        assert src["source_archive_absolute"] == str(archive_path.resolve())
+
+
+def test_inference_dataset_split_archive_catalog(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    _setup_demo_model(tmp_path)
+
+    ds_root = tmp_path / "build" / "ds_zip"
+    test_images = ds_root / "test" / "images"
+    test_images.mkdir(parents=True)
+    _write_image(test_images / "x.jpg")
+    (ds_root / "test" / "labels").mkdir(parents=True)
+    (ds_root / "data.yaml").write_text(
+        "train: train/images\nval: val/images\ntest: test/images\nnc: 1\nnames: ['obj']\n",
+        encoding="utf-8",
+    )
+    zip_path = tmp_path / "ds_a.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in ds_root.rglob("*"):
+            if path.is_file():
+                zf.write(path, arcname=str(path.relative_to(ds_root.parent)))
+
+    (tmp_path / "datasets" / "datasets_info.json").write_text(
+        json.dumps(
+            {
+                "ds_a": {
+                    "structure": "split",
+                    "data_path": str(zip_path),
+                    "classes": {"obj": 0},
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "demo_model",
+            "--data-mode",
+            "dataset-split",
+            "--dataset",
+            "ds_a",
+            "--split",
+            "test",
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["source"]["mode"] == "dataset-split"
+    assert report["source"]["dataset"] == "ds_a"
+    assert report["source"]["split"] == "test"
+    src = report["source"]
+    if "source_archive_relative" in src:
+        assert "\\" not in src["source_archive_relative"]
+        assert zip_path.name in src["source_archive_relative"] or src["source_archive_relative"].endswith("ds_a.zip")
+    else:
+        assert src["source_archive_absolute"] == str(zip_path.resolve())
+    assert report["summary"]["images_processed"] == 1
+
+
+def test_inference_external_provider_zip_source_is_directory(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+    zip_path = _make_images_zip(tmp_path, count=1)
+    captured: dict[str, str] = {}
+
+    def _fake_run_external_infer(provider_id: str, repo_path: str, venv_path: str, **kwargs) -> int:
+        captured["provider_id"] = provider_id
+        captured["source_path"] = str(kwargs.get("source_path"))
+        return 0
+
+    monkeypatch.setattr("smartrain.backends.implementations.ultralytics.inference.run_external_infer", _fake_run_external_infer)
+    with pytest.raises(SystemExit) as ex:
+        inference_main(
+            [
+                "--workspace",
+                str(tmp_path),
+                "--weights",
+                "dr-yolo:yolov8n",
+                "--external-repo",
+                str(tmp_path / "dr-repo"),
+                "--data-mode",
+                "folder",
+                "--source-dir",
+                str(zip_path),
+                "--no-export-dataset",
+                "--no-export-visualize",
+            ]
+        )
+    assert int(ex.value.code or 0) == 0
+    assert captured["source_path"]
+    assert not captured["source_path"].endswith(".zip")
+    assert Path(captured["source_path"]).is_dir()
+
+
+def test_resolve_model_accepts_relative_weights_path_in_model_name(tmp_path: Path, monkeypatch) -> None:
+    import argparse
+
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+    from smartrain.services.inference_runtime_helpers import resolve_model
+
+    model_dir = tmp_path / "models" / "merged2_fltd_aug"
+    model_dir.mkdir(parents=True)
+    weights = model_dir / "detect_yolo11s_20260708_214400.pt"
+    weights.write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "detect_yolo11s_20260708_214400.pt", "task_type": "detection"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        model_name="merged2_fltd_aug/detect_yolo11s_20260708_214400.pt",
+        run=None,
+        weights=None,
+    )
+    model_path, model_name, source = resolve_model(args, WorkspaceLayout(str(tmp_path)))
+    assert source == "models"
+    assert model_path == weights.resolve()
+    assert model_name == "merged2_fltd_aug"
+
+
+def test_inference_model_name_file_path_cli(tmp_path: Path, monkeypatch) -> None:
+    deploy_workspace(str(tmp_path))
+    monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
+    _install_fake_ultralytics(monkeypatch)
+
+    model_dir = tmp_path / "models" / "merged2_fltd_aug"
+    model_dir.mkdir(parents=True)
+    weights = model_dir / "detect_yolo11s_20260708_214400.pt"
+    weights.write_bytes(b"fake")
+    (model_dir / "model_manifest.json").write_text(
+        json.dumps({"weights_file": "detect_yolo11s_20260708_214400.pt", "task_type": "detection"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    src = tmp_path / "raw_images"
+    _write_image(src / "a.jpg")
+
+    inference_main(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--model-name",
+            "merged2_fltd_aug/detect_yolo11s_20260708_214400.pt",
+            "--data-mode",
+            "folder",
+            "--source-dir",
+            str(src),
+            "--no-export-dataset",
+            "--no-export-visualize",
+        ]
+    )
+    report = json.loads(_latest_report_path(tmp_path).read_text(encoding="utf-8"))
+    assert report["summary"]["images_processed"] == 1
+    assert report["model"]["source"] == "models"
 

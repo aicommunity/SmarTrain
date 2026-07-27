@@ -2,7 +2,7 @@
 
 # CLI: inference
 
-`smartrain inference` runs inference on a folder or a dataset split (detection, instance segmentation, classification depending on model/task).
+`smartrain inference` runs inference on a folder, archive, or dataset split (detection, instance segmentation, classification depending on model/task).
 
 It writes:
 
@@ -20,7 +20,26 @@ Both primary JSON files are saved under:
 
 Enabled by default (`--export-dataset`, disable with `--no-export-dataset`).
 
-Directory layout `<basename>_autolabeled/` (inside the inference run folder):
+By default export is split into **independent YOLO sub-datasets** (`--export-split-dirs`, disable with `--no-export-split-dirs`). Each `part_XXX/` holds up to `--export-files-per-dir` **actually exported** images (after label confidence filter; default `500`).
+
+Split layout (default):
+
+```
+<basename>_autolabeled/
+  autolabel_manifest.json          # root index (layout=independent_parts)
+  part_000/
+    images/
+    labels/
+    data.yaml
+    autolabel_manifest.json
+  part_001/
+    ...
+pred_overlays/
+  part_000/
+  part_001/
+```
+
+Flat layout (`--no-export-split-dirs`):
 
 ```
 <basename>_autolabeled/
@@ -30,11 +49,21 @@ Directory layout `<basename>_autolabeled/` (inside the inference run folder):
   autolabel_manifest.json
 ```
 
-- **`basename`** is the source folder name (`--source-dir`) or `{dataset}-{split}` for `dataset-split`.
-- Only frames with **≥1 detection/segment** after the export confidence filter are included.
-- **`autolabel_manifest.json`** records model, inference/export parameters, summary stats, and `file_mapping`.
+- **`basename`** is the source folder or archive name (`--source` / `--source-dir`) or `{dataset}-{split}` for `dataset-split`.
 
-Export flags:
+## Data sources
+
+| Mode | Flags | Archive support |
+|------|-------|-----------------|
+| `folder` | `--source` or `--source-dir` | Yes: `.zip`, `.tar`, `.tar.gz`, `.tgz` — extracted to `tmp/extracted_datasets/` |
+| `dataset-split` | `--dataset`, `--split` | Yes when `data_path` in `datasets_info.json` points to an archive |
+
+Archives are unpacked into the workspace cache (`tmp/extracted_datasets/`) with mtime/size invalidation. When an archive was used, `source.source_archive_*` in the report keeps the original archive path.
+
+- Only frames with **≥1 detection/segment** after the export confidence filter are included.
+- **`autolabel_manifest.json`** records model, inference/export parameters, summary stats, and `file_mapping` (per part when split; root index lists parts).
+
+Export / inference flags:
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -42,11 +71,19 @@ Export flags:
 | `--export-label-conf-min` | `0.25` | Min confidence for label export |
 | `--export-label-conf-max` | `1.0` | Max confidence for label export |
 | `--export-visualize` / `--no-export-visualize` | on when export-dataset | `pred_overlays/` vis-style renders |
+| `--export-split-dirs` / `--no-export-split-dirs` | on | Independent `part_XXX/` sub-datasets (+ mirrored overlays) |
+| `--export-files-per-dir` | `500` | Max exported images per sub-dataset |
+| `--export-classes` | all | Keep only frames with these class names/ids in saved results |
+| `--batch-size` | `8` | Local Ultralytics inference batch size (ignored for external providers) |
+| `--task` | auto | Task routing: `detect` / `segment` / `classify` (aliases `detection`, `segmentation`, `classification`). Passed through to Ultralytics `YOLO(..., task=)` when set; otherwise inferred from model context. |
 
 `--conf` is the inference threshold; `--export-label-conf-*` further filters labels written to the dataset from predictions already returned by the model.
 
 - Classification is not exported to YOLO (warning, no dataset folder created).
 - If no images pass the export confidence filter, `<basename>_autolabeled/` and `pred_overlays/` are not created.
+- Large `--batch-size` with high `--img-size` may OOM; lower `--batch-size` if needed.
+- Static ONNX exports (default convert: fixed batch=1) clamp `--batch-size` automatically with a warning. For multi-image batches, re-export with `smartrain model convert --dynamic` (or a larger `--batch`).
+- Interactive mode lists model classes after model selection; empty selection exports all classes. `--export-classes` applies together with `--export-label-conf-*`: frames without selected classes are omitted from `inference_results.json`, autolabel export, and overlays.
 
 ## External provider capability matrix (task × payload)
 
@@ -79,19 +116,19 @@ Note: `pt_uni` is an internal metrics-comparison mode (PT vs PT-uni, test/val) a
 
 ```bash
 smartrain inference --model-name my_model --data-mode folder --source-dir ./images --device cpu
-smartrain inference --model-name my_model --data-mode folder --source-dir ./images --no-export-dataset
-smartrain inference --model-name my_model --data-mode folder --source-dir ./images --export-label-conf-min 0.4 --export-label-conf-max 0.9
-smartrain inference --weights ./runs/ds/run_001/models/run_001.engine --data-mode folder --source-dir ./images
+smartrain inference --run runs/ds/2026-07-14_20-42_ultralytics_yolo11s_640px_400epochs_b16-b1ef93cc --data-mode folder --source-dir ./images
+smartrain inference --weights ./runs/ds/my_run/models/detect_yolo11s_20260714_204230_640px_400epochs_b16.pt --data-mode folder --source-dir ./images
+smartrain inference --weights ./models/ds/my_run/detect_yolo11s_20260714_204230_640px_400epochs_b16.onnx --data-mode folder --source-dir ./images --batch-size 1
+smartrain inference --weights yolo11s-seg.pt --task segment --data-mode folder --source-dir ./images --save-overlay
 smartrain inference --weights dr-yolo:yolov8n --external-repo /opt/dr-yolo --data-mode folder --source-dir ./images
-smartrain inference --weights yolo11s-seg.pt --data-mode folder --source-dir ./images --save-overlay
 ```
 
 ### Instance segmentation overlay
 
-For `*-seg.pt` models, inference JSON includes per-image `segments` (polygon vertices). Use `--save-overlay` to write RGB preview images with GT-style polygon outlines next to the JSON report (under the same `workspace/inference/...` output directory).
+For `*-seg.pt` models (or `--task segment`), inference JSON includes per-image `segments` (polygon vertices). Use `--save-overlay` to write RGB preview images with GT-style polygon outlines next to the JSON report (under the same `workspace/inference/...` output directory).
 
 ```bash
-smartrain inference --weights runs/ds/run_seg/models/best-seg.pt --data-mode folder --source-dir ./images --save-overlay
+smartrain inference --weights runs/ds/run_seg/models/detect_yolo11s-seg_….pt --task segment --data-mode folder --source-dir ./images --save-overlay
 ```
 
 ## Device selection
@@ -100,6 +137,19 @@ smartrain inference --weights runs/ds/run_seg/models/best-seg.pt --data-mode fol
 - Interactive mode supports number, token, or GPU name input.
 - Default device is `GPU 0` when CUDA is available, otherwise `cpu`.
 - The same rules are used in `train` and `test`.
+
+## Input resolution (`--img-size`)
+
+When `--img-size` is omitted, inference resolves input size from model context (priority order):
+
+1. `training_metadata.json`, `args.yaml`, and other metadata files next to the model or in ancestor directories up to `models/`
+2. sidecar `*.meta.json` next to the weights file
+3. artifact filename token `_imgsz{N}x{N}_` (e.g. ONNX after `model convert`)
+4. static ONNX graph input H/W
+
+If no source is found, fallback **640** is used with a `[WARN]` message. Explicit `--img-size` always wins (`img_size_source: cli`).
+
+`inference_results.json` → `parameters.img_size_source` records the resolved source label (e.g. `training_metadata`, `artifact_filename`, `fallback_640`).
 
 ## Performance contract
 

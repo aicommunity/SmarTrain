@@ -1,17 +1,23 @@
 # Duplication Matrix
 
-| Area | Files | Duplication Type | Refactor Target |
+Updated: 2026-07-26 (post–project audit P0+P1+P2 wave).
+
+| Area | Files | Status | Notes / next |
 |---|---|---|---|
-| CLI prompts | `train_cli_callbacks.py`, `dataset_augment.py`, `dataset_balance.py` | Repeated prompt/validation | `cli/core/interactive.py` |
-| Replay output | train/test/inference/dataset commands | Slightly different replay builders | `cli/core/replay.py` |
-| Dataset catalog/splits | `dataset_augment.py`, `dataset_balance.py`, `dataset_orient.py`, `dataset_prune.py` | Repeated dataset lookup and split logic | `dataset_cli_common.py` (`load_dataset_catalog`, …) + `dataset_cli_catalog.py` (interactive dataset prompt helper) |
-| Run/model resolution | `model_test_cli.py`, `inference_cli.py`, `results_analyzer.py` | Similar target resolution branches | canonical gateway layer |
-| Backend dispatch | `inference_backends.py`, `model_test_backends.py`, train path | Backend-specific branching in app layer | capability registry |
-| Detection assumptions | `model_test_backends.py`, `results_analyzer.py`, dataset modules | Box-specific fields and metrics | task adapters |
+| Dead augment compat shims | `augment_{cli,pipeline,donors,yolo_io}.py` | **Closed (P0.2)** | Removed |
+| MFEL ConvModule shim | `mfel_*_launcher.py` | **Closed (P0.4)** | [`mfel_shim.py`](../../smartrain/external_providers/launchers/mfel_shim.py) |
+| Interactive dataset preamble | dataset_* | **Partial (P0.3)** | [`cli_interactive.py`](../../smartrain/cli_entrypoints/support/cli_interactive.py) |
+| Registry metadata read | `registry_cli.py` | **Closed (P0.1)** | [`run_fields.py`](../../smartrain/services/registry/run_fields.py) + gateway |
+| `_resolve_run_ref` | registry / inference / release | **Closed (P1.5)** | [`run_refs.py`](../../smartrain/core/runtime/run_refs.py) |
+| CLI prompts dual stack | train_prompts / ROI | **Partial (P1.4)** | yes_no/int shared via `cli_prompts` |
+| God `model_convert` | was workflow monolith | **Closed (P1.1)** | [`model_convert_service.py`](../../smartrain/services/models/model_convert_service.py) + thin facade |
+| God `dataset_balance` | monolith | **Partial (P1.3)** | `balance_{strategies,eval_coverage,presets}.py` extracted |
+| God `dataset_augment` | monolith | **Partial (P1.2)** | `augment_{cli_parser,budget}.py` extracted; orchestrator still large |
+| Replay builders | train/test/inference/dataset | Partial | Prefer `cli_replay.py` |
+| P2 science/MLOps | IRFS/LRP/SAHI-FT/queue/Docker/harness/core↔services | **Done (execution=1)** | [09-tech-debt.md](./09-tech-debt.md), [audit](../audit/2026-07-26-project-audit.md) |
 
-## Priority
+## Priority (remaining follow-ups)
 
-1. CLI request/interactive/replay
-2. Dataset helper extraction
-3. Run/model canonical contract
-4. Backend and task abstraction
+1. Further thin `dataset_augment` / analyze gods if needed
+2. Full prompt API consolidation (train `prompt_input` completer path)
+3. Raise coverage floor; expand mypy on `run_model_contract` without ignore_errors
