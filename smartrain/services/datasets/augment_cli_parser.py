@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR

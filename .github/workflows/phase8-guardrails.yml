@@ -42,6 +42,15 @@ jobs:
           smartrain/services/datasets/dataset_cli_common.py
           smartrain/services/datasets/dataset_convert_service.py
           smartrain/services/datasets/augment_transforms.py
+          smartrain/services/datasets/augment_budget.py
+          smartrain/services/datasets/augment_cli_parser.py
+          smartrain/services/datasets/balance_eval_coverage.py
+          smartrain/services/datasets/balance_strategies.py
+          smartrain/services/datasets/yolo_augment_geom.py
+          smartrain/services/analyze/test_metrics_plot.py
+          smartrain/services/inference_service.py
+          smartrain/services/reporting/document_export.py
+          smartrain/services/testing/backends/format_runners_native.py
           smartrain/services/testing/model_test_cli_surface.py
           smartrain/cli_entrypoints/help_texts.py
           smartrain/cli_entrypoints/cli_forwarding.py
@@ -68,6 +77,8 @@ jobs:
           tests/test_imports.py
           tests/test_registry_models_add.py
           tests/test_confidence_recommendation.py
+          tests/run_model_contract
+          tests/test_file_lock.py
 
       - name: Mypy
         run: >-

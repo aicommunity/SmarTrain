@@ -5,7 +5,6 @@ from typing import Iterable
 
 import albumentations as A
 import numpy as np
-from PIL import Image
 
 from smartrain.services.datasets.yolo_labels import (
     YoloBBox,

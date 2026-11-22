@@ -9,7 +9,7 @@ import os
 import shutil
 import tarfile
 import zipfile
-from typing import Any
+from typing import Any, Literal
 
 from smartrain.core.runtime.path_portable import relativize_if_under, resolve_stored_path_under_workspace
 
@@ -142,7 +142,7 @@ def _safe_extract_tar(archive_path: str, target_dir: str) -> None:
     """Secure tar/tar.gz unpacking to target_dir with path traversal protection."""
     abs_target = os.path.abspath(target_dir)
     kind = archive_kind(archive_path)
-    mode = "r:gz" if kind in ("tar.gz", "tgz") else "r:"
+    mode: Literal["r:gz", "r:"] = "r:gz" if kind in ("tar.gz", "tgz") else "r:"
     with tarfile.open(archive_path, mode) as tf:
         members = [m for m in tf.getmembers() if m.isfile() or m.isdir()]
         for member in members:

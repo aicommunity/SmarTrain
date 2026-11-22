@@ -43,7 +43,11 @@ def smb_safe_locked_file(
             try:
                 fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 break
-            except FileExistsError:
+            except (FileExistsError, PermissionError):
+                # FileExistsError: lock file exists (classic contention).
+                # PermissionError: on Windows the holder's open handle denies
+                # shared write, so os.open fails with EACCES instead — same
+                # meaning here: the lock is taken, keep spinning until deadline.
                 if time.monotonic() >= deadline:
                     raise TimeoutError(f"Timed out waiting for lock: {lock_path}") from None
                 time.sleep(poll_sec)

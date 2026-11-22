@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any, Sequence
+from typing import Sequence
 
 from smartrain.cli_entrypoints.support.cli_prompts import is_interactive_tty, prompt_choice
 
