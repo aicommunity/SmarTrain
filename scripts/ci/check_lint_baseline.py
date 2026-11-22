@@ -20,6 +20,14 @@ def _run(cmd: list[str]) -> tuple[int, str]:
 def main() -> int:
     failed = False
 
+    # Hard gate: undefined names and syntax errors are always bugs (they broke
+    # augment/balance at runtime after the module-split wave); never baseline.
+    hard_code, hard_out = _run([sys.executable, "-m", "ruff", "check", "smartrain", "tests", "--select", "F821,E9"])
+    if hard_code != 0:
+        failed = True
+        print("[ERROR] Undefined names / syntax errors found (F821/E9 must be zero):")
+        print(hard_out)
+
     ruff_limit = 511
     ruff_code, ruff_out = _run([sys.executable, "-m", "ruff", "check", "smartrain", "tests"])
     ruff_count = _extract_count(ruff_out, r"Found (\d+) errors\.")
