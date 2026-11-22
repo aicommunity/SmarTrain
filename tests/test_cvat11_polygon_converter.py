@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from smartrain.services.datasets.cvat11_converter import (
+    CvatPolygon,
     _cvat_polygon_to_yolo_line,
     build_cvat11_annotations_xml,
     export_yolo_to_cvat11_zip,
-    CvatPolygon,
 )
 from smartrain.services.datasets.yolo_labels import YoloSegment, read_yolo_labels
 

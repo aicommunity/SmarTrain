@@ -6,13 +6,13 @@ from typing import Any
 
 import yaml
 
-from smartrain.core.runtime.run_artifacts import read_model_sidecar_metadata, run_tmp_dir
 from smartrain.core.models.model_artifact_imgsz import (
     DEFAULT_INFERENCE_IMGSZ,
+    extract_imgsz_from_sidecar_payload,
     extract_onnx_input_imgsz,
     parse_imgsz_from_artifact_filename,
-    extract_imgsz_from_sidecar_payload,
 )
+from smartrain.core.runtime.run_artifacts import read_model_sidecar_metadata, run_tmp_dir
 
 FALLBACK_IMGSZ_SOURCE = "fallback_640"
 

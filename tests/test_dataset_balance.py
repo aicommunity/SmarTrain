@@ -7,13 +7,15 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 from smartrain.workflows.datasets.dataset_balance import (
     _auto_head_cap_multipliers,
     _parse_class_weight_multiplier,
+)
+from smartrain.workflows.datasets.dataset_balance import (
     main as balance_main,
 )
 from smartrain.workflows.datasets.datasets_json_former import main as scan_main
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 
 
 def _write_jpg(path: Path) -> None:

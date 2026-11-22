@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 from PIL import Image
@@ -11,9 +11,9 @@ from smartrain.services.datasets.dataset_convert_cli import main as dataset_conv
 from smartrain.services.datasets.dataset_convert_service import (
     TARGET_CVAT11,
     TARGET_YOLO,
-    run_conversion,
-    DatasetSource,
     ConvertOptions,
+    DatasetSource,
+    run_conversion,
 )
 
 
@@ -87,8 +87,8 @@ def test_cvat_zip_to_yolo_service(tmp_path: Path) -> None:
     cvat_zip = _make_cvat11_zip(tmp_path)
     out = tmp_path / "yolo_out"
     from smartrain.services.datasets.dataset_source_resolver import (
-        resolved_to_dataset_source,
         resolve_dataset_source,
+        resolved_to_dataset_source,
     )
 
     resolved = resolve_dataset_source(str(ws), cvat_zip)

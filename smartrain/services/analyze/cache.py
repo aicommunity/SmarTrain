@@ -5,7 +5,7 @@ import json
 import os
 from typing import Any
 
-from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
+from smartrain.core.runtime.run_artifacts import materialize_preferred_run_model, preferred_run_model_path
 
 
 def run_cache_root(run_dir: str) -> str:

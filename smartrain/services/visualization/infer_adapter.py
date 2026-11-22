@@ -5,11 +5,9 @@ from pathlib import Path
 from typing import Any
 
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.services.inference_arg_parser import build_inference_arg_parser
 from smartrain.services.inference_service import run_inference_job
-
-
-from smartrain.core.training.train_profile import task_to_metadata_task_type
 
 
 def _predictions_from_row(row: dict[str, Any]) -> list[dict[str, Any]]:

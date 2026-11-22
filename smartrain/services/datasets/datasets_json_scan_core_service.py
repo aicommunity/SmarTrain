@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
-import yaml
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Optional
+
+import yaml
 
 from smartrain.services.datasets.cvat11_converter import load_cvat11_label_names_from_xml
 from smartrain.services.datasets.cvsdcldet_converter import (
@@ -18,7 +19,6 @@ from smartrain.services.datasets.dataset_scan import (
     find_yaml_file,
     load_obj_names,
 )
-
 
 IMAGE_EXTS_FLAT = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
@@ -405,7 +405,7 @@ def process_dataset(folder_path: str, folder_name: str):
                 print(f"[WARNING] CVAT 1.1: failed to extract labels from {xml_path} - skipping")
                 return None
         else:
-            print(f"[WARNING] CVAT 1.1: annotations.xml not found - skipping")
+            print("[WARNING] CVAT 1.1: annotations.xml not found - skipping")
             return None
 
     if not names and structure == "cvsdcldet":

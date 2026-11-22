@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from smartrain.external_providers.base import ExternalProviderSpec
 
-
 _SPECS: tuple[ExternalProviderSpec, ...] = (
     ExternalProviderSpec(
         id="dr-yolo",

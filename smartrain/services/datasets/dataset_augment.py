@@ -5,12 +5,12 @@ import atexit
 import json
 import math
 import os
-import tempfile
-from collections import defaultdict
 import random
 import shutil
 import sys
+import tempfile
 import zlib
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -31,25 +31,58 @@ from smartrain.cli_entrypoints.support.cli_prompts import (
     prompt_yes_no,
 )
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.ultralytics_ephemeral import (
+    best_effort_prune_workspace_runs_detect,
+    ultralytics_sidecar_dir,
+)
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.services.datasets.augment_transforms import (
     FlipSpec,
     OrthogonalSpec,
+)
+from smartrain.services.datasets.augment_transforms import (
     append_conveyor_transforms as _append_conveyor_transforms,
+)
+from smartrain.services.datasets.augment_transforms import (
     compose_for_basic as _compose_for_basic,
+)
+from smartrain.services.datasets.augment_transforms import (
     conveyor_any as _conveyor_any,
+)
+from smartrain.services.datasets.augment_transforms import (
     flip_specs_for_mode as _flip_specs_for_mode,
+)
+from smartrain.services.datasets.augment_transforms import (
     iter_flip_variants as _iter_flip_variants,
+)
+from smartrain.services.datasets.augment_transforms import (
     iter_orthogonal_variants as _iter_orthogonal_variants,
+)
+from smartrain.services.datasets.augment_transforms import (
     normalize_augment_args as _normalize_augment_args,
+)
+from smartrain.services.datasets.augment_transforms import (
     set_conveyor_enabled as _set_conveyor_enabled,
+)
+from smartrain.services.datasets.augment_transforms import (
     sync_conveyor_flags as _sync_conveyor_flags,
 )
 from smartrain.services.datasets.data_yaml_writer import write_data_yaml_from_names
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
+from smartrain.services.datasets.dataset_cli_catalog import (
+    EMPTY_DATASETS_INFO_MESSAGE,
+    load_datasets_catalog,
+    sorted_class_names_for_dataset,
+    try_prompt_dataset_interactive,
+)
+from smartrain.services.datasets.dataset_cli_common import (
+    detect_split_from_path,
+    update_datasets_sidecar,
+)
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.services.datasets.noise_augment import build_conveyor_noise_transform, parse_noise_types
-from smartrain.services.datasets.yolo_image_rotate import apply_orthogonal_rotate
 from smartrain.services.datasets.yolo_augment_geom import (
     SPLIT_ALIASES,
     _parse_yolo_labels,
@@ -64,34 +97,14 @@ from smartrain.services.datasets.yolo_augment_geom import (
     rotate_labels_with_matrix,
     write_augment_label_file,
 )
+from smartrain.services.datasets.yolo_image_rotate import apply_orthogonal_rotate
 from smartrain.services.datasets.yolo_labels import YoloLabel, read_yolo_labels, serialize_yolo_labels
-from smartrain.services.datasets.dataset_cli_catalog import (
-    EMPTY_DATASETS_INFO_MESSAGE,
-    load_datasets_catalog,
-    sorted_class_names_for_dataset,
-    try_prompt_dataset_interactive,
-)
-from smartrain.services.datasets.dataset_cli_common import (
-    detect_split_from_path,
-    update_datasets_sidecar,
-)
-from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 _BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 _ROI_MODEL_CACHE: dict[str, YOLO] = {}
 
 
-from smartrain.services.datasets.augment_cli_parser import (
-    AUGMENT_PRESETS,
-    build_augment_arg_parser,
-    _apply_augment_preset_defaults,
-    _class_aware_enabled,
-    _provided_augment_flags,
-    _warn_exhaustive_class_aware,
-)
 from smartrain.services.datasets.augment_budget import (
     _aug_extra_budget_allow,
     _class_aware_trigger_prob,
@@ -112,6 +125,15 @@ from smartrain.services.datasets.augment_budget import (
     sum_train_bbox_disk,
     sum_train_class_bbox_disk,
 )
+from smartrain.services.datasets.augment_cli_parser import (
+    AUGMENT_PRESETS,
+    _apply_augment_preset_defaults,
+    _class_aware_enabled,
+    _provided_augment_flags,
+    _warn_exhaustive_class_aware,
+    build_augment_arg_parser,
+)
+
 
 def _detect_split(images_path: str) -> str:
     return detect_split_from_path(images_path, prefer_valid_name=True)

@@ -27,9 +27,9 @@ from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.services.datasets.dataset_split_core import (
     DEFAULT_RANDOM_SEED,
+    TEST_PART,
     TRAIN_PART,
     VAL_PART,
-    TEST_PART,
     parse_split_ratio_arg,
     split_pairs_by_ratio,
     unique_output_stem,
@@ -69,9 +69,8 @@ def _write_data_yaml(out_dir: str, class_map: dict[str, Any]) -> None:
 
 def _interactive_fill(args: argparse.Namespace, dataset_names: list[str]) -> None:
     print("[INFO] Interactive split mode")
-    from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice
-
     from smartrain.cli_entrypoints.support.cli_interactive import ensure_dataset_arg
+    from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice
 
     ensure_dataset_arg(args, dataset_names)
     output_default = str(args.output_name or "").strip()

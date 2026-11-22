@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from smartrain.core.runtime.path_portable import posix_relpath
-
 import csv
 import json
 import os
@@ -10,18 +8,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+import yaml
+
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.core.runtime.run_artifacts import (
-    preferred_run_model_path,
     ensure_run_layout,
     materialize_preferred_run_model,
+    model_sidecar_metadata_path,
+    preferred_run_model_path,
     run_test_backend_dir,
     run_test_format_dir,
     run_tests_dir,
 )
-from smartrain.core.runtime.run_artifacts import model_sidecar_metadata_path
-
-import yaml
-from smartrain.core.training.confidence_recommendation import read_recommendation_file, recommendations_complete
 from smartrain.core.testing.artifact_paths import (
     ALL_TEST_FORMATS,
     INTERNAL_TEST_FORMATS,
@@ -44,6 +42,7 @@ from smartrain.core.testing.artifact_paths import (
     test_artifacts_manifest_path,
 )
 from smartrain.core.testing.ultralytics_test_contract import rich_files_required_for_format
+from smartrain.core.training.confidence_recommendation import read_recommendation_file, recommendations_complete
 
 
 @dataclass

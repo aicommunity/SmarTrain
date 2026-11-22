@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from smartrain.services.testing import model_test_cli_surface as surf
 from smartrain.services.testing import model_test_cli_service as _cli_mod
+from smartrain.services.testing import model_test_cli_surface as surf
 from smartrain.services.testing.model_test_service import (
     SUPPORTED_TEST_FORMATS,
     persist_target_test_artifacts_state,

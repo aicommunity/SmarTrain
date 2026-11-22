@@ -20,7 +20,11 @@ from smartrain.services.datasets.dataset_cli_catalog import load_datasets_catalo
 from smartrain.services.inference_runtime_helpers import discover_model_entries
 from smartrain.services.visualization.contracts import VisRequest
 from smartrain.services.visualization.pipeline import visualize_dataset, visualize_model, visualize_run
-from smartrain.services.visualization.target_resolution import resolve_dataset_target, resolve_model_target, resolve_run_target
+from smartrain.services.visualization.target_resolution import (
+    resolve_dataset_target,
+    resolve_model_target,
+    resolve_run_target,
+)
 
 
 def build_vis_arg_parser() -> argparse.ArgumentParser:

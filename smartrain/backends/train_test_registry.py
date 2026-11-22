@@ -4,7 +4,6 @@ from smartrain.backends.contracts import BackendCapabilities
 from smartrain.backends.registry import CapabilityRegistry
 from smartrain.tasks.contracts import KNOWN_TASKS
 
-
 _REGISTRY = CapabilityRegistry()
 _REGISTRY.register(
     BackendCapabilities(

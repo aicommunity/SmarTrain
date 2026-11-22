@@ -115,7 +115,7 @@ def test_update_unify_root_release(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     (release_dir / f"{stem}.onnx").write_bytes(b"onnx")
     (release_dir / "training_metadata.json").write_text("{}", encoding="utf-8")
     _release_sidecar(tmp_path, release_dir, pt, stem)
-    upsert_entry(layout, entry_key=f"ds/run1", model_path=pt, comment="note")
+    upsert_entry(layout, entry_key="ds/run1", model_path=pt, comment="note")
     monkeypatch.setenv("SMART_TRAIN_INTERACTIVE_ALLOWED", "0")
 
     with pytest.raises(SystemExit) as exc:

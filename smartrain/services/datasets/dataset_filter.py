@@ -24,18 +24,19 @@ from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_c
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.services.datasets.bbox_edge_filter import (
+    EDGE_SIDES_CHOICES,
+    SIZE_BASELINE_MODE_CHOICES,
+    SIZE_DIMS_CHOICES,
     BboxEdgeFilterConfig,
     BboxGeom,
     ClassBboxStats,
     ContentBounds,
     EmpiricalBoundsMap,
-    EDGE_SIDES_CHOICES,
-    SIZE_BASELINE_MODE_CHOICES,
-    SIZE_DIMS_CHOICES,
     SizeStatsMap,
     allowed_filter_sides,
     allowed_size_baseline_mode,
     allowed_size_dims,
+    bbox_geom_from_label,
     collect_baseline_stats,
     collect_empirical_bounds,
     collect_size_baseline_stats,
@@ -44,7 +45,6 @@ from smartrain.services.datasets.bbox_edge_filter import (
     normalize_size_dims,
     should_drop_bbox,
     should_drop_small_bbox,
-    bbox_geom_from_label,
     summarize_empirical_bounds,
     summarize_size_baseline_stats,
 )

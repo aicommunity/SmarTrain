@@ -3,8 +3,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from smartrain.external_providers.installer import _resolve_ssdm_repo_root
-from smartrain.external_providers.installer import _resolve_effective_repo_dir
+from smartrain.external_providers.installer import _resolve_effective_repo_dir, _resolve_ssdm_repo_root
 
 
 def test_resolve_ssdm_repo_root_unpacks_archive(tmp_path: Path) -> None:

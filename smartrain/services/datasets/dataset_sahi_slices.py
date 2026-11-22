@@ -13,6 +13,7 @@ from typing import Any, Iterator
 from PIL import Image
 
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+from smartrain.services.datasets.data_yaml_writer import write_data_yaml_from_names
 from smartrain.services.datasets.dataset_access import (
     iter_image_label_buckets,
     resolve_dataset_root_for_entry,
@@ -21,7 +22,6 @@ from smartrain.services.datasets.dataset_cli_catalog import load_datasets_catalo
 from smartrain.services.datasets.dataset_cli_common import update_datasets_sidecar
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.services.datasets.dataset_roi_yolo import _transform_label_line
-from smartrain.services.datasets.data_yaml_writer import write_data_yaml_from_names
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 

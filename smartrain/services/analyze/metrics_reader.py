@@ -17,12 +17,12 @@ from smartrain.core.analyze.run_metrics_discovery import (
     read_metrics_by_format_for_split_artifacts,
     read_test_metrics_by_format,
 )
-from smartrain.tasks.metric_columns import metric_agg_columns_with_fallback, read_run_task_type
 from smartrain.core.testing.artifact_paths import (
     format_metrics_path,
     format_test_dir,
     load_test_artifacts_manifest,
 )
+from smartrain.tasks.metric_columns import metric_agg_columns_with_fallback, read_run_task_type
 
 DEFAULT_MAP_COL = "metrics/mAP50-95(B)"
 

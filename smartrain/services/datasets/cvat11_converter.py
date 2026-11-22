@@ -3,12 +3,12 @@ from __future__ import annotations
 import html
 import os
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
-import xml.etree.ElementTree as ET
 
 from PIL import Image
 

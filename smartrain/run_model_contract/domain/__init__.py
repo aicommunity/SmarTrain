@@ -7,7 +7,7 @@ from smartrain.run_model_contract.domain.models import (
     UnifiedPredictionRef,
     UnifiedRunRef,
 )
-from smartrain.run_model_contract.domain.validators import validate_unified_payload, validate_schema_version
+from smartrain.run_model_contract.domain.validators import validate_schema_version, validate_unified_payload
 
 __all__ = [
     "UnifiedIdentity",

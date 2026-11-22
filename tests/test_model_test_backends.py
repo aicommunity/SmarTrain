@@ -14,6 +14,8 @@ from smartrain.workflows.testing.model_test_service import (
     format_recommendation_path,
     format_test_dir,
     has_matching_test_artifacts,
+)
+from smartrain.workflows.testing.model_test_service import (
     test_artifacts_manifest_path as manifest_path_fn,
 )
 from smartrain.workflows.testing.unified_metrics_adapter import collect_ultralytics_style_gt
@@ -672,7 +674,7 @@ def test_run_native_onnx_backend_writes_deep_diagnostics_artifacts(monkeypatch, 
 
 
 def test_ultralytics_style_metrics_payload_is_stable() -> None:
-    from smartrain.workflows.testing.model_test_backends import _Gt, _Pred, _compute_ultralytics_style_payload
+    from smartrain.workflows.testing.model_test_backends import _compute_ultralytics_style_payload, _Gt, _Pred
 
     names = ["obj"]
     preds = [

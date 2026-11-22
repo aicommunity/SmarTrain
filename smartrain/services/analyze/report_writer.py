@@ -21,6 +21,7 @@ from smartrain.services.reporting.document_export import (
     _try_pandoc_pdf,
 )
 
+
 def write_analysis_report(
     report_root: str,
     manifest: dict[str, Any],

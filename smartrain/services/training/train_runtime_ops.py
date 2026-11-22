@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from smartrain.external_providers.runner import run_external_infer, run_external_train
+from smartrain.services.testing.model_test_service import sync_test_artifacts_manifest
 from smartrain.services.train_runtime_helpers import (
     build_run_name,
     json_safe_train_summary,
     load_batch_from_training_metadata,
     resolve_external_eval_source,
 )
-from smartrain.services.testing.model_test_service import sync_test_artifacts_manifest
 from smartrain.services.training.train_metadata_io_service import save_training_metadata as _save_training_metadata_svc
 from smartrain.services.training.train_system_profile_service import collect_system_profile
 from smartrain.services.training.train_yolo_execution_service import test_yolo as _test_yolo

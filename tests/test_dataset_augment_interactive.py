@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 from unittest.mock import patch
 
 from smartrain.services.datasets.dataset_augment import (
@@ -10,7 +11,6 @@ from smartrain.services.datasets.dataset_augment import (
     _iter_orthogonal_variants,
     _normalize_augment_args,
 )
-import random
 
 
 def test_augment_roi_prompt_label_center_rotate_only() -> None:

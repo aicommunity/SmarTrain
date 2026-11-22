@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from smartrain.services.testing.backends import format_runners_support as _support
 from smartrain.services.testing.backends.format_runners_support import (
+    YOLO,
     Any,
     BackendRunResult,
-    _Pred,
     _collect_gt,
     _collect_test_system_profile,
     _ensure_confidence_recommendations_for_explicit_artifact,
     _finalize_ultralytics_pt_test_dir,
     _load_names,
+    _Pred,
     _release_cuda_memory_best_effort,
     _save_metrics_csv_for_format,
     _split_images_from_yaml,
@@ -19,10 +20,10 @@ from smartrain.services.testing.backends.format_runners_support import (
     _write_deep_diagnostics_artifacts,
     _write_perf_artifact,
     best_effort_prune_runs_detect_near_run,
-    normalize_ultralytics_run_layout,
     datetime,
     ensure_run_layout,
     normalize_eval_params,
+    normalize_ultralytics_run_layout,
     np,
     persist_target_test_artifacts_state,
     prune_empty_sidecar_dirs,
@@ -31,7 +32,6 @@ from smartrain.services.testing.backends.format_runners_support import (
     sys,
     tqdm,
     ultralytics_sidecar_dir,
-    YOLO,
 )
 
 

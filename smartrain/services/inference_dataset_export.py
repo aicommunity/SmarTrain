@@ -23,7 +23,6 @@ from smartrain.services.inference_runtime_helpers import _portable_path_pair, sa
 from smartrain.services.visualization.color_registry import LabelColorRegistry
 from smartrain.services.visualization.rendering import render_pred_overlay, save_rendered_image
 
-
 MANIFEST_FILENAME = "autolabel_manifest.json"
 SCHEMA_VERSION = "1.0.0"
 

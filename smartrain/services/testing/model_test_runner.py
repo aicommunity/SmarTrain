@@ -26,14 +26,14 @@ def run_model_test_after_setup(
 ) -> None:
     from smartrain.backends.train_test_registry import resolve_test_backend
     from smartrain.cli_entrypoints.support.cli_contracts import emit_replay
+    from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
+    from smartrain.core.training.train_profile import task_to_metadata_task_type
     from smartrain.core.workflow_adapters import testing_runtime_api as mtr
     from smartrain.services.test_backend_dispatch import (
         run_internal_pt_uni_backend,
         run_non_pt_test_backend,
         run_pt_test_backend,
     )
-    from smartrain.core.training.train_profile import task_to_metadata_task_type
-    from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
 
     ensure_matplotlib_training_runtime(non_interactive=bool(getattr(args, "non_interactive", False)))
 

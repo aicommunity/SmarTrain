@@ -22,9 +22,8 @@ from smartrain.cli_entrypoints.support.cli_prompts import (
 )
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.workflows.analyze.results_analyzer import find_run_directories, load_metadata, latest_test_metrics_path
+from smartrain.core.runtime.run_artifacts import materialize_preferred_run_model, preferred_run_model_path
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
-from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
 from smartrain.services.analyze.metrics_reader import results_csv_path, training_args_yaml_path
 from smartrain.services.models.release_model_naming import (
     build_model_weights_stem_from_metadata,
@@ -34,6 +33,7 @@ from smartrain.services.models.release_models_manifest import (
     entry_key_for_pt,
     upsert_entry,
 )
+from smartrain.workflows.analyze.results_analyzer import find_run_directories, latest_test_metrics_path, load_metadata
 
 
 def build_model_release_arg_parser() -> argparse.ArgumentParser:

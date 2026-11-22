@@ -14,8 +14,8 @@ from smartrain.core.runtime.workspace_paths import (
     extract_dataset_archive_to_cache,
     is_dataset_archive_path,
 )
-from smartrain.services.datasets.cvsdcldet_converter import _json_has_cvsdcldet_detections
 from smartrain.services.datasets.cvat11_converter import YOLO_IMAGE_EXTS
+from smartrain.services.datasets.cvsdcldet_converter import _json_has_cvsdcldet_detections
 from smartrain.services.datasets.dataset_cli_common import load_dataset_catalog
 from smartrain.services.datasets.datasets_json_scan_core_service import detect_structure, detect_structures
 from smartrain.services.datasets.datasets_json_scan_index_service import _load_datasets_list_file

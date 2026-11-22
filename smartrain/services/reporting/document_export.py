@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+
 def _log(msg: str) -> None:
     print(msg, flush=True)
 

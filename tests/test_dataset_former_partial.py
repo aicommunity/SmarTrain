@@ -7,14 +7,21 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from smartrain.core.runtime.workspace_paths import (
+    CLASS_NAMES_FILE,
+    DATASETS_INFO_FILE,
+    WORKSPACE_ENV_VAR,
+    deploy_workspace,
+)
 from smartrain.workflows.datasets.dataset_former import (
     _collect_label_image_pairs,
     _prompt_interactive_merge_rules,
     _validate_interactive_merge_rules,
-    main as fusion_main,
     prune_output_empty_label_pairs,
 )
-from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, CLASS_NAMES_FILE, WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.workflows.datasets.dataset_former import (
+    main as fusion_main,
+)
 
 
 def _write_jpg(path: Path, color: tuple[int, int, int] = (10, 20, 30)) -> None:

@@ -11,10 +11,10 @@ from types import ModuleType
 import pytest
 from PIL import Image
 
-from smartrain.workflows.inference.inference_backends import BackendPrediction
-from smartrain.workflows.inference.inference_cli import main as inference_main
-from smartrain.workflows.inference.inference_cli import _resolve_model
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.workflows.inference.inference_backends import BackendPrediction
+from smartrain.workflows.inference.inference_cli import _resolve_model
+from smartrain.workflows.inference.inference_cli import main as inference_main
 
 
 class _FakeTensor:
@@ -915,8 +915,9 @@ def test_resolve_model_run_ignores_internal_trtprep(tmp_path: Path, monkeypatch)
     internal.write_bytes(b"internal")
     public.write_bytes(b"public")
 
-    from smartrain.core.runtime.workspace_paths import WorkspaceLayout
     import argparse
+
+    from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
     args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
     model_path, _name, source = _resolve_model(args, WorkspaceLayout(str(tmp_path)))
@@ -941,6 +942,7 @@ def test_resolve_model_run_prefers_newest_profile_onnx_variant(tmp_path: Path, m
     os.utime(new_variant, (1_800_000_000, 1_800_000_000))
 
     import argparse
+
     from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
     args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
@@ -976,6 +978,7 @@ def test_resolve_model_uses_canonical_gateway_for_run_when_enabled(tmp_path: Pat
     monkeypatch.setattr("smartrain.run_model_contract.gateway.load_target", lambda *_a, **_k: _P())
     monkeypatch.setattr("smartrain.run_model_contract.gateway.resolve_task_context", lambda *_a, **_k: _C())
     import argparse
+
     from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
     args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)
@@ -1005,6 +1008,7 @@ def test_resolve_model_falls_back_when_canonical_gateway_fails(tmp_path: Path, m
         lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     import argparse
+
     from smartrain.core.runtime.workspace_paths import WorkspaceLayout
 
     args = argparse.Namespace(model_name=None, run=str(run_dir), weights=None)

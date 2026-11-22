@@ -25,8 +25,8 @@ from smartrain.services.datasets.dataset_cli_catalog import (
     load_datasets_catalog,
     try_prompt_dataset_interactive,
 )
-from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_cli_common import update_datasets_sidecar_from_entry
+from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.services.datasets.yolo_image_rotate import rotate_image_k
 from smartrain.services.datasets.yolo_labels import read_yolo_labels, rotate_yolo_labels_90cw_k, write_yolo_labels

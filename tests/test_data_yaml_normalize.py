@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import yaml
 from pathlib import Path
 
+import yaml
+
 from smartrain.services.datasets.data_yaml_normalize import (
+    _rewrite_split_string,
     normalize_data_yaml_file,
     normalize_data_yaml_mapping,
     run_normalize,
-    _rewrite_split_string,
 )
 
 

@@ -6,9 +6,9 @@ from pathlib import Path
 
 from PIL import Image
 
+from scripts.balance_preset_harness import run_harness
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
 from smartrain.workflows.datasets.datasets_json_former import main as scan_main
-from scripts.balance_preset_harness import run_harness
 
 
 def _write_jpg(path: Path) -> None:

@@ -10,18 +10,17 @@ import os
 import re
 import shutil
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
-from smartrain.core.runtime.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.analyze.run_metrics_discovery import latest_test_metrics_path
+from smartrain.core.runtime.run_artifacts import materialize_preferred_run_model, preferred_run_model_path
+from smartrain.core.runtime.run_bundle_copy import copy_run_bundle, normalize_training_metadata_paths_for_bundle
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.run_refs import resolve_run_ref
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.services.registry.run_fields import load_run_list_fields, load_run_training_metadata
-
 
 MANIFEST_NAME = "model_manifest.json"
 

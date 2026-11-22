@@ -8,6 +8,8 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from smartrain.core.runtime.path_portable import posix_relpath
+from smartrain.core.runtime.run_artifacts import resolve_run_model
 from smartrain.core.workflow_adapters.analyze_runtime_api import (
     ensure_format_compare_index,
     load_test_artifacts_manifest,
@@ -16,8 +18,6 @@ from smartrain.core.workflow_adapters.analyze_runtime_api import (
     read_test_performance_by_format_artifacts,
     read_test_system_profile_by_format_artifacts,
 )
-from smartrain.core.runtime.path_portable import posix_relpath
-from smartrain.core.runtime.run_artifacts import resolve_run_model
 from smartrain.run_model_contract.gateway import load_metrics as unified_load_metrics
 from smartrain.tasks.metric_columns import (
     metric_agg_columns,

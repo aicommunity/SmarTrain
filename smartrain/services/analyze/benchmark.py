@@ -13,11 +13,11 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.services.analyze.data_yaml_splits import (
     collect_split_images_for_split,
     collect_split_images_resolved,
 )
-from smartrain.core.runtime.path_portable import posix_relpath
 
 
 def resolve_selected_run_dirs(

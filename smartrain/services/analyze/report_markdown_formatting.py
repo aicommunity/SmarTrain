@@ -19,7 +19,6 @@ from smartrain.tasks.metric_columns import (
     runs_summary_test_column_names,
 )
 
-
 __all__ = [
     "_read_template",
     "_column_display_name",

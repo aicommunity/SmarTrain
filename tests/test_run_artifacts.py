@@ -6,16 +6,16 @@ from pathlib import Path
 import pytest
 
 from smartrain.core.runtime.run_artifacts import (
-    preferred_run_model_path,
-    normalize_ultralytics_run_layout,
     consolidate_train_backend_dir,
     ensure_run_layout,
     materialize_preferred_run_model,
+    normalize_ultralytics_run_layout,
+    preferred_run_model_path,
     reject_documentation_placeholder_path,
     relocate_or_remove_legacy_val_recs_at_run_root,
     resolve_run_model,
-    run_train_backend_dir,
     run_tests_dir,
+    run_train_backend_dir,
 )
 from smartrain.core.runtime.ultralytics_ephemeral import prune_empty_sidecar_dirs
 

@@ -5,8 +5,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.core.runtime.path_portable import relativize_abs_paths_in_obj, relativize_if_under
+from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 
 
 def next_dataset_name(base_dir: str, preferred: str) -> str:

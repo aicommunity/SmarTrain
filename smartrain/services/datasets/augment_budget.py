@@ -15,6 +15,7 @@ from smartrain.services.datasets.yolo_augment_geom import (
     count_label_instances,
 )
 
+
 def _collect_class_freq(items: list[dict], *, train_only: bool = True) -> dict[int, int]:
     freq: dict[int, int] = {}
     for it in items:

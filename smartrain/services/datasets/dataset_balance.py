@@ -20,6 +20,8 @@ from smartrain.cli_entrypoints.support.cli_prompts import (
     prompt_yes_no,
 )
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_cli_catalog import (
     EMPTY_DATASETS_INFO_MESSAGE,
@@ -33,10 +35,13 @@ from smartrain.services.datasets.dataset_cli_common import (
 )
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
-from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+from smartrain.services.datasets.balance_eval_coverage import (
+    _enforce_no_cross_split_duplicates,
+    _ensure_non_empty_eval_splits,
+    _head_bbox_undersample_balanced_train,
+)
 from smartrain.services.datasets.balance_presets import (
     BALANCE_PRESETS,
     _apply_hybrid_aug_default_mode,
@@ -55,11 +60,7 @@ from smartrain.services.datasets.balance_strategies import (
     _rfs_expand_pool,
     _weighted_sample_items,
 )
-from smartrain.services.datasets.balance_eval_coverage import (
-    _enforce_no_cross_split_duplicates,
-    _ensure_non_empty_eval_splits,
-    _head_bbox_undersample_balanced_train,
-)
+
 
 def build_balance_arg_parser() -> argparse.ArgumentParser:
     p = CliArgumentParser(description="Balancing the dataset into a new datasets/<name>")
@@ -1028,6 +1029,8 @@ def main(argv=None):
     if is_hybrid_aug:
         from smartrain.services.datasets.dataset_augment import (
             main as augment_main,
+        )
+        from smartrain.services.datasets.dataset_augment import (
             sum_train_bbox_disk,
             sum_train_class_bbox_disk,
         )

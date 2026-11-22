@@ -10,21 +10,22 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-from smartrain.services.analyze.report_sections.report_common import (
-    append_numbered_table_title,
-    append_table_source,
-    finalize_centered_table,
-)
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.services.analyze.report_markdown_formatting import (
     _center_close,
     _center_open,
     _md_table_from_df,
 )
-from smartrain.core.runtime.logging_config import get_logger
+from smartrain.services.analyze.report_sections.report_common import (
+    append_numbered_table_title,
+    append_table_source,
+    finalize_centered_table,
+)
 
 logger = get_logger(__name__)
 
 from smartrain.services.analyze.report_sections.report_tables import _csv_source_label
+
 
 def _ultralytics_completeness_lines(item: dict[str, Any], is_ru: bool) -> list[str]:
     completeness = str(item.get("completeness") or "").strip().lower()

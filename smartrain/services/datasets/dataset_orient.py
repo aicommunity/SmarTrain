@@ -17,19 +17,18 @@ from tqdm import tqdm
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_yes_no
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_cli_catalog import (
     EMPTY_DATASETS_INFO_MESSAGE,
     load_datasets_catalog,
     try_prompt_dataset_interactive,
 )
-from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_cli_common import update_datasets_sidecar_from_entry
+from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
-from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.services.datasets.yolo_labels import read_yolo_labels, rotate_yolo_labels_90cw_k, write_yolo_labels
-
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 ON_UNCERTAIN = ("keep", "skip", "fail")
@@ -116,6 +115,7 @@ def build_orient_arg_parser() -> argparse.ArgumentParser:
 def _interactive_fill(args, *, dataset_names: list[str]) -> None:
     from prompt_toolkit import prompt
     from prompt_toolkit.completion import WordCompleter
+
     from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_prefilled_text, prompt_text
 
     print("[INFO] Interactive mode orient")

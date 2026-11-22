@@ -7,6 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+
 def _class_weights(
     bbox_count: dict[str, int],
     *,

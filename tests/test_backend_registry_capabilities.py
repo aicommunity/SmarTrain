@@ -5,7 +5,11 @@ import pytest
 from smartrain.backends.contracts import (
     BackendCapabilities,
     BackendExecutionResult,
+)
+from smartrain.backends.contracts import (
     InferenceBackend as InferenceBackendProtocol,
+)
+from smartrain.backends.contracts import (
     TrainBackend as TrainBackendProtocol,
 )
 from smartrain.backends.registry import CapabilityRegistry

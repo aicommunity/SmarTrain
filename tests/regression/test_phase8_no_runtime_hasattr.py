@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 TARGET_FILES = (
     "smartrain/services/inference_service.py",
     "smartrain/services/train_service.py",

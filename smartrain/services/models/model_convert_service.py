@@ -24,16 +24,16 @@ from smartrain.cli_entrypoints.support.cli_prompts import (
     prompt_yes_no,
 )
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
-from smartrain.core.runtime.interactive_contract import is_interactive_allowed
+from smartrain.core.models import tensorrt_checks as trt_checks
 from smartrain.core.models.model_context import infer_img_size_with_source
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
 from smartrain.core.runtime.run_artifacts import (
-    preferred_run_model_path,
     materialize_preferred_run_model,
+    preferred_run_model_path,
     run_models_dir,
     run_tmp_dir,
     write_model_sidecar_metadata,
 )
-from smartrain.core.models import tensorrt_checks as trt_checks
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, resolve_workspace_root
 from smartrain.services.models.release_models_manifest import is_workspace_release_bundle
@@ -371,7 +371,7 @@ def _run_interactive_pipeline(ctx: InteractiveContext) -> InteractiveResult:
     source_path = ctx.source_path
     out_dir = ctx.output_dir if ctx.output_dir else _default_output_dir_for_source(source_path)
     out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[INFO] Found 1 model(s) for conversion.")
+    print("[INFO] Found 1 model(s) for conversion.")
     _print_stage_header("Model 1/1")
     print(f"[INFO] Convert: {source_path}")
 
