@@ -48,10 +48,14 @@ def build_model_weights_stem_from_metadata(payload: Any) -> str | None:
     hyperparameters = training_info.get("hyperparameters")
     if not isinstance(hyperparameters, dict) or not training_info.get("model"):
         return None
+    epochs_raw = hyperparameters.get("epochs")
+    image_size_raw = hyperparameters.get("image_size")
+    batch_value = hyperparameters.get("batch_size")
+    if epochs_raw is None or image_size_raw is None or batch_value is None:
+        return None
     try:
-        epochs = int(hyperparameters.get("epochs"))
-        image_size = int(hyperparameters.get("image_size"))
-        batch_value = hyperparameters.get("batch_size")
+        epochs = int(epochs_raw)
+        image_size = int(image_size_raw)
         batch = f"b{str(batch_value).replace('.', 'p')}" if isinstance(batch_value, float) and not batch_value.is_integer() else f"b{int(batch_value)}"
     except (TypeError, ValueError):
         return None

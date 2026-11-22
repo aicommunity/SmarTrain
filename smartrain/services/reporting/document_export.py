@@ -6,7 +6,6 @@ import html
 import os
 import shutil
 import subprocess
-import sys
 import zipfile
 from pathlib import Path
 from typing import Any
