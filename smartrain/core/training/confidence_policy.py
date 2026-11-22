@@ -11,7 +11,6 @@ from typing import Any, Mapping
 
 from smartrain.core.training.confidence_recommendation import DEFAULT_FALLBACK_CONFIDENCE
 
-
 DEFAULT_OBJECTIVE = "A"
 DEFAULT_AGGREGATION = "macro"
 

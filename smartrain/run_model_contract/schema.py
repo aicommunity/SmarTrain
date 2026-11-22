@@ -5,7 +5,6 @@ from typing import Any
 
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 
-
 SCHEMA_V2 = "2.0.0"
 
 

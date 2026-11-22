@@ -23,41 +23,41 @@ class InferenceJobOutcome(NamedTuple):
 from PIL import Image
 from tqdm import tqdm
 
-from smartrain.core.runtime.environment_profile import collect_environment_profile, write_environment_profile
 from smartrain.backends.external_provider_adapter import ExternalProviderAdapter
-from smartrain.backends.ultralytics_adapter import UltralyticsAdapter
-from smartrain.core.training.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.backends.train_test_registry import resolve_infer_backend
-from smartrain.external_providers.registry import list_provider_specs
-from smartrain.core.workflow_adapters.inference_runtime_api import DualPerfProfiler
+from smartrain.backends.ultralytics_adapter import UltralyticsAdapter
+from smartrain.core.runtime.environment_profile import collect_environment_profile, write_environment_profile
 from smartrain.core.runtime.path_portable import relativize_if_under
-from smartrain.providers.core.global_index import get_provider_location
-from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model
-from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout
+from smartrain.core.training.external_model_ref import parse_external_model_ref, validate_external_model_ref
+from smartrain.core.training.train_model_catalog import TrainModelCatalog, is_supported_external_provider_model
+from smartrain.core.training.train_profile import task_to_metadata_task_type
+from smartrain.core.workflow_adapters.inference_runtime_api import DualPerfProfiler
+from smartrain.external_providers.registry import list_provider_specs
+from smartrain.providers.core.global_index import get_provider_location
 from smartrain.run_model_contract.io.write.snapshot_hook import maybe_dual_write_unified_snapshot
-from smartrain.services.inference_runtime_helpers import (
-    build_report,
-    apply_inference_batch_from_model,
-    apply_inference_imgsz_from_model,
-    _portable_path_pair,
-    predict_roi_crop,
-    resolve_inference_source,
-    resolve_inference_task_type,
-    resolve_model,
-    resolve_output_root,
-    resolve_export_class_filter,
-    resolve_export_class_ids_for_args,
-    sanitize_segment,
-    source_descriptor_from_resolved,
-    write_report,
-)
 from smartrain.services.inference_dataset_export import (
     filter_inference_report_by_classes,
     resolve_export_options,
     run_inference_exports,
     validate_export_options,
+)
+from smartrain.services.inference_runtime_helpers import (
+    _portable_path_pair,
+    apply_inference_batch_from_model,
+    apply_inference_imgsz_from_model,
+    build_report,
+    predict_roi_crop,
+    resolve_export_class_filter,
+    resolve_export_class_ids_for_args,
+    resolve_inference_source,
+    resolve_inference_task_type,
+    resolve_model,
+    resolve_output_root,
+    sanitize_segment,
+    source_descriptor_from_resolved,
+    write_report,
 )
 
 

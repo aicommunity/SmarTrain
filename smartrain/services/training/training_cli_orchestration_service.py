@@ -168,7 +168,7 @@ def run_train_cli_pipeline(
     u_cfg["model"] = model_version
     ensure_device_available_or_raise_cb(str(u_cfg.get("device")) if u_cfg.get("device") is not None else None)
     print(
-        f"[INFO] Train device: "
+        "[INFO] Train device: "
         + device_display_name_cb(str(u_cfg.get("device")) if u_cfg.get("device") is not None else None)
     )
     epochs = int(u_cfg.get("epochs", epochs_default))

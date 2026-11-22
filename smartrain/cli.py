@@ -49,6 +49,7 @@ from smartrain.cli_entrypoints.help_texts import (
     _print_en_quick_start,
 )
 
+
 def _sync_workspace_env(cli_workspace: Optional[str]) -> None:
     w = (cli_workspace or "").strip()
     if w:
@@ -278,8 +279,8 @@ def cmd_normalize_data_yaml(ctx: typer.Context) -> None:
     if getattr(ctx, "resilient_parsing", False):
         return
     args = parser.parse_args(list(ctx.args))
-    from smartrain.services.datasets.data_yaml_normalize import run_normalize
     from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
+    from smartrain.services.datasets.data_yaml_normalize import run_normalize
 
     if args.datasets_dir:
         ddir = os.path.abspath(os.path.expanduser(args.datasets_dir))

@@ -7,12 +7,11 @@ import pytest
 import torch
 
 from smartrain.core.runtime import run_discovery as rd
-from smartrain.workflows.training import train_entry
-from smartrain.workflows.training import train_resume as tr
-from smartrain.workflows.training import train_wiring
-from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
 from smartrain.core.runtime.workspace_paths import deploy_workspace
+from smartrain.core.training.confidence_recommendation import write_not_available_recommendations
 from smartrain.workflows.testing.ultralytics_test_contract import ultralytics_pt_rich_files_required
+from smartrain.workflows.training import train_entry, train_wiring
+from smartrain.workflows.training import train_resume as tr
 
 
 def _touch_missing_ultralytics_pt_rich_files(test_dir: Path, *, task_type: str | None = None) -> None:

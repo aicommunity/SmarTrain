@@ -6,16 +6,36 @@ import sys
 from typing import Any, Callable
 
 from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
-from smartrain.core.runtime.device_selector import default_device_value, device_display_name, resolve_device_request
+from smartrain.core.runtime.device_selector import (
+    default_device_value,
+    device_display_name,
+    resolve_device_request,
+    validate_device_available,
+)
 from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.device_selector import validate_device_available
+from smartrain.core.training.external_model_ref import parse_external_model_ref, validate_external_model_ref
 from smartrain.core.training.train_profile import (
     apply_cli_smartrain_overrides,
     load_train_profile,
     merge_cli_into_ultralytics_cfg,
 )
 from smartrain.external_providers.registry import list_provider_specs
-from smartrain.core.training.external_model_ref import parse_external_model_ref, validate_external_model_ref
+from smartrain.services.train_service import run_train_after_setup as _default_run_train_after_setup
+from smartrain.services.training.train_cli_callbacks import (
+    apply_external_provider_defaults_cb,
+)
+from smartrain.services.training.train_cli_callbacks import (
+    load_ultralytics_yaml_cb as _default_load_ultralytics_yaml_cb,
+)
+from smartrain.services.training.train_cli_callbacks import (
+    normalize_model_spec_cb as _default_normalize_model_spec_cb,
+)
+from smartrain.services.training.train_cli_callbacks import (
+    resolve_cli_paths_with_profile_cb as _default_resolve_cli_paths_with_profile_cb,
+)
+from smartrain.services.training.train_cli_callbacks import (
+    run_interactive_train_setup_cb as _default_run_interactive_train_setup_cb,
+)
 from smartrain.services.training.train_cli_parsers import (
     BATCH,
     EPOCHS,
@@ -25,14 +45,6 @@ from smartrain.services.training.train_cli_parsers import (
     parse_train_args,
 )
 from smartrain.services.training.train_config_merge_service import merge_sources_with_priority
-from smartrain.services.training.train_cli_callbacks import (
-    apply_external_provider_defaults_cb,
-    load_ultralytics_yaml_cb as _default_load_ultralytics_yaml_cb,
-    normalize_model_spec_cb as _default_normalize_model_spec_cb,
-    resolve_cli_paths_with_profile_cb as _default_resolve_cli_paths_with_profile_cb,
-    run_interactive_train_setup_cb as _default_run_interactive_train_setup_cb,
-)
-from smartrain.services.train_service import run_train_after_setup as _default_run_train_after_setup
 from smartrain.services.training.training_cli_orchestration_service import (
     handle_aux_train_commands,
     run_train_cli_pipeline,

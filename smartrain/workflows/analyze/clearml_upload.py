@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.core.runtime.run_artifacts import preferred_run_model_path, materialize_preferred_run_model
+from smartrain.core.runtime.run_artifacts import materialize_preferred_run_model, preferred_run_model_path
 
 
 def build_clearml_upload_arg_parser() -> argparse.ArgumentParser:
@@ -71,8 +71,8 @@ def upload_run(
             "Install clearml: pip install 'smartrain[clearml]' or pip install clearml"
         ) from e
 
-    import yaml
     import pandas as pd
+    import yaml
     from PIL import Image
 
     rd = Path(run_dir).expanduser().resolve()

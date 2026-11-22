@@ -11,6 +11,8 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+from smartrain.core.runtime.logging_config import get_logger
+from smartrain.core.runtime.path_portable import to_posix
 from smartrain.services.analyze.report_markdown_formatting import (
     MAX_NARRATIVE_BULLETS,
     _abbrev_df,
@@ -37,8 +39,6 @@ from smartrain.services.analyze.report_markdown_formatting import (
     _table_preamble_lines,
     _table_takeaway_lines,
 )
-from smartrain.core.runtime.logging_config import get_logger
-from smartrain.core.runtime.path_portable import to_posix
 
 logger = get_logger(__name__)
 
@@ -58,9 +58,9 @@ from smartrain.services.analyze.report_sections.report_common import (
 )
 from smartrain.services.analyze.report_sections.report_figures import (
     _discover_missing_pr_images,
-    append_figure_caption_lines,
     _figure_preamble_lines,
     _figure_takeaway_lines,
+    append_figure_caption_lines,
     is_ultralytics_compact_main_image,
     ultralytics_report_mode,
 )
@@ -80,10 +80,11 @@ from smartrain.services.analyze.report_sections.report_tables import (
     _table_title,
 )
 from smartrain.services.analyze.report_sections.report_ultralytics import (
+    _csv_source_label,
     _ultralytics_completeness_lines,
     _ultralytics_per_class_ap_table_lines,
-    _csv_source_label,
 )
+
 
 def _build_markdown_lines(manifest: dict[str, Any], lang: str) -> list[str]:
     is_ru = lang == "ru"

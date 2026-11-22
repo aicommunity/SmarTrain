@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from smartrain.core.runtime.path_portable import posix_relpath
-from smartrain.run_model_contract.refs import unified_target_from_model_dir
 from smartrain.run_model_contract.domain.models import UnifiedModelRef, UnifiedPayload
+from smartrain.run_model_contract.refs import unified_target_from_model_dir
 
 from .normalizers import normalize_backend, normalize_task
 

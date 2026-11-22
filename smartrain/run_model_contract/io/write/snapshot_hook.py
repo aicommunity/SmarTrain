@@ -23,9 +23,9 @@ def maybe_dual_write_unified_snapshot(
     if not status_ok or not unified_write_enabled():
         return
     try:
+        from smartrain.run_model_contract.gateway import UnifiedGatewayOptions, load_target
         from smartrain.run_model_contract.io.read.resolvers import infer_source_kind
         from smartrain.run_model_contract.io.write.dual_write import run_dual_write
-        from smartrain.run_model_contract.gateway import UnifiedGatewayOptions, load_target
 
         dual_mode = unified_dual_write_mode()
         source_kind = infer_source_kind(root_dir)

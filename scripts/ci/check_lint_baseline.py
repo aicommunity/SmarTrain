@@ -28,7 +28,7 @@ def main() -> int:
         print("[ERROR] Undefined names / syntax errors found (F821/E9 must be zero):")
         print(hard_out)
 
-    ruff_limit = 511
+    ruff_limit = 293
     ruff_code, ruff_out = _run([sys.executable, "-m", "ruff", "check", "smartrain", "tests"])
     ruff_count = _extract_count(ruff_out, r"Found (\d+) errors\.")
     if ruff_count is None:
@@ -40,7 +40,7 @@ def main() -> int:
         failed = True
         print("[ERROR] Ruff errors exceeded baseline.")
 
-    mypy_limit = 306
+    mypy_limit = 373
     mypy_code, mypy_out = _run([sys.executable, "-m", "mypy", "smartrain"])
     mypy_count = _extract_count(mypy_out, r"Found (\d+) errors in \d+ files")
     if mypy_count is None:

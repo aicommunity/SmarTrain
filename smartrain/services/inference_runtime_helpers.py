@@ -14,10 +14,8 @@ from typing import Any
 import yaml
 from PIL import Image
 
-from smartrain.run_model_contract.refs import unified_target_from_model_dir
-from smartrain.run_model_contract.schema import wrap_inference_report_v2
-from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.core.runtime.logging_config import get_logger
+from smartrain.core.runtime.path_portable import relativize_if_under
 from smartrain.core.runtime.run_artifacts import is_internal_conversion_artifact
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.ultralytics_ephemeral import ultralytics_sidecar_dir
@@ -30,17 +28,19 @@ from smartrain.core.runtime.workspace_paths import (
 from smartrain.core.training.train_profile import task_to_metadata_task_type
 from smartrain.core.workflow_adapters.inference_runtime_api import (
     FALLBACK_IMGSZ_SOURCE,
-    find_yaml_file,
+    clamp_crop,
     extract_batch_from_sidecar_payload,
     extract_onnx_input_batch,
+    find_yaml_file,
+    full_image_crop,
     infer_img_size_from_model_context,
     infer_img_size_with_source,
-    resolve_inference_imgsz,
     resolve_dataset_root_for_entry,
-    clamp_crop,
-    full_image_crop,
+    resolve_inference_imgsz,
     select_roi_boxes,
 )
+from smartrain.run_model_contract.refs import unified_target_from_model_dir
+from smartrain.run_model_contract.schema import wrap_inference_report_v2
 from smartrain.services.datasets.dataset_roi_yolo import ON_EMPTY_MODES, ROI_POLICIES
 
 _LOG = get_logger("smartrain.inference.runtime")

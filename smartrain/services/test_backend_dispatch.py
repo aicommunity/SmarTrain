@@ -20,7 +20,6 @@ class TestBackendDispatchContext:
 
 from smartrain.tasks.contracts import TASK_SEGMENTATION, normalize_task_type
 
-
 _NATIVE_NON_PT_FORMATS = frozenset({"onnx", "engine", "trt"})
 
 
@@ -108,8 +107,8 @@ def _dispatch_pt_uni(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]
 
 
 def _dispatch_non_pt(ctx: TestBackendDispatchContext) -> tuple[bool, str | None]:
-    from smartrain.core.workflow_adapters import testing_runtime_api as mtr
     from smartrain.backends.train_test_registry import resolve_test_backend
+    from smartrain.core.workflow_adapters import testing_runtime_api as mtr
 
     skip_reason = _segmentation_native_skip_reason(ctx)
     if skip_reason:

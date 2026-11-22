@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 from PIL import Image

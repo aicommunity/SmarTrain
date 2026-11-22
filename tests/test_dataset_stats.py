@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from smartrain.services.datasets.dataset_stats import _scan_one_dataset, main as stats_main
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.services.datasets.dataset_stats import _scan_one_dataset
+from smartrain.services.datasets.dataset_stats import main as stats_main
 
 
 def _write_jpg(path: Path) -> None:

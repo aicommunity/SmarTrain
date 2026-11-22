@@ -7,8 +7,8 @@ import pytest
 import yaml
 from PIL import Image
 
-from smartrain.workflows.datasets.dataset_prune import main as prune_main
 from smartrain.core.runtime.workspace_paths import DATASETS_INFO_FILE, WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.workflows.datasets.dataset_prune import main as prune_main
 
 
 def _write_jpg(path: Path, color: tuple[int, int, int], *, size: tuple[int, int] = (32, 24)) -> None:

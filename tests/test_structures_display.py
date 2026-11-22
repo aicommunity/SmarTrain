@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from smartrain.services.datasets.dataset_convert_service import (
+    TARGET_CVAT11,
+    TARGET_YOLO,
     list_available_targets,
     pick_structure_for_target,
     structures_display_name,
-    TARGET_CVAT11,
-    TARGET_YOLO,
 )
 
 

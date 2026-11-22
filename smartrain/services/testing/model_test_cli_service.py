@@ -13,38 +13,38 @@ from typing import Any
 import yaml
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text
 from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
-from smartrain.core.runtime.logging_config import get_logger
+from smartrain.cli_entrypoints.support.cli_prompts import prompt_prefilled_text
 from smartrain.core.models import tensorrt_checks as trt_checks
-from smartrain.services.testing import model_test_cli_surface as surf
-from smartrain.services.testing.model_test_service import (
-    SUPPORTED_TEST_FORMATS,
-    complete_missing_test_artifacts,
-    format_test_dir,
-    resolve_root_dir_for_target,
-)
-from smartrain.services.inference_runtime_helpers import _resolve_run_ref, resolve_model_from_name
-from smartrain.services.analyze.metrics_reader import training_args_yaml_path
-from smartrain.services.testing.model_test_runner import run_model_test_after_setup
-from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
-from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
-from smartrain.core.workflow_adapters.training_runtime_api import resolve_dataset_path_for_resume
-from smartrain.core.testing.artifact_paths import TEST_EVAL_SLOT_ENV
-from smartrain.core.runtime.run_artifacts import (
-    ensure_run_layout,
-    is_internal_conversion_artifact,
-    materialize_preferred_run_model,
-    scan_run_models,
-    run_models_dir,
-)
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.core.runtime.device_selector import (
     default_device_value,
     device_display_name,
     prompt_device_selection,
     resolve_device_request,
     validate_device_available,
+)
+from smartrain.core.runtime.logging_config import get_logger
+from smartrain.core.runtime.mpl_runtime import ensure_matplotlib_training_runtime
+from smartrain.core.runtime.run_artifacts import (
+    ensure_run_layout,
+    is_internal_conversion_artifact,
+    materialize_preferred_run_model,
+    run_models_dir,
+    scan_run_models,
+)
+from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.core.testing.artifact_paths import TEST_EVAL_SLOT_ENV
+from smartrain.core.workflow_adapters.training_runtime_api import resolve_dataset_path_for_resume
+from smartrain.services.analyze.metrics_reader import training_args_yaml_path
+from smartrain.services.inference_runtime_helpers import _resolve_run_ref, resolve_model_from_name
+from smartrain.services.testing import model_test_cli_surface as surf
+from smartrain.services.testing.model_test_runner import run_model_test_after_setup
+from smartrain.services.testing.model_test_service import (
+    SUPPORTED_TEST_FORMATS,
+    complete_missing_test_artifacts,
+    format_test_dir,
+    resolve_root_dir_for_target,
 )
 
 logger = get_logger(__name__)

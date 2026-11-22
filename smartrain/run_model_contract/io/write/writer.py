@@ -7,10 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from smartrain.core.runtime.path_portable import posix_relpath
+from smartrain.run_model_contract.domain.models import UnifiedPayload
 from smartrain.run_model_contract.io.write.layout import unified_snapshot_write_dir
 from smartrain.run_model_contract.io.write.manifest import build_manifest
-from smartrain.run_model_contract.domain.models import UnifiedPayload
-from smartrain.core.runtime.path_portable import posix_relpath
 
 
 @dataclass(frozen=True)

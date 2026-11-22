@@ -26,8 +26,9 @@ from tqdm import tqdm
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_int, prompt_text
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
-from smartrain.services.datasets.image_label_pairs import collect_label_image_pairs as _collect_label_image_pairs
 from smartrain.services.datasets.dataset_stats import (
     SPLITS,
     DatasetStats,
@@ -35,8 +36,7 @@ from smartrain.services.datasets.dataset_stats import (
     _imbalance_summary,
     _scan_one_dataset,
 )
-from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.services.datasets.image_label_pairs import collect_label_image_pairs as _collect_label_image_pairs
 from smartrain.services.datasets.yolo_labels import YoloBBox, YoloLabel, YoloSegment, read_yolo_labels
 from smartrain.services.reporting.document_export import (
     UI,
@@ -901,7 +901,7 @@ def main(argv: list[str] | None = None) -> None:
             if _export_odt_odfpy(lang, out_dir, args.dataset, picks, classes_by_id):
                 _log(f"[OK] ODT (odfpy): report-{lang}.odt")
                 continue
-            _log(f"[INFO] odfpy failed; built-in ODT zip writer…")
+            _log("[INFO] odfpy failed; built-in ODT zip writer…")
             if _export_odt_builtin_zip(lang, out_dir, args.dataset, picks, classes_by_id):
                 _log(f"[OK] ODT (builtin): report-{lang}.odt")
             else:

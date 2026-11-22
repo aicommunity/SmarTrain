@@ -9,10 +9,10 @@ from tqdm import tqdm
 
 from smartrain.workflows.testing.model_test_backends import (
     PerfCollector,
-    _Pred,
     _infer_with_onnx_session,
     _is_onnx_cuda_oom_error,
     _load_names,
+    _Pred,
     _release_cuda_memory_best_effort,
     _resolve_imgsz_from_onnx,
 )

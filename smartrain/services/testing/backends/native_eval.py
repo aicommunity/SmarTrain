@@ -13,13 +13,14 @@ from typing import Any
 import matplotlib
 
 matplotlib.use("Agg")
+from datetime import datetime
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from PIL import Image
-from datetime import datetime
 import yaml
+from PIL import Image
 from ultralytics.utils import nms as ultralytics_nms
 from ultralytics.utils.metrics import ap_per_class
 

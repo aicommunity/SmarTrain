@@ -12,6 +12,8 @@ from smartrain.services.training.train_resume_backoff_service import (
 )
 from smartrain.services.training.train_resume_cli_service import (
     run_calc_confidence_command as _svc_run_calc_confidence_command,
+)
+from smartrain.services.training.train_resume_cli_service import (
     run_resume_command as _svc_run_resume_command,
 )
 from smartrain.services.training.train_resume_confidence_service import ensure_resume_confidence_recommendations

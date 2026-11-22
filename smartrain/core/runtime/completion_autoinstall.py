@@ -8,7 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 _STATE_ENV = "SMARTRAIN_AUTO_COMPLETION_RUNNING"
 _DISABLE_ENV = "SMARTRAIN_DISABLE_AUTO_COMPLETION"
 

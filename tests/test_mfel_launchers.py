@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import builtins
 import sys
-from types import ModuleType
 from pathlib import Path
+from types import ModuleType
 
 from smartrain.external_providers.launchers import mfel_infer_launcher, mfel_train_launcher, mp_infer_launcher
 

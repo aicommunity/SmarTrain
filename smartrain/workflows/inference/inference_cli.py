@@ -7,7 +7,7 @@ import os
 import sys
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
-from smartrain.cli_entrypoints.support.cli_replay import print_replay_command  # backward-compatible symbol for tests/mocks
+from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
 from smartrain.cli_entrypoints.support.cli_prompts import (
     print_numbered_options,
     prompt_choice,
@@ -16,11 +16,9 @@ from smartrain.cli_entrypoints.support.cli_prompts import (
     prompt_text,
     prompt_yes_no,
 )
-from smartrain.cli_entrypoints.support.cli_contracts import emit_replay, make_command_request
-from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.run_discovery import find_run_directories
-from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
+from smartrain.cli_entrypoints.support.cli_replay import (
+    print_replay_command,  # backward-compatible symbol for tests/mocks
+)
 from smartrain.core.runtime.device_selector import (
     default_device_value,
     device_display_name,
@@ -28,24 +26,28 @@ from smartrain.core.runtime.device_selector import (
     resolve_device_request,
     validate_device_available,
 )
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.run_discovery import find_run_directories
+from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.services.inference_arg_parser import build_inference_arg_parser
 from smartrain.services.inference_dataset_export import resolve_export_options, validate_export_options
-from smartrain.services.inference_service import run_inference_job
 from smartrain.services.inference_runtime_helpers import (
     DATA_MODES,
     ON_EMPTY_MODES,
     ROI_POLICIES,
     default_inference_batch_for_model,
     discover_model_entries,
+    export_classes_csv_from_picked_labels,
+    format_model_class_option_labels,
     infer_img_size_with_source_safe,
     load_catalog,
+    load_model_class_names,
     resolve_inference_source,
     resolve_inference_task_type,
     resolve_model,
-    load_model_class_names,
-    format_model_class_option_labels,
-    export_classes_csv_from_picked_labels,
 )
+from smartrain.services.inference_service import run_inference_job
 from smartrain.workflows.models.model_context import DEFAULT_INFERENCE_IMGSZ, FALLBACK_IMGSZ_SOURCE
 
 # Test / integration imports (canonical model resolution).

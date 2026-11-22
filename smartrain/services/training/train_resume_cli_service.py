@@ -10,9 +10,9 @@ from smartrain.cli_entrypoints.support.cli_prompts import print_numbered_options
 from smartrain.core.runtime.run_discovery import find_run_directories
 from smartrain.core.runtime.workspace_paths import WorkspaceLayout, resolve_workspace_root
 from smartrain.core.training.confidence_recommendation import (
+    read_recommendation_file,
     recommendation_file_path,
     recommendations_complete,
-    read_recommendation_file,
 )
 from smartrain.services.training.train_cli_parsers import (
     build_train_calc_confidence_arg_parser,

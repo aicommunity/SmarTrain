@@ -5,7 +5,6 @@ import os
 import zipfile
 from pathlib import Path
 
-from smartrain.services.datasets.dataset_passport import write_dataset_passport
 from smartrain.core.runtime.path_portable import (
     is_abs_like,
     posix_relpath,
@@ -16,6 +15,7 @@ from smartrain.core.runtime.path_portable import (
     to_posix,
 )
 from smartrain.core.runtime.workspace_paths import extract_dataset_zip_to_cache
+from smartrain.services.datasets.dataset_passport import write_dataset_passport
 
 
 def test_is_abs_like_posix_and_drive() -> None:

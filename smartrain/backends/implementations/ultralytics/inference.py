@@ -54,9 +54,8 @@ class UltralyticsBackend(InferenceBackend):
         backend_name: str = "ultralytics",
         task_type: str | None = None,
     ) -> None:
-        from ultralytics import YOLO
-
         from smartrain.external_providers.task_alias import ultralytics_task_alias
+        from ultralytics import YOLO
 
         self.name = backend_name
         self._task_type = task_to_metadata_task_type(task_type)

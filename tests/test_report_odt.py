@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 from smartrain.services.analyze import report_odt

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-
 VisMode = Literal["dataset", "model", "run"]
 FrameStatus = Literal["ok", "skipped", "error"]
 

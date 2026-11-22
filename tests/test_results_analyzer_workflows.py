@@ -4,14 +4,14 @@ import argparse
 import json
 from pathlib import Path
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pytest
 
 import smartrain.services.analyze.workflow_dispatch as workflow_dispatch
 import smartrain.workflows.analyze.results_analyzer as results_analyzer
-from smartrain.workflows.analyze.results_analyzer import main as analyze_main
 from smartrain.core.runtime.run_artifacts import run_test_backend_dir
+from smartrain.workflows.analyze.results_analyzer import main as analyze_main
 
 
 def _write_run(

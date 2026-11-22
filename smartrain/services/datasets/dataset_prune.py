@@ -11,24 +11,25 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image
+
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_prefilled_text, prompt_text
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 from smartrain.services.datasets.bbox_edge_filter import bbox_geom_from_label
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
+from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
 from smartrain.services.datasets.dataset_cli_catalog import (
     EMPTY_DATASETS_INFO_MESSAGE,
     load_datasets_catalog,
     try_prompt_dataset_interactive,
 )
 from smartrain.services.datasets.dataset_cli_common import update_datasets_sidecar
-from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
 from smartrain.services.datasets.dataset_former import _image_content_hash
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import next_dataset_name, write_dataset_passport
 from smartrain.services.datasets.yolo_labels import read_yolo_labels, serialize_yolo_labels
-from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 SPLIT_PRIORITY = {"train": 0, "val": 1, "valid": 1, "test": 2}

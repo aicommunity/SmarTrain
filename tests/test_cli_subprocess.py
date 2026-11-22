@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from smartrain.cli import app
-from smartrain.workflows.analyze.results_analyzer import build_analyze_arg_parser
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, deploy_workspace
+from smartrain.workflows.analyze.results_analyzer import build_analyze_arg_parser
 
 HELP_MATRIX: list[list[str]] = [
     ["--help"],

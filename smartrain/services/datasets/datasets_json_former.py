@@ -1,18 +1,28 @@
-import os
-import copy
-import yaml
-import json
-import sys
 import argparse
+import copy
 import hashlib
-import zipfile
+import json
+import os
 import shutil
-from pathlib import Path
-from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
-from typing import Any, Dict, List, Optional, Set, Tuple
+import sys
 import xml.etree.ElementTree as ET
+import zipfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import yaml
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
+from smartrain.core.runtime.logging_config import get_logger
+from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
+from smartrain.core.runtime.workspace_paths import (
+    CLASS_NAMES_FILE,
+    DATASETS_INFO_FILE,
+    WORKSPACE_ENV_VAR,
+    WorkspaceLayout,
+    resolve_or_extract_dataset_root,
+    resolve_workspace_root,
+)
 from smartrain.services.datasets.cvat11_converter import generate_temp_yolo_labels_from_cvat11_extracted
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
 from smartrain.services.datasets.dataset_passport import write_dataset_passport
@@ -23,59 +33,89 @@ from smartrain.services.datasets.dataset_scan import (
     load_obj_data,
     load_obj_names,
 )
-from smartrain.core.runtime.logging_config import get_logger
-from smartrain.core.runtime.workspace_paths import (
-    WORKSPACE_ENV_VAR,
-    WorkspaceLayout,
-    resolve_workspace_root,
-    resolve_or_extract_dataset_root,
-    DATASETS_INFO_FILE,
-    CLASS_NAMES_FILE,
-)
 
 _LOG = get_logger("smartrain.datasets.scan")
 
 from smartrain.providers.core.global_index import reconcile_stale_provider_paths
+from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
+from smartrain.services.datasets.datasets_json_convert_purge_service import (
+    _confirm_purge_processed_raw as _svc_confirm_purge_processed_raw,
+)
+from smartrain.services.datasets.datasets_json_convert_purge_service import (
+    _copy_source_to_training as _svc_copy_source_to_training,
+)
+from smartrain.services.datasets.datasets_json_convert_purge_service import (
+    _dataset_content_hash as _svc_dataset_content_hash,
+)
+from smartrain.services.datasets.datasets_json_convert_purge_service import (
+    _purge_raw_sources as _svc_purge_raw_sources,
+)
+from smartrain.services.datasets.datasets_json_cvat11_normalize_service import (
+    _ensure_training_ready_after_copy as _svc_ensure_training_ready_after_copy,
+)
 from smartrain.services.datasets.datasets_json_normalize_service import _normalize_path_for_data_path
 from smartrain.services.datasets.datasets_json_report_io import (
     _merge_preserved_dataset_fields,
     _print_scan_report,
     _write_scan_summary,
 )
-from smartrain.services.datasets.datasets_json_scan_index_service import (
-    _append_roots_from_datasets_list as _svc_append_roots_from_datasets_list,
-    _compute_source_signature as _svc_compute_source_signature,
-    _dir_has_content as _svc_dir_has_content,
-    _extract_zip_for_scan as _svc_extract_zip_for_scan,
-    _load_datasets_list_file as _svc_load_datasets_list_file,
-    _run_scan_folder_roots as _svc_run_scan_folder_roots,
-    _sorted_diff as _svc_sorted_diff,
-    _unique_dataset_key as _svc_unique_dataset_key,
-    _zip_extract_path as _svc_zip_extract_path,
-)
-from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
-from smartrain.services.datasets.datasets_json_convert_purge_service import (
-    _confirm_purge_processed_raw as _svc_confirm_purge_processed_raw,
-    _copy_source_to_training as _svc_copy_source_to_training,
-    _dataset_content_hash as _svc_dataset_content_hash,
-    _purge_raw_sources as _svc_purge_raw_sources,
-)
-from smartrain.services.datasets.datasets_json_cvat11_normalize_service import (
-    _ensure_training_ready_after_copy as _svc_ensure_training_ready_after_copy,
+from smartrain.services.datasets.datasets_json_scan_core_service import (
+    _cvat_has_images_dir_near_xml as _svc_cvat_has_images_dir_near_xml,
 )
 from smartrain.services.datasets.datasets_json_scan_core_service import (
     _find_cvat_annotations_xml as _svc_find_cvat_annotations_xml,
-    _cvat_has_images_dir_near_xml as _svc_cvat_has_images_dir_near_xml,
+)
+from smartrain.services.datasets.datasets_json_scan_core_service import (
     _is_cvat11_images_xml as _svc_is_cvat11_images_xml,
-    _load_cvat11_label_names as _svc_load_cvat11_label_names,
+)
+from smartrain.services.datasets.datasets_json_scan_core_service import (
     _is_split_name as _svc_is_split_name,
-    yolo_flat_image_label_buckets as _svc_yolo_flat_image_label_buckets,
-    detect_structure as _svc_detect_structure,
-    load_yaml as _svc_load_yaml,
+)
+from smartrain.services.datasets.datasets_json_scan_core_service import (
+    _load_cvat11_label_names as _svc_load_cvat11_label_names,
+)
+from smartrain.services.datasets.datasets_json_scan_core_service import (
     count_elements as _svc_count_elements,
+)
+from smartrain.services.datasets.datasets_json_scan_core_service import (
+    detect_structure as _svc_detect_structure,
+)
+from smartrain.services.datasets.datasets_json_scan_core_service import (
+    load_yaml as _svc_load_yaml,
+)
+from smartrain.services.datasets.datasets_json_scan_core_service import (
     process_dataset as _svc_process_dataset,
 )
-
+from smartrain.services.datasets.datasets_json_scan_core_service import (
+    yolo_flat_image_label_buckets as _svc_yolo_flat_image_label_buckets,
+)
+from smartrain.services.datasets.datasets_json_scan_index_service import (
+    _append_roots_from_datasets_list as _svc_append_roots_from_datasets_list,
+)
+from smartrain.services.datasets.datasets_json_scan_index_service import (
+    _compute_source_signature as _svc_compute_source_signature,
+)
+from smartrain.services.datasets.datasets_json_scan_index_service import (
+    _dir_has_content as _svc_dir_has_content,
+)
+from smartrain.services.datasets.datasets_json_scan_index_service import (
+    _extract_zip_for_scan as _svc_extract_zip_for_scan,
+)
+from smartrain.services.datasets.datasets_json_scan_index_service import (
+    _load_datasets_list_file as _svc_load_datasets_list_file,
+)
+from smartrain.services.datasets.datasets_json_scan_index_service import (
+    _run_scan_folder_roots as _svc_run_scan_folder_roots,
+)
+from smartrain.services.datasets.datasets_json_scan_index_service import (
+    _sorted_diff as _svc_sorted_diff,
+)
+from smartrain.services.datasets.datasets_json_scan_index_service import (
+    _unique_dataset_key as _svc_unique_dataset_key,
+)
+from smartrain.services.datasets.datasets_json_scan_index_service import (
+    _zip_extract_path as _svc_zip_extract_path,
+)
 
 sys.stdout.reconfigure(encoding='utf-8')
 

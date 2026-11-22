@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 from smartrain.cli_entrypoints.support.cli_prompts import print_numbered_options, prompt_text
 

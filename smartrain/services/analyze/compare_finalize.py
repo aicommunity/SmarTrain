@@ -6,8 +6,8 @@ import shutil
 import sys
 from typing import Callable
 
-from smartrain.services.analyze.schema_contracts import ensure_analyze_session_manifest
 from smartrain.core.runtime.path_portable import posix_relpath, store_path_under_workspace
+from smartrain.services.analyze.schema_contracts import ensure_analyze_session_manifest
 
 
 def resolve_compare_artifact_path(path: str, session_dir: str) -> str:

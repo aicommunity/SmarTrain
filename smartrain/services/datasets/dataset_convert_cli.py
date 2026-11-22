@@ -36,10 +36,10 @@ from smartrain.services.datasets.dataset_passport import next_dataset_name, writ
 from smartrain.services.datasets.dataset_source_resolver import (
     MANUAL_SOURCE_OPTION,
     build_interactive_source_options,
-    resolved_to_dataset_source,
+    replay_source_path,
     resolve_dataset_source,
     resolve_manual_source_token,
-    replay_source_path,
+    resolved_to_dataset_source,
 )
 
 

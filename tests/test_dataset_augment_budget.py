@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import math
 import random
 from types import SimpleNamespace
 
-import math
 import pytest
 from PIL import Image
 
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 from smartrain.workflows.datasets.dataset_augment import (
     AUGMENT_PRESETS,
     _class_aware_trigger_prob,
@@ -18,11 +19,12 @@ from smartrain.workflows.datasets.dataset_augment import (
     _image_tail_priority_score,
     _inserted_class_delta,
     _warn_exhaustive_class_aware,
-    main as augment_main,
     sum_train_bbox_disk,
 )
+from smartrain.workflows.datasets.dataset_augment import (
+    main as augment_main,
+)
 from smartrain.workflows.datasets.datasets_json_former import main as scan_main
-from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 def test_effective_flip_prob_geo_prefers_higher_image_weight() -> None:

@@ -21,6 +21,12 @@ from ultralytics import YOLO
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.ultralytics_ephemeral import (
+    best_effort_prune_workspace_runs_detect,
+    ultralytics_sidecar_dir,
+)
+from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
 from smartrain.services.datasets.dataset_access import iter_image_label_buckets, resolve_dataset_root_for_entry
 from smartrain.services.datasets.dataset_passport import write_dataset_passport
 from smartrain.services.datasets.dataset_scan import find_yaml_file
@@ -30,12 +36,13 @@ from smartrain.services.datasets.datasets_json_scan_core_service import (
 )
 from smartrain.services.datasets.roi_geometry import (
     clamp_crop as _clamp_crop,
+)
+from smartrain.services.datasets.roi_geometry import (
     full_image_crop as _full_image_crop,
+)
+from smartrain.services.datasets.roi_geometry import (
     select_roi_boxes as _select_roi_boxes,
 )
-from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_workspace_runs_detect, ultralytics_sidecar_dir
-from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout
 
 sys.stdout.reconfigure(encoding="utf-8")
 

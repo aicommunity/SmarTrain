@@ -1,13 +1,13 @@
 """YAML + CLI training profile merge tests."""
 import argparse
 
-from smartrain.services.training.train_config_kwargs_service import finalize_train_kwargs
-from smartrain.services.training.train_config_merge_service import merge_sources_with_priority
 from smartrain.core.training.train_profile import (
     extract_smartrain_options,
     merge_cli_into_ultralytics_cfg,
     task_to_metadata_task_type,
 )
+from smartrain.services.training.train_config_kwargs_service import finalize_train_kwargs
+from smartrain.services.training.train_config_merge_service import merge_sources_with_priority
 
 
 def test_extract_smartrain_options():

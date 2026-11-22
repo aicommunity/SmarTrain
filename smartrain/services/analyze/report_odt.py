@@ -7,8 +7,8 @@ import re
 import shutil
 import subprocess
 import tempfile
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 
 from smartrain.services.reporting.document_export import _pandoc_executable, _try_pandoc_odt
 

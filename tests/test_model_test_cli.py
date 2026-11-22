@@ -4,21 +4,23 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
-from pathlib import Path
-from types import ModuleType
-
 from PIL import Image
 
+from smartrain.core.runtime.workspace_paths import deploy_workspace
 from smartrain.workflows.testing.model_test_cli import (
     _check_onnx_format_preflight,
     _discover_run_artifact_candidates,
     _infer_task_from_training_metadata,
-    _prompt_export_backends_interactive,
     _prompt_artifact_selection_interactive,
+    _prompt_export_backends_interactive,
     _resolve_existing_artifact,
+)
+from smartrain.workflows.testing.model_test_cli import (
     main as smartrain_test_main,
 )
 from smartrain.workflows.testing.model_test_service import (
@@ -26,9 +28,10 @@ from smartrain.workflows.testing.model_test_service import (
     format_metrics_path,
     format_recommendation_path,
     format_test_dir,
+)
+from smartrain.workflows.testing.model_test_service import (
     test_artifacts_manifest_path as manifest_path_fn,
 )
-from smartrain.core.runtime.workspace_paths import deploy_workspace
 
 
 class _FakeInput:

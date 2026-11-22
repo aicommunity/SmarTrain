@@ -1,6 +1,6 @@
 import pytest
 
-from smartrain.services.datasets.dataset_split_core import TRAIN_PART, VAL_PART, TEST_PART, parse_split_ratio_arg
+from smartrain.services.datasets.dataset_split_core import TEST_PART, TRAIN_PART, VAL_PART, parse_split_ratio_arg
 from smartrain.workflows.datasets.dataset_former import parse_fusion_split_arg
 
 

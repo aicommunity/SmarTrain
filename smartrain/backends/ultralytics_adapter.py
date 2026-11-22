@@ -5,8 +5,8 @@ from typing import Any
 
 from smartrain.backends.contracts import BackendCapabilities, BackendExecutionResult, InferenceBackend
 from smartrain.backends.implementations.ultralytics.inference import InferenceBackendRegistry
-from smartrain.tasks.contracts import KNOWN_TASKS
 from smartrain.core.training.train_profile import task_to_metadata_task_type
+from smartrain.tasks.contracts import KNOWN_TASKS
 
 
 @dataclass(frozen=True)

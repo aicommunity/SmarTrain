@@ -4,9 +4,9 @@ CLI for managing the training queue file (training_queue.txt).
 """
 import argparse
 import os
+import shutil
 import sys
 import tempfile
-import shutil
 
 import smartrain.workflows.queue.training_queue as tq
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser

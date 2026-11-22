@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from smartrain.core.runtime.workspace_paths import (
-    DATASETS_INFO_FILE,
     CLASS_NAMES_FILE,
+    DATASETS_INFO_FILE,
     DATASETS_SCAN_SUMMARY_FILE,
 )
 

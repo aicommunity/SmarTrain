@@ -8,6 +8,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from smartrain.core.runtime.logging_config import get_logger
+from smartrain.core.runtime.path_portable import posix_relpath
 from smartrain.services.analyze.report_markdown_formatting import (
     MAX_NARRATIVE_BULLETS,
     _abbrev_value,
@@ -16,8 +18,6 @@ from smartrain.services.analyze.report_markdown_formatting import (
     _pr_summary_takeaways,
     _speed_quality_takeaways,
 )
-from smartrain.core.runtime.logging_config import get_logger
-from smartrain.core.runtime.path_portable import posix_relpath
 
 logger = get_logger(__name__)
 
@@ -516,7 +516,11 @@ def render_executive_ultralytics_figure_pairs(
     tpl: dict[str, str],
     abbrev_label_fn: Callable[[Any, dict[str, str]], str],
 ) -> tuple[list[str], int, set[str]]:
-    from smartrain.services.analyze.report_markdown_formatting import _center_close, _center_open, _subsection_intro_lines
+    from smartrain.services.analyze.report_markdown_formatting import (
+        _center_close,
+        _center_open,
+        _subsection_intro_lines,
+    )
 
     lines: list[str] = []
     emitted: set[str] = set()

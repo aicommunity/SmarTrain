@@ -10,6 +10,7 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+from smartrain.core.runtime.logging_config import get_logger
 from smartrain.services.analyze.report_markdown_formatting import (
     MAX_NARRATIVE_BULLETS,
     _abbrev_df,
@@ -32,7 +33,6 @@ from smartrain.services.analyze.report_markdown_formatting import (
     _table_preamble_lines,
     _table_takeaway_lines,
 )
-from smartrain.core.runtime.logging_config import get_logger
 
 logger = get_logger(__name__)
 

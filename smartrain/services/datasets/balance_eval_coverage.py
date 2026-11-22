@@ -14,6 +14,7 @@ from smartrain.services.datasets.balance_strategies import (
     _source_image_key,
 )
 
+
 def _ensure_non_empty_eval_splits(
     balanced_train: list[tuple[str, str, str, list[str]]],
     passthrough_items: list[tuple[str, str, str, list[str]]],

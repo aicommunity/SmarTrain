@@ -185,8 +185,8 @@ def resolve_source(
     source: str | Path | None = None,
 ) -> DatasetSource:
     from smartrain.services.datasets.dataset_source_resolver import (
-        resolved_to_dataset_source,
         resolve_dataset_source,
+        resolved_to_dataset_source,
         structures_for_workspace_dataset,
     )
 

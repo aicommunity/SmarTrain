@@ -1,38 +1,37 @@
-import os
-import json
-import shutil
-import random
 import argparse
-import tempfile
-import sys
 import hashlib
+import json
+import os
+import random
+import shutil
+import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
+
 from tqdm import tqdm
 
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_replay import build_non_interactive_command, print_replay_command
+from smartrain.core.runtime.interactive_contract import is_interactive_allowed
+from smartrain.core.runtime.logging_config import get_logger
+from smartrain.core.runtime.workspace_paths import (
+    CLASS_NAMES_FILE,
+    DATASETS_INFO_FILE,
+    WORKSPACE_ENV_VAR,
+    WorkspaceLayout,
+    resolve_workspace_root,
+)
 from smartrain.services.datasets.cvat11_converter import YOLO_IMAGE_EXTS
 from smartrain.services.datasets.dataset_access import (
     find_dataset_paths,
     iter_image_label_buckets,
     resolve_dataset_root_for_entry,
 )
-from smartrain.services.datasets.dataset_passport import write_dataset_passport
+from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
 from smartrain.services.datasets.dataset_cli_common import update_datasets_sidecar
 from smartrain.services.datasets.dataset_hash import calculate_dataset_hash
-from smartrain.services.datasets.dataset_class_cleanup import strip_unused_classes
-from smartrain.services.datasets.image_label_pairs import collect_label_image_pairs as _collect_label_image_pairs
-from smartrain.core.runtime.logging_config import get_logger
-from smartrain.core.runtime.interactive_contract import is_interactive_allowed
-from smartrain.core.runtime.workspace_paths import (
-    WORKSPACE_ENV_VAR,
-    WorkspaceLayout,
-    resolve_workspace_root,
-    DATASETS_INFO_FILE,
-    CLASS_NAMES_FILE,
-)
-
+from smartrain.services.datasets.dataset_passport import write_dataset_passport
 from smartrain.services.datasets.dataset_split_core import (
     DEFAULT_RANDOM_SEED,
     TEST_PART,
@@ -41,6 +40,7 @@ from smartrain.services.datasets.dataset_split_core import (
     parse_split_ratio_arg,
     split_pairs_by_ratio,
 )
+from smartrain.services.datasets.image_label_pairs import collect_label_image_pairs as _collect_label_image_pairs
 
 # Default directory name suffix in workspace (prefix is date-time, see main).
 FUSION_DEFAULT_DIR_SUFFIX = "merged"
