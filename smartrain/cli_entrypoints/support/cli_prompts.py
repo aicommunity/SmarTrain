@@ -12,6 +12,46 @@ NO_TOKENS = {"n", "no", "0", "false", "No", "n"}
 
 from smartrain.core.runtime.interactive_contract import stdin_is_tty
 
+_PLAIN_INPUT_FALLBACK = False
+
+
+def _is_prompt_toolkit_failure(exc: BaseException) -> bool:
+    """Whether prompt_toolkit failed to attach to this terminal.
+
+    Examples: mintty/xterm on Windows (NoConsoleScreenBufferError), some IDE
+    consoles. Such failures come from prompt_toolkit's own output layer.
+    """
+    module = type(exc).__module__ or ""
+    return module.startswith("prompt_toolkit.")
+
+
+def _prompt_raw(label: str, *, default: str = "", completer=None) -> str:
+    """prompt_toolkit prompt() with one-way degradation to builtin input().
+
+    On terminals that cannot host a prompt_toolkit output, fall back to plain
+    line input instead of crashing interactive flows. Empty or EOF input
+    resolves to ``default`` (same as pressing Enter in full mode).
+    """
+    global _PLAIN_INPUT_FALLBACK
+    if not _PLAIN_INPUT_FALLBACK:
+        try:
+            return prompt(
+                label,
+                default=default,
+                completer=completer,
+                complete_while_typing=True,
+            )
+        except Exception as exc:
+            if not _is_prompt_toolkit_failure(exc):
+                raise
+            print(f"[WARN] Advanced prompt unavailable ({type(exc).__name__}); using plain input.")
+            _PLAIN_INPUT_FALLBACK = True
+    try:
+        raw = input(label)
+    except EOFError:
+        return default
+    return raw if raw != "" else default
+
 
 def is_interactive_tty() -> bool:
     return stdin_is_tty()
@@ -42,12 +82,7 @@ def _echo_default_if_used(default_value: str | None, prompt_label: str) -> None:
 def prompt_text(label: str, default: str | None = None, choices: Sequence[str] | None = None) -> str:
     prompt_label = _prompt_label(label, default)
     completer = WordCompleter(list(choices), ignore_case=True) if choices else None
-    raw = prompt(
-        prompt_label,
-        default="",
-        completer=completer,
-        complete_while_typing=True,
-    ).strip()
+    raw = _prompt_raw(prompt_label, default="", completer=completer).strip()
     if raw:
         return raw
     fallback = "" if default is None else str(default)
@@ -59,12 +94,7 @@ def prompt_prefilled_text(label: str, default: str, choices: Sequence[str] | Non
     """Prompt with the default value pre-filled in the input field for editing."""
     prompt_label = f"{label}: "
     completer = WordCompleter(list(choices), ignore_case=True) if choices else None
-    raw = prompt(
-        prompt_label,
-        default=str(default),
-        completer=completer,
-        complete_while_typing=True,
-    ).strip()
+    raw = _prompt_raw(prompt_label, default=str(default), completer=completer).strip()
     if raw:
         return raw
     _echo_default_if_used(str(default), prompt_label)
@@ -74,7 +104,7 @@ def prompt_prefilled_text(label: str, default: str, choices: Sequence[str] | Non
 def prompt_yes_no(label: str, default: bool = False) -> bool:
     suffix = "Y/n" if default else "y/N"
     prompt_label = f"{label} [{suffix}]: "
-    raw = prompt(prompt_label, default="").strip().lower()
+    raw = _prompt_raw(prompt_label, default="").strip().lower()
     if not raw:
         _echo_default_if_used("y" if default else "n", prompt_label)
         return default
@@ -97,7 +127,7 @@ def prompt_int(label: str, default: int) -> int:
 def prompt_optional_int(label: str, default: int | None = None) -> int | None:
     while True:
         prompt_label = _prompt_label(label, "" if default is None else str(default))
-        raw = prompt(prompt_label, default="").strip()
+        raw = _prompt_raw(prompt_label, default="").strip()
         if not raw:
             _echo_default_if_used("" if default is None else str(default), prompt_label)
             return default
@@ -110,7 +140,7 @@ def prompt_optional_int(label: str, default: int | None = None) -> int | None:
 def prompt_optional_float(label: str, default: float | None = None) -> float | None:
     while True:
         prompt_label = _prompt_label(label, "" if default is None else str(default))
-        raw = prompt(prompt_label, default="").strip()
+        raw = _prompt_raw(prompt_label, default="").strip()
         if not raw:
             _echo_default_if_used("" if default is None else str(default), prompt_label)
             return default
@@ -156,11 +186,10 @@ def prompt_choice(
         print_numbered_options(label, options)
     choice_default = default if default in options else options[0]
     while True:
-        raw = prompt(
+        raw = _prompt_raw(
             _prompt_label(f"{label} (number or value)", choice_default),
             default="",
             completer=WordCompleter(list(options), ignore_case=True),
-            complete_while_typing=True,
         ).strip()
         if not raw:
             _echo_default_if_used(choice_default, _prompt_label(f"{label} (number or value)", choice_default))
@@ -187,11 +216,10 @@ def prompt_multi_choice_csv(
         print_numbered_options(label, options)
     default_csv = ",".join(default_values or [])
     while True:
-        raw = prompt(
+        raw = _prompt_raw(
             _prompt_label(f"{label} (CSV of numbers or values)", default_csv),
             default="",
             completer=WordCompleter(list(options), ignore_case=True),
-            complete_while_typing=True,
         ).strip()
         if not raw:
             defaults = list(default_values or [])

@@ -159,7 +159,6 @@ def test_balance_interactive_can_enable_emit_report(
     )
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
-    monkeypatch.setattr("smartrain.services.datasets.dataset_balance.prompt", lambda *a, **k: next(answers))
     monkeypatch.setattr("smartrain.cli_entrypoints.support.cli_prompts.prompt", lambda *a, **k: next(answers))
     balance_main([])
     out = tmp_path / "datasets" / "ds_b_balanced"
@@ -187,7 +186,6 @@ def test_balance_interactive_defaults_enable_manifest_creation(
     )
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
-    monkeypatch.setattr("smartrain.services.datasets.dataset_balance.prompt", lambda *a, **k: next(answers))
     monkeypatch.setattr("smartrain.cli_entrypoints.support.cli_prompts.prompt", lambda *a, **k: next(answers))
     balance_main([])
     out = tmp_path / "datasets" / "ds_b_balanced"
@@ -234,7 +232,6 @@ def test_balance_interactive_hybrid_aug_uses_mode_defaults_in_replay(
     )
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setenv(WORKSPACE_ENV_VAR, str(tmp_path))
-    monkeypatch.setattr("smartrain.services.datasets.dataset_balance.prompt", lambda *a, **k: next(answers))
     monkeypatch.setattr("smartrain.cli_entrypoints.support.cli_prompts.prompt", lambda *a, **k: next(answers))
     balance_main([])
     captured = capsys.readouterr().out

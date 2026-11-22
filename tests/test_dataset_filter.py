@@ -558,6 +558,7 @@ def test_filter_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr("smartrain.services.datasets.dataset_filter.prompt_yes_no", _yes_no)
     monkeypatch.setattr("smartrain.services.datasets.dataset_filter.prompt_text", _text)
     monkeypatch.setattr("smartrain.services.datasets.dataset_filter.prompt_choice", _choice)
+    monkeypatch.setattr("smartrain.cli_entrypoints.support.cli_interactive.prompt_choice", _choice)
     monkeypatch.setattr("smartrain.services.datasets.dataset_filter.prompt_multi_choice_csv", lambda *a, **k: [])
 
     filter_main([])
@@ -613,6 +614,7 @@ def test_filter_interactive_cancel(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("smartrain.services.datasets.dataset_filter.prompt_yes_no", _yes_no)
     monkeypatch.setattr("smartrain.services.datasets.dataset_filter.prompt_text", _text)
     monkeypatch.setattr("smartrain.services.datasets.dataset_filter.prompt_choice", _choice)
+    monkeypatch.setattr("smartrain.cli_entrypoints.support.cli_interactive.prompt_choice", _choice)
     monkeypatch.setattr("smartrain.services.datasets.dataset_filter.prompt_multi_choice_csv", lambda *a, **k: [])
 
     filter_main([])
