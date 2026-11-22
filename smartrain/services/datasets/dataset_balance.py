@@ -11,9 +11,6 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from prompt_toolkit import prompt
-from prompt_toolkit.completion import WordCompleter
-
 from smartrain.cli_entrypoints.support.cli_argparse import CliArgumentParser
 from smartrain.cli_entrypoints.support.cli_prompts import (
     prompt_choice,
@@ -335,7 +332,7 @@ def _interactive_fill(args, dataset_names: list[str], catalog: dict) -> None:
     )
     mode = prompt_choice("Classes", ["all", "single", "list"], default="all").lower()
     if mode == "single":
-        args.single_class = prompt("Class: ", completer=WordCompleter(class_names, ignore_case=True)).strip()
+        args.single_class = prompt_text("Class: ", choices=class_names)
         args.classes = None
     elif mode == "list":
         selected = prompt_multi_choice_csv("Classes", class_names, default_values=[])

@@ -102,6 +102,7 @@ def test_prune_interactive_empty_mode(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     answers = iter(["empty", "src_ds", ""])
     monkeypatch.setattr("smartrain.services.datasets.dataset_prune.prompt_choice", lambda *a, **k: next(answers))
+    monkeypatch.setattr("smartrain.cli_entrypoints.support.cli_interactive.prompt_choice", lambda *a, **k: next(answers))
     monkeypatch.setattr("smartrain.services.datasets.dataset_prune.prompt_text", lambda *a, **k: "")
     prune_main([])
     assert (tmp_path / "datasets" / "src_ds_pruned").is_dir()
@@ -213,6 +214,7 @@ def test_prune_size_interactive_mode(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     answers = iter(["size", "src_ds", "or", "yes"])
     monkeypatch.setattr("smartrain.services.datasets.dataset_prune.prompt_choice", lambda *a, **k: next(answers))
+    monkeypatch.setattr("smartrain.cli_entrypoints.support.cli_interactive.prompt_choice", lambda *a, **k: next(answers))
     monkeypatch.setattr(
         "smartrain.services.datasets.dataset_prune.prompt_text",
         lambda *a, **k: "20x20" if "--min-size" in str(a[0]) else "",

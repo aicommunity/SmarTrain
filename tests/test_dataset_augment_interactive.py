@@ -166,6 +166,8 @@ def test_interactive_skips_bbox_copy_block_when_disabled(capsys) -> None:
         return [x.strip() for x in raw.split(",") if x.strip()]
 
     with patch("smartrain.services.datasets.dataset_augment.prompt_choice", side_effect=fake_prompt_choice), patch(
+        "smartrain.cli_entrypoints.support.cli_interactive.prompt_choice", side_effect=fake_prompt_choice
+    ), patch(
         "smartrain.services.datasets.dataset_augment.prompt_text", side_effect=fake_prompt_text
     ), patch("smartrain.services.datasets.dataset_augment.prompt_yes_no", side_effect=fake_prompt_yes_no), patch(
         "smartrain.services.datasets.dataset_augment.prompt_multi_choice_csv", side_effect=fake_prompt_multi_choice_csv
@@ -282,6 +284,8 @@ def test_interactive_skips_imbalance_strength_when_balancing_off(capsys) -> None
         return [x.strip() for x in raw.split(",") if x.strip()]
 
     with patch("smartrain.services.datasets.dataset_augment.prompt_choice", side_effect=fake_prompt_choice), patch(
+        "smartrain.cli_entrypoints.support.cli_interactive.prompt_choice", side_effect=fake_prompt_choice
+    ), patch(
         "smartrain.services.datasets.dataset_augment.prompt_text", side_effect=fake_prompt_text
     ), patch("smartrain.services.datasets.dataset_augment.prompt_yes_no", side_effect=fake_prompt_yes_no), patch(
         "smartrain.services.datasets.dataset_augment.prompt_multi_choice_csv", side_effect=fake_prompt_multi_choice_csv
@@ -408,6 +412,8 @@ def test_interactive_prompts_tail_budget_when_cap_positive(capsys) -> None:
         return [x.strip() for x in raw.split(",") if x.strip()]
 
     with patch("smartrain.services.datasets.dataset_augment.prompt_choice", side_effect=fake_prompt_choice), patch(
+        "smartrain.cli_entrypoints.support.cli_interactive.prompt_choice", side_effect=fake_prompt_choice
+    ), patch(
         "smartrain.services.datasets.dataset_augment.prompt_text", side_effect=fake_prompt_text
     ), patch("smartrain.services.datasets.dataset_augment.prompt_yes_no", side_effect=fake_prompt_yes_no), patch(
         "smartrain.services.datasets.dataset_augment.prompt_multi_choice_csv", side_effect=fake_prompt_multi_choice_csv
