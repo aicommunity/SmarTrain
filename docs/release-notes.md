@@ -10,16 +10,12 @@
 - CLI: `smartrain migrate unified` (hidden alias: `migrate canonical`).
 - Run layout helpers renamed: `preferred_run_model_path`, `materialize_preferred_run_model`, `normalize_ultralytics_run_layout`.
 
-### Deprecations: canonical read legacy fallback environment flags
+### Removed: canonical read legacy fallback environment flags
 
-The following environment variables are deprecated and will be removed in `0.0.3`:
+The following environment variables are **removed** from runtime (package `0.0.6+`). Setting them has no effect and does not emit warnings:
 
-- `SMARTTRAIN_CANONICAL_READ`
-  - Deprecated. Canonical read is always enabled now; this flag is ignored.
-  - Removal target: `0.0.3`.
-- `SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK`
-  - Deprecated. Legacy fallback is removed as part of the canonical cutover.
-  - Removal target: `0.0.3`.
+- `SMARTTRAIN_CANONICAL_READ` — ignored; unified/canonical read is always on.
+- `SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK` — ignored; legacy read fallback is gone.
 
-If both variables are set in a way that previously enabled legacy fallback, deterministic `[DEPRECATION] ...` warnings are emitted to `stderr`.
+Use `smartrain update` / migration tooling for on-disk legacy layouts. See [`docs/refactor/legacy-compat-inventory.md`](refactor/legacy-compat-inventory.md).
 

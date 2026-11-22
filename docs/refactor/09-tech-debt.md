@@ -425,11 +425,11 @@ Purpose: keep a running list of refactor leftovers and intentional short-term co
 
 - 2026-06-27: **Instance segmentation rollout (SEG-0…SEG-8) closed.** Register: [`tech-debt-instance-segmentation.md`](./tech-debt-instance-segmentation.md). Polygon augment, native test guard, metrics adapter, analyze mask columns, inference overlay, CVAT polygon, external `--task` propagation.
 
-- **Canonical model read (`ModelAdapter`):** порядок вывода `task_type` — поля `manifest` / `training_metadata.training_info.task_type` / `training_info.ultralytics_train.task` (если заданы) → эвристика по имени файла весов (`-cls`/`-seg` и т.д.) → **последний резерв `detection`**. Порядок `backend_type` — metadata/provider → эвристика по расширению веса (`onnx` → onnxruntime, `engine`/`trt` → tensorrt, иначе ultralytics). При «немых» артефактах без метаданных и без подсказок в имени возможна неверная интерпретация задачи до явного исправления provenance.
+- **Canonical model read (`ModelAdapter`):** порядок вывода `task_type` — поля `manifest` / `training_metadata.training_info.task_type` / `training_info.ultralytics_train.task` (если заданы) → эвристика по имени файла весов (`-cls`/`-seg` и т.д.) → **иначе `ValueError`** (без немого fallback на `detection`). Порядок `backend_type` — metadata/provider → эвристика по расширению веса (`onnx` → onnxruntime, `engine`/`trt` → tensorrt, иначе ultralytics). Для «немых» артефактов без provenance используйте [`scripts/migrate_model_task_provenance.py`](../../scripts/migrate_model_task_provenance.py).
 
 - Резюме архитектуры и ограничений для онбординга: [`13-project-current-state.md`](./13-project-current-state.md).
 
-- **`registry_cli` и `load_metadata`:** команда registry читает `training_metadata.json` через [`metrics_reader.load_metadata`](../../smartrain/services/analyze/metrics_reader.py) — это **отдельный CLI-контур**, не analyze consumer; canonical analyze run-rows идут через `build_run_record_unified` в [`services/analyze/run_query.py`](../../smartrain/services/analyze/run_query.py) (ранее `analyze_run_query_service.build_run_record_canonical`, модуль удалён). Перевод registry на gateway — опционально (волна G3).
+- **`registry_cli` и training metadata:** команда registry читает `training_metadata.json` через [`services/registry/run_fields.py`](../../smartrain/services/registry/run_fields.py) (`load_run_training_metadata` / `read_training_metadata`) — это **отдельный CLI-контур**, не `metrics_reader.load_metadata` и не analyze consumer; canonical analyze run-rows идут через `build_run_record_unified` в [`services/analyze/run_query.py`](../../smartrain/services/analyze/run_query.py).
 
 ## Historical Log (closed/stale backlog)
 

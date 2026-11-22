@@ -15,14 +15,17 @@ from smartrain.core.runtime.interactive_contract import stdin_is_tty
 _PLAIN_INPUT_FALLBACK = False
 
 
-def _is_prompt_toolkit_failure(exc: BaseException) -> bool:
-    """Whether prompt_toolkit failed to attach to this terminal.
+def _is_prompt_toolkit_console_failure(exc: BaseException) -> bool:
+    """Whether prompt_toolkit failed to attach an output console.
 
-    Examples: mintty/xterm on Windows (NoConsoleScreenBufferError), some IDE
-    consoles. Such failures come from prompt_toolkit's own output layer.
+    Covers mintty/Git Bash ``NoConsoleScreenBufferError`` and neighboring
+    failures from ``prompt_toolkit.output*``. Other prompt_toolkit errors
+    (buffer/completion) are not treated as a permanent console fallback.
     """
+    if type(exc).__name__ == "NoConsoleScreenBufferError":
+        return True
     module = type(exc).__module__ or ""
-    return module.startswith("prompt_toolkit.")
+    return module.startswith("prompt_toolkit.output")
 
 
 def _prompt_raw(label: str, *, default: str = "", completer=None) -> str:
@@ -42,7 +45,7 @@ def _prompt_raw(label: str, *, default: str = "", completer=None) -> str:
                 complete_while_typing=True,
             )
         except Exception as exc:
-            if not _is_prompt_toolkit_failure(exc):
+            if not _is_prompt_toolkit_console_failure(exc):
                 raise
             print(f"[WARN] Advanced prompt unavailable ({type(exc).__name__}); using plain input.")
             _PLAIN_INPUT_FALLBACK = True

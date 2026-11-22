@@ -113,9 +113,6 @@ def build_orient_arg_parser() -> argparse.ArgumentParser:
 
 
 def _interactive_fill(args, *, dataset_names: list[str]) -> None:
-    from prompt_toolkit import prompt
-    from prompt_toolkit.completion import WordCompleter
-
     from smartrain.cli_entrypoints.support.cli_prompts import prompt_choice, prompt_prefilled_text, prompt_text
 
     print("[INFO] Interactive mode orient")
@@ -133,7 +130,7 @@ def _interactive_fill(args, *, dataset_names: list[str]) -> None:
         refs: list[str] = []
         print("[INFO] References (correct orientation). Enter paths, empty line = end.")
         while True:
-            r = prompt("Path to reference image (empty=finish): ", default="").strip()
+            r = prompt_text("Path to reference image (empty=finish)").strip()
             if not r:
                 break
             refs.append(r)

@@ -125,7 +125,7 @@
 
 ## Следующий горизонт (backlog, без обязательства срока)
 
-1. **Inference CLI (опционально):** [`inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py) ~235 LOC (цель LB-D4: under 200) — косметическое сжатие фасада; runtime в `services/inference_service.py`.
+1. **Inference CLI (опционально):** [`inference_cli.py`](../../smartrain/workflows/inference/inference_cli.py) ~358 LOC (цель LB-D4: under 200) — косметическое сжатие фасада; runtime в `services/inference_service.py`.
 
 ---
 

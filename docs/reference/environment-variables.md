@@ -19,7 +19,6 @@ Smart Train reads configuration from CLI flags and environment variables. CLI fl
 | `SMARTTRAIN_CANONICAL_WRITE` | unset | Deprecated alias for `SMARTTRAIN_UNIFIED_WRITE`. |
 | `SMARTTRAIN_UNIFIED_DUAL_WRITE_MODE` | `unified_only` | Dual-write mode: `unified_only`, `dual_write_strict`, or `dual_write_best_effort`. |
 | `SMARTTRAIN_CANONICAL_DUAL_WRITE_MODE` | unset | Deprecated alias for `SMARTTRAIN_UNIFIED_DUAL_WRITE_MODE`. |
-| `SMARTTRAIN_ALLOW_LEGACY_READ_FALLBACK` | unset | Emergency legacy read fallback during unified cutover (see migration docs). |
 
 ## Model test and ONNX runtime
 

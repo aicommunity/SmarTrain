@@ -333,7 +333,7 @@ def _interactive_fill(args, dataset_names: list[str], catalog: dict) -> None:
     )
     mode = prompt_choice("Classes", ["all", "single", "list"], default="all").lower()
     if mode == "single":
-        args.single_class = prompt_text("Class: ", choices=class_names)
+        args.single_class = prompt_text("Class", choices=class_names)
         args.classes = None
     elif mode == "list":
         selected = prompt_multi_choice_csv("Classes", class_names, default_values=[])

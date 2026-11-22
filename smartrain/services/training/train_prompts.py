@@ -2,30 +2,20 @@
 
 from __future__ import annotations
 
-import sys
-
+from smartrain.cli_entrypoints.support.cli_prompts import _echo_default_if_used
+from smartrain.cli_entrypoints.support.cli_prompts import _prompt_raw
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_int as _shared_prompt_int
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_yes_no as _shared_prompt_yes_no
 from smartrain.core.runtime.device_selector import default_device_value, prompt_device_selection
 
 
 def prompt_input(label: str, default: str = "", completer=None, show_default_hint: bool = True) -> str:
-    from prompt_toolkit import prompt
-
     prompt_label = f"{label} [default: {default}]: " if (default != "" and show_default_hint) else label
-    value = str(prompt(prompt_label, default=str(default), completer=completer, complete_while_typing=True)).strip()
+    value = _prompt_raw(prompt_label, default=str(default), completer=completer).strip()
     if value:
         return value
     if default != "":
-        if sys.stdin.isatty():
-            try:
-                sys.stdout.write("\x1b[1A\r")
-                sys.stdout.write(f"{prompt_label}{default}\n")
-                sys.stdout.flush()
-            except Exception:
-                print(default)
-        else:
-            print(default)
+        _echo_default_if_used(str(default), prompt_label)
     return str(default)
 
 

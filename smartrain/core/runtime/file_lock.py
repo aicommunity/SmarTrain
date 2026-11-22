@@ -9,6 +9,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+# Windows ERROR_SHARING_VIOLATION: holder has the .lock open exclusively.
+_WINERROR_SHARING_VIOLATION = 32
+
 
 def use_smb_safe_locks() -> bool:
     """Use O_EXCL lock files when SMB coordination is requested or on Windows."""
@@ -18,6 +21,15 @@ def use_smb_safe_locks() -> bool:
     if env in {"0", "false", "no", "off"}:
         return False
     return sys.platform == "win32"
+
+
+def _is_smb_lock_contention(exc: BaseException) -> bool:
+    """Whether ``os.open(O_EXCL)`` failed because another holder owns the lock."""
+    if isinstance(exc, FileExistsError):
+        return True
+    if isinstance(exc, PermissionError) and getattr(exc, "winerror", None) == _WINERROR_SHARING_VIOLATION:
+        return True
+    return False
 
 
 @contextmanager
@@ -43,11 +55,11 @@ def smb_safe_locked_file(
             try:
                 fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 break
-            except (FileExistsError, PermissionError):
+            except OSError as exc:
+                if not _is_smb_lock_contention(exc):
+                    raise
                 # FileExistsError: lock file exists (classic contention).
-                # PermissionError: on Windows the holder's open handle denies
-                # shared write, so os.open fails with EACCES instead — same
-                # meaning here: the lock is taken, keep spinning until deadline.
+                # PermissionError winerror=32: Windows holder denies shared write.
                 if time.monotonic() >= deadline:
                     raise TimeoutError(f"Timed out waiting for lock: {lock_path}") from None
                 time.sleep(poll_sec)
@@ -55,10 +67,10 @@ def smb_safe_locked_file(
     finally:
         if fd is not None:
             os.close(fd)
-        try:
-            lock_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+            try:
+                lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 @contextmanager
@@ -87,7 +99,5 @@ def locked_file(path: str | Path) -> Iterator[None]:
             except Exception:
                 pass
             os.close(fd)
-        try:
-            lock_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        # Keep the lock file: exclusivity is flock(fd), not path presence.
+        # Unlinking after LOCK_UN races with waiters that open a new inode.
