@@ -3,9 +3,16 @@ from __future__ import annotations
 import hashlib
 import math
 import random
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
+
+from smartrain.services.datasets.balance_strategies import (
+    _line_class_id,
+    _quantile,
+    _read_label_text_lines,
+    _source_image_key,
+)
 
 def _ensure_non_empty_eval_splits(
     balanced_train: list[tuple[str, str, str, list[str]]],

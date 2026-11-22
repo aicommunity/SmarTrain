@@ -51,7 +51,10 @@ from smartrain.services.datasets.balance_strategies import (
     _class_weights,
     _image_weights,
     _irfs_expand_pool,
+    _line_class_id,
     _parse_class_weight_multiplier,
+    _quantile,
+    _read_label_text_lines,
     _rfs_expand_pool,
     _weighted_sample_items,
 )
@@ -277,11 +280,6 @@ def build_balance_arg_parser() -> argparse.ArgumentParser:
 
 def _detect_split(images_path: str) -> str:
     return detect_split_from_path(images_path, prefer_valid_name=False)
-
-
-def _source_image_key(image_path: str) -> str:
-    # Stable key for split-uniqueness checks across copied/linked paths.
-    return os.path.normcase(os.path.realpath(image_path))
 
 
 def _read_label_classes(label_path: str) -> list[int]:
@@ -540,23 +538,6 @@ def _remove_dataset_from_workspace_catalog(layout: WorkspaceLayout, dataset_key:
     del data[dataset_key]
     with open(info_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-
-
-def _read_label_text_lines(lbl_path: str) -> list[str]:
-    if not os.path.isfile(lbl_path):
-        return []
-    with open(lbl_path, "r", encoding="utf-8") as f:
-        return f.readlines()
-
-
-def _line_class_id(line: str) -> int | None:
-    parts = line.strip().split()
-    if not parts:
-        return None
-    try:
-        return int(float(parts[0]))
-    except ValueError:
-        return None
 
 
 def _head_bbox_undersample_items(

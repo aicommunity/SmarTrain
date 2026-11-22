@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Iterable
 
 import albumentations as A
@@ -56,6 +57,33 @@ def resolve_label_kind(label_path: str, *, label_type: str = "auto") -> LabelKin
 
 def count_label_instances(label_path: str) -> int:
     return len(read_yolo_labels(label_path))
+
+
+# Shared split-name normalization for augment/budget helpers.
+SPLIT_ALIASES = {"train": "train", "val": "val", "valid": "valid", "test": "test"}
+
+
+def _read_yolo_classes(label_path: str) -> set[int]:
+    out: set[int] = set()
+    if not os.path.isfile(label_path):
+        return out
+    with open(label_path, "r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if not parts:
+                continue
+            try:
+                out.add(int(float(parts[0])))
+            except ValueError:
+                continue
+    return out
+
+
+def _parse_yolo_labels(label_path: str) -> list[tuple[int, float, float, float, float]]:
+    return labels_to_legacy_tuples(read_augment_label_file(label_path))
 
 
 def _sanitize_bbox(lb: YoloBBox, *, min_size: float = 1e-6) -> YoloBBox | None:

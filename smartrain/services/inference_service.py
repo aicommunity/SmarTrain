@@ -47,6 +47,7 @@ from smartrain.services.inference_runtime_helpers import (
     resolve_inference_task_type,
     resolve_model,
     resolve_output_root,
+    resolve_export_class_filter,
     resolve_export_class_ids_for_args,
     sanitize_segment,
     source_descriptor_from_resolved,

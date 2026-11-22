@@ -270,6 +270,11 @@ def _apply_augment_preset_defaults(args: argparse.Namespace, provided_flags: set
 
 
 
+def _class_aware_enabled(args) -> bool:
+    return bool(getattr(args, "aug_class_aware_geo", False)) and str(getattr(args, "imbalance_mode", "soft")) == "soft"
+
+
+
 def _warn_exhaustive_class_aware(args) -> None:
     if not _class_aware_enabled(args):
         return
