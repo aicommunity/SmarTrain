@@ -42,7 +42,7 @@ def main() -> int:
         print("[ERROR] Undefined names / syntax errors found (F821/E9 must be zero):")
         print(hard_out)
 
-    ruff_limit = 283
+    ruff_limit = 282
     ruff_code, ruff_out = _run([sys.executable, "-m", "ruff", "check", "smartrain", "tests"])
     ruff_count = _extract_count(ruff_out, tool="ruff")
     if ruff_count is None:

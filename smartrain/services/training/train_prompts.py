@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from smartrain.cli_entrypoints.support.cli_prompts import _echo_default_if_used
-from smartrain.cli_entrypoints.support.cli_prompts import _prompt_raw
+from smartrain.cli_entrypoints.support.cli_prompts import _echo_default_if_used, _prompt_raw
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_int as _shared_prompt_int
 from smartrain.cli_entrypoints.support.cli_prompts import prompt_yes_no as _shared_prompt_yes_no
 from smartrain.core.runtime.device_selector import default_device_value, prompt_device_selection
