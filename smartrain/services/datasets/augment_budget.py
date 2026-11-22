@@ -3,8 +3,17 @@ from __future__ import annotations
 import math
 import os
 import random
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+from smartrain.services.datasets.augment_cli_parser import _class_aware_enabled
+from smartrain.services.datasets.yolo_augment_geom import (
+    SPLIT_ALIASES,
+    _parse_yolo_labels,
+    _read_yolo_classes,
+    count_label_instances,
+)
 
 def _collect_class_freq(items: list[dict], *, train_only: bool = True) -> dict[int, int]:
     freq: dict[int, int] = {}
@@ -148,11 +157,6 @@ def _reorder_items_for_bbox_budget(
 
     order = sorted(range(len(items)), key=sort_key)
     return [items[j] for j in order]
-
-
-
-def _class_aware_enabled(args) -> bool:
-    return bool(getattr(args, "aug_class_aware_geo", False)) and str(getattr(args, "imbalance_mode", "soft")) == "soft"
 
 
 

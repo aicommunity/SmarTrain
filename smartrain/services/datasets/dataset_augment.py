@@ -51,6 +51,9 @@ from smartrain.services.datasets.dataset_passport import next_dataset_name, writ
 from smartrain.services.datasets.noise_augment import build_conveyor_noise_transform, parse_noise_types
 from smartrain.services.datasets.yolo_image_rotate import apply_orthogonal_rotate
 from smartrain.services.datasets.yolo_augment_geom import (
+    SPLIT_ALIASES,
+    _parse_yolo_labels,
+    _read_yolo_classes,
     apply_albumentations_to_labels,
     count_label_instances,
     infer_label_kind,
@@ -77,7 +80,6 @@ from smartrain.core.runtime.ultralytics_ephemeral import best_effort_prune_works
 from smartrain.core.runtime.workspace_paths import WORKSPACE_ENV_VAR, WorkspaceLayout, resolve_workspace_root
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-SPLIT_ALIASES = {"train": "train", "val": "val", "valid": "valid", "test": "test"}
 _BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 _ROI_MODEL_CACHE: dict[str, YOLO] = {}
 
@@ -86,12 +88,12 @@ from smartrain.services.datasets.augment_cli_parser import (
     AUGMENT_PRESETS,
     build_augment_arg_parser,
     _apply_augment_preset_defaults,
+    _class_aware_enabled,
     _provided_augment_flags,
     _warn_exhaustive_class_aware,
 )
 from smartrain.services.datasets.augment_budget import (
     _aug_extra_budget_allow,
-    _class_aware_enabled,
     _class_aware_trigger_prob,
     _collect_class_freq,
     _effective_flip_prob_geo,
@@ -113,29 +115,6 @@ from smartrain.services.datasets.augment_budget import (
 
 def _detect_split(images_path: str) -> str:
     return detect_split_from_path(images_path, prefer_valid_name=True)
-
-
-def _read_yolo_classes(label_path: str) -> set[int]:
-    out: set[int] = set()
-    if not os.path.isfile(label_path):
-        return out
-    with open(label_path, "r", encoding="utf-8") as f:
-        for raw in f:
-            line = raw.strip()
-            if not line:
-                continue
-            parts = line.split()
-            if not parts:
-                continue
-            try:
-                out.add(int(float(parts[0])))
-            except ValueError:
-                continue
-    return out
-
-
-def _parse_yolo_labels(label_path: str) -> list[tuple[int, float, float, float, float]]:
-    return labels_to_legacy_tuples(read_augment_label_file(label_path))
 
 
 def _serialize_yolo_labels(labels: list[tuple[int, float, float, float, float]]) -> str:
@@ -1340,12 +1319,12 @@ def main(argv=None):
     per_class_cap_mult = float(getattr(args, "aug_per_class_bbox_cap_mult", 0.0))
     per_class_extra_budget: dict[int, int] | None = None
     train_extra_bbox_by_class: dict[int, int] = defaultdict(int)
+    train_cls_counts = _train_split_class_bbox_counts(items)
     if per_class_cap_mult > 0 and train_cls_counts:
         per_class_extra_budget = {
             c: max(0, int(math.ceil(per_class_cap_mult * int(n))) - int(n)) for c, n in train_cls_counts.items()
         }
     train_extra_bbox_used = 0
-    train_cls_counts = _train_split_class_bbox_counts(items)
     items = _reorder_items_for_bbox_budget(
         items,
         split_filter=split_filter,

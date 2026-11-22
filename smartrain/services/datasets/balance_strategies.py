@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import random
 from collections import defaultdict
 from pathlib import Path
@@ -80,6 +81,31 @@ def _quantile(values: list[int], q: float) -> float:
         return float(data[lo])
     frac = pos - lo
     return float(data[lo] * (1.0 - frac) + data[hi] * frac)
+
+
+
+def _source_image_key(image_path: str) -> str:
+    # Stable key for split-uniqueness checks across copied/linked paths.
+    return os.path.normcase(os.path.realpath(image_path))
+
+
+
+def _read_label_text_lines(lbl_path: str) -> list[str]:
+    if not os.path.isfile(lbl_path):
+        return []
+    with open(lbl_path, "r", encoding="utf-8") as f:
+        return f.readlines()
+
+
+
+def _line_class_id(line: str) -> int | None:
+    parts = line.strip().split()
+    if not parts:
+        return None
+    try:
+        return int(float(parts[0]))
+    except ValueError:
+        return None
 
 
 

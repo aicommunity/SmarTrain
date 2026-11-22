@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
 from typing import Any
 
 def _log(msg: str) -> None:
