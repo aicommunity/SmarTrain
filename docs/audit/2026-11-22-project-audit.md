@@ -34,11 +34,11 @@ Lint baseline guard exceeded on both counters (ruff 517 > 511, mypy 412 > 306); 
 
 Fix (merge `881446d`): hard zero-gate for F821/E9 (undefined names must never pass), safe ruff fixes applied (I001/F541/W292), baselines recalibrated to actuals (ruff 293, mypy 373) — ratchet-down only. After all fixes: **1250 passed / 0 failed** (one later flake of `test_file_lock.py` under full-suite load passes reliably in isolation).
 
-Post-audit follow-up on `develop`: ruff baseline lowered to **282** (actual); lint parser accepts zero-error / singular `error` forms; prompt console fallback covers orient/ROI/train; file-lock fcntl race and SMB foreign-unlink fixed. The Windows `PermissionError` spin in `smb_safe_locked_file` did **not** by itself fix the Linux fcntl flake — that required keeping the lock inode after `LOCK_UN`.
+Post-audit follow-up on `develop`: ruff baseline lowered to **282** (actual); mypy baseline ratcheted to **340** (CI Python 3.11 + current mypy); lint parser accepts zero-error / singular `error` forms; prompt console fallback covers orient/ROI/train; file-lock fcntl race and SMB foreign-unlink fixed. The Windows `PermissionError` spin in `smb_safe_locked_file` did **not** by itself fix the Linux fcntl flake — that required keeping the lock inode after `LOCK_UN`.
 
 ## Remaining debt (backlog)
 
 - **~271 ruff F401** unused imports deliberately left (total ruff budget **282** including F841/E731/E741/F811): many F401 are implicit re-exports consumed by other modules (blind `--fix` broke 24 imports in a trial). Convert to explicit re-exports (`import as` / `__all__`) before removal.
-- **mypy ≤373** baseline on the full package (CI Python 3.11); config-scope errors are mostly typing noise (`unused-ignore`, `arg-type`).
+- **mypy ≤340** baseline on the full package (CI Python 3.11); config-scope errors are mostly typing noise (`unused-ignore`, `arg-type`). Counts differ on other Python versions (e.g. 3.14).
 - `.gitignore` uses global `*.png`, `*.csv`, `*.pt` masks — already caused the missing-`models/`-packages incident (`6d3a84a`, `68bc19c`); consider path-scoped ignores.
 - RU docs mirror may lag behind EN docs (not fully verified this audit).

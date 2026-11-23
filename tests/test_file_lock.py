@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -44,6 +46,29 @@ def test_locked_file_serializes_concurrent_access(tmp_path: Path) -> None:
         assert order[i].endswith("-enter")
         assert order[i + 1].endswith("-leave")
         assert order[i].split("-")[0] == order[i + 1].split("-")[0]
+
+
+def test_fcntl_locked_file_keeps_same_inode_across_holders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """fcntl path must not unlink after LOCK_UN (avoids waiter/new-inode race)."""
+    if sys.platform == "win32":
+        pytest.skip("fcntl lock path is not used on Windows")
+    monkeypatch.setenv("SMART_TRAIN_SMB_LOCKS", "0")
+    target = tmp_path / "index.json"
+    lock_path = target.with_suffix(target.suffix + ".lock")
+
+    with locked_file(target):
+        assert lock_path.exists()
+        first_inode = lock_path.stat().st_ino
+
+    assert lock_path.exists(), "fcntl path must keep the lock file after unlock"
+    assert lock_path.stat().st_ino == first_inode
+
+    with locked_file(target):
+        assert lock_path.stat().st_ino == first_inode
+        # Same path must reopen the existing inode (O_CREAT|O_RDWR, not O_EXCL).
+        assert os.stat(lock_path).st_ino == first_inode
 
 
 def test_smb_safe_lock_serializes_and_only_holder_unlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -58,7 +58,8 @@ def main() -> int:
         failed = True
         print("[ERROR] Ruff errors exceeded baseline.")
 
-    mypy_limit = 373
+    # Measured on CI Python 3.11 + current mypy from ``.[dev]`` (ratchet-down only).
+    mypy_limit = 340
     mypy_code, mypy_out = _run([sys.executable, "-m", "mypy", "smartrain"])
     mypy_count = _extract_count(mypy_out, tool="mypy")
     if mypy_count is None:
